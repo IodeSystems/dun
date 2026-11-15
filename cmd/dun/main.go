@@ -691,7 +691,12 @@ func main() {
 	// Every response with a cost is also a line in the machine's spend ledger
 	// ($DUN_HOME/spend, dun/ledger.go), billed to the provider, a fingerprint
 	// of the key (never the key) and the model.
-	spend.SetLedger(spendmeter.NewLedger(dun.DefaultLedgerDir()), spendmeter.KeyFingerprint(effKey))
+	ledger := spendmeter.NewLedger(dun.DefaultLedgerDir())
+	spend.SetLedger(ledger, spendmeter.KeyFingerprint(effKey))
+	// Its lines name the session, so the next engine on it seeds the
+	// session's money from them (tally.go).
+	spend.SetSession(sessionID)
+	tally.spend = spend
 	usageFor := func(u, k, model, role string) func(llm.Usage) {
 		return spend.NoteAs(spendmeter.Source{Provider: providerLabel(fc, u), Key: spendmeter.KeyFingerprint(k), Model: model, Role: role})
 	}
@@ -765,6 +770,8 @@ func main() {
 	if os.Getenv("DUN_NO_BROWSER") == "" {
 		cfg.OpenBrowser = openurl.Open
 	}
+	// The stats file the next engine on this session seeds from (tally.go).
+	cfg.OnRound = func(u agent.TokenUsage) { tally.save(lastUsage.total(u)) }
 	// Memory notes are indexed and recalled through dund's retrieval, dialed
 	// on its socket per call: under dund or standalone alike, and with dund
 	// down from the note files (dun/memrecall.go). DUN_MEMORY=0: no memory
@@ -799,8 +806,7 @@ func main() {
 		}
 		cfg.OnToken = func(s string) { em.emit(&proto.Token{Text: s}) }
 		cfg.OnReasoning = func(s string) { em.emit(&proto.Reasoning{Text: s}) }
-		reqs := &proto.RequestFold{}
-		cfg.OnRequest = func(r dun.RequestStat) { em.emit(requestEvent(reqs, r)) }
+		cfg.OnRequest = func(r dun.RequestStat) { em.emit(requestEvent(tally.reqs, r)) }
 		// An autostart server that came up (or did not) after the session
 		// was ready. Before Start returns there is no harness to describe;
 		// the ready event that follows carries the server list instead.
@@ -1051,6 +1057,14 @@ func main() {
 		fatal(err)
 	}
 	defer h.Close()
+
+	// The session's totals so far, from the engines before this one: before
+	// the first request, so the first usage and request events carry them
+	// (tally.go). Saved after every round from here on (cfg.OnRound).
+	seeded := seedTally(&tally, &lastUsage, statsPath(sessionFile), ledger.SessionEntries(sessionID), h.RoundUsages())
+	if seeded != seedNone {
+		fmt.Fprintf(os.Stderr, "dun: session totals continue (from the %s)\n", seeded)
+	}
 
 	if *prog {
 		em.setSession(sessionID)

@@ -139,8 +139,13 @@ derive them from `turn`, tokens, tool calls or `done`.
   before the turn's `usage` and `done`, the last round too. The engine holds
   a round's final stream chunk until the client has priced the round
   (`reasoningTee`).
-- Scope: the engine process. An engine restart (a crash, a model switch)
-  starts the figures again.
+- Scope: the session, across engines (owner, 2026-11-14). An engine restart
+  (a crash, an idle stop and a wake, a model switch) does not start the
+  figures again: the engine seeds its fold at start, before its first
+  request, from the session's stats file (see "Session totals across
+  engines" below), so its first `request` already carries the session's
+  figures. The last-measured `ttft_ms`/`pp`/`tg` are the last engine's
+  until a new round measures them.
 - Old logs: a `request` with no `session_stats` (an older engine) shows its own
   figures and no averages; marked in both clients.
 
@@ -156,8 +161,35 @@ derive them from `turn`, tokens, tool calls or `done`.
   right. (Both clients used to add the counts, which counted every earlier
   turn again on each turn.) A turn cut before its first round sends the
   last totals, not zeros.
-- Scope: the engine process, as `request`: an engine restart counts again
-  from 0, and so does the spend's session part.
+- Scope: the session, as `request`: the token counts, `turns` and the
+  spend's session part (session, this hour, today, the interval, the last
+  turn, the calls) continue across an engine restart and a model switch.
+  The engine's first `usage` and `spend` after one carry the session's whole
+  count. `active` is the new engine's window.
+- Model switch: one session total over every model the session ran on; no
+  per-session breakdown by model. The per-model rows in the cost view are
+  the ledger's (`ledger.by_model`: this machine's month, by model), as
+  before.
+
+### Session totals across engines
+
+- What an engine seeds from at start (`cmd/dun/tally.go`):
+  - money: the spend ledger's lines for the session. Each line names its
+    session id and how many of the session's turns had ended (`session`,
+    `turn`; `internal/spendmeter/ledger.go`), so the session, hour, today,
+    interval and last-turn sums are the ledger's (`spendmeter.Meter.Seed`).
+  - tokens, rounds, the request fold's sums and the meter's other counts
+    (calls, tokens over all calls): the session's stats file,
+    `<id>.stats.json` beside `<id>.jsonl` (`dun.StatsFile`), rewritten after
+    every round and every turn. Beside the history, not in it: a fold or a
+    recap removes the rounds it summarizes, and their per-entry usage.
+- Fallback (an older engine's session, no stats file): the per-entry usage
+  in the history (`Harness.RoundUsages`). Tokens and rounds of the entries
+  still in it; `pp_avg`/`tg_avg` only from rounds with the server's timings
+  (the client-side ttft and stream times were never saved); no money (older
+  ledger lines name no session).
+- Fallback (no stats file, no per-entry usage): from 0.
+- `/clear` keeps the totals: the money was spent.
 - `spend` between turns, and `usage.spend`, carry the whole cost view: what
   the session spent (and this hour, today, the interval), the last turn,
   the key's budget, the rate-limit windows, and this machine's ledger. The

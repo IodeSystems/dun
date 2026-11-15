@@ -55,3 +55,40 @@ func (f *RequestFold) Note(r *Request) {
 	}
 	r.Session = &out
 }
+
+// RequestFoldState is a fold's whole state: the session's figures and the
+// token-weighted sums behind its averages. An engine keeps it beside the
+// session (cmd/dun/tally.go) and seeds the next engine's fold with it, so an
+// engine restart or a model switch does not start the figures again.
+type RequestFoldState struct {
+	Session RequestSession `json:"session"`
+	PPSum   float64        `json:"pp_sum,omitempty"`
+	PPN     float64        `json:"pp_n,omitempty"`
+	TGSum   float64        `json:"tg_sum,omitempty"`
+	TGN     float64        `json:"tg_n,omitempty"`
+}
+
+// State is f's state now.
+func (f *RequestFold) State() RequestFoldState {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	st := RequestFoldState{Session: f.s, PPSum: f.ppSum, PPN: f.ppN, TGSum: f.tgSum, TGN: f.tgN}
+	if f.s.CachePct != nil {
+		p := *f.s.CachePct
+		st.Session.CachePct = &p
+	}
+	return st
+}
+
+// Seed sets f to st, before its first request.
+func (f *RequestFold) Seed(st RequestFoldState) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.s = st.Session
+	f.ppSum, f.ppN, f.tgSum, f.tgN = st.PPSum, st.PPN, st.TGSum, st.TGN
+	f.s.CachePct = nil
+	if st.Session.CachePct != nil {
+		f.pct = *st.Session.CachePct
+		f.s.CachePct = &f.pct
+	}
+}

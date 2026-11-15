@@ -508,4 +508,5 @@ func removeSidecars(root, id string) {
 	for _, s := range side {
 		_ = os.Remove(s)
 	}
+	_ = os.Remove(StatsFile(root, id))
 }

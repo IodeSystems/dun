@@ -69,6 +69,12 @@ type Meter struct {
 	// and this session's key fingerprint, for its trailing-24-hour rate.
 	ledger    *Ledger
 	ledgerKey string
+
+	// sessionID is whose spend the ledger lines are (SetSession), and ended
+	// how many of its turns have ended: both written on each line, for the
+	// next engine's seed (seed.go).
+	sessionID string
+	ended     int
 }
 
 type turnSpend struct {
@@ -141,6 +147,7 @@ func (m *Meter) EndTurn() {
 	m.mu.Lock()
 	m.last = turnSpend{amount: m.turn, calls: m.turnCalls, costed: m.turnCosted, ended: true}
 	m.turn, m.turnCalls, m.turnCosted = 0, 0, 0
+	m.ended++
 	m.mu.Unlock()
 	m.Poke()
 }

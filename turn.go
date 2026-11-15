@@ -41,6 +41,21 @@ func (h *Harness) History() []HistoryItem {
 	return historyItems(h.store.History())
 }
 
+// RoundUsages is the saved cost of each model round in the conversation, in
+// order: agentkit stamps one per round on the entry the round wrote. What an
+// engine seeds its totals from when the session has no stats file (an older
+// engine's session; cmd/dun/tally.go). A fold or recap removes the rounds
+// it summarized.
+func (h *Harness) RoundUsages() []agent.EntryUsage {
+	var out []agent.EntryUsage
+	for _, e := range h.store.History() {
+		if e.Usage != nil {
+			out = append(out, *e.Usage)
+		}
+	}
+	return out
+}
+
 // ReplyID is the id of the reply the turn that just ended wrote: its
 // history item's, which the message event carries so a service can tell a
 // reply it already sent from a new one with the same text. "" when the turn

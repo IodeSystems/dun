@@ -479,6 +479,7 @@ func childConfig(parent *Harness, num int, cc childRun, iso isolation) Config {
 	cfg.OnToken = nil
 	cfg.OnReasoning = nil
 	cfg.OnRequest = nil
+	cfg.OnRound = nil
 	cfg.OnToolCall = nil
 	cfg.OnToolStart = nil
 	cfg.OnToolEnd = nil
