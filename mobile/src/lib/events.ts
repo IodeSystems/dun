@@ -124,6 +124,8 @@ function pushUser(v: View, text: string, queued?: boolean): View {
   return push(v, queued ? { kind: 'user', text, queued } : { kind: 'user', text });
 }
 
+const QUEUED_STATUS = ' message(s) queued for the running turn';
+
 function settleQueued(v: View): View {
   if (!v.items.some((i) => i.kind === 'user' && i.queued)) return v;
   return { ...v, items: v.items.map((i) => (i.kind === 'user' && i.queued ? { ...i, queued: false } : i)) };
@@ -223,12 +225,17 @@ export function apply(v: View, ev: Ev): View {
         merge(w, withCall(w.items, str(ev.tool), ev.args, str(ev.call_id) || undefined, String(w.n)))
       );
     }
-    case 'tool_result':
-      if (ev.tool === 'ask_user') return push(v, { kind: 'user', text: str(ev.result) });
+    case 'tool_result': {
+      // The engine lifts queued messages into this result, so the model has
+      // read them now: drop the queued mark here, as the TUI does.
+      let w = settleQueued(v);
+      if (w.status.endsWith(QUEUED_STATUS)) w = { ...w, status: '' };
+      if (ev.tool === 'ask_user') return push(w, { kind: 'user', text: str(ev.result) });
       return (
-        settleCarried(v, str(ev.tool), str(ev.result), str(ev.call_id)) ??
-        merge(v, withResult(v.items, str(ev.tool), str(ev.result), str(ev.call_id) || undefined, String(v.n)))
+        settleCarried(w, str(ev.tool), str(ev.result), str(ev.call_id)) ??
+        merge(w, withResult(w.items, str(ev.tool), str(ev.result), str(ev.call_id) || undefined, String(w.n)))
       );
+    }
     case 'done':
       if (ev.reason === 'interrupted') return interrupted(v, str(ev.detail));
       // Messages queued into the turn have been read by it.
@@ -312,7 +319,7 @@ export function apply(v: View, ev: Ev): View {
     case 'retry':
       return { ...v, status: str(ev.text) || 'retrying…' };
     case 'queued':
-      return { ...v, status: `${Number(ev.count ?? 0)} message(s) queued for the running turn` };
+      return { ...v, status: `${Number(ev.count ?? 0)}${QUEUED_STATUS}` };
   }
   return v;
 }

@@ -187,6 +187,19 @@ test('a provider that failed to list (ids null) does not break the picker', () =
   expect(filterModels(ps, '').map((r) => r.id)).toEqual(['m1']);
 });
 
+test('a queued message loses its mark at the tool result that lifts it, as in the TUI', () => {
+  const v = run([
+    { type: 'turn' },
+    { type: 'tool_call', tool: 'exec', args: { command: 'ls' } },
+    { type: 'user', content: 'also this', queued: true },
+    { type: 'queued', count: 1 },
+  ]);
+  expect(v.status).toBe('1 message(s) queued for the running turn');
+  const w = apply(v, { type: 'tool_result', tool: 'exec', result: 'ok' });
+  expect(w.items.find((i) => i.kind === 'user')).toMatchObject({ queued: false });
+  expect(w.status).toBe('');
+});
+
 test('an interrupted turn keeps its partial reply, ends with a note, and keeps queued marks', () => {
   const v = run([
     { type: 'user', content: 'go' },
