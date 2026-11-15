@@ -763,10 +763,13 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m = m.applyUI(ev["state"])
 	case "snapshot":
 		// Too far behind to replay: the conversation, then the latest state.
-		// On a reconnect the conversation is already on screen; the history a
-		// respawned engine sends next is skipped by the same flag.
-		if !m.skipHistory {
-			items, _ := ev["items"].([]any)
+		// On a reconnect the screen is rebuilt from it, so what happened
+		// while detached shows (reconnect.go); the history a respawned engine
+		// sends next is still skipped by the same flag.
+		items, _ := ev["items"].([]any)
+		if m.skipHistory {
+			m.rebuildFrom(items)
+		} else {
 			m.replay(items)
 		}
 		state, _ := ev["state"].([]any)

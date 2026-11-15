@@ -91,6 +91,11 @@ derive them from `turn`, tokens, tool calls or `done`.
   from the replay after a snapshot what the items hold: a `user` event by
   id, a `tool_call`/`tool_result` by `call_id`, a `message` equal to the last
   reply. An entry is in the snapshot or the replay, not both.
+- A client that gets a snapshot on a reconnect replaces its conversation
+  with the snapshot's items: what happened while it was away is only there.
+  The TUI keeps the splash, the draft, the open question and its picker,
+  and the scroll (at the bottom stays at the bottom); its own lines (notes,
+  command output) are not in a snapshot and go (`internal/tui/rebuild.go`).
 
 ## Questions
 
