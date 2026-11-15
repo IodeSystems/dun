@@ -322,6 +322,7 @@ type tuiModel struct {
 	reconnTries int
 	reconnSince time.Time
 	skipHistory bool      // a respawned engine replays what is already on screen
+	rounds      bool      // an event named its model round: reasoning_end closes thoughts (thinking.go)
 	ctrlCAt     time.Time // the last ctrl+c that interrupted a turn (a second one quits)
 	chord       string    // a chord started (ctrl+x), waiting for its next key (composerkeys.go)
 	// lastClickAt/lastClickLine: the last plain click in the conversation,

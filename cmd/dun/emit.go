@@ -160,12 +160,15 @@ type emitter struct {
 	onReply func(payload any)
 	// turn follows the events into turn_state (turnstate.go); nil outside -p.
 	turn *turnTracker
+	// rounds stamps reasoning, token and tool_call with their model round
+	// and sends reasoning_end where a round's thinking ends (proto.StepRound),
+	// in the order the events are written.
+	rounds proto.RoundState
 }
 
 func (e *emitter) emit(payload any) {
-	ev := proto.NewEvent(payload)
 	e.mu.Lock()
-	ev.Session, ev.TS = e.session, time.Now()
+	now := time.Now()
 	if e.enc == nil {
 		w := e.w
 		if w == nil {
@@ -173,6 +176,13 @@ func (e *emitter) emit(payload any) {
 		}
 		e.enc = json.NewEncoder(w)
 	}
+	if end := proto.StepRound(&e.rounds, payload); end != nil {
+		ee := proto.NewEvent(end)
+		ee.Session, ee.TS = e.session, now
+		_ = e.enc.Encode(ee)
+	}
+	ev := proto.NewEvent(payload)
+	ev.Session, ev.TS = e.session, now
 	_ = e.enc.Encode(ev)
 	onReply, turn := e.onReply, e.turn
 	e.mu.Unlock()

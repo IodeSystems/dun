@@ -160,3 +160,28 @@ derive them from `turn`, tokens, tool calls or `done`.
   TUI's /usage and the web client's Context sheet (`lib/costview.ts`) show
   the same rows.
 - Old logs: same fields, same meaning; nothing changed on the wire.
+
+## Thinking rounds
+
+- A round is one model request of the turn (its `request` `start` begins
+  it; side calls and sub-agents are not rounds). `reasoning {text, round}`,
+  `token {text, round}` and `tool_call {…, round}` name theirs; the first
+  round of an engine is 1.
+- `reasoning_end {round, cut?}`: round `round`'s thinking is over. Sent once
+  per round that thought, right before the first event that ends it: the
+  round's first token or tool call, its request's `done`, the next round's
+  `start`, a `message`, `ask`, `mount`, `error`, `retry` or `done`. `cut`:
+  the turn was interrupted mid-thought (the `done` with reason
+  `interrupted` follows).
+- A client opens a thought at a round's first `reasoning`, grows it, and
+  closes it at `reasoning_end`; it does not end a thought on a token, a
+  tool call or the turn's end. A `reasoning` of another round than the
+  live thought's opens a new one. Where a thought is shown (its own block,
+  or a step of the open tool run), its title (`# Thinking:` / `# Summary:`)
+  and the run's wording stay presentation, client-side.
+- Owner: the engine (`proto.StepRound`, applied in `cmd/dun/emit.go` as each
+  event is written), so the rule is one place, not one list per client.
+- Old logs: events with no `round` and no `reasoning_end` (an older engine)
+  end a thought on the events listed above, guessed as before; marked in
+  both clients (`endThinkingOld`, `endsThinkingOld`), used only until an
+  event names its round.

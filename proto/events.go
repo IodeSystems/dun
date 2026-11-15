@@ -67,18 +67,22 @@ func init() {
 // --- a turn ---
 
 // Token is a streamed fragment of the assistant's reply.
+// Round is the model round it is from (docs/session-events.md, "Thinking
+// rounds"); 0 from an engine before round ids.
 type Token struct {
-	Text string `json:"text"`
+	Text  string `json:"text"`
+	Round int    `json:"round,omitempty"`
 }
 
 // Reasoning is a streamed fragment of the model's reasoning — its thinking
 // before the reply or the tool call of a round. Deltas, like Token, and only
-// the turn's own: a sub-agent's or a side call's thinking is not sent. A
-// round's thinking ends when its first token or tool_call arrives, or the
-// turn ends (done, error); there is no event of its own for that. Thinking
-// from finished rounds comes back in history as items of kind "reasoning".
+// the turn's own: a sub-agent's or a side call's thinking is not sent. Round
+// is the model round it is from; the round's thinking ends at its
+// reasoning_end (rounds.go). Thinking from finished rounds comes back in
+// history as items of kind "reasoning".
 type Reasoning struct {
-	Text string `json:"text"`
+	Text  string `json:"text"`
+	Round int    `json:"round,omitempty"`
 }
 
 // Message is a whole reply, sent when the turn's text is final. ID is the
@@ -97,6 +101,7 @@ type ToolCall struct {
 	CallID string         `json:"call_id,omitempty"`
 	Tool   string         `json:"tool"`
 	Args   map[string]any `json:"args"`
+	Round  int            `json:"round,omitempty"` // the model round that asked for it
 }
 
 // ToolResult: the call CallID returned. Result is what the person is shown

@@ -104,6 +104,9 @@ func (m tuiModel) handleEvent(ev evMsg) tuiModel {
 	return m
 }
 func (m tuiModel) applyEvent(ev evMsg) tuiModel {
+	if _, ok := ev["round"].(float64); ok {
+		m.rounds = true // the engine names rounds: reasoning_end ends a thought
+	}
 	switch ev["type"] {
 	case "workspace":
 		// An empty branch is /isolate off: back in place, no worktree; the
@@ -257,15 +260,24 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		}
 	case "reasoning":
 		m.suggestions = nil
-		m.addThinking(str(ev["text"]))
+		m.addThinking(str(ev["text"]), int(evNum(ev["round"])))
+	case "reasoning_end":
+		// The round's thinking is over (the engine says so). Folding changes
+		// the block's height, so this frame is drawn now, not on the tick.
+		if t, _ := m.liveThought(); t != nil {
+			if ev["cut"] == true {
+				t.cut = true
+			}
+			m.endThinking()
+			m.refresh()
+		}
 	case "token":
 		m.suggestions = nil
 		m.endRun() // the reply began: the run takes nothing more
-		if m.liveThinking() >= 0 {
-			// The reply has begun, so the round's thinking is over. Folding
-			// changes the block's height, so this frame is drawn now, not on
-			// the tick.
-			m.endThinking()
+		if m.liveThinking() >= 0 && !m.rounds {
+			// Fallback, an engine from before round ids: the reply has begun,
+			// so the round's thinking is over. Drawn now, not on the tick.
+			m.endThinkingOld()
 			m.refresh()
 		}
 		m.cur += str(ev["text"])
@@ -288,7 +300,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m.refresh()
 	case "tool_call":
 		m.suggestions = nil
-		m.endThinking()
+		m.endThinkingOld()
 		m.flushCur()
 		// The call started (dun/toolevents.go): shown running until the
 		// tool_result that names its call_id. Appended; nothing above moves.
@@ -437,7 +449,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 			m.refresh()
 		}
 	case "ask":
-		m.endThinking()
+		m.endThinkingOld()
 		m.flushCur()
 		m.paging = false // the question needs the screen
 		m.jobViewing = false
@@ -654,7 +666,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		if cut {
 			m.markInterrupted()
 		}
-		m.endThinking()
+		m.endThinkingOld()
 		m.endRun()
 		m.flushCur()
 		// A question the turn asked ends with it, however the turn ended.
@@ -687,7 +699,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m.armIdleSuggest()
 		m.refresh()
 	case "error":
-		m.endThinking()
+		m.endThinkingOld()
 		m.endRun()
 		// A setup step not taken is the next step, not a failure: said as
 		// the one action, with no retry advice — retrying cannot help.
@@ -846,7 +858,7 @@ func (m tuiModel) handleRetry(ev evMsg) tuiModel {
 		// (turnstate.go), which follows this event.
 		// Whatever was thought before the failure stays, folded; the retried
 		// round thinks in a block of its own.
-		m.endThinking()
+		m.endThinkingOld()
 		m.retry = m.retryBanner(ev)
 		if ms := evNum(ev["delay_ms"]); ms > 0 {
 			m.retryDue = time.Now().Add(time.Duration(ms) * time.Millisecond)
