@@ -185,8 +185,8 @@ input dund_CreateInputBodyInput {
 
 type dund_DirListing {
   dir: String!
-  exists: Boolean!
   items: [String!]!
+  problem: String
   truncated: Boolean!
   workspace: String!
 }
