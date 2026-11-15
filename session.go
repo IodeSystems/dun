@@ -282,6 +282,12 @@ func MetaFile(root, id string) string {
 	return filepath.Join(RootDir(root), id+".meta.json")
 }
 
+// StatsFile is the session's .stats.json sidecar: the totals the next engine
+// on the session seeds from (cmd/dun/tally.go).
+func StatsFile(root, id string) string {
+	return filepath.Join(RootDir(root), id+".stats.json")
+}
+
 // SaveSessionMeta writes the worktree metadata for a session.
 func SaveSessionMeta(root, id string, meta SessionMeta) error {
 	dir := RootDir(root)

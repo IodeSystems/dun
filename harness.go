@@ -117,7 +117,11 @@ type Config struct {
 	// (reqstats.go): at its start, about 4 times a second while it streams,
 	// at its end, and when a recap or compaction moves the context. The
 	// turn's own rounds only. nil → not measured.
-	OnRequest  func(RequestStat)
+	OnRequest func(RequestStat)
+	// OnRound fires after each turn round with the session's cumulative
+	// token tally (agentkit's), after the round's last OnRequest: where
+	// cmd/dun saves what the next engine seeds from (cmd/dun/tally.go).
+	OnRound    func(agent.TokenUsage)
 	OnToolCall func(tool string, args map[string]any, result string)
 	// OnToolStart and OnToolEnd bracket every dispatched call, paired by
 	// call id (toolevents.go): what a client shows a running tool from.

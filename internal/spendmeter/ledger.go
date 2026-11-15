@@ -19,7 +19,14 @@ import (
 // The spend ledger: what every session and sub-agent on this machine spent,
 // one line per response that reported a cost, under $DUN_HOME/spend/.
 //
-//	{"t":"2026-10-23T14:02:11Z","provider":"work","key":"9f86d081884c7d65","model":"chat-standard","cost":0.0042,"cur":"USD"}
+//	{"t":"2026-10-23T14:02:11Z","provider":"work","key":"9f86d081884c7d65","model":"chat-standard","cost":0.0042,"cur":"USD","session":"…","turn":3}
+//
+// session and turn say whose spend it was: the session id, and how many of
+// its turns had ended (Meter.EndTurn) when the response came. An engine that
+// starts on the session again seeds the session's money from them
+// (SessionEntries, Meter.Seed), so an engine restart or a model switch does
+// not start it at 0. Lines from before the fields carry neither: they count
+// toward the machine's totals and no session's.
 //
 // key is a FINGERPRINT of the API key (the first 8 bytes of its SHA-256, in
 // hex) — never the key. It tells two keys on one provider apart, which is
@@ -47,6 +54,8 @@ type Entry struct {
 	Model    string    `json:"model"`
 	Cost     float64   `json:"cost"`
 	Currency string    `json:"cur,omitempty"`
+	Session  string    `json:"session,omitempty"`
+	Turn     int       `json:"turn,omitempty"`
 }
 
 // KeyFingerprint is what the ledger stores for a key: never the key.
@@ -95,6 +104,7 @@ func (l *Ledger) Append(e Entry) error {
 		return s
 	}
 	e.Provider, e.Model, e.Currency = clipField(e.Provider), clipField(e.Model), clipField(e.Currency)
+	e.Session = clipField(e.Session)
 	if e.Time.IsZero() {
 		e.Time = l.now()
 	}
@@ -203,6 +213,43 @@ func (l *Ledger) Summary(key string, since time.Time) Summary {
 		}
 	}
 	return s
+}
+
+// SessionEntries is every ledger line of session id: what an engine that
+// starts on the session again seeds its money from. A full read of every
+// month, apart from Summary's incremental one, because a seed is a snapshot
+// of what was spent before this process; what the process spends later is
+// already in its meter. Once per engine start. nil for id "".
+func (l *Ledger) SessionEntries(id string) []Entry {
+	if l == nil || id == "" {
+		return nil
+	}
+	q, _ := json.Marshal(id)
+	needle := `"session":` + string(q)
+	files, _ := filepath.Glob(filepath.Join(l.dir, "spend-*.jsonl"))
+	var out []Entry
+	for _, path := range files {
+		f, err := os.Open(path)
+		if err != nil {
+			continue
+		}
+		r := bufio.NewReader(f)
+		for {
+			line, err := r.ReadString('\n')
+			if err != nil {
+				break // EOF, or a line still being written
+			}
+			if !strings.Contains(line, needle) {
+				continue
+			}
+			var e Entry
+			if json.Unmarshal([]byte(strings.TrimSpace(line)), &e) == nil && !e.Time.IsZero() && e.Session == id {
+				out = append(out, e)
+			}
+		}
+		f.Close()
+	}
+	return out
 }
 
 // scan reads every month's file, each from where it stopped.
@@ -335,10 +382,10 @@ func (m *Meter) NoteAs(src Source) func(u llm.Usage) {
 			return
 		}
 		m.mu.Lock()
-		l, now := m.ledger, m.now()
+		l, now, sess, turn := m.ledger, m.now(), m.sessionID, m.ended
 		m.mu.Unlock()
 		_ = l.Append(Entry{Time: now, Provider: src.Provider, Key: src.Key, Model: src.Model,
-			Cost: u.Cost.Amount, Currency: u.Cost.Currency})
+			Cost: u.Cost.Amount, Currency: u.Cost.Currency, Session: sess, Turn: turn})
 	}
 }
 

@@ -71,6 +71,17 @@ func TestMarkdownStyle_NoQueryInAMultiplexer(t *testing.T) {
 
 // An explicit setting skips everything.
 func TestMarkdownStyle_Override(t *testing.T) {
+	// mdStyle is a process global the other tests render with: put back
+	// what it was, so no test passes or fails on the style this one left.
+	// (stSecondary, which a light style changes, too.)
+	prevStyle, prevSecondary := mdStyle, stSecondary
+	t.Cleanup(func() {
+		mdStyle, stSecondary = prevStyle, prevSecondary
+		mdStyleOnce = sync.Once{}
+		if prevStyle != "" {
+			mdStyleOnce.Do(func() {}) // resolved already: initMarkdownStyle keeps it
+		}
+	})
 	for _, want := range []string{"dark", "light", "notty"} {
 		t.Setenv("DUN_MD_STYLE", want)
 		mdStyleOnce = sync.Once{}

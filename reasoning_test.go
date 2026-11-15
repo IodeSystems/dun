@@ -165,3 +165,26 @@ func TestReasoningTee_DoneWaitsForUsageHook(t *testing.T) {
 		}
 	}
 }
+
+// A stream that ends twice (the finish chunk with the usage, then [DONE])
+// reaches the reader whole: holding only the last Done dropped the round's
+// usage, and agentkit's tally read 0 (e2e, 2026-11-14).
+func TestReasoningTee_TwoDonesKeepTheUsage(t *testing.T) {
+	inner := &thinkRunner{chunks: []llm.StreamChunk{
+		{Content: "hi"},
+		{Done: true, Usage: &llm.Usage{PromptTokens: 5, CompletionTokens: 3}},
+		{Done: true},
+	}}
+	r := &reasoningTee{LLMRunner: inner, on: func(string) {}}
+	ch, err := r.ChatStream(context.Background(), nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []llm.StreamChunk
+	for c := range ch {
+		out = append(out, c)
+	}
+	if !reflect.DeepEqual(out, inner.chunks) {
+		t.Errorf("chunks changed in transit:\n got %+v\nwant %+v", out, inner.chunks)
+	}
+}

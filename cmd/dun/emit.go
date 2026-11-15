@@ -24,9 +24,12 @@ import (
 //
 // The token counts are the session's, cumulative (agentkit's tally): a
 // client sets them. A turn cut before its first round returns no tally, so
-// the last one stands for it, or the totals would read 0.
+// the last one stands for it, or the totals would read 0. They include what
+// the engines before this one counted on the session (tally.go), and the
+// stats file is saved with the turn closed.
 func usageEvent(h *dun.Harness, u agent.TokenUsage) *proto.Usage {
 	u = lastUsage.at(u)
+	defer tally.save(u)
 	sysTokens, forcedCalls, notifLifted := h.SessionStats()
 	return &proto.Usage{
 		Total: u.Total, Active: u.Active, Cached: u.Cached, Processed: u.Processed,
@@ -53,28 +56,45 @@ func usageEvent(h *dun.Harness, u agent.TokenUsage) *proto.Usage {
 	}
 }
 
-// usageTally is the last cumulative tally a usage event carried.
+// usageTally is the last cumulative tally a usage event carried, and the
+// seed: what the engines before this one counted on the session (tally.go).
 type usageTally struct {
 	mu   sync.Mutex
+	base agent.TokenUsage
 	last agent.TokenUsage
 }
 
 var lastUsage usageTally
 
+// seed sets the earlier engines' totals, before the first round.
+func (t *usageTally) seed(b agent.TokenUsage) {
+	t.mu.Lock()
+	t.base = b
+	t.mu.Unlock()
+}
+
+// total is u (this process's tally) with the seed added.
+func (t *usageTally) total(u agent.TokenUsage) agent.TokenUsage {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return addUsage(t.base, u)
+}
+
 // at is u, or the last tally when u is behind it (a turn with no round
-// returns a zero one). Active is u's when it has one: the window now.
+// returns a zero one), with the seed added. Active is u's when it has one:
+// the window now.
 func (t *usageTally) at(u agent.TokenUsage) agent.TokenUsage {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if u.Turns >= t.last.Turns {
 		t.last = u
-		return u
+		return addUsage(t.base, u)
 	}
 	out := t.last
 	if u.Active > 0 {
 		out.Active = u.Active
 	}
-	return out
+	return addUsage(t.base, out)
 }
 
 // mcpInfoDays is how far back /mcp info totals what the schemas cost.

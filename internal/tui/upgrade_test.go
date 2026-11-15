@@ -179,6 +179,9 @@ func TestAutoResumeRow(t *testing.T) {
 // A dund from before coordinated upgrades (hello, no broadcast) gets the
 // command that replaces it, once, and is never asked to upgrade.
 func TestCheckDundBuildOldDund(t *testing.T) {
+	// checkDundBuild records the attach it is part of (attachNow); with no
+	// attach around it here, nothing clears it for the next test.
+	t.Cleanup(func() { attachNow.Store(nil) })
 	old := buildinfo.Version
 	buildinfo.Version = "new"
 	defer func() { buildinfo.Version = old }()
@@ -233,6 +236,7 @@ func TestCheckDundBuildOldDund(t *testing.T) {
 // back the same old build once; and a TUI whose file is now dund's build
 // re-execs instead of asking dund to move back.
 func TestCheckDundBuild(t *testing.T) {
+	t.Cleanup(func() { attachNow.Store(nil) }) // as TestCheckDundBuildOldDund
 	old, oldProbe := buildinfo.Version, probeSelf
 	buildinfo.Version = "new"
 	defer func() { buildinfo.Version, probeSelf = old, oldProbe }()
