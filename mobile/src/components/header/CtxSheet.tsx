@@ -6,12 +6,14 @@ import { pieces, type Stats } from '@/lib/stats';
 import { font, mono, space, useColors } from '@/lib/theme';
 
 import { ContextSection } from './ContextSection';
+import { CostSection } from './CostSection';
 import { Sheet } from './Sheet';
 
 /**
  * The context in detail, opened from the header's ctx: the request figures
  * (lib/stats.ts, the TUI's top bar) and the /context and /usage figures
- * (lib/ctxstats.ts). Labels left, values right-aligned in one column (DES-7).
+ * (lib/ctxstats.ts), cost and limits (lib/costview.ts) and the rest of
+ * /context (lib/ctxview.ts). Labels left, values right-aligned in one column (DES-7).
  */
 export function CtxSheet({
   stats,
@@ -56,6 +58,7 @@ export function CtxSheet({
           ))}
         </View>
       ))}
+      <CostSection spend={ctx.spend} />
       <ContextSection ctxv={ctxv} blocks={blocks} />
     </Sheet>
   );

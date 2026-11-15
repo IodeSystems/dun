@@ -139,3 +139,24 @@ derive them from `turn`, tokens, tool calls or `done`.
   starts the figures again.
 - Old logs: a `request` with no `session_stats` (an older engine) shows its own
   figures and no averages; marked in both clients.
+
+## Usage
+
+- `usage {total, cached, processed, generated, turns, active, …, spend,
+  turn_stats}` before each `done`. The token counts and `turns` (model
+  rounds) are the session's, **cumulative** (agentkit's tally); `active` is
+  the window now; `turn_stats` is the turn's own share; `spend` the
+  session's money and limits (`proto.Spend`).
+- A client **sets** them, it does not add them up: the last `usage` is the
+  whole count, a snapshot keeps it (state), so a reconnected client is
+  right. (Both clients used to add the counts, which counted every earlier
+  turn again on each turn.) A turn cut before its first round sends the
+  last totals, not zeros.
+- Scope: the engine process, as `request`: an engine restart counts again
+  from 0, and so does the spend's session part.
+- `spend` between turns, and `usage.spend`, carry the whole cost view: what
+  the session spent (and this hour, today, the interval), the last turn,
+  the key's budget, the rate-limit windows, and this machine's ledger. The
+  TUI's /usage and the web client's Context sheet (`lib/costview.ts`) show
+  the same rows.
+- Old logs: same fields, same meaning; nothing changed on the wire.

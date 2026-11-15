@@ -626,12 +626,13 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m.syncStats()
 		m.refresh()
 	case "usage":
-		// Accumulate token usage stats for /context.
-		m.ctxStats.totalTokens += int(evNum(ev["total"]))
+		// The session's token totals, as the engine counts them (cumulative:
+		// the last usage is the whole count, so a snapshot's is too).
+		m.ctxStats.totalTokens = int(evNum(ev["total"]))
 		m.ctxStats.activeTokens = int(evNum(ev["active"]))
-		m.ctxStats.cachedTokens += int(evNum(ev["cached"]))
-		m.ctxStats.processedTokens += int(evNum(ev["processed"]))
-		m.ctxStats.generatedTokens += int(evNum(ev["generated"]))
+		m.ctxStats.cachedTokens = int(evNum(ev["cached"]))
+		m.ctxStats.processedTokens = int(evNum(ev["processed"]))
+		m.ctxStats.generatedTokens = int(evNum(ev["generated"]))
 		m.ctxStats.turns = int(evNum(ev["turns"]))
 		// Session-level stats (cumulative — use last value, not sum).
 		m.ctxStats.readSystemCost(ev)

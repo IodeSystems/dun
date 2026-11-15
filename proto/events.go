@@ -200,7 +200,12 @@ type Window struct {
 	WindowFolds    int     `json:"window_folds"`
 }
 
-// Usage is a turn's accounting, sent before done.
+// Usage is the session's accounting as of a turn's end, sent before done.
+// Total, Cached, Processed, Generated and Turns (rounds) are CUMULATIVE over
+// the engine's session (agentkit's TokenUsage), not the turn's: the last
+// usage is the whole count, a snapshot keeps it, and a client sets them, it
+// does not add them up (docs/session-events.md, "Usage"). Active is the
+// window now. TurnStats is the turn's own share.
 type Usage struct {
 	Total               int `json:"total"`
 	Active              int `json:"active"`

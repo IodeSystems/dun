@@ -889,8 +889,8 @@ func emitInterrupted(h *dun.Harness, em *emitter, res agent.TurnResult) {
 }
 
 // emitFailedUsage reports what a failed turn cost. A turn that ends on an
-// error (max turns, a provider failure) has still spent its rounds, and usage
-// is per turn: without this the rounds of a failed turn are in no usage event.
+// error (max turns, a provider failure) has still spent its rounds: without
+// this its turn_stats and spend are in no usage event.
 func emitFailedUsage(h *dun.Harness, em *emitter, res agent.TurnResult) {
 	if res.Usage.Turns > 0 {
 		em.emit(usageEvent(h, res.Usage))

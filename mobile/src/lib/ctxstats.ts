@@ -1,24 +1,17 @@
 // What fills the context and what it cost: the TUI's /context and /usage
 // figures (internal/tui/tui_context.go, spend.go), from the usage,
-// context_cost and spend events. usage is one turn's accounting: its token
-// counts add up here, as in the TUI, so after a snapshot they count from the
-// last turn the snapshot kept. The cache figures and the spend are the
-// session's own totals.
+// context_cost and spend events. usage carries the session's token totals,
+// cumulative (proto.Usage): the last one is the whole count, so a snapshot's
+// is right too, and nothing is added up here. The cache figures and the
+// spend are the session's own totals as well. The cost view is costview.ts.
+
+import { parseSpend, type Spend } from './costview';
 
 export type Part = { name: string; tokens: number };
 
-export type Spend = {
-  currency: string;
-  session: number | null;
-  today: number | null;
-  calls: number;
-  costedCalls: number;
-  lastTurn: number | null;
-};
-
 export type Ctx = {
   seen: boolean;
-  // tokens, summed over the turns seen
+  // tokens: the session's, as the last usage said
   processed: number;
   generated: number;
   cached: number;
@@ -76,7 +69,6 @@ export const noCtx: Ctx = {
 
 type Ev = Record<string, unknown>;
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
-const money = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
 function systemCost(c: Ctx, ev: Ev): Ctx {
   if (num(ev.system_tokens) <= 0) return c;
@@ -108,19 +100,8 @@ function windowOf(c: Ctx, ev: Ev): Ctx {
 }
 
 function spendOf(c: Ctx, src: unknown): Ctx {
-  if (!src || typeof src !== 'object') return c;
-  const s = src as Ev;
-  return {
-    ...c,
-    spend: {
-      currency: typeof s.currency === 'string' ? s.currency : '',
-      session: money(s.session_cost),
-      today: money(s.session_today),
-      calls: num(s.calls),
-      costedCalls: num(s.costed_calls),
-      lastTurn: money(s.last_turn_cost),
-    },
-  };
+  const sp = parseSpend(src);
+  return sp ? { ...c, spend: sp } : c;
 }
 
 /** Folds one event in; others leave c as it is. */
@@ -134,10 +115,10 @@ export function noteCtx(c: Ctx, ev: Ev): Ctx {
       let n: Ctx = {
         ...c,
         seen: true,
-        processed: c.processed + num(ev.processed),
-        generated: c.generated + num(ev.generated),
-        cached: c.cached + num(ev.cached),
-        total: c.total + num(ev.total),
+        processed: num(ev.processed),
+        generated: num(ev.generated),
+        cached: num(ev.cached),
+        total: num(ev.total),
         active: num(ev.active),
         turns: num(ev.turns),
       };
@@ -160,12 +141,6 @@ export function noteCtx(c: Ctx, ev: Ev): Ctx {
 
 /** 188,160 (DES-7: thousands separators). */
 export const commas = (n: number) => Math.trunc(n).toLocaleString('en-US');
-
-/** An amount of money, to the cent, or below a cent to 4 places (numfmt.Money). */
-export function moneyText(f: number, currency: string): string {
-  const v = Math.abs(f) > 0 && Math.abs(f) < 0.01 ? f.toFixed(4) : f.toFixed(2);
-  return currency ? `${v} ${currency}` : v;
-}
 
 export type DetailRow = { label: string; value: string; note?: string };
 export type Section = { title: string; rows: DetailRow[] };
@@ -234,21 +209,5 @@ export function sections(c: Ctx): Section[] {
         },
       ],
     });
-  const sp = c.spend;
-  out.push({
-    title: 'cost',
-    rows:
-      sp && sp.session !== null
-        ? [
-            {
-              label: 'session spend',
-              value: moneyText(sp.session, sp.currency),
-              note: sp.costedCalls < sp.calls ? `${commas(sp.costedCalls)} of ${commas(sp.calls)} calls priced` : '',
-            },
-            ...(sp.today !== null ? [{ label: '  today', value: moneyText(sp.today, sp.currency) }] : []),
-            ...(sp.lastTurn !== null ? [{ label: '  last turn', value: moneyText(sp.lastTurn, sp.currency) }] : []),
-          ]
-        : [{ label: 'session spend', value: '—', note: 'not reported' }],
-  });
   return out;
 }

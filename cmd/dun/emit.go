@@ -21,7 +21,12 @@ import (
 // three groups: what the turn cost, how the pre-conversation context breaks
 // down, and how the window is divided (see dun.WindowBudget) — the last of which
 // /context has no other way to learn.
+//
+// The token counts are the session's, cumulative (agentkit's tally): a
+// client sets them. A turn cut before its first round returns no tally, so
+// the last one stands for it, or the totals would read 0.
 func usageEvent(h *dun.Harness, u agent.TokenUsage) *proto.Usage {
+	u = lastUsage.at(u)
 	sysTokens, forcedCalls, notifLifted := h.SessionStats()
 	return &proto.Usage{
 		Total: u.Total, Active: u.Active, Cached: u.Cached, Processed: u.Processed,
@@ -46,6 +51,30 @@ func usageEvent(h *dun.Harness, u agent.TokenUsage) *proto.Usage {
 		// endpoint's prefill speed (dun/roundstats.go).
 		TurnStats: turnStatsProto(h),
 	}
+}
+
+// usageTally is the last cumulative tally a usage event carried.
+type usageTally struct {
+	mu   sync.Mutex
+	last agent.TokenUsage
+}
+
+var lastUsage usageTally
+
+// at is u, or the last tally when u is behind it (a turn with no round
+// returns a zero one). Active is u's when it has one: the window now.
+func (t *usageTally) at(u agent.TokenUsage) agent.TokenUsage {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if u.Turns >= t.last.Turns {
+		t.last = u
+		return u
+	}
+	out := t.last
+	if u.Active > 0 {
+		out.Active = u.Active
+	}
+	return out
 }
 
 // mcpInfoDays is how far back /mcp info totals what the schemas cost.
