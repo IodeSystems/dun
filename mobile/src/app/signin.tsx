@@ -6,6 +6,7 @@ import { Platform, ScrollView, Text, View } from 'react-native';
 import { explain, makeClient, UnauthorizedError } from '@/api/client';
 import { ListSessions } from '@/api/ops';
 import { Button, ErrorText, Field, Muted, Screen } from '@/components/ui';
+import { fetchHello, NotDundError } from '@/lib/hello';
 import { landing } from '@/lib/landing';
 import { defaultBaseUrl } from '@/lib/storage';
 import { font, space, useColors } from '@/lib/theme';
@@ -21,6 +22,28 @@ function fragmentParams(raw: string): URLSearchParams {
   const i = raw.indexOf('#');
   return new URLSearchParams(i >= 0 ? raw.slice(i + 1) : '');
 }
+/** A command the user can select and copy. */
+function Cmd({ children }: { children: string }) {
+  const c = useColors();
+  return (
+    <Text
+      selectable
+      style={{
+        color: c.text,
+        backgroundColor: c.surface,
+        borderColor: c.border,
+        borderWidth: 1,
+        borderRadius: 8,
+        padding: space.sm,
+        fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+        fontSize: font.sm,
+      }}
+    >
+      {children}
+    </Text>
+  );
+}
+
 export default function SignIn() {
   const auth = useAuth();
   const c = useColors();
@@ -30,15 +53,15 @@ export default function SignIn() {
   const [err, setErr] = useState(() => landing()?.error ?? '');
   const [busy, setBusy] = useState(false);
   const [sso, setSso] = useState(false);
+  const [help, setHelp] = useState(false);
   const base = url.trim().replace(/\/+$/, '');
 
   // Whether this dund signs in with the identity provider. hello is open:
   // a plain fetch, since GraphQL needs a token this screen does not have.
   useEffect(() => {
     let live = true;
-    fetch(base + '/api/v1/hello')
-      .then((r) => r.json())
-      .then((h: { sign_in?: boolean }) => live && setSso(h.sign_in === true))
+    fetchHello(base)
+      .then((h) => live && setSso(h.sign_in === true))
       .catch(() => live && setSso(false));
     return () => {
       live = false;
@@ -49,13 +72,18 @@ export default function SignIn() {
     setErr('');
     setBusy(true);
     try {
-      // Prove the pair works before keeping it.
+      // The address must be dund, then the pair must work.
+      await fetchHello(u);
       await makeClient(u, t).request(ListSessions);
       await auth.signIn(u, t);
     } catch (e) {
       const x = explain(e);
       setErr(
-        x instanceof UnauthorizedError ? 'That token was refused. Make a new one with `dun dund token`.' : x.message,
+        x instanceof NotDundError
+          ? x.message
+          : x instanceof UnauthorizedError
+            ? 'That token was refused. Make a new one with `dun dund token`.'
+            : x.message,
       );
     } finally {
       setBusy(false);
@@ -119,6 +147,19 @@ export default function SignIn() {
             disabled={busy || !token.trim()}
           />
         </View>
+        <Button title={help ? 'Hide help' : 'No token?'} onPress={() => setHelp(!help)} />
+        {help ? (
+          <View style={{ gap: space.sm }}>
+            <Muted>1. Install dun on the machine that runs the agents:</Muted>
+            <Cmd>curl -fsSL https://dun.iodesystems.com/install.sh | sh</Cmd>
+            <Muted>More ways to install: https://dun.iodesystems.com/#install</Muted>
+            <Muted>2. Start dund with its web listener on. The phone must reach this address:</Muted>
+            <Cmd>dun dund serve --web-experimental 0.0.0.0:20003</Cmd>
+            <Muted>3. Make a token. Use any name. The token shows once. Copy it now:</Muted>
+            <Cmd>dun dund token create phone</Cmd>
+            <Muted>List tokens with `dun dund token list`. Revoke one with `dun dund token revoke phone`.</Muted>
+          </View>
+        ) : null}
       </ScrollView>
     </Screen>
   );
