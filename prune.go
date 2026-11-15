@@ -426,8 +426,9 @@ func PruneSessions(root, repoRoot, except string) []string {
 	// Claimed but never written (a dun that exited before saying anything):
 	// nothing to keep. Ten minutes old, so a session that has just started
 	// and not yet flushed is not taken out from under its process.
+	// One whose archives hold a message is kept: it is how they are found.
 	for _, id := range emptySessionIDs(root, time.Now().Add(-10*time.Minute)) {
-		if id != except && os.Remove(filepath.Join(RootDir(root), id+".jsonl")) == nil {
+		if id != except && !SessionAsked(root, id) && os.Remove(SessionFile(root, id)) == nil {
 			removed = append(removed, id)
 		}
 	}
@@ -439,8 +440,9 @@ func PruneSessions(root, repoRoot, except string) []string {
 		if id == except {
 			continue
 		}
-		ForgetSession(root, id)
-		removed = append(removed, id)
+		if pruneTranscript(root, id) {
+			removed = append(removed, id)
+		}
 	}
 	ids := ListSessions(root) // newest first
 	if len(ids) <= keepSessions {
@@ -459,35 +461,48 @@ func PruneSessions(root, repoRoot, except string) []string {
 		if meta := LoadSessionMeta(root, id); meta.WorktreePath != "" && holds[meta.WorktreePath] {
 			continue // its branch still holds work; the transcript explains it
 		}
-		if err := os.Remove(filepath.Join(RootDir(root), id+".jsonl")); err != nil {
-			continue
+		if pruneTranscript(root, id) {
+			removed = append(removed, id)
 		}
-		_ = os.Remove(MetaFile(root, id))
-		removeSidecars(root, id)
-		removed = append(removed, id)
 	}
 	return removed
 }
 
-// unaskedSessionIDs lists sessions with entries but no user message, last
-// modified before cutoff.
+// unaskedSessionIDs lists sessions with entries but no user message in them or
+// their archives (SessionAsked), last modified before cutoff.
 func unaskedSessionIDs(root string, cutoff time.Time) []string {
 	var out []string
 	for _, id := range ListSessions(root) {
-		path := SessionFile(root, id)
-		st, err := os.Stat(path)
+		st, err := os.Stat(SessionFile(root, id))
 		if err != nil || !st.ModTime().Before(cutoff) {
 			continue
 		}
-		if entries, preview, unreadable := scanSession(path); entries > 0 && preview == "" && !unreadable {
+		if !SessionAsked(root, id) {
 			out = append(out, id)
 		}
 	}
 	return out
 }
 
-// ForgetSession removes one session outright — transcript, children, metadata —
-// so it cannot come back from /resume. Used by /close.
+// pruneTranscript is what an AUTOMATIC cleanup removes: the transcript and the
+// small files derived from it (metadata, stats). Never the sidecars — the
+// transcript /clear set aside, recap and re-heading archives, children — nor
+// the shell's saved output. A prune decides by a rule, not a person, and a
+// rule that misjudged (/clear's notices-only transcript, 2026-11-14) must not
+// cost the archives. Only /close (ForgetSession) removes those. It reports
+// whether the transcript was removed.
+func pruneTranscript(root, id string) bool {
+	if os.Remove(SessionFile(root, id)) != nil {
+		return false
+	}
+	_ = os.Remove(MetaFile(root, id))
+	_ = os.Remove(StatsFile(root, id))
+	return true
+}
+
+// ForgetSession removes one session outright — transcript, children, archives,
+// metadata, saved output — so it cannot come back from /resume. Used by
+// /close only: a person's call. Automatic cleanup uses pruneTranscript.
 func ForgetSession(root, id string) {
 	_ = os.Remove(filepath.Join(RootDir(root), id+".jsonl"))
 	_ = os.Remove(MetaFile(root, id))

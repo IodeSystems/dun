@@ -1,12 +1,100 @@
 package dund
 
 import (
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/proto"
 )
+
+// realAsked puts the real rule back for one test: it reads transcripts the
+// test writes itself.
+func realAsked(t *testing.T) {
+	askedMu.Lock()
+	fake := askedIn
+	askedIn = dun.SessionAsked
+	askedMu.Unlock()
+	t.Cleanup(func() {
+		askedMu.Lock()
+		askedIn = fake
+		askedMu.Unlock()
+	})
+}
+
+// writeTranscript writes one of a session's transcript files, aged past the
+// prune's ten minutes.
+func writeTranscript(t *testing.T, ws, name, body string) {
+	t.Helper()
+	dir := dun.RootDir(ws)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, name)
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	os.Chtimes(p, old, old)
+}
+
+// After /clear the transcript holds notices only, and the conversation is in
+// "<id>.cleared.<time>.jsonl". dund keeps that session on stop and on load,
+// as the engine's prune keeps its files; one with nothing asked anywhere
+// still goes.
+func TestClearedSessionIsKeptOnStopAndLoad(t *testing.T) {
+	realAsked(t)
+	svc, sp, dir := newSvc(t)
+	notice := `{"Kind":"notification","Content":"cleared"}` + "\n"
+	asked := `{"Kind":"user","Content":"fix it"}` + "\n"
+
+	ws := t.TempDir()
+	cleared, _ := svc.Create(alice, ws, nil, "")
+	writeTranscript(t, ws, cleared+".jsonl", notice)
+	writeTranscript(t, ws, cleared+".cleared.20261114T100000.jsonl", asked)
+	recapWS := t.TempDir()
+	recapped, _ := svc.Create(alice, recapWS, nil, "")
+	writeTranscript(t, recapWS, recapped+".jsonl", notice)
+	writeTranscript(t, recapWS, recapped+".recap1.jsonl", asked)
+	emptyWS := t.TempDir()
+	empty, _ := svc.Create(alice, emptyWS, nil, "")
+	writeTranscript(t, emptyWS, empty+".jsonl", notice)
+
+	for _, id := range []string{cleared, recapped, empty} {
+		if err := svc.Stop(alice, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ids := func(ls []proto.SessionSummary) map[string]bool {
+		m := map[string]bool{}
+		for _, s := range ls {
+			m[s.ID] = true
+		}
+		return m
+	}
+	if got := ids(svc.List(alice)); !got[cleared] || !got[recapped] || got[empty] || len(got) != 2 {
+		t.Fatalf("after stop: %v", got)
+	}
+	svc.Close()
+	svc2, err := New(dir, sp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc2.Close()
+	if got := ids(svc2.List(alice)); !got[cleared] || !got[recapped] || len(got) != 2 {
+		t.Fatalf("after reload: %v", got)
+	}
+	// And the engine's prune agrees: nothing of either is removed.
+	if removed := dun.PruneSessions(ws, ws, ""); len(removed) != 0 {
+		t.Fatalf("prune removed %v", removed)
+	}
+	if _, err := os.Stat(filepath.Join(dun.RootDir(ws), cleared+".cleared.20261114T100000.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // The fake engine writes no transcript; the tests that are not about empty
 // sessions treat every session as asked in.
