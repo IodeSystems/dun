@@ -297,6 +297,27 @@ type ControlInput struct {
 	}
 }
 
+type AgentInput struct {
+	SessionPath
+	Body struct {
+		Agent   string `json:"agent" doc:"the sub-agent's number"`
+		Action  string `json:"action" enum:"view,leave,tell" doc:"view: its conversation (agent_history, then agent_entry events) until a leave; tell: send it content"`
+		Content string `json:"content,omitempty"`
+	}
+}
+
+type JobOutputInput struct {
+	SessionPath
+	Job   int   `path:"job"`
+	Since int64 `query:"since" default:"-1" doc:"the byte offset to read from (the last read's next); -1: use tail"`
+	Tail  int64 `query:"tail" doc:"with since -1, the last this many bytes; 0: from the start"`
+	Limit int   `query:"limit" doc:"the most bytes to return (at most 262144)"`
+}
+
+type JobOutputOutput struct {
+	Body dund.JobOutput
+}
+
 type SwitchModelInput struct {
 	SessionPath
 	Body struct {
@@ -433,6 +454,29 @@ func (s *Server) register(api huma.API, g *gat.Gateway) {
 				return nil, err
 			}
 			return ok(), fail(s.svc.Send(p, in.ID, proto.NewCommand("", payload)))
+		})
+	gat.Register(api, g, huma.Operation{OperationID: "agent", Method: http.MethodPost, Path: "/api/v1/sessions/{id}/agent",
+		Summary: "View, leave or tell one of the session's sub-agents. A view streams its conversation as session events until its leave."},
+		func(ctx context.Context, in *AgentInput) (*OKOutput, error) {
+			p, err := who(ctx)
+			if err != nil {
+				return nil, err
+			}
+			cmd := &proto.AgentCmd{ID: in.Body.Agent, Action: in.Body.Action, Content: in.Body.Content}
+			return ok(), fail(s.svc.Send(p, in.ID, proto.NewCommand("", cmd)))
+		})
+	gat.Register(api, g, huma.Operation{OperationID: "jobOutput", Method: http.MethodGet, Path: "/api/v1/sessions/{id}/jobs/{job}/output",
+		Summary: "Part of a background job's output: from an offset, or its tail. Only the session's own jobs."},
+		func(ctx context.Context, in *JobOutputInput) (*JobOutputOutput, error) {
+			p, err := who(ctx)
+			if err != nil {
+				return nil, err
+			}
+			out, err := s.svc.JobOutput(p, in.ID, in.Job, in.Since, in.Tail, in.Limit)
+			if err != nil {
+				return nil, fail(err)
+			}
+			return &JobOutputOutput{Body: *out}, nil
 		})
 	gat.Register(api, g, huma.Operation{OperationID: "restartSession", Method: http.MethodPost, Path: "/api/v1/sessions/{id}/restart",
 		Summary: "Restart the session's engine with new flags (a model switch)."},

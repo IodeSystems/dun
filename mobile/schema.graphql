@@ -4,9 +4,12 @@ schema {
   subscription: Subscription
 }
 
+directive @export(as: String!) on FIELD
+
 directive @derived(operationId: String) on FIELD_DEFINITION | OBJECT | INPUT_OBJECT | INPUT_FIELD_DEFINITION | ENUM | SCALAR | UNION | INTERFACE | ARGUMENT_DEFINITION
 
 type DundMutationNamespace {
+  agent(body: dund_AgentInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "agent")
   answer(body: dund_AnswerInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "answer")
   control(body: dund_ControlInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "control")
   createSession(body: dund_CreateInputBodyInput!): dund_IDOutputBody @derived(operationId: "createSession")
@@ -25,6 +28,16 @@ type DundMutationNamespace {
 type DundQueryNamespace {
   getUI(id: String!): dund_UIOutputBody @derived(operationId: "getUI")
   hello: dund_HelloOutputBody @derived(operationId: "hello")
+  jobOutput(
+    id: String!
+    job: Long!
+    """the most bytes to return (at most 262144)"""
+    limit: Long
+    """the byte offset to read from (the last read's next); -1: use tail"""
+    since: Long
+    """with since -1, the last this many bytes; 0: from the start"""
+    tail: Long
+  ): dund_JobOutput @derived(operationId: "jobOutput")
   listSessions: dund_SessionsOutputBody @derived(operationId: "listSessions")
   pollSessionEvents(
     """the last seq seen; 0 for the start"""
@@ -39,6 +52,7 @@ type DundQueryNamespace {
 }
 
 type DundV1MutationNamespace {
+  agent(body: dund_AgentInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "agent")
   answer(body: dund_AnswerInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "answer")
   control(body: dund_ControlInputBodyInput!, id: String!): dund_OKOutputBody @derived(operationId: "control")
   createSession(body: dund_CreateInputBodyInput!): dund_IDOutputBody @derived(operationId: "createSession")
@@ -56,6 +70,16 @@ type DundV1MutationNamespace {
 type DundV1QueryNamespace {
   getUI(id: String!): dund_UIOutputBody @derived(operationId: "getUI")
   hello: dund_HelloOutputBody @derived(operationId: "hello")
+  jobOutput(
+    id: String!
+    job: Long!
+    """the most bytes to return (at most 262144)"""
+    limit: Long
+    """the byte offset to read from (the last read's next); -1: use tail"""
+    since: Long
+    """with since -1, the last this many bytes; 0: from the start"""
+    tail: Long
+  ): dund_JobOutput @derived(operationId: "jobOutput")
   listSessions: dund_SessionsOutputBody @derived(operationId: "listSessions")
   pollSessionEvents(
     """the last seq seen; 0 for the start"""
@@ -96,6 +120,21 @@ type Subscription {
     """from subscribeToken"""
     timestamp: Long!
   ): dund_StreamEvent! @derived(operationId: "sessionEvents")
+}
+
+"""view: its conversation (agent_history, then agent_entry events) until a leave; tell: send it content"""
+enum dund_AgentInputBodyAction {
+  leave
+  tell
+  view
+}
+
+input dund_AgentInputBodyInput {
+  """view: its conversation (agent_history, then agent_entry events) until a leave; tell: send it content"""
+  action: dund_AgentInputBodyAction!
+  """the sub-agent's number"""
+  agent: String!
+  content: String
 }
 
 type dund_AndroidRelease {
@@ -151,6 +190,15 @@ type dund_HelloOutputBody {
 
 type dund_IDOutputBody {
   id: String!
+}
+
+type dund_JobOutput {
+  data: String!
+  job: Long!
+  next: Long!
+  offset: Long!
+  size: Long!
+  state: String!
 }
 
 input dund_MessageInputBodyInput {
