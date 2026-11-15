@@ -4,6 +4,8 @@ export const light = {
   bg: '#fbfbfa',
   surface: '#ffffff',
   sunken: '#f4f3ef',
+  /** An open fold inside another open fold: darker than sunken, so the parent shows. */
+  fold: '#eae8e1',
   border: '#e3e2de',
   text: '#1d1d1b',
   muted: '#6b6b66',
@@ -39,10 +41,11 @@ export const light = {
   },
 };
 
-const dark: typeof light = {
+export const dark: typeof light = {
   bg: '#161615',
   surface: '#1e1e1c',
   sunken: '#232321',
+  fold: '#2e2e2b',
   border: '#2c2c2a',
   text: '#e8e7e3',
   muted: '#9a9993',
