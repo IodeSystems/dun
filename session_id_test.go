@@ -3,9 +3,23 @@ package dun
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+// A test binary without $DUN_HOME never resolves the real ~/.dun.
+func TestSessionsDir_TestsNeverReachTheRealHome(t *testing.T) {
+	t.Setenv("DUN_HOME", "")
+	home, _ := os.UserHomeDir()
+	got := SessionsDir()
+	if home != "" && strings.HasPrefix(got, filepath.Join(home, ".dun")) {
+		t.Fatalf("SessionsDir = %s, the real home", got)
+	}
+	if got != SessionsDir() {
+		t.Fatal("the stand-in moved between calls")
+	}
+}
 
 // Two sessions started in the same second get different files.
 func TestNewSessionFile_NoCollisionInOneSecond(t *testing.T) {
