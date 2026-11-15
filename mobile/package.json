@@ -56,8 +56,9 @@
     "react-native-web": "^0.21.4"
   },
   "devDependencies": {
-    "@graphql-codegen/cli": "^7.4.6",
-    "@graphql-codegen/client-preset": "^6.2.3",
+    "@babel/core": "^7.29.13",
+    "@graphql-codegen/cli": "^8.0.0",
+    "@graphql-codegen/client-preset": "^7.0.0",
     "@types/jest": "30.0.0",
     "@types/prismjs": "^1.26.6",
     "@types/react": "~19.3.0",
