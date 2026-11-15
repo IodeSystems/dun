@@ -9,6 +9,7 @@ export const ListSessions = graphql(`
           workspace
           running
           lastSeq
+          lastActive
         }
       }
     }

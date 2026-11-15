@@ -11,6 +11,7 @@ import (
 	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
+	"github.com/iodesystems/dun/proto"
 )
 
 // Switching sessions from inside the TUI.
@@ -57,9 +58,35 @@ func resumeSlash(m *tuiModel, args []string) tea.Cmd {
 	return nil
 }
 
-// addServiceSessions adds the sessions dund runs in OTHER workspaces after
-// this workspace's, and notes which have a live engine. A failure to reach
-// dund leaves the list as the files say.
+// orderSessions sorts infos by the rule dund lists in (proto.SortSessions).
+// dund's own last-activity time wins over the file's where it has the session.
+func orderSessions(infos []dun.SessionInfo, live map[string]bool, list []proto.SessionSummary) []dun.SessionInfo {
+	active := map[string]string{}
+	for _, s := range list {
+		active[s.ID] = s.LastActive
+	}
+	byID := map[string]dun.SessionInfo{}
+	rows := make([]proto.SessionSummary, 0, len(infos))
+	for _, in := range infos {
+		byID[in.ID] = in
+		la := active[in.ID]
+		if la == "" && !in.ModTime.IsZero() {
+			la = in.ModTime.UTC().Format(time.RFC3339)
+		}
+		rows = append(rows, proto.SessionSummary{ID: in.ID, Running: live[in.ID], LastActive: la})
+	}
+	proto.SortSessions(rows)
+	out := make([]dun.SessionInfo, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, byID[r.ID])
+	}
+	return out
+}
+
+// addServiceSessions adds the sessions dund holds in OTHER workspaces, notes
+// which have a live engine, and orders the whole list by dund's rule:
+// running first, then last activity. A failure to reach dund leaves the list
+// as the files say (newest first).
 func (m *tuiModel) addServiceSessions() {
 	m.sessWS, m.sessLive = map[string]string{}, map[string]bool{}
 	list, err := dundSessions()
@@ -88,6 +115,7 @@ func (m *tuiModel) addServiceSessions() {
 		}
 		m.sessions = append(m.sessions, info)
 	}
+	m.sessions = orderSessions(m.sessions, m.sessLive, list)
 }
 
 // updatePicking owns the keys while the session list is open.
