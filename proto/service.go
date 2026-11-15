@@ -1,6 +1,10 @@
 package proto
 
-import "github.com/iodesystems/dun/internal/procstat"
+import (
+	"sort"
+
+	"github.com/iodesystems/dun/internal/procstat"
+)
 
 // The service's own frames: what a client says to dund rather than to one
 // session's engine, and what dund says back. A command naming a session in
@@ -218,6 +222,29 @@ type SessionSummary struct {
 	Persist   bool     `json:"persist,omitempty"`
 	// Attached is how many clients follow the session right now.
 	Attached int `json:"attached"`
+	// LastActive is the session's last activity, RFC3339 in UTC: the
+	// transcript's modification time (it survives a dund restart), else the
+	// moment dund last touched the session. "" when neither is known.
+	LastActive string `json:"last_active,omitempty"`
+}
+
+// SessionBefore is the one session order: running first, then the most
+// recently active, then the greater id. dund lists in it and the TUI's
+// picker merges with it; clients show it and do not re-derive it.
+func SessionBefore(a, b SessionSummary) bool {
+	if a.Running != b.Running {
+		return a.Running
+	}
+	// UTC RFC3339 compares as text; "" (unknown) sorts last.
+	if a.LastActive != b.LastActive {
+		return a.LastActive > b.LastActive
+	}
+	return a.ID > b.ID
+}
+
+// SortSessions orders items by SessionBefore.
+func SortSessions(items []SessionSummary) {
+	sort.SliceStable(items, func(i, j int) bool { return SessionBefore(items[i], items[j]) })
 }
 
 // EngineState is the session's engine process: started, exited, restarting

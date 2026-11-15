@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -254,11 +255,34 @@ func (s *session) touch() {
 func (s *session) isMember(principal string) bool { return slices.Contains(s.members, principal) }
 
 func (s *session) summary() proto.SessionSummary {
+	s.actMu.Lock()
+	last := s.lastActive
+	s.actMu.Unlock()
+	if mt, ok := transcriptTime(s.workspace, s.id); ok {
+		last = mt
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return proto.SessionSummary{ID: s.id, Workspace: s.workspace, Owner: s.owner,
+	return proto.SessionSummary{LastActive: rfc3339(last), ID: s.id, Workspace: s.workspace, Owner: s.owner,
 		Members: slices.Clone(s.members), Running: s.running, LastSeq: s.log.Last(), Persist: s.persist,
 		Attached: s.log.Subscribers()}
+}
+
+// transcriptTime is when the session's transcript was last written: the
+// activity that outlives a dund restart.
+func transcriptTime(workspace, id string) (time.Time, bool) {
+	st, err := os.Stat(dun.SessionFile(workspace, id))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return st.ModTime(), true
+}
+
+func rfc3339(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 // reusable reports whether CreateOrReuse may hand this session to a client

@@ -7,10 +7,11 @@ import { explain, UnauthorizedError } from '@/api/client';
 import { CreateSession, ListSessions } from '@/api/ops';
 import { AppRelease } from '@/components/AppRelease';
 import { Button, ErrorText, Field, Muted, Screen } from '@/components/ui';
+import { ago, sessionRows } from '@/lib/sessionlist';
 import { font, mono, space, useColors } from '@/lib/theme';
 import { useAuth } from '@/providers/AuthProvider';
 
-// The caller's sessions, every workspace, newest first.
+// The caller's sessions, every workspace, in the order dund lists them.
 export default function Sessions() {
   const auth = useAuth();
   const c = useColors();
@@ -46,7 +47,7 @@ export default function Sessions() {
   if (!auth.ready) return <ActivityIndicator style={{ marginTop: space.xl }} />;
   if (!auth.token) return <Redirect href="/signin" />;
 
-  const items = [...(list.data ?? [])].sort((a, b) => b.id.localeCompare(a.id));
+  const items = sessionRows(list.data);
   return (
     <Screen>
       <Stack.Screen
@@ -100,7 +101,7 @@ export default function Sessions() {
               </Text>
             </View>
             <Text style={{ color: c.muted, fontSize: font.sm }} numberOfLines={1} ellipsizeMode="tail">
-              {s.workspace}
+              {[s.workspace, ago(s.lastActive)].filter(Boolean).join('  ·  ')}
             </Text>
           </Pressable>
         )}

@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -348,13 +349,27 @@ func (s *Service) Get(principal, id string) (*session, error) {
 	return ses, nil
 }
 
-// List is principal's sessions, newest id last.
+// diskPerWorkspace bounds the on-disk transcripts List adds per workspace:
+// the newest N by id. Each costs one stat, and a workspace holds hundreds.
+const diskPerWorkspace = 20
+
+// List is principal's sessions in proto.SessionBefore order: those in the
+// registry, then, per workspace they run in, the newest transcripts on disk
+// the registry does not hold (running=false: resumable from a client).
 func (s *Service) List(principal string) []proto.SessionSummary {
 	s.mu.Lock()
 	var mine []*session
+	have := map[string]bool{} // workspace + id, every session in the registry
+	var wss []string
+	seen := map[string]bool{}
 	for _, ses := range s.sessions {
+		have[ses.workspace+"\x00"+ses.id] = true
 		if ses.isMember(principal) {
 			mine = append(mine, ses)
+			if !seen[ses.workspace] {
+				seen[ses.workspace] = true
+				wss = append(wss, ses.workspace)
+			}
 		}
 	}
 	s.mu.Unlock()
@@ -362,7 +377,22 @@ func (s *Service) List(principal string) []proto.SessionSummary {
 	for _, ses := range mine {
 		out = append(out, ses.summary())
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	for _, ws := range wss {
+		n := 0
+		for _, id := range dun.ListSessions(ws) { // newest id first; no sidecars, no empty files
+			if n >= diskPerWorkspace {
+				break
+			}
+			if have[ws+"\x00"+id] {
+				continue
+			}
+			n++
+			mt, _ := transcriptTime(ws, id)
+			out = append(out, proto.SessionSummary{ID: id, Workspace: ws, Owner: principal,
+				Members: []string{principal}, LastActive: rfc3339(mt)})
+		}
+	}
+	proto.SortSessions(out)
 	return out
 }
 

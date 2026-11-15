@@ -217,6 +217,7 @@ input dund_RestartInputBodyInput {
 type dund_SessionSummary {
   attached: Long!
   id: String!
+  lastActive: String
   lastSeq: Long!
   members: [String!]!
   owner: String!
