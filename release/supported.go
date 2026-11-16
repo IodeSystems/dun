@@ -108,8 +108,15 @@ var Supported = []Tool{
 	// lifted by --index-anyway), a macOS memory-pressure stop, orphaned
 	// children reaped. `status --json` gains fleet and memoryLimit. dun's
 	// interim --lsp-max-rss-mb and --lsp-idle-stop are dropped (lspsafe.go).
+	// Recommended v0.5.2 (2026-11-15), tarballs in deps.json: inotify watch
+	// limits (10% of max_user_watches) and file-watch forwarding to child
+	// LSPs. For a root that resolves typescript >= 7 it launches TS 7's native
+	// `tsc --lsp --stdio` instead of typescript-language-server (needs the
+	// @typescript/typescript-<os>-<arch> platform package); the forwarding
+	// needs typescript-language-server >= 6.1.0 for TS <= 6. No new flag or
+	// config for dun.
 	{Name: "poly-lsp-mcp", Module: "github.com/iodesystems/lsp-mcp",
-		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.5.1"},
+		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.5.2"},
 	// Min 5d24299 (main, 2026-10-24): the raglit/setup notification, doctor
 	// --json and provider keys by api_key_file, which /rag setup and
 	// doctor read. v0.1.0 (a32c5db): raglit's first release. v0.2.0 (574d91e,

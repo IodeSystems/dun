@@ -44,7 +44,7 @@ pick one repo (a `node_*` call naming a path in it restarts poly-lsp there).
 `/lsp index-anyway on` lifts the guard for the project; only you set it, no tool
 or model can. dun never raises poly-lsp's index budget on its own. The same
 guard keeps dund's code index and the raglit workspace ingest off such a root.
-poly-lsp-mcp v0.5.1 bounds its daemon by default (child count, RSS, idle stop),
+poly-lsp-mcp v0.5.1+ bounds its daemon by default (child count, RSS, idle stop),
 so dun no longer passes `lsp_max_rss_mb` or `lsp_idle_stop`; a config that still
 has them loads and ignores them. `dun doctor` lists each running poly-lsp root
 with its child LSPs, their RSS and indexed files. Detail:
