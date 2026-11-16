@@ -245,6 +245,9 @@ const shellFlags = "-c"
 type HostExec struct {
 	Dir string
 	Env []string // added to the command's environment (DUN_HARNESS)
+	// Live is asked at every command for values that change mid-session
+	// (liveEnv: DUN_MODEL_ID, DUN_EFFORT); nil adds none.
+	Live func() []string
 }
 
 // pgidKey carries a job's "here is my process group" callback in the context
@@ -271,6 +274,9 @@ func (h HostExec) Run(ctx context.Context, command string, w io.Writer) ExecResu
 	// bite: it kills the whole process group, not just the `sh` that spawned it.
 	proc.KillGroup(proc.Detach(cmd))
 	cmd.Env = append(cmd.Env, h.Env...)
+	if h.Live != nil {
+		cmd.Env = append(cmd.Env, h.Live()...)
+	}
 	return finishNoting(ctx, w, cmd)
 }
 
@@ -304,6 +310,10 @@ func (h HostExec) Run(ctx context.Context, command string, w io.Writer) ExecResu
 type HostShell struct {
 	Dir string
 	Env []string // added to the shell's environment (DUN_HARNESS)
+	// Live is exported into the shell before every command (see Env on
+	// HostExec): the shell lives across /model and /effort, so a start-time
+	// value would go stale.
+	Live func() []string
 
 	mu  sync.Mutex
 	p   *shellProc
@@ -383,6 +393,7 @@ func (h *HostShell) RunPromotable(ctx context.Context, command string, w io.Writ
 	// installer's prompt) ate the sentinel and waited forever for more. Braces,
 	// not a subshell: export and cd still reach the next call.
 	script := "cd " + shellQuote(h.Dir) + " 2>/dev/null\n" +
+		exportLive(h.Live) +
 		"{ " + command + "\n} </dev/null\n" +
 		"echo " + sentinel + " $?\n\n"
 	if _, err := h.p.stdin.Write([]byte(script)); err != nil {
@@ -744,6 +755,8 @@ type DockerExec struct {
 	// its own path so a saved result's path means the same file in here as on
 	// the host. "" mounts nothing.
 	TmpDir string
+	// Live is asked at every command; its values are passed with Env.
+	Live func() []string
 	// Env is passed to the container (-e): DUN_HARNESS names a file in TmpDir.
 	Env []string
 }
@@ -775,6 +788,11 @@ func (d DockerExec) runArgs(name, command string) []string {
 	}
 	for _, kv := range d.Env {
 		args = append(args, "-e", kv)
+	}
+	if d.Live != nil {
+		for _, kv := range d.Live() {
+			args = append(args, "-e", kv)
+		}
 	}
 	// Mount extra paths read-only at /<name>.
 	for _, m := range d.ExtraMounts {
@@ -1013,4 +1031,22 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 		}
 		return out, nil
 	}
+}
+
+// exportLive is the export line that goes before a command in the persistent
+// shell: its own line, so a command's text and its exit status ($? is read
+// after the command's braces) are untouched, and it prints nothing.
+func exportLive(live func() []string) string {
+	if live == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, kv := range live() {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		b.WriteString("export " + k + "=" + shellQuote(v) + "\n")
+	}
+	return b.String()
 }

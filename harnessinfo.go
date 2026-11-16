@@ -3,6 +3,7 @@ package dun
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,7 @@ import (
 //	the session tool                the model asks (session_tool.go)
 //	dun session <id> info [--context]   a person or a script; reads <session>.harness.json
 //	DUN_SESSION_ID                  in the environment of every command dun runs
+//	dun session [<id>] attribution  the agent line for a commit or PR: harness, version, model, effort
 //
 // and the system prompt introduces it as dun (👷) with its session id.
 
@@ -113,9 +115,12 @@ func HarnessInfoFile(sessionFile string) string {
 }
 
 // writeHarnessInfo keeps <session>.harness.json current, for dun session
-// <id> info. Quiet: a session without a file, or a failed write, says nothing.
+// <id> info and attribution. A child has its own (<parent>.sub<N>.harness.json):
+// its model and effort are not its parent's, and its commands' $DUN_SESSION_ID
+// names it (withExecEnv). Quiet: a session without a file, or a failed write,
+// says nothing.
 func (h *Harness) writeHarnessInfo() {
-	if h.cfg.SessionFile == "" || h.cfg.Parent != nil {
+	if h.cfg.SessionFile == "" {
 		return
 	}
 	b, err := json.MarshalIndent(h.HarnessInfo(), "", "  ")
@@ -144,25 +149,54 @@ func (h *Harness) harnessTmpPath() string {
 	return filepath.Join(tmp, "harness.json")
 }
 
-// withExecEnv gives exec's commands $DUN_HARNESS. Per backend, not the
+// withExecEnv gives exec's commands $DUN_HARNESS, $DUN_SESSION_ID and liveEnv's. Per backend, not the
 // process environment: a child harness runs in the same process.
 func (h *Harness) withExecEnv(e ExecBackend) ExecBackend {
-	p := h.harnessTmpPath()
-	if p == "" {
-		return e
+	var env []string
+	if p := h.harnessTmpPath(); p != "" {
+		env = append(env, "DUN_HARNESS="+p)
 	}
-	env := []string{"DUN_HARNESS=" + p}
+	// $DUN_SESSION_ID is per process (main.go), so a child's commands would
+	// name its parent, and dun session attribution would print the parent's
+	// model. A child with no log names no session rather than the parent's.
+	if h.cfg.SessionFile != "" {
+		env = append(env, "DUN_SESSION_ID="+h.SessionID())
+	} else if h.cfg.Parent != nil {
+		env = append(env, "DUN_SESSION_ID=")
+	}
 	switch b := e.(type) {
 	case *HostShell:
-		b.Env = env
+		b.Env, b.Live = env, h.liveEnv
 	case HostExec:
-		b.Env = env
+		b.Env, b.Live = env, h.liveEnv
 		return b
 	case DockerExec:
-		b.Env = env
+		b.Env, b.Live = env, h.liveEnv
 		return b
 	}
 	return e
+}
+
+// liveEnv is what a command is told about the agent running it, read when
+// the command starts: $DUN_MODEL_ID, $DUN_EFFORT, $DUN_HARNESS_VERSION,
+// $DUN_HARNESS_NAME, $DUN_PROVIDER. A child's are its own. ($DUN_HARNESS is
+// taken: it names the harness.json file.) A fact that is not known is left
+// out, not guessed. A long-lived child process (an MCP server, a job that
+// outlives its turn) has only its start-time values; it runs
+// `dun session attribution` for the current ones.
+func (h *Harness) liveEnv() []string {
+	v := h.cfg.Version
+	if v == "" {
+		v = "dev"
+	}
+	var env []string
+	for _, kv := range [][2]string{{"DUN_HARNESS_NAME", "dun"}, {"DUN_HARNESS_VERSION", v},
+		{"DUN_MODEL_ID", h.cfg.Endpoint.Model}, {"DUN_PROVIDER", h.cfg.Provider}, {"DUN_EFFORT", h.Effort()}} {
+		if kv[1] != "" {
+			env = append(env, kv[0]+"="+kv[1])
+		}
+	}
+	return env
 }
 
 // identityLine says where dun's harness info is (USER 2026-10-27: asked for
@@ -180,4 +214,49 @@ func (h *Harness) identityLine() string {
 	}
 	return "\n\nHarness info (dun version, session, model, effort, branch) is the JSON file $DUN_HARNESS; " +
 		"copy from it when a project's rules ask a commit, PR or report to name the agent, model or version."
+}
+
+// dunVars is the `dun` constant every shell eval carries: the same facts as
+// liveEnv, read when the call is made, so a child's are its own.
+func (h *Harness) dunVars() map[string]any {
+	v := h.cfg.Version
+	if v == "" {
+		v = "dev"
+	}
+	m := map[string]any{"harness": "dun", "harness_version": v, "model_id": h.cfg.Endpoint.Model, "effort": h.Effort()}
+	if h.cfg.Provider != "" {
+		m["provider"] = h.cfg.Provider
+	}
+	return m
+}
+
+// dunVarsCaller binds `dun` into the shell server's eval calls (mcpshell's
+// eval takes `vars`, per-call constants). Reserved: a `dun` the model passes
+// is overwritten. The other vars and the model's args are left alone.
+type dunVarsCaller struct {
+	toolCaller
+	h *Harness
+}
+
+func (c dunVarsCaller) CallTool(ctx context.Context, serverID, toolName string, args map[string]any) (string, error) {
+	if serverID == "shell" && toolName == "eval" {
+		out := make(map[string]any, len(args)+1)
+		for k, v := range args {
+			out[k] = v
+		}
+		vars := map[string]any{}
+		if raw, present := out["vars"]; present && raw != nil {
+			old, ok := raw.(map[string]any)
+			if !ok {
+				return "", fmt.Errorf("eval: vars is an object of name: value; got %T", raw)
+			}
+			for k, v := range old {
+				vars[k] = v
+			}
+		}
+		vars["dun"] = c.h.dunVars()
+		out["vars"] = vars
+		args = out
+	}
+	return c.toolCaller.CallTool(ctx, serverID, toolName, args)
 }

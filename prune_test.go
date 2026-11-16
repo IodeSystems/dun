@@ -218,6 +218,8 @@ func TestForgetSession_LeavesNothingToResume(t *testing.T) {
 	id := "20260801-120000"
 	os.WriteFile(filepath.Join(dir, id+".jsonl"), []byte("{}\n"), 0o644)
 	os.WriteFile(filepath.Join(dir, id+".sub1.jsonl"), []byte("{}\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, id+".harness.json"), []byte("{}\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, id+".sub1.harness.json"), []byte("{}\n"), 0o644)
 	SaveSessionMeta(repo, id, SessionMeta{Branch: "gone"})
 	os.MkdirAll(filepath.Join(dir, "overflow", id), 0o700)
 	os.WriteFile(filepath.Join(dir, "overflow", id, "eval-1.txt"), []byte("x"), 0o600)
@@ -232,6 +234,11 @@ func TestForgetSession_LeavesNothingToResume(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, id+".sub1.jsonl")); err == nil {
 		t.Error("a child's transcript should go with its parent's")
+	}
+	for _, f := range []string{id + ".harness.json", id + ".sub1.harness.json"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
+			t.Errorf("%s must go: attribution would answer from a closed session", f)
+		}
 	}
 	for _, d := range []string{id, id + ".sub1"} {
 		if _, err := os.Stat(filepath.Join(dir, "overflow", d)); err == nil {

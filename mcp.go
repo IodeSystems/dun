@@ -59,7 +59,8 @@ var toolDocs = map[string]string{
 		"Unlike JS: == and === compare plain objects by structure; Map/Set keys(), values() and entries() return arrays; " +
 		"an error mcpshell raises itself is a string in catch. xs.sort(), xs.reverse() and xs.fill(v) mutate xs in place and return it (JS); " +
 		"sort(xs), xs |> sort and xs.toSorted() return copies. Dedup, count, sort etc. are pipe commands — help() lists them; " +
-		"on a hosted server's namespace, <ns>.help() or <ns>.help(\"cmd\") does the same.",
+		"on a hosted server's namespace, <ns>.help() or <ns>.help(\"cmd\") does the same.\n" +
+		"`dun` is bound in every eval (reserved, overwrites a vars.dun of yours): dun.harness, dun.harness_version, dun.model_id, dun.effort, dun.provider — for a commit or PR that names the agent.",
 }
 
 // mcpToolDefs bridges discovered MCP tools into the OpenAI tool format. The MCP

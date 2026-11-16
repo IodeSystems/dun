@@ -497,6 +497,7 @@ func pruneTranscript(root, id string) bool {
 	}
 	_ = os.Remove(MetaFile(root, id))
 	_ = os.Remove(StatsFile(root, id))
+	_ = os.Remove(HarnessInfoFile(SessionFile(root, id))) // dun session attribution must not answer for it
 	return true
 }
 
@@ -516,12 +517,16 @@ func ForgetSession(root, id string) {
 
 // removeSidecars deletes what belongs to a session besides its transcript:
 // children ("<id>.subN.jsonl") and the archives recap and re-heading write
-// ("<id>.recapN.jsonl", "<id>.reheadN.jsonl"). Only ".sub*" used to go, which
+// ("<id>.recapN.jsonl", "<id>.reheadN.jsonl"), and the harness records
+// ("<id>.harness.json", "<id>.subN.harness.json": dun session attribution
+// would answer from a stale one). Only ".sub*" used to go, which
 // left the archives behind with no session to explain them.
 func removeSidecars(root, id string) {
 	side, _ := filepath.Glob(filepath.Join(RootDir(root), id+".*.jsonl"))
-	for _, s := range side {
+	rec, _ := filepath.Glob(filepath.Join(RootDir(root), id+".*harness.json"))
+	for _, s := range append(side, rec...) {
 		_ = os.Remove(s)
 	}
+	_ = os.Remove(HarnessInfoFile(SessionFile(root, id)))
 	_ = os.Remove(StatsFile(root, id))
 }

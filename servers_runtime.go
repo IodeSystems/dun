@@ -708,7 +708,7 @@ func (h *Harness) rebuildTools() {
 	if h.ownMgr != nil {
 		caller = childCaller{h}
 	}
-	dispatch := mcpDispatcher(caller, tools, report, h.regain)
+	dispatch := mcpDispatcher(dunVarsCaller{caller, h}, tools, report, h.regain)
 	dispatch = withCodeGuard(dispatch, h, tools)
 	// The extensions the hooks go to, among the running servers.
 	exts := h.extensions()

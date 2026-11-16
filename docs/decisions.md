@@ -574,6 +574,19 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   first turn carries the `[plan]` aside. The goal/plan/todo/status store and
   its `.state.json` are gone. `dun session <id> info` and the harness file
   beside the session are unchanged.
+- **Attribution is read, not typed (2026-11-16).** `dun session [<id>]
+  attribution [--format git-trailer|kv|json]` prints harness, version, model
+  and effort from `<session>.harness.json`; an unknown field is an error, a
+  dev build's version is `dev`. A sub-agent has its own record
+  (`<parent>.sub<N>.harness.json`) and its commands' `$DUN_SESSION_ID` names
+  it (`withExecEnv`), so it never reads the parent's model. Commands also get
+  live `$DUN_HARNESS_NAME`, `$DUN_HARNESS_VERSION`, `$DUN_MODEL_ID`,
+  `$DUN_PROVIDER`, `$DUN_EFFORT` (`$DUN_HARNESS` stays the harness.json
+  path), exported before each command in the persistent shell, and shell
+  `eval` has a reserved `dun` var with the same facts. Long-lived children
+  (MCP servers, jobs outliving a turn) have start-time values: they run
+  `dun session attribution`. `/model` and `/login` change the saved default
+  for the next session only; a running session's model does not change.
 - **Each fact once (USER, 2026-10-27: "reduce the verbosity and
   duplication").** The system prompt no longer repeats dun's tool
   descriptions (exec, exec_monitor, ask_user, recap, the sub-agent
