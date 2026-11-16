@@ -41,7 +41,7 @@ func TestMCP_InitializeAndToolList(t *testing.T) {
 	for _, tl := range got[2]["result"].(map[string]any)["tools"].([]any) {
 		names = append(names, tl.(map[string]any)["name"].(string))
 	}
-	if strings.Join(names, " ") != "dun_sessions dun_start dun_send dun_wait dun_answer dun_interrupt" {
+	if strings.Join(names, " ") != "dun_sessions dun_start dun_send dun_wait dun_answer dun_interrupt dun_stop dun_usage" {
 		t.Errorf("tools %v", names)
 	}
 	if got[3]["error"] == nil {

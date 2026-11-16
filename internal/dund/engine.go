@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // Engine is one running `dun -p`: commands go in on Stdin, events come out on
@@ -75,11 +76,26 @@ var allowedFlags = map[string]bool{
 	"--model": true, "--url": true, "--worktree": true, "--docker": true,
 	"--docker-network": true, "--pr": true, "--ship": true, "--no-ship": true, "--rag": true,
 	"--lsp": true, "--rephrase": true, "--no-suggest": true, "--no-dir": true,
-	"--no-tools": true,
+	"--no-tools": true, "--settle-delay": true,
 }
 
 // takesValue are the allowed flags whose value may be the next argument.
-var takesValue = map[string]bool{"--model": true, "--url": true, "--docker": true}
+var takesValue = map[string]bool{"--model": true, "--url": true, "--docker": true, "--settle-delay": true}
+
+// minSettleDelay: a worker's settle self-prompt is a paid turn; a client may
+// turn it off or leave it at least this long, not make it frequent.
+const minSettleDelay = 30 * time.Second
+
+func checkSettleDelay(v string) error {
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return fmt.Errorf("engine flag --settle-delay: %q is not a duration", v)
+	}
+	if d > 0 && d < minSettleDelay {
+		return fmt.Errorf("engine flag --settle-delay: %s is under %s (use a negative value to turn settle off)", v, minSettleDelay)
+	}
+	return nil
+}
 
 func checkArgs(args []string) error {
 	for i := 0; i < len(args); i++ {
@@ -87,11 +103,24 @@ func checkArgs(args []string) error {
 		if !allowedFlags[name] {
 			return fmt.Errorf("engine flag %q is not allowed", args[i])
 		}
+		val := ""
 		if takesValue[name] && !hasEq {
 			if i+1 >= len(args) {
 				return fmt.Errorf("engine flag %s needs a value", name)
 			}
 			i++
+			val = args[i]
+			// A value that looks like a flag is not skipped unchecked.
+			if strings.HasPrefix(val, "-") && name != "--settle-delay" {
+				return fmt.Errorf("engine flag %s: %q is a flag, not a value", name, val)
+			}
+		} else if hasEq {
+			_, val, _ = strings.Cut(args[i], "=")
+		}
+		if name == "--settle-delay" {
+			if err := checkSettleDelay(val); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

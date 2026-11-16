@@ -110,20 +110,14 @@ func (s *mcpServer) watch(session string, after uint64, hasAfter, once bool, out
 		return err
 	}
 	defer c.Close()
+	it, err := s.live(c, session)
+	if err != nil {
+		return err
+	}
 	if !hasAfter {
-		items, err := s.list(c)
-		if err != nil {
-			return err
-		}
-		found := false
-		for _, it := range items {
-			if it.ID == session {
-				after, found = it.LastSeq, true
-			}
-		}
-		if !found {
-			return fmt.Errorf("no session %s", session)
-		}
+		after = it.LastSeq
+	} else if after > it.LastSeq {
+		return pastEnd(after, it)
 	}
 	sub := proto.NewCommand("sub", &proto.Subscribe{After: after})
 	sub.Session = session
@@ -144,6 +138,9 @@ func (s *mcpServer) watch(session string, after uint64, hasAfter, once bool, out
 		}
 		if ev.Seq > r.seq {
 			r.seq = ev.Seq
+		}
+		if sn, ok := ev.Payload.(*proto.Snapshot); ok && sn.After > r.seq {
+			r.seq = sn.After
 		}
 		end := r.take(ev, "")
 		if end == "" {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"os"
 	"path/filepath"
@@ -54,10 +55,14 @@ Tools:
   dun_start      start a session in a workspace with a first message;
                  optional model and provider (a provider you logged in to
                  with /provider login); waits for the reply
+                 settle true lets dun wake the idle worker after a tool-using
+                 turn (a paid turn you did not ask for; default off)
   dun_send       send a message to a session; waits for its reply
   dun_wait       wait for a session's next reply, from an event number
   dun_answer     answer a question the session asked (ask_user)
   dun_interrupt  stop the session's running turn
+  dun_stop       end the session's engine; with forget, delete the session
+  dun_usage      the session's tokens and, when the provider reports it, cost
 
 A reply ends one of four ways: done (the reply), asking (a question and
 its options: answer with dun_answer), error, or still working when the
@@ -69,30 +74,75 @@ open: send with timeout_s 0 and run "dun watch <session> --after N" (the
 result names it) under Claude Code's Monitor, or with --once in the
 background. dun watch --help has the details.
 
+Tool groups: agent (dun_start, dun_wait, dun_answer, dun_interrupt, dun_stop,
+dun_usage, dun_sessions) starts and drives workers; msg (dun_sessions,
+dun_send) messages sessions that exist. No group flag: all groups. Group
+flags add: --agent --msg give only those; --no-agent --no-msg remove from
+all; both kinds give the positives minus the negatives. The server's
+instructions to the client cover only the groups on.
+
 Flags:
 
+  --agent        the agent group
+  --msg          the msg group
+  --no-agent     all groups but agent
+  --no-msg       all groups but msg
   -h, --help     this text
 
 The provider keys stay with dun: a client sees provider names, never keys.
 `
 
 func mcpCmd(args []string, in io.Reader, out, errw io.Writer) int {
+	var pos, neg []string
 	for _, a := range args {
 		switch a {
 		case "-h", "--help", "help":
 			fmt.Fprint(out, mcpHelp)
 			return 0
+		case "--agent", "--msg":
+			pos = append(pos, a[2:])
+		case "--no-agent", "--no-msg":
+			neg = append(neg, a[5:])
 		default:
 			fmt.Fprintf(errw, "dun mcp: no flag %q\n\n%s", a, mcpHelp)
 			return 2
 		}
 	}
-	s := &mcpServer{out: out, dial: tui.DialDund}
+	groups, err := mcpGroups(pos, neg)
+	if err != nil {
+		fmt.Fprintf(errw, "dun mcp: %v\n\n%s", err, mcpHelp)
+		return 2
+	}
+	s := &mcpServer{out: out, dial: tui.DialDund, groups: groups}
 	if err := s.serve(in); err != nil {
 		fmt.Fprintln(errw, "dun mcp:", err)
 		return 1
 	}
 	return 0
+}
+
+// mcpGroupNames are the tool groups.
+var mcpGroupNames = []string{"agent", "msg"}
+
+// mcpGroups is the groups on: the positives (all when none) minus the
+// negatives.
+func mcpGroups(pos, neg []string) (map[string]bool, error) {
+	on := map[string]bool{}
+	for _, g := range mcpGroupNames {
+		on[g] = len(pos) == 0
+	}
+	for _, g := range pos {
+		on[g] = true
+	}
+	for _, g := range neg {
+		on[g] = false
+	}
+	for _, g := range mcpGroupNames {
+		if on[g] {
+			return on, nil
+		}
+	}
+	return nil, errors.New("these flags leave no tool group on")
 }
 
 // mcpServer answers one client on stdio.
@@ -101,6 +151,35 @@ type mcpServer struct {
 	wmu  sync.Mutex
 	dial func() (net.Conn, error)
 	wg   sync.WaitGroup
+	// groups are the tool groups on (mcpGroups); nil is all.
+	groups map[string]bool
+}
+
+func (s *mcpServer) on(group string) bool { return s.groups == nil || s.groups[group] }
+
+// mcpInstructions is the server's guidance to the client, one short section
+// per group on. Every word costs the client's context in every session.
+func (s *mcpServer) mcpInstructions() string {
+	var parts []string
+	if s.on("agent") {
+		t := "dun runs worker sessions on cheaper models. dun_start with timeout_s 0; then run " +
+			"`dun watch <id> --after N` (N: the result's event) under Monitor instead of holding dun_wait; " +
+			"when it prints a line, dun_wait {session, after: N} returns the reply. " +
+			"Tell the worker to end with a short final report: results stay small. " +
+			"Pick model and provider per task: cheap for mechanical work. Workers do not self-wake (settle off)."
+		var names []string
+		for _, p := range dunconfig.LoadConfig().ProviderList() {
+			names = append(names, p.Name)
+		}
+		if len(names) > 0 {
+			t += " Providers: " + strings.Join(names, ", ") + "."
+		}
+		parts = append(parts, t+" dun_usage shows tokens and cost; dun_stop ends a session.")
+	}
+	if s.on("msg") {
+		parts = append(parts, "dun_sessions lists running sessions; dun_send messages one and waits for its reply (timeout_s 0: send only).")
+	}
+	return strings.Join(parts, "\n")
 }
 
 type rpcMsg struct {
@@ -171,17 +250,12 @@ func (s *mcpServer) handle(m rpcMsg) (any, *rpcErr) {
 			"protocolVersion": v,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "dun", "version": buildinfo.Version},
-			"instructions": "dun runs coding-agent sessions on the models and providers its user logged in to. " +
-				"Hand it work that does not need you: dun_start a session in a workspace with the task, " +
-				"read the reply, follow up with dun_send. A result that is still working gives an event " +
-				"number: dun_wait from it. To keep working while it runs, send with timeout_s 0 and run " +
-				"the `dun watch` command the result names under your Monitor tool: it prints a line " +
-				"when the session finishes its turn or asks for input.",
+			"instructions":    s.mcpInstructions(),
 		}, nil
 	case "ping":
 		return map[string]any{}, nil
 	case "tools/list":
-		return map[string]any{"tools": mcpTools}, nil
+		return map[string]any{"tools": s.tools()}, nil
 	case "tools/call":
 		var p struct {
 			Name      string         `json:"name"`
@@ -214,6 +288,32 @@ var (
 	propTimeout = map[string]any{"type": "integer", "description": "seconds to wait for the reply (default 600); 0 sends and returns at once"}
 )
 
+// mcpToolGroups is the groups a tool belongs to; a tool is on when any is.
+var mcpToolGroups = map[string][]string{
+	"dun_sessions": {"agent", "msg"}, "dun_send": {"msg"},
+	"dun_start": {"agent"}, "dun_wait": {"agent"}, "dun_answer": {"agent"},
+	"dun_interrupt": {"agent"}, "dun_stop": {"agent"}, "dun_usage": {"agent"},
+}
+
+func (s *mcpServer) toolOn(name string) bool {
+	for _, g := range mcpToolGroups[name] {
+		if s.on(g) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *mcpServer) tools() []map[string]any {
+	out := []map[string]any{}
+	for _, t := range mcpTools {
+		if s.toolOn(t["name"].(string)) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 var mcpTools = []map[string]any{
 	{"name": "dun_sessions", "description": "List your running dun sessions (engine connected to dund): id, workspace, clients attached, and its last event number.",
 		"inputSchema": mcpSchema(nil, map[string]any{})},
@@ -223,6 +323,7 @@ var mcpTools = []map[string]any{
 			"workspace": map[string]any{"type": "string", "description": "the directory to work in (default: where dun mcp runs)"},
 			"model":     map[string]any{"type": "string", "description": "the model id (default: dun's saved model)"},
 			"provider":  map[string]any{"type": "string", "description": "a provider dun is logged in to, by name (default: dun's saved one)"},
+			"settle":    map[string]any{"type": "boolean", "description": "let dun wake the idle worker 2 minutes after a tool-using turn, a paid turn you did not ask for (default false)"},
 			"timeout_s": propTimeout,
 		})},
 	{"name": "dun_send", "description": "Send a message to a dun session and wait for its reply.",
@@ -241,6 +342,26 @@ var mcpTools = []map[string]any{
 		})},
 	{"name": "dun_interrupt", "description": "Stop a dun session's running turn. What it did so far stays.",
 		"inputSchema": mcpSchema([]string{"session"}, map[string]any{"session": propSession})},
+	{"name": "dun_stop", "description": "End a dun session's engine; the session stays resumable. With forget, delete the session too.",
+		"inputSchema": mcpSchema([]string{"session"}, map[string]any{
+			"session": propSession, "forget": map[string]any{"type": "boolean", "description": "also delete the session and its log"},
+		})},
+	{"name": "dun_usage", "description": "A running dun session's tokens and, when its provider reports it, cost.",
+		"inputSchema": mcpSchema([]string{"session"}, map[string]any{"session": propSession})},
+}
+
+// boolArg is an optional boolean argument: absent is false, another type an
+// error rather than a silent false.
+func boolArg(a map[string]any, k string) (bool, error) {
+	v, ok := a[k]
+	if !ok || v == nil {
+		return false, nil
+	}
+	b, ok := v.(bool)
+	if !ok {
+		return false, fmt.Errorf("%s must be true or false", k)
+	}
+	return b, nil
 }
 
 func (s *mcpServer) call(name string, a map[string]any) (string, error) {
@@ -257,6 +378,9 @@ func (s *mcpServer) call(name string, a map[string]any) (string, error) {
 		return dflt
 	}
 	wait := time.Duration(num("timeout_s", 600)) * time.Second
+	if !s.toolOn(name) {
+		return "", fmt.Errorf("no tool %q", name)
+	}
 	switch name {
 	case "dun_sessions":
 		return s.sessions()
@@ -264,7 +388,11 @@ func (s *mcpServer) call(name string, a map[string]any) (string, error) {
 		if str("prompt") == "" {
 			return "", errors.New("prompt is required")
 		}
-		return s.start(str("workspace"), str("prompt"), str("model"), str("provider"), wait)
+		settle, err := boolArg(a, "settle")
+		if err != nil {
+			return "", err
+		}
+		return s.start(str("workspace"), str("prompt"), str("model"), str("provider"), settle, wait)
 	case "dun_send":
 		if str("session") == "" || str("text") == "" {
 			return "", errors.New("session and text are required")
@@ -289,13 +417,45 @@ func (s *mcpServer) call(name string, a map[string]any) (string, error) {
 			return "", err
 		}
 		defer c.Close()
-		// Forwarded to the session's engine, which does not ack it.
+		// The engine does not ack an interrupt: an unknown session is caught here.
+		if _, err := s.lastSeq(c, str("session")); err != nil {
+			return "", err
+		}
 		cmd := proto.NewCommand("", &proto.Interrupt{Reason: "dun mcp"})
 		cmd.Session = str("session")
 		if err := c.enc.Encode(cmd); err != nil {
 			return "", err
 		}
 		return "interrupted " + str("session"), nil
+	case "dun_stop":
+		if str("session") == "" {
+			return "", errors.New("session is required")
+		}
+		c, err := s.connect()
+		if err != nil {
+			return "", err
+		}
+		defer c.Close()
+		var payload any = &proto.Stop{}
+		verb := "stopped"
+		forget, err := boolArg(a, "forget")
+		if err != nil {
+			return "", err
+		}
+		if forget {
+			payload, verb = &proto.Forget{}, "deleted"
+		}
+		cmd := proto.NewCommand("stop", payload)
+		cmd.Session = str("session")
+		if _, err := c.roundTrip(cmd); err != nil {
+			return "", err
+		}
+		return verb + " " + str("session"), nil
+	case "dun_usage":
+		if str("session") == "" {
+			return "", errors.New("session is required")
+		}
+		return s.usage(str("session"))
 	}
 	return "", fmt.Errorf("no tool %q", name)
 }
@@ -386,7 +546,7 @@ func (s *mcpServer) sessions() (string, error) {
 	return b.String(), nil
 }
 
-func (s *mcpServer) start(ws, prompt, model, provider string, wait time.Duration) (string, error) {
+func (s *mcpServer) start(ws, prompt, model, provider string, settle bool, wait time.Duration) (string, error) {
 	if ws == "" {
 		ws = "."
 	}
@@ -408,6 +568,12 @@ func (s *mcpServer) start(ws, prompt, model, provider string, wait time.Duration
 	if model != "" {
 		args = append(args, "--model", model)
 	}
+	// Settle wakes an idle session after a tool-using turn, expecting a person
+	// to come back; an MCP client never signals one, so each worker would get
+	// an unrequested paid turn.
+	if !settle {
+		args = append(args, "--settle-delay=-1s")
+	}
 	c, err := s.connect()
 	if err != nil {
 		return "", err
@@ -428,23 +594,104 @@ func (s *mcpServer) send(session string, cmd proto.Command, echo string, wait ti
 	if err != nil {
 		return "", err
 	}
-	items, err := s.list(c)
+	after, err := s.lastSeq(c, session)
 	c.Close()
 	if err != nil {
 		return "", err
 	}
-	var after uint64
-	found := false
-	for _, it := range items {
-		if it.ID == session {
-			after, found = it.LastSeq, true
-		}
-	}
-	if !found {
-		return "", fmt.Errorf("no session %s (dun_sessions lists them)", session)
-	}
 	cmd.Session = session
 	return s.follow(session, after, &cmd, echo, wait)
+}
+
+// lastSeq is the session's last event, or an error when dund has no such
+// session.
+func (s *mcpServer) lastSeq(c *dundConn, session string) (uint64, error) {
+	items, err := s.list(c)
+	if err != nil {
+		return 0, err
+	}
+	for _, it := range items {
+		if it.ID == session {
+			return it.LastSeq, nil
+		}
+	}
+	return 0, fmt.Errorf("no session %s (dun_sessions lists them)", session)
+}
+
+// live is the session's summary, or an error when dund has no such session
+// or its engine is stopped: reading a stopped session would restart it, so a
+// read never subscribes to one.
+func (s *mcpServer) live(c *dundConn, session string) (proto.SessionSummary, error) {
+	items, err := s.list(c)
+	if err != nil {
+		return proto.SessionSummary{}, err
+	}
+	for _, it := range items {
+		if it.ID == session {
+			if !it.Running {
+				return it, fmt.Errorf("session %s is stopped; reading it would restart it (dun --resume %s)", session, session)
+			}
+			return it, nil
+		}
+	}
+	return proto.SessionSummary{}, fmt.Errorf("no session %s (dun_sessions lists them)", session)
+}
+
+// pastEnd is the error for an event number beyond the session's log: dund
+// answers such a subscribe with a snapshot of the old, finished turn.
+func pastEnd(after uint64, it proto.SessionSummary) error {
+	return fmt.Errorf("event %d is past the session's log (last %d); call dun_sessions", after, it.LastSeq)
+}
+
+// usage reads a session's accounting from the state a snapshot carries:
+// subscribing past its last event is a gap dund answers with one.
+func (s *mcpServer) usage(session string) (string, error) {
+	c, err := s.connect()
+	if err != nil {
+		return "", err
+	}
+	defer c.Close()
+	if _, err := s.live(c, session); err != nil {
+		return "", fmt.Errorf("usage unavailable: %w", err)
+	}
+	sub := proto.NewCommand("sub", &proto.Subscribe{After: math.MaxUint64})
+	sub.Session = session
+	if _, err := c.roundTrip(sub); err != nil {
+		return "", err
+	}
+	_ = c.SetReadDeadline(time.Now().Add(30 * time.Second))
+	for {
+		var ev proto.Event
+		if err := c.dec.Decode(&ev); err != nil {
+			return "", fmt.Errorf("no usage from %s: %w", session, err)
+		}
+		snap, ok := ev.Payload.(*proto.Snapshot)
+		if !ok || ev.Session != session {
+			continue
+		}
+		for _, st := range snap.State {
+			if u, ok := st.Payload.(*proto.Usage); ok {
+				return mcpUsageText(session, u), nil
+			}
+		}
+		return "session " + session + ": no turn has ended yet, so no usage\n", nil
+	}
+}
+
+func mcpUsageText(session string, u *proto.Usage) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "session %s · %d rounds · %d tokens (%d processed, %d cached, %d generated)\n",
+		session, u.Turns, u.Total, u.Processed, u.Cached, u.Generated)
+	if sp := u.Spend; sp != nil && sp.Session != nil {
+		cur := sp.Currency
+		if cur == "" {
+			cur = "units"
+		}
+		fmt.Fprintf(&b, "cost %.4f %s over %d of %d calls that reported one\n", *sp.Session, cur, sp.CostedCalls, sp.Calls)
+	} else {
+		b.WriteString("cost: the provider reported none\n")
+	}
+	return b.String()
 }
 
 func (s *mcpServer) wait(session string, after uint64, echo string, wait time.Duration) (string, error) {
@@ -459,6 +706,15 @@ func (s *mcpServer) follow(session string, after uint64, cmd *proto.Command, ech
 		return "", err
 	}
 	defer c.Close()
+	if cmd == nil { // a read, not a send: send's after is the log's end
+		it, err := s.live(c, session)
+		if err != nil {
+			return "", err
+		}
+		if after > it.LastSeq {
+			return "", pastEnd(after, it)
+		}
+	}
 	sub := proto.NewCommand("sub", &proto.Subscribe{After: after})
 	sub.Session = session
 	if _, err := c.roundTrip(sub); err != nil {
@@ -489,18 +745,13 @@ func (s *mcpServer) follow(session string, after uint64, cmd *proto.Command, ech
 		if ev.Seq > r.seq {
 			r.seq = ev.Seq
 		}
+		if sn, ok := ev.Payload.(*proto.Snapshot); ok && sn.After > r.seq {
+			r.seq = sn.After
+		}
 		if end := r.take(ev, echo); end != "" {
 			return r.render(end), nil
 		}
 	}
-}
-
-// watchHint is how to be told when the session ends its turn or asks, without
-// holding a tool call open for it (watchcmd.go).
-func (r mcpReply) watchHint() string {
-	return fmt.Sprintf("to be told when it ends or asks: Monitor `dun watch %s --after %d` "+
-		"(or run `dun watch %s --after %d --once` in the background), then dun_wait {\"session\": %q, \"after\": %d} for the reply\n",
-		r.session, r.seq, r.session, r.seq, r.session, r.seq)
 }
 
 // mcpReply gathers one turn's events into the text a caller reads.
@@ -531,6 +782,8 @@ func (r *mcpReply) take(ev proto.Event, echo string) string {
 		return ""
 	}
 	switch p := ev.Payload.(type) {
+	case *proto.Snapshot:
+		return r.fromSnapshot(p)
 	case *proto.Message:
 		if p.Role == "assistant" && strings.TrimSpace(p.Content) != "" {
 			r.reply = append(r.reply, p.Content)
@@ -557,16 +810,58 @@ func (r *mcpReply) take(ev proto.Event, echo string) string {
 	return ""
 }
 
+// fromSnapshot reads the turn from a snapshot, which dund sends in place of
+// a replay it cannot give (a subscribe from far back, or past 256 events): the
+// events the caller waits for are inside it. The reply is what the history
+// holds after its last user message; the turn is over when the state says
+// idle, asking when it waits for an answer, else its live events follow.
+func (r *mcpReply) fromSnapshot(sn *proto.Snapshot) string {
+	last := -1
+	for i, it := range sn.Items {
+		if it.Kind == "user" && !it.Queued {
+			last = i
+		}
+	}
+	// A message is last in the history, or waits in the queue: the turn for
+	// it has not run, and the idle state is the one before it.
+	pending := len(sn.Items) > 0 && sn.Items[len(sn.Items)-1].Kind == "user"
+	if last < 0 {
+		return ""
+	}
+	r.reply, r.tools = nil, nil
+	for _, it := range sn.Items[last+1:] {
+		switch it.Kind {
+		case "assistant":
+			if strings.TrimSpace(it.Content) != "" {
+				r.reply = append(r.reply, it.Content)
+			}
+		case "tool_call":
+			if r.tools == nil {
+				r.tools = map[string]int{}
+			}
+			r.tools[it.Tool]++
+		}
+	}
+	for _, st := range sn.State {
+		if ts, ok := st.Payload.(*proto.TurnState); ok {
+			switch {
+			case ts.Phase == proto.PhaseWaitingAnswer && ts.Ask != nil:
+				r.ask = ts.Ask
+				return "asking"
+			case ts.Phase == proto.PhaseIdle && !pending && len(ts.Queued) == 0:
+				return "done"
+			}
+		}
+	}
+	return ""
+}
+
 func (r mcpReply) render(end string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "session %s · %s · event %d\n", r.session, end, r.seq)
 	switch end {
 	case "working":
-		fmt.Fprintf(&b, "still working: dun_wait {\"session\": %q, \"after\": %d} to read on\n", r.session, r.seq)
-		b.WriteString(r.watchHint())
-	case "sent":
-		fmt.Fprintf(&b, "sent: dun_wait {\"session\": %q, \"after\": %d} for the reply\n", r.session, r.seq)
-		b.WriteString(r.watchHint())
+		b.WriteString("still working: dun_wait from this event to read on\n")
 	case "asking":
 		fmt.Fprintf(&b, "question: %s\n", r.ask.Question)
 		if len(r.ask.Options) > 0 {

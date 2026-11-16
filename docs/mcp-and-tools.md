@@ -506,8 +506,26 @@ guards, which hold with or without those fixes:
 USER 2026-11-04: "interface claude<->dun for making things cheaper". `dun mcp`
 serves dun's sessions to another agent over MCP on stdio
 (`claude mcp add dun -- dun mcp`). Tools: `dun_sessions`, `dun_start`,
-`dun_send`, `dun_wait`, `dun_answer`, `dun_interrupt`. `dun mcp --help` is the
-user's documentation.
+`dun_send`, `dun_wait`, `dun_answer`, `dun_interrupt`, `dun_stop`
+(`forget` deletes the session), `dun_usage` (tokens; cost only when the
+provider reported it, from the latest `usage` event in a snapshot's state).
+`dun mcp --help` is the user's documentation.
+
+- `dun_start` passes `--settle-delay=-1s` (settle off) unless its boolean
+  `settle` is true: settle self-prompts an idle session after a tool-using
+  turn, and an MCP client never signals presence. dund accepts
+  `--settle-delay` only as a duration that is <= 0 or >= 30s.
+- Tool groups (flags): `agent` (all but `dun_send`) and `msg` (`dun_sessions`,
+  `dun_send`). No flag: all. `--agent`/`--msg` give only those; `--no-agent`/
+  `--no-msg` all minus those; both kinds: positives minus negatives. The
+  initialize `instructions` are assembled from the groups on; they carry the
+  watch advice (start with timeout_s 0, `dun watch <id> --after N` under a
+  Monitor, workers end with a short report) and the provider names, so the
+  results do not repeat it.
+- A subscribe from far behind (or past 256 events) gets a `snapshot`, not a
+  replay (`dund/session.go` subscribe). `dun_wait` and `dun watch` read the
+  turn from it (`mcpReply.fromSnapshot`): the history after the last user
+  message is the reply, `turn_state` idle is done, `waiting_answer` is asking.
 
 - It is a dund client on the unix socket, like the TUI (`tui.DialDund`, which
   starts dund when nothing listens). No token: the socket's peer uid is the
