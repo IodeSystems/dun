@@ -70,16 +70,35 @@ func NewWorktree(repoDir string, mounts []MountSpec) (wt *Worktree, isRepo bool,
 		return &Worktree{Path: repoDir, Mounts: mounts}, false, nil // not a git repo → work in place
 	}
 	root := strings.TrimSpace(top)
+	wt, err = newWorktreeIn(root, root, mounts)
+	return wt, err == nil, err
+}
+
+// MainRepo is the main checkout of the repo containing dir: for a dir in a
+// linked worktree it is the repo the worktree belongs to, not the worktree
+// (--show-toplevel). "" when there is none.
+func MainRepo(dir string) string {
+	out, err := git("", "-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return ""
+	}
+	return filepath.Dir(strings.TrimSpace(out))
+}
+
+// newWorktreeIn branches a worktree off the HEAD of the checkout root, kept
+// in repo's project store; repo is its main checkout (root itself, unless
+// root is a linked worktree).
+func newWorktreeIn(root, repo string, mounts []MountSpec) (*Worktree, error) {
 	// Remember what branch we're on — this is the base the worktree branches from.
 	baseBranch, _ := git("", "-C", root, "rev-parse", "--abbrev-ref", "HEAD")
 	baseBranch = strings.TrimSpace(baseBranch)
-	wtParent, err := worktreeParent(root, mounts)
+	wtParent, err := worktreeParent(repo, mounts)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	dir, err := os.MkdirTemp(wtParent, "dun-worktree-")
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	// The temp directory's suffix makes the name unique: worktrees made in
 	// the same second (sub-agents started together, subisolation.go) took
@@ -87,9 +106,9 @@ func NewWorktree(repoDir string, mounts []MountSpec) (wt *Worktree, isRepo bool,
 	branch := fmt.Sprintf("dun/%d-%s", time.Now().Unix(), strings.TrimPrefix(filepath.Base(dir), "dun-worktree-"))
 	if _, err := git("", "-C", root, "worktree", "add", "-b", branch, dir, "HEAD"); err != nil {
 		os.RemoveAll(dir)
-		return nil, false, fmt.Errorf("dun: git worktree add: %w", err)
+		return nil, fmt.Errorf("dun: git worktree add: %w", err)
 	}
-	return &Worktree{Path: dir, Branch: branch, BaseBranch: baseBranch, repoRoot: root, Mounts: mounts}, true, nil
+	return &Worktree{Path: dir, Branch: branch, BaseBranch: baseBranch, repoRoot: repo, Mounts: mounts}, nil
 }
 
 // worktreeParent is the directory new session worktrees of root go in —

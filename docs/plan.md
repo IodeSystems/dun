@@ -92,6 +92,8 @@ owner's call before work starts.
 - [~] Sub-agents in isolation: the agent tool's `isolation` is none,
   worktree (its own git worktree and branch; the parent merges), docker
   (the same, commands in a container) or nodir. Several run at once.
+  `dir` (2026-11-17) puts a new child in another directory: in place with
+  none, a worktree of that directory's repo with worktree or docker.
 - [~] A sub-agent asks by ending its turn (owner, 2026-10-27): its question
   reaches the parent as the turn-end notification, the parent answers with
   `jobs(agent:N, tell:…)`. `ask_parent` is unlisted (a hidden alias that

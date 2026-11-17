@@ -14,7 +14,7 @@ import (
 // path under spawnTool, for tests about the child itself. The model has no
 // such path (USER 2026-11-10: sub-agents only via plan nodes).
 func (h *Harness) spawnAgent(ctx context.Context, prompt, provider, model, effort, mode string) (*subAgent, error) {
-	return h.spawnAgentFor(ctx, prompt, provider, model, effort, mode, "")
+	return h.spawnAgentFor(ctx, prompt, provider, model, effort, mode, "", "")
 }
 
 // testAgent is a child with no harness — enough to exercise the state machine,

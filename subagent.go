@@ -565,7 +565,8 @@ func (h *Harness) clientFor(provider, model string) (childRun, error) {
 // one, planCanAssign) the child is given it before its first turn, and the
 // node's brief follows prompt. The model's only way here is spawnTool, which
 // always names a node (USER 2026-11-10); a child with no node is the tests'.
-func (h *Harness) spawnAgentFor(ctx context.Context, prompt, provider, model, effort, mode, node string) (*subAgent, error) {
+// dir is where it works ("" is h's workspace; subisolation.go).
+func (h *Harness) spawnAgentFor(ctx context.Context, prompt, provider, model, effort, mode, dir, node string) (*subAgent, error) {
 	if node != "" {
 		// Before the record is made, so the prompt kept (the agents pane,
 		// a resume) is the brief the child got.
@@ -586,7 +587,7 @@ func (h *Harness) spawnAgentFor(ctx context.Context, prompt, provider, model, ef
 		return nil, err
 	}
 	run.effort = effort
-	iso, err := h.newIsolation(mode)
+	iso, err := h.newIsolation(mode, dir)
 	if err != nil {
 		return nil, err
 	}
@@ -1220,6 +1221,7 @@ func agentToolDef(defaultModel, defaultProvider, defaultEffort string, providers
 		"the node's title, details and done_when are the child's whole brief (it cannot see your conversation), and " +
 		"it publishes its answer onto the node. It spends its own context; what it read never enters yours. " +
 		"isolation none: it has your tools, in your tree. worktree and docker: your tools, in its own tree. " +
+		"dir puts it in another directory, a git worktree of that directory's repo with worktree. " +
 		"nodir: NO project and NO file tools; its shell runs in a scratch dir, deleted on dismiss. Never use nodir " +
 		"for work that reads or edits project files. If a child drops its node with \"missing tools\", start it again " +
 		"with isolation none or worktree. It returns at once and you are notified each time the child ends a turn, unless wait:true. " +
@@ -1246,6 +1248,9 @@ func agentToolDef(defaultModel, defaultProvider, defaultEffort string, providers
 					"from this tree's last commit (uncommitted changes are not in it); it commits there and you merge its " +
 					"branch — use it for children that edit at the same time. docker: the same, its commands in a " +
 					"container. nodir: no project, no file tools, shell in a scratch dir deleted on dismiss; only for work that needs no project files."},
+			"dir": map[string]any{"type": "string", "description": "a new child's directory, absolute, ~/ or relative to " +
+				"your workspace (default: your workspace). With isolation none it works there in place; with worktree or " +
+				"docker its worktree is branched from that directory's git repository, and it works in the same subdirectory of it"},
 		},
 	}
 	if len(providers) > 1 {
@@ -1272,6 +1277,7 @@ func withAgent(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 			Effort    string `json:"effort"`
 			Wait      bool   `json:"wait"`
 			Isolation string `json:"isolation"`
+			Dir       string `json:"dir"`
 			Node      string `json:"node"`
 			// With id: act on agent #id (these were jobs(agent:N, …) until
 			// 2026-11-06, USER: "Agent stuff moves").
@@ -1286,13 +1292,15 @@ func withAgent(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 		switch {
 		case strings.TrimSpace(args.Prompt) != "":
 			out = agentNoPrompt
+		case args.ID != nil && strings.TrimSpace(args.Dir) != "" && !h.agentInDir(*args.ID, args.Dir):
+			out = fmt.Sprintf("ERROR: dir is a new agent's; agent #%d keeps the directory it was started in. Nothing was done.", *args.ID)
 		case args.ID != nil:
 			out = agentOp(h, *args.ID, args.Tell, args.Node, args.Resume, args.Dismiss)
 			if h.agentByID(*args.ID) != nil {
 				num = *args.ID
 			}
 		default:
-			out, num = spawnCall(ctx, h, tc.ID, args.Provider, args.Model, args.Effort, args.Isolation, args.Node, args.Wait)
+			out, num = spawnCall(ctx, h, tc.ID, args.Provider, args.Model, args.Effort, args.Isolation, strings.TrimSpace(args.Dir), args.Node, args.Wait)
 		}
 		if num > 0 {
 			h.toolCur.noteAgent(num)
@@ -1322,6 +1330,9 @@ func withAgent(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 			if args.Node != "" {
 				call["node"] = args.Node
 			}
+			if args.Dir != "" {
+				call["dir"] = args.Dir
+			}
 			onCall("agent", call, out)
 		}
 		return out, nil
@@ -1344,15 +1355,33 @@ const (
 // spawnTool is agent({node, …}): the model's only way to start a child. The
 // child's first message is node's brief (planBrief); nothing else.
 func spawnTool(ctx context.Context, h *Harness, provider, model, effort, isolation, node string, wait bool) string {
-	out, _ := spawnCall(ctx, h, "", provider, model, effort, isolation, node, wait)
+	out, _ := spawnCall(ctx, h, "", provider, model, effort, isolation, "", node, wait)
 	return out
+}
+
+// agentInDir reports whether dir is where agent #id works (or there is no
+// such agent: agentOp says so).
+func (h *Harness) agentInDir(id int, dir string) bool {
+	sa := h.agentByID(id)
+	if sa == nil {
+		return true
+	}
+	d, err := h.resolveDir(dir)
+	if err != nil {
+		return false
+	}
+	ws := sa.iso.workspace()
+	if ws == "" {
+		ws = h.Workspace()
+	}
+	return sameDir(d, ws) || (sa.iso.Dir != "" && sameDir(d, sa.iso.Dir))
 }
 
 // spawnCall is spawnTool for the tool call callID: it also returns the
 // child's number (0 when none started), and the child's sidecar keeps
 // callID, so a replayed history names the child its spawn started
 // (History, agentSpawns).
-func spawnCall(ctx context.Context, h *Harness, callID, provider, model, effort, isolation, node string, wait bool) (string, int) {
+func spawnCall(ctx context.Context, h *Harness, callID, provider, model, effort, isolation, dir, node string, wait bool) (string, int) {
 	node = strings.TrimSpace(node)
 	switch {
 	case node == "" && !h.hasTool(taskgraph.ToolAdd):
@@ -1364,7 +1393,7 @@ func spawnCall(ctx context.Context, h *Harness, callID, provider, model, effort,
 	if err := h.planCanAssign(node); err != nil {
 		return "ERROR: " + strings.TrimSuffix(err.Error(), ".") + ". No agent was started.", 0
 	}
-	sa, err := h.spawnAgentFor(ctx, "Work this plan node.", provider, model, effort, isolation, node)
+	sa, err := h.spawnAgentFor(ctx, "Work this plan node.", provider, model, effort, isolation, dir, node)
 	if err != nil {
 		return "ERROR: could not start the agent: " + err.Error(), 0
 	}
@@ -1379,13 +1408,19 @@ func spawnCall(ctx context.Context, h *Harness, callID, provider, model, effort,
 	if !wait {
 		where := ""
 		if sa.iso.isolated() {
-			where = " in " + sa.iso.Mode + " isolation at " + sa.iso.Path
+			where = " in " + sa.iso.Mode + " isolation at " + sa.iso.workspace()
 			if sa.iso.Branch != "" {
-				where += " (branch " + sa.iso.Branch + ")"
+				where += " (branch " + sa.iso.Branch
+				if sa.iso.Dir != "" {
+					where += " of " + sa.iso.Repo
+				}
+				where += ")"
 			}
 			if sa.iso.Mode == IsoNoDir {
 				where += ". nodir: no file tools; shell in a scratch dir, deleted on dismiss"
 			}
+		} else if sa.iso.Dir != "" {
+			where = " in " + sa.iso.Dir + ", in place"
 		}
 		// No model name when the child runs on the parent's own client: it
 		// read "Started agent #1 on ." live.
