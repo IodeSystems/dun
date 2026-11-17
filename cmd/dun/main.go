@@ -867,6 +867,13 @@ func main() {
 				em.emit(planEvent(h, ""))
 			}
 		}
+		cfg.OnPlanNote = func(msg string) {
+			if h, _ := started.Load().(*dun.Harness); h != nil {
+				ev := planEvent(h, "")
+				ev.Note = msg
+				em.emit(ev)
+			}
+		}
 		// An install hint, once (dun/setupstate.go): said as a quiet line.
 		// It is said once, so a Harness not yet stored is waited for.
 		cfg.OnServerSetup = func(id, msg string) {

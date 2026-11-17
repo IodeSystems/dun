@@ -400,6 +400,7 @@ func (h *Harness) AskImages(ctx context.Context, task string, imgs []ImageInput)
 	defer end()
 	h.clearBudgetNotes()
 	h.settleBegin(true)
+	h.planAutoArchive(ctx)
 	h.prepareTurn(ctx)
 	e := agent.Entry{ID: uuid.New().String(), Kind: agent.KindUser, Content: task, Parts: parts,
 		CreatedAt: time.Now().UnixNano()}

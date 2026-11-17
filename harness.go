@@ -139,6 +139,9 @@ type Config struct {
 	// OnPlan says the task plan changed (plan.go), whoever changed it: a
 	// screen reads it again with Plan().
 	OnPlan func()
+	// OnPlanNote is OnPlan with a quiet line for the UI alone (auto-archive:
+	// "archived 2 trees"), never put in the model's context.
+	OnPlanNote func(msg string)
 	// OnServerSetup says a server's install hint (setupstate.go): one
 	// quiet line, at most once per session.
 	OnServerSetup func(id, msg string)
@@ -917,6 +920,7 @@ func (h *Harness) AskAs(ctx context.Context, id, task string) (agent.TurnResult,
 	defer end()
 	h.clearBudgetNotes()
 	h.settleBegin(true)
+	h.planAutoArchive(ctx)
 	h.prepareTurn(ctx)
 	h.workInput(task)
 	h.store.publish(agent.Entry{

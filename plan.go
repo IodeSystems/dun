@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"regexp"
 	"slices"
@@ -15,6 +16,7 @@ import (
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/taskgraph"
 	"github.com/iodesystems/dun/internal/fsutil"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // The task plan (docs/taskplan.md): the graph and its rules are agentkit's
@@ -36,11 +38,47 @@ func PlanFile(sessionFile string) string {
 	return strings.TrimSuffix(sessionFile, ".jsonl") + ".plan.json"
 }
 
-// planFileData is the sidecar's content: the graph and the host's two flags.
+// planFileData is the sidecar's content: the graph, the host's two flags, and
+// the ids of archived nodes (/plan clear): finished trees the graph keeps, so
+// edges stay valid, and every view of the plan leaves out (hideArchived).
 type planFileData struct {
 	Graph    taskgraph.Graph `json:"graph"`
 	Mode     bool            `json:"mode,omitempty"`
 	Approved bool            `json:"approved,omitempty"`
+	Archived []string        `json:"archived,omitempty"`
+}
+
+// hideArchived takes the archived nodes out of g. A component with a node
+// shown is shown whole: a node reopened, or made after the archive with a
+// need on an archived node, brings its archived neighbours back, so no edge
+// dangles and nothing open hides. The ids stay archived: when the component
+// finishes again, the next clear or user turn archives it again.
+func hideArchived(g *taskgraph.Graph, archived []string) {
+	if len(archived) == 0 {
+		return
+	}
+	hid := map[string]bool{}
+	for _, id := range archived {
+		hid[id] = true
+	}
+	for _, n := range g.Nodes {
+		if hid[n.ID] && n.Status != taskgraph.Done && n.Status != taskgraph.Dropped {
+			delete(hid, n.ID)
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, n := range g.Nodes {
+			for _, d := range n.Needs {
+				if hid[n.ID] != hid[d] && g.Get(d) != nil {
+					delete(hid, n.ID)
+					delete(hid, d)
+					changed = true
+				}
+			}
+		}
+	}
+	g.Nodes = slices.DeleteFunc(g.Nodes, func(n *taskgraph.Node) bool { return hid[n.ID] })
 }
 
 // UnmarshalJSON reads a sidecar written before agentkit's plan node became
@@ -78,6 +116,8 @@ type planState struct {
 	// mode and approved: plan mode, and whether the person approved the
 	// plan. Guarded by Harness.planMu.
 	mode, approved bool
+	// archived: ids /plan clear set aside. Guarded by Harness.planMu.
+	archived []string
 }
 
 // planNow is the session's plan, read from its sidecar on first use.
@@ -93,11 +133,17 @@ func (h *Harness) planNow() *planState {
 		if b, err := os.ReadFile(PlanFile(p.file)); err == nil {
 			var d planFileData
 			if json.Unmarshal(b, &d) == nil {
-				g, p.mode, p.approved = d.Graph, d.Mode, d.Approved
+				g, p.mode, p.approved, p.archived = d.Graph, d.Mode, d.Approved, d.Archived
 			}
 		}
 	}
-	p.store = &planMemStore{g: g, save: func(g taskgraph.Graph) error { return h.savePlan(p, g) }}
+	p.store = &planMemStore{g: g, save: func(g taskgraph.Graph) error { return h.savePlan(p, g) },
+		hide: func(g *taskgraph.Graph) {
+			h.planMu.Lock()
+			a := slices.Clone(p.archived)
+			h.planMu.Unlock()
+			hideArchived(g, a)
+		}}
 	h.plan = p
 	return p
 }
@@ -108,7 +154,7 @@ func (h *Harness) savePlan(p *planState, g taskgraph.Graph) error {
 		return nil
 	}
 	h.planMu.Lock()
-	d := planFileData{Graph: g, Mode: p.mode, Approved: p.approved}
+	d := planFileData{Graph: g, Mode: p.mode, Approved: p.approved, Archived: slices.Clone(p.archived)}
 	h.planMu.Unlock()
 	b, err := json.MarshalIndent(d, "", " ")
 	if err != nil {
@@ -125,12 +171,19 @@ type planMemStore struct {
 	g  taskgraph.Graph
 	// save writes the plan out. If it fails the change is undone.
 	save func(g taskgraph.Graph) error
+	// hide takes the archived nodes out of a copy View hands out; Update's
+	// function still sees the whole graph. Nil: nothing is archived.
+	hide func(g *taskgraph.Graph)
 }
 
 func (s *planMemStore) View(context.Context) (taskgraph.Graph, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.g.Clone(), nil
+	g := s.g.Clone()
+	if s.hide != nil {
+		s.hide(&g)
+	}
+	return g, nil
 }
 
 func (s *planMemStore) Update(_ context.Context, fn func(g *taskgraph.Graph) error) error {
@@ -181,7 +234,7 @@ func (h *Harness) planChanged() {
 const planDesc = "Add a node to the plan. The plan is what survives. It is kept outside the conversation: recap and " +
 	"context folds do not cut it, a fold's summary is given it, and each turn starts with its open nodes. What is " +
 	"only in the conversation can be lost when context is cut. Make nodes for work with several steps; a " +
-	"one-step task needs none. A node has a title, details, done_when (what must be true when it is done) and " +
+	"one-step task needs none. Keep the plan current as you work, not only at the start: add a node when work appears, plan_update when you begin one, plan_close when it is done. A node has a title, details, done_when (what must be true when it is done) and " +
 	"needs (ids it waits on; it is ready when all of them are done). Begin a node: plan_update it to status doing. " +
 	"When done_when is true: plan_close done, with an account of how it was met. plan_close block: you are stuck, " +
 	"with a reason; waiting on other nodes is not blocked. A dropped node keeps its dependents waiting: plan_add a " +
@@ -192,7 +245,8 @@ const planDesc = "Add a node to the plan. The plan is what survives. It is kept 
 // --non-interactive, where no one reads, edits or approves the plan.
 const planNote = "The user can read and edit the plan. While plan mode is on, the user " +
 	"must approve the plan before you change files or run commands: make the nodes, then ask them to " +
-	"approve it (/plan approve); until then reading, searching and the plan tools work."
+	"approve it (/plan approve); until then reading, searching and the plan tools work. " +
+	"When the user asks about Y while you do X, stop and decide. If Y changes X, plan_update X or replace it. If Y is separate, plan_add Y, then finish or park X. Never drop X or ignore Y without saying so. If unclear, ask."
 
 // planDescFor is the plan_add description for this session. It depends only on
 // Config.NonInteractive, which a session never changes, so the tool def is
@@ -316,6 +370,7 @@ func PlanBrief(sessionFile string) string {
 	if json.Unmarshal(b, &d) != nil {
 		return ""
 	}
+	hideArchived(&d.Graph, d.Archived)
 	return d.Graph.Brief("")
 }
 
@@ -538,6 +593,25 @@ func (h *Harness) PlanCmd(ctx context.Context, action string) (string, error) {
 		}
 		h.planTellKeyed(cs, "the user", note, "plan-drop:"+id)
 		return "node " + id + " dropped", nil
+	case "clear":
+		return h.planClear(ctx)
+	case "unarchive":
+		h.planMu.Lock()
+		prev := p.archived
+		p.archived = nil
+		h.planMu.Unlock()
+		n := len(prev)
+		if n == 0 {
+			return "nothing is archived", nil
+		}
+		if err := p.store.Update(ctx, func(*taskgraph.Graph) error { return nil }); err != nil {
+			h.planMu.Lock()
+			p.archived = prev // not saved: memory keeps what the file has
+			h.planMu.Unlock()
+			return "", err
+		}
+		h.planChanged()
+		return fmt.Sprintf("unarchived %s", textfmt.Plural(n, "node")), nil
 	case "tell":
 		id, text, _ := strings.Cut(rest, " ")
 		if id == "" || strings.TrimSpace(text) == "" {
@@ -545,7 +619,127 @@ func (h *Harness) PlanCmd(ctx context.Context, action string) (string, error) {
 		}
 		return h.planTellOwner(id, strings.TrimSpace(text))
 	}
-	return "", fmt.Errorf("usage: /plan [mode on|off | approve | edit <id> title|details <text> | drop <id> [why] | tell <id> <text>]")
+	return "", fmt.Errorf("usage: /plan [mode on|off | approve | edit <id> title|details <text> | drop <id> [why] | tell <id> <text> | clear | unarchive]")
+}
+
+// planClear archives every finished tree: a connected component of the graph
+// (edges either way) whose nodes are all done or dropped. The nodes stay in the
+// graph, so edges hold; hideArchived leaves them out of every view. A component
+// with any open node is left whole.
+func (h *Harness) planClear(ctx context.Context) (string, error) {
+	trees, nodes, err := h.planArchive(ctx)
+	if err != nil {
+		return "", err
+	}
+	if trees == 0 {
+		return "no finished trees to archive", nil
+	}
+	return fmt.Sprintf("archived %s · %s (/plan unarchive brings them back)", textfmt.Plural(trees, "tree"), textfmt.Plural(nodes, "node")), nil
+}
+
+// planAutoArchive runs where a turn the person started begins: the trees
+// finished by now are archived, so a long session does not pile up nodes. One
+// that finished during the previous turn was shown through it. A sub-agent's
+// turn never does this.
+func (h *Harness) planAutoArchive(ctx context.Context) {
+	if h.isChild() {
+		return
+	}
+	if g, _ := h.planNow().store.View(ctx); len(g.Nodes) == 0 {
+		return // nothing shown, nothing to archive; no sidecar for a plain chat
+	}
+	trees, nodes, err := h.planArchive(ctx)
+	if err != nil {
+		log.Printf("dun: plan: auto-archive: %v", err)
+		return
+	}
+	if trees > 0 && h.cfg.OnPlanNote != nil {
+		h.cfg.OnPlanNote(fmt.Sprintf("archived %s · %s", textfmt.Plural(trees, "tree"), textfmt.Plural(nodes, "node")))
+	}
+}
+
+// planArchive is the archive behind /plan clear and planAutoArchive: how many
+// trees and nodes it set aside.
+func (h *Harness) planArchive(ctx context.Context) (trees, nodes int, err error) {
+	p := h.planNow()
+	h.planMu.Lock()
+	prev := slices.Clone(p.archived)
+	h.planMu.Unlock()
+	err = p.store.Update(ctx, func(g *taskgraph.Graph) error {
+		trees, nodes = 0, 0
+		h.planMu.Lock()
+		defer h.planMu.Unlock()
+		p.archived = slices.Clone(prev)
+		old := map[string]bool{}
+		for _, id := range p.archived {
+			old[id] = true
+		}
+		comp := map[string]int{}
+		for _, n := range g.Nodes {
+			comp[n.ID] = -1
+		}
+		var members [][]*taskgraph.Node
+		for _, n := range g.Nodes {
+			if comp[n.ID] >= 0 {
+				continue
+			}
+			c := len(members)
+			members = append(members, nil)
+			stack := []*taskgraph.Node{n}
+			comp[n.ID] = c
+			for len(stack) > 0 {
+				x := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+				members[c] = append(members[c], x)
+				next := g.Dependents(x.ID)
+				for _, d := range x.Needs {
+					if y := g.Get(d); y != nil {
+						next = append(next, y)
+					}
+				}
+				for _, y := range next {
+					if comp[y.ID] < 0 {
+						comp[y.ID] = c
+						stack = append(stack, y)
+					}
+				}
+			}
+		}
+		for _, ms := range members {
+			fresh := 0
+			finished := true
+			for _, n := range ms {
+				if n.Status != taskgraph.Done && n.Status != taskgraph.Dropped {
+					finished = false
+					break
+				}
+				if !old[n.ID] {
+					fresh++
+				}
+			}
+			if !finished || fresh == 0 {
+				continue
+			}
+			for _, n := range ms {
+				if !old[n.ID] {
+					p.archived = append(p.archived, n.ID)
+				}
+			}
+			trees++
+			nodes += fresh
+		}
+		return nil
+	})
+	if err != nil {
+		h.planMu.Lock()
+		p.archived = prev // not saved: memory keeps what the file has
+		h.planMu.Unlock()
+		return 0, 0, err
+	}
+	if trees > 0 {
+		h.planChanged()
+	}
+	return trees, nodes, err
 }
 
 // planTellOwner hands what the person said about node id to whoever owns it,

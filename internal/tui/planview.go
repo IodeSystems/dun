@@ -16,7 +16,10 @@ import (
 // /plan in the TUI: a screen (panes.go) with a status pane (how much is done,
 // plan mode and whether the plan is approved) over the graph as a tree. A
 // node with several parents shows under each, the later rows marked "again".
-// The engine sends the graph (control "plan" "view", then a plan event
+// Outline is the default: the engine's rows are in the graph's order (a node
+// under each node it needs), and the screen reverses the edges for display
+// from each row's needs. The finished-trees row is by connected component in
+// outline and order, per node in flat. The engine sends the graph (control "plan" "view", then a plan event
 // whenever it changes, whoever changed it); the screen never works out what
 // can start, the engine says (Ready, Waiting).
 //
@@ -24,6 +27,9 @@ import (
 //	e, m         edit the selected node's title, details: the composer takes
 //	             the command, filled in, to change and send
 //	d            drop the selected node, same way: a reason can be added
+//	v            the view: outline (goals over what they need), order (the
+//	             graph's own tree), flat (one row per node); not saved
+//	c            on the finished row: /plan clear, archive the finished trees
 //	enter, →     the node's details, done-when, needs, why it waits
 //
 // Marking a node done is the model's, so there is no key for it. What the
@@ -51,6 +57,115 @@ type planView struct {
 	keys  []string
 	// animating: the last layout has a row in motion, so the pulse runs.
 	animating bool
+	// view is how the rows are laid out (planOutline, planOrder, planFlat),
+	// kept across refreshes of one open screen.
+	view int
+}
+
+const (
+	planOutline = iota // goals at the root, what each needs beneath it
+	planOrder          // the graph's own tree: a node under each node it needs
+	planFlat           // one row per node
+	planViews
+)
+
+var planViewNames = [planViews]string{"outline", "order", "flat"}
+
+// planDisp is a row as shown: which of the engine's rows, how deep, and whether
+// it only points at a node shown earlier.
+type planDisp struct {
+	i, depth int
+	repeat   bool
+}
+
+// layout lays the rows out in the current view and splits them into the work
+// that is left and the finished rows (folded away): a connected component with
+// every node done or dropped, the same in every view and as /plan clear has it.
+// units counts the finished trees.
+func (v *planView) layout() (live, done []planDisp, units int) {
+	first := map[string]int{} // id → its first row
+	var uniq []int
+	for i, r := range v.rows {
+		if _, ok := first[r.id]; !ok {
+			first[r.id] = i
+			uniq = append(uniq, i)
+		}
+	}
+	// Components over needs, either way.
+	parent := map[string]string{}
+	var find func(string) string
+	find = func(x string) string {
+		if parent[x] == "" || parent[x] == x {
+			parent[x] = x
+			return x
+		}
+		parent[x] = find(parent[x])
+		return parent[x]
+	}
+	for _, i := range uniq {
+		for _, n := range v.rows[i].needs {
+			if _, ok := first[n]; ok {
+				parent[find(v.rows[i].id)] = find(n)
+			}
+		}
+	}
+	finished := func(status string) bool { return status == "done" || status == "dropped" }
+	open := map[string]bool{} // component root → has an open node
+	for _, i := range uniq {
+		if !finished(v.rows[i].status) {
+			open[find(v.rows[i].id)] = true
+		}
+	}
+	var all []planDisp
+	switch v.view {
+	case planOrder:
+		for i, r := range v.rows {
+			all = append(all, planDisp{i, r.depth, r.repeat})
+		}
+	case planFlat:
+		for _, i := range uniq {
+			all = append(all, planDisp{i: i})
+		}
+	default:
+		needed := map[string]bool{}
+		for _, i := range uniq {
+			for _, n := range v.rows[i].needs {
+				needed[n] = true
+			}
+		}
+		shown := map[string]bool{}
+		var walk func(i, depth int)
+		walk = func(i, depth int) {
+			id := v.rows[i].id
+			if shown[id] {
+				all = append(all, planDisp{i, depth, true})
+				return
+			}
+			shown[id] = true
+			all = append(all, planDisp{i, depth, false})
+			for _, n := range v.rows[i].needs {
+				if j, ok := first[n]; ok {
+					walk(j, depth+1)
+				}
+			}
+		}
+		for _, i := range uniq {
+			if !needed[v.rows[i].id] {
+				walk(i, 0)
+			}
+		}
+	}
+	trees := map[string]bool{}
+	for _, d := range all {
+		r := v.rows[d.i]
+		if !open[find(r.id)] {
+			done = append(done, d)
+			trees[find(r.id)] = true
+		} else {
+			live = append(live, d)
+		}
+	}
+	return live, done, len(trees)
 }
 
 // planLive is what /plan needs to know of the agents to colour and move it.
@@ -106,15 +221,15 @@ func (v *planView) page() pageDoc {
 	narrow := v.width > 0 && v.width < narrowW
 	v.order, v.keys, v.animating = v.order[:0], v.keys[:0], false
 	seen := map[string]int{}
-	live, done := v.segments()
+	live, done, units := v.layout()
 	nodes := make([]pageNode, 0, len(v.rows))
-	for _, i := range live {
-		r := v.rows[i]
+	for _, d := range live {
+		i, r := d.i, v.rows[d.i]
 		mark, style, ownerTag := v.motion(r)
-		indent := strings.Repeat("  ", r.depth)
+		indent := strings.Repeat("  ", d.depth)
 		head := indent + r.id + " " + mark + " " + r.title
 		var tags []string
-		if r.repeat {
+		if d.repeat {
 			tags = append(tags, "again")
 		}
 		if r.ready {
@@ -149,7 +264,7 @@ func (v *planView) page() pageDoc {
 		add("replaces", r.replaces)
 		add("why", r.why)
 		add("account", r.account)
-		if r.repeat {
+		if d.repeat {
 			body = append([]string{"(already shown under another parent)"}, body...)
 		}
 		nodes = append(nodes, pageNode{head: head, sub: sub, body: strings.Join(body, "\n"), pre: true,
@@ -162,21 +277,21 @@ func (v *planView) page() pageDoc {
 	// (USER 2026-11-05: "clear done trees and move them out"). The graph
 	// keeps them; this is the view.
 	if len(done) > 0 {
-		trees := 0
 		var body []string
-		for _, i := range done {
-			r := v.rows[i]
-			if r.depth == 0 {
-				trees++
-			}
-			line := strings.Repeat("  ", r.depth) + r.id + " " + planMark(r.status) + " " + r.title
+		for _, d := range done {
+			r := v.rows[d.i]
+			line := strings.Repeat("  ", d.depth) + r.id + " " + planMark(r.status) + " " + r.title
 			if n, ok := planAgentOf(r.owner); ok {
 				line += fmt.Sprintf("  · agent %d", n)
 			}
 			body = append(body, line)
 		}
-		nodes = append(nodes, pageNode{head: fmt.Sprintf("≡ %s finished · %s", textfmt.Plural(trees, "tree"),
-			textfmt.Plural(len(done), "node")), body: strings.Join(body, "\n"), pre: true, style: &StDim})
+		ids := map[string]bool{} // a repeat is not another node
+		for _, d := range done {
+			ids[v.rows[d.i].id] = true
+		}
+		head := fmt.Sprintf("≡ %s finished · %s", textfmt.Plural(units, "tree"), textfmt.Plural(len(ids), "node"))
+		nodes = append(nodes, pageNode{head: head, body: strings.Join(body, "\n"), pre: true, style: &StDim})
 		v.order = append(v.order, -1)
 		v.keys = append(v.keys, "≡")
 	}
@@ -184,34 +299,6 @@ func (v *planView) page() pageDoc {
 		nodes = append(nodes, pageNode{body: "The plan is empty. The model makes nodes with its plan tools when a task has several steps."})
 	}
 	return pageDoc{title: textfmt.Plural(v.total, "node"), nodes: nodes}
-}
-
-// segments splits the rows into trees (a root and the rows under it, up to
-// the next root) and sorts them: the trees with work left, and the rows of the
-// finished ones, where every node is done or dropped.
-func (v *planView) segments() (live, done []int) {
-	for i := 0; i < len(v.rows); {
-		j := i + 1
-		for j < len(v.rows) && v.rows[j].depth > 0 {
-			j++
-		}
-		finished := true
-		for k := i; k < j; k++ {
-			if st := v.rows[k].status; st != "done" && st != "dropped" {
-				finished = false
-				break
-			}
-		}
-		for k := i; k < j; k++ {
-			if finished {
-				done = append(done, k)
-			} else {
-				live = append(live, k)
-			}
-		}
-		i = j
-	}
-	return live, done
 }
 
 // planSpin is a working owner's mark, one frame per pulse step.
@@ -278,10 +365,11 @@ func (v *planView) motion(r planRow) (mark string, style *lipgloss.Style, tag st
 }
 
 func (v *planView) hint() string {
+	name := "view: " + planViewNames[v.view]
 	if v.width > 0 && v.width < narrowW {
-		return "t tell · a approve · e m d edit/drop · enter dive/open · esc"
+		return "t tell · a approve · e m d edit/drop · v " + planViewNames[v.view] + " · enter · esc"
 	}
-	return hotKey("tell", "t") + StDim.Render(" · ") + hotKey("approve", "a") + StDim.Render(" · ") + hotKey("edit title", "e") +
+	return StDim.Render(name+" ") + hotKey("change view", "v") + StDim.Render(" · ") + hotKey("tell", "t") + StDim.Render(" · ") + hotKey("approve", "a") + StDim.Render(" · ") + hotKey("edit title", "e") +
 		StDim.Render(" · ") + hotKey("details", "m") + StDim.Render(" · ") + hotKey("drop", "d") +
 		StDim.Render(" · enter dive into its agent, else details · → details · esc back")
 }
@@ -310,6 +398,9 @@ func (m tuiModel) notePlan(ev evMsg) tuiModel {
 	v := &planView{total: intOf(ev["total"]), done: intOf(ev["done"])}
 	v.mode, _ = ev["mode"].(bool)
 	v.approved, _ = ev["approved"].(bool)
+	if msg := str(ev["note"]); msg != "" { // auto-archive: said once, in the status line
+		m.flashText, m.flashUntil = msg, time.Now().Add(flashFor)
+	}
 	rows, _ := ev["rows"].([]any)
 	for _, x := range rows {
 		o, _ := x.(map[string]any)
@@ -321,7 +412,7 @@ func (m tuiModel) notePlan(ev evMsg) tuiModel {
 		v.rows = append(v.rows, r)
 	}
 	if cur := m.planPaging(); cur != nil {
-		v.width, v.keys = cur.width, cur.keys // keys: where the selection was (keepPlace)
+		v.width, v.keys, v.view = cur.width, cur.keys, cur.view // keys: where the selection was (keepPlace)
 		*cur = *v
 		m.syncPager()
 		return m
@@ -363,6 +454,19 @@ func (planListPane) key(m *tuiModel, msg tea.KeyPressMsg) bool {
 		r = &v.rows[v.order[m.pg.cur]]
 	}
 	switch k {
+	case "v":
+		v.view = (v.view + 1) % planViews
+		m.syncPager()
+		return true
+	case "c":
+		if m.pg.cur >= 0 && m.pg.cur < len(v.order) && v.order[m.pg.cur] == -1 {
+			if !m.proc.controlCmd("plan", "clear") {
+				m.flashText, m.flashUntil = "no engine right now — /reconnect first", time.Now().Add(flashFor)
+				return true
+			}
+			m.flashText, m.flashUntil = "/plan clear", time.Now().Add(flashFor)
+			return true
+		}
 	case "a":
 		if !m.proc.controlCmd("plan", "approve") {
 			m.flashText, m.flashUntil = "no engine right now — /reconnect first", time.Now().Add(flashFor)

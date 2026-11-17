@@ -1195,7 +1195,7 @@ func agentToolDef(defaultModel, defaultProvider, defaultEffort string, providers
 	td.Type = "function"
 	td.Function.Name = "agent"
 	td.Function.Description = "Start a sub-agent on a plan node: for work that would cost you a lot of context for a " +
-		"small answer (reading a long log, scanning a large file). Add the node with plan first, then agent({node:\"<id>\"}): " +
+		"small answer (reading a long log, scanning a large file), or for work on Y that does not depend on X, so X continues. Add the node with plan first, then agent({node:\"<id>\"}): " +
 		"the node's title, details and done_when are the child's whole brief (it cannot see your conversation), and " +
 		"it publishes its answer onto the node. It has your tools and spends its own context; what it read never " +
 		"enters yours. It returns at once and you are notified each time the child ends a turn, unless wait:true. " +

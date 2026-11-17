@@ -619,3 +619,193 @@ func TestPlan_OldSidecarRowsBecomeDetails(t *testing.T) {
 		t.Errorf("old fields persisted: %s", b)
 	}
 }
+
+// finish adds a node and closes it done.
+func planFinished(t *testing.T, h *Harness, needs string) {
+	t.Helper()
+	planCall(t, h, "plan_add", `{"title":"n","done_when":"x"`+needs+`}`)
+	id := fmt.Sprint(len(h.planNow().store.g.Nodes))
+	planCall(t, h, "plan_update", `{"id":"`+id+`","status":"doing"}`)
+	planCall(t, h, "plan_close", `{"outcome":"done","id":"`+id+`","account":"ok"}`)
+}
+
+// /plan clear archives a component only when every node in it is finished: 1
+// and 2 are done, 3 needs 2 and is open (one tree, left whole), 4 is done and
+// alone, 5 is dropped and alone. It persists, and hides the nodes everywhere.
+func TestPlan_ClearArchivesFinishedTrees(t *testing.T) {
+	h := planHarness(t, true)
+	planFinished(t, h, "")
+	planFinished(t, h, `,"needs":["1"]`)
+	planCall(t, h, "plan_add", `{"title":"open","done_when":"x","needs":["2"]}`)
+	planFinished(t, h, "")
+	planCall(t, h, "plan_add", `{"title":"gone","done_when":"x"}`)
+	planCall(t, h, "plan_close", `{"outcome":"drop","id":"5","reason":"no"}`)
+	out, err := h.PlanCmd(context.Background(), "clear")
+	if err != nil || !strings.Contains(out, "archived 2 trees · 2 nodes") {
+		t.Fatalf("clear: %q %v", out, err)
+	}
+	snap := h.Plan()
+	if snap.Total != 3 || len(snap.Rows) != 3 {
+		t.Errorf("snapshot after clear: total %d, %d rows", snap.Total, len(snap.Rows))
+	}
+	// The open tree is whole, with its done nodes.
+	if out, _ := h.PlanCmd(context.Background(), "clear"); !strings.Contains(out, "no finished trees") {
+		t.Errorf("second clear: %q", out)
+	}
+	if show := planCall(t, h, "plan_show", `{}`); strings.Contains(show, "gone") {
+		t.Errorf("plan_show has an archived node: %s", show)
+	}
+	// Reload from the sidecar: still archived.
+	h2 := planHarness(t, false)
+	h2.cfg.SessionFile = h.cfg.SessionFile
+	if s := h2.Plan(); len(s.Rows) != 3 {
+		t.Errorf("after reload %d rows", len(s.Rows))
+	}
+	if PlanBrief(h.cfg.SessionFile) == "" {
+		t.Error("brief lost the open node")
+	}
+	// unarchive brings back both archived trees.
+	if out, _ := h.PlanCmd(context.Background(), "unarchive"); !strings.Contains(out, "unarchived 2 nodes") {
+		t.Errorf("unarchive: %q", out)
+	}
+	if s := h.Plan(); len(s.Rows) != 5 {
+		t.Errorf("after unarchive %d rows", len(s.Rows))
+	}
+}
+
+// Archived nodes stay out of what the model is told, and the edges still hold:
+// a new node that needs an archived one shows its tree again.
+func TestPlan_ArchivedHiddenFromAsideAndRevealedByNeed(t *testing.T) {
+	h := planHarness(t, true)
+	planFinished(t, h, "")
+	if _, err := h.PlanCmd(context.Background(), "clear"); err != nil {
+		t.Fatal(err)
+	}
+	if g, _ := (planStore{h}).View(context.Background()); len(g.Nodes) != 0 {
+		t.Fatalf("the archived node shows: %d", len(g.Nodes))
+	}
+	if got := h.planOpen(); got != "" {
+		t.Errorf("planOpen: %q", got)
+	}
+	planCall(t, h, "plan_add", `{"title":"next","done_when":"x","needs":["1"]}`)
+	g, _ := (planStore{h}).View(context.Background())
+	if len(g.Nodes) != 2 {
+		t.Fatalf("a node needing an archived one: %d nodes shown", len(g.Nodes))
+	}
+	if ok, _ := g.CanStart("2"); !ok {
+		t.Error("the new node cannot start")
+	}
+	// Both finished again: archived again.
+	planCall(t, h, "plan_close", `{"outcome":"drop","id":"2","reason":"x"}`)
+	h.planArchive(context.Background())
+	if g, _ := (planStore{h}).View(context.Background()); len(g.Nodes) != 0 {
+		t.Errorf("both finished, archived again: %d shown", len(g.Nodes))
+	}
+}
+
+// A turn the person starts archives what finished before it; an open tree is
+// left; a child never does. What finished during a turn stays until the next.
+func TestPlan_AutoArchiveAtUserTurn(t *testing.T) {
+	h := planHarness(t, true)
+	planFinished(t, h, "") // finished during turn N
+	if len(h.Plan().Rows) != 1 {
+		t.Fatal("not visible during its turn")
+	}
+	planCall(t, h, "plan_add", `{"title":"open","done_when":"x"}`)
+	h.planAutoArchive(context.Background()) // turn N+1 begins
+	if rows := h.Plan().Rows; len(rows) != 1 || rows[0].ID != "2" {
+		t.Errorf("after N+1 starts: %+v", rows)
+	}
+	h.parent = &Harness{}
+	planCall(t, h, "plan_close", `{"outcome":"drop","id":"2","reason":"x"}`)
+	h.planAutoArchive(context.Background())
+	if len(h.Plan().Rows) != 1 {
+		t.Error("a child archived")
+	}
+}
+
+// Auto-archive tells the UI alone, once, through OnPlanNote and OnPlan; the
+// model's queue gets nothing.
+func TestPlan_AutoArchiveNotesTheUIOnly(t *testing.T) {
+	h := planHarness(t, true)
+	var notes []string
+	var changed int
+	h.cfg.OnPlanNote = func(m string) { notes = append(notes, m) }
+	h.cfg.OnPlan = func() { changed++ }
+	planFinished(t, h, "")
+	planCall(t, h, "plan_add", `{"title":"open","done_when":"x"}`)
+	changed = 0
+	h.planAutoArchive(context.Background())
+	if len(notes) != 1 || notes[0] != "archived 1 tree · 1 node" || changed == 0 {
+		t.Errorf("notes %v, plan changes %d", notes, changed)
+	}
+	if q := queuedTexts(h); len(q) != 0 {
+		t.Errorf("the model was told: %v", q)
+	}
+	h.planAutoArchive(context.Background())
+	if len(notes) != 1 {
+		t.Errorf("said again: %v", notes)
+	}
+}
+
+// A save that fails leaves memory as the file has it: the graph (the store
+// undoes it) and the archive list.
+func TestPlan_ArchiveNotKeptWhenSaveFails(t *testing.T) {
+	h := planHarness(t, true)
+	planFinished(t, h, "")
+	dir := filepath.Dir(h.cfg.SessionFile)
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Skip(err)
+	}
+	defer os.Chmod(dir, 0o700)
+	if f, err := os.Create(filepath.Join(dir, "probe")); err == nil {
+		f.Close()
+		t.Skip("directory is writable anyway (root?)")
+	}
+	if _, err := h.PlanCmd(context.Background(), "clear"); err == nil {
+		t.Fatal("clear did not fail")
+	}
+	if len(h.planNow().archived) != 0 || len(h.Plan().Rows) != 1 {
+		t.Errorf("memory kept an unsaved archive: %v", h.planNow().archived)
+	}
+	os.Chmod(dir, 0o700)
+	if out, err := h.PlanCmd(context.Background(), "clear"); err != nil || !strings.Contains(out, "archived 1 tree") {
+		t.Fatalf("retry: %q %v", out, err)
+	}
+	os.Chmod(dir, 0o500)
+	if _, err := h.PlanCmd(context.Background(), "unarchive"); err == nil {
+		t.Fatal("unarchive did not fail")
+	}
+	if len(h.planNow().archived) != 1 {
+		t.Errorf("unarchive forgot the list: %v", h.planNow().archived)
+	}
+}
+
+// The user's message starts the archive; a notification turn and a child's
+// do not.
+func TestPlan_AutoArchiveWiring(t *testing.T) {
+	r := &scriptRunner{rounds: []roundFn{textRound("ok"), textRound("ok")}}
+	h := startScripted(t, r)
+	planFinished(t, h, "")
+	h.Notify("a job finished")
+	if _, err := h.Continue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.Plan().Rows) != 1 {
+		t.Fatal("a notification turn archived")
+	}
+	if _, err := h.Ask(context.Background(), "next"); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.Plan().Rows) != 0 {
+		t.Error("a user turn did not archive")
+	}
+	// A child: its own plan view is the parent's; it must not archive.
+	planFinished(t, h, "")
+	h.parent = &Harness{}
+	h.planAutoArchive(context.Background())
+	h.parent = nil
+	if len(h.Plan().Rows) != 1 {
+		t.Error("a child archived")
+	}
+}

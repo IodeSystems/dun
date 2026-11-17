@@ -284,10 +284,10 @@ func routeSlash(line string, r slashRoutes) {
 		switch arg(0) {
 		case "":
 			r.control(name, "view")
-		case "mode", "approve", "edit", "drop":
+		case "mode", "approve", "edit", "drop", "clear", "unarchive":
 			r.control(name, strings.TrimSpace(arg(0)+" "+strings.Join(args[min(1, len(args)):], " ")))
 		default:
-			r.reply("usage: /plan [mode on|off | approve | edit <id> title|details <text> | drop <id> [why]]")
+			r.reply("usage: /plan [mode on|off | approve | edit <id> title|details <text> | drop <id> [why] | clear | unarchive]")
 		}
 	case "effort":
 		r.control(name, arg(0))

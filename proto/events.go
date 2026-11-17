@@ -1119,6 +1119,9 @@ type Plan struct {
 	Total    int        `json:"total"`
 	Done     int        `json:"done"`
 	Rows     []PlanNode `json:"rows"`
+	// Note is a quiet line for the UI alone, on an event no command asked for
+	// ("archived 2 trees"); never part of the model's context.
+	Note string `json:"note,omitempty"`
 	// Message answers the command that asked, when it was not the view.
 	Message string `json:"message,omitempty"`
 }

@@ -85,8 +85,14 @@ folds and resume. A session with no file (an in-memory session) keeps it in memo
 
 ## The person
 
-`/plan` opens a screen with the graph as a tree. A node with several parents shows
-under each, marked as a repeat ("again"). From it a person can approve the plan, edit
+`/plan` opens a screen with the graph as a tree, in three views (`v` cycles them,
+per open screen, not saved). **outline** (default) puts each goal at the root and what
+it needs under it (the edges reversed for display: roots are the nodes nothing needs).
+**order** is the graph's own tree (`Graph.Tree`): a node hangs under each node it needs.
+**flat** is one row per node, live first. A node reached twice shows again, marked
+"again" (outline and order). Finished trees fold into one row in every view; `c` on that
+row sends `/plan clear`. The views are client-side: `PlanNode` carries `needs`, and `depth`
+and `repeat` stay the graph's order view for other clients. From it a person can approve the plan, edit
 a node's title or details, or drop a node. Re-ordering is not built: order is the edges,
 and the screen does not edit them (not built). `e`, `m` and `d` fill the composer with
 `/plan edit|drop …` to finish, so a drop is typed, not a keystroke. What the person
@@ -94,6 +100,17 @@ changes reaches the model as a note: an approval as a notification that wakes it
 the rest as asides that ride its next turn. The engine sends the graph as a `plan`
 event (control `plan` `view`, then again on every change by anyone); the screen
 never works out what can start.
+
+**Archive.** `/plan clear` archives every finished tree: a connected component (edges
+either way) whose nodes are all done or dropped; one with an open node is left whole.
+The ids go in the sidecar (`archived`); the nodes stay in the graph so edges hold, and
+`hideArchived` leaves them out of every view: `Harness.Plan`, `plan_show`, the `[plan]`
+aside, fold and restore blocks (all read through the store's `View`). A turn the person
+starts archives the same way before it runs (`planAutoArchive`), so a tree that finished
+during turn N stays visible through N and goes at N+1; a settle or notification turn and
+a sub-agent's never do. If a node of an archived tree is reopened, or a new node needs
+one, the whole component shows again (it is hidden only while all of it is finished);
+it is archived again the next time it finishes. `/plan unarchive` brings everything back.
 
 **Plan mode.** Approval is asked for only in plan mode: `/plan mode on|off`, off by
 default, so a small task stays free of it. In plan mode, tool calls that change the
