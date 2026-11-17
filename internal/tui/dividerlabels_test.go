@@ -217,3 +217,90 @@ func TestDividerLabels_NamesDoNotMove(t *testing.T) {
 		t.Errorf("pane screen names moved: %+v then %+v", a, b)
 	}
 }
+
+// divClick clicks the base divider's label for focus zone id.
+func divClick(m tuiModel, id int) tuiModel {
+	y := m.convoTopRow() + m.convoHeight() + m.dividerGap()
+	_, spans := m.baseDivider()
+	for _, sp := range spans {
+		if sp.id == id {
+			return click(m, sp.x0+1, y)
+		}
+	}
+	return m
+}
+
+// A click on a name does nothing while something else has the keys: a
+// confirm prompt, a form, the palette.
+func TestDividerLabels_ClickIgnoredUnderModals(t *testing.T) {
+	for name, set := range map[string]func(m *tuiModel){
+		"confirm":   func(m *tuiModel) { m.confirm.q = "sure?" },
+		"provider":  func(m *tuiModel) { m.providerForm = true },
+		"login":     func(m *tuiModel) { m.loginPicking = true },
+		"palette":   func(m *tuiModel) { m.input.SetValue("/") },
+		"searching": func(m *tuiModel) { m.searching = true },
+	} {
+		v := tallConvo(t)
+		m := v.m
+		set(&m)
+		before := m.focus
+		m = divClick(m, focusConvo)
+		if m.focus != before {
+			t.Errorf("%s: focus moved %d -> %d", name, before, m.focus)
+		}
+	}
+}
+
+// Clicking the name that already has focus changes nothing: the selection
+// and the activity scope stay.
+func TestDividerLabels_ClickFocusedKeepsState(t *testing.T) {
+	v := tallConvo(t)
+	m := v.m
+	m.setFocus(focusConvo)
+	m.sel = 0
+	m = divClick(m, focusConvo)
+	if m.focus != focusConvo || m.sel != 0 {
+		t.Errorf("sel %d focus %d: the click reset them", m.sel, m.focus)
+	}
+}
+
+// The cue works at widths between 20 and 41 (the bare cue) and when the
+// divider is one row lower (dividerGap).
+func TestDividerLabels_CueClickNarrowAndGap(t *testing.T) {
+	for _, tc := range []struct {
+		w   int
+		gap bool
+	}{{30, false}, {20, false}, {80, true}, {30, true}} {
+		v := tallConvo(t)
+		v.resize(tc.w, 15)
+		v.setScrollPin(false)
+		v.setYOffset(2)
+		v.m.refresh()
+		if tc.gap {
+			v.m.modelPicking, v.m.rolesPicking = true, true
+			v.m.refresh()
+			if v.m.dividerGap() != 1 {
+				t.Fatal("test needs dividerGap 1")
+			}
+		}
+		m := v.m
+		y := m.convoTopRow() + m.convoHeight() + m.dividerGap()
+		m = click(m, tc.w-3, y)
+		if !m.scrollPinned {
+			t.Errorf("w=%d gap=%v: the cue click did not go to the newest", tc.w, tc.gap)
+		}
+	}
+}
+
+// An emptied strip with focus still on it names a pane as focused.
+func TestDividerLabels_EmptiedStripStillMarksFocus(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	m.focus = focusActivity
+	for _, w := range []int{80, 25, 20} {
+		m.w = w
+		d, _ := m.baseDivider()
+		if got := ansi.Strip(d); !strings.Contains(got, "[") {
+			t.Errorf("w=%d: no focused name: %q", w, got)
+		}
+	}
+}

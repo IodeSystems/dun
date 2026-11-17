@@ -840,7 +840,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, restartEngine(m.opts, m.sessionID, m.everUp, m.seen())
 
 	case tea.MouseMsg:
-		if _, click := msg.(tea.MouseClickMsg); click && m.screenClick(msg.Mouse()) {
+		if _, click := msg.(tea.MouseClickMsg); click && !m.inspecting && !m.searching && m.confirm.q == "" && !m.mcpForm && m.screenClick(msg.Mouse()) {
 			m.syncPager()
 			return m, nil
 		}

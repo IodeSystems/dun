@@ -158,13 +158,18 @@ func renderDivider(w int, labels []divLabel, cue string) (string, []divSpan) {
 // the bottom up. "jobs" (the activity strip) is named only while the strip
 // has rows: tab skips it when it is empty.
 func (m tuiModel) divLabels() []divLabel {
-	in := m.focus == focusInput || m.asking
+	rows := len(m.actRows()) > 0
+	f := m.focus
+	if f == focusActivity && !rows {
+		f = focusInput // the strip just emptied: tab (cycleFocus) goes on from the input
+	}
+	in := f == focusInput || m.asking
 	ls := []divLabel{
 		{"input", "in", focusInput, in},
-		{"messages", "msg", focusConvo, !in && m.focus == focusConvo},
+		{"messages", "msg", focusConvo, !in && f == focusConvo},
 	}
-	if len(m.actRows()) > 0 {
-		ls = append(ls, divLabel{"jobs", "jobs", focusActivity, !in && m.focus == focusActivity})
+	if rows {
+		ls = append(ls, divLabel{"jobs", "jobs", focusActivity, !in && f == focusActivity})
 	}
 	return ls
 }

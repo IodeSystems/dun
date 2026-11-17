@@ -117,14 +117,17 @@ func (m tuiModel) mouseLeft(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.drag = mouseSel{on: true, a: c, b: c}
 		case mo.Y >= m.actTopRow() && mo.Y < top:
 			return m.activityClick(mo.Y - m.actTopRow())
-		case mo.Y == top+h: // the divider: "↓ newest", or a pane's name
+		case mo.Y == top+h+m.dividerGap(): // the divider: "↓ newest", or a pane's name
 			id, ok := m.dividerHit(mo.X)
 			switch {
 			case !ok:
 			case id == divCue:
 				m.scrollToEnd()
 				m.refresh()
-			case m.asking || m.picking || m.modelPicking || m.mcpForm:
+			case !m.inputShown() || m.panelOpen():
+				// a form, picker, question or the palette has the lower pane
+			case id == m.focus:
+				// already focused: nothing moves (the selection, the scope)
 			default:
 				m.setFocus(id)
 				m.refresh()
