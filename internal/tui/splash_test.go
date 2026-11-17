@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/internal/dunconfig"
@@ -133,31 +132,6 @@ func TestHeader_FolderAndModelOnly(t *testing.T) {
 	m.tools = []string{"a", "b"}
 	if h := stripANSI(m.headView()); h != "dun · greet · chat-standard" {
 		t.Errorf("header %q", h)
-	}
-}
-
-// The divider carries focus three ways: the focused side's half in the
-// accent, the other dim; the thin line on the edge toward the focused pane
-// (▁ for the upper side, ▔ for the input); and both far ends thickening
-// toward it. The activity strip is above the divider, so it lights the upper
-// half too.
-func TestDivider_LeansTowardTheFocusedSide(t *testing.T) {
-	up := divider(10, true)
-	if want := stEdge.Render("▁▁▁▄▄") + StDim.Render("▁▁▁▁▁"); up != want {
-		t.Errorf("up: %q, want %q", up, want)
-	}
-	// Down is up's mirror: the top edge, the lit half and the bump past the
-	// center.
-	down := divider(10, false)
-	if want := StDim.Render("▔▔▔▔▔") + stEdge.Render("▀▀▔▔▔"); down != want {
-		t.Errorf("down: %q, want %q", down, want)
-	}
-	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
-	nm, _ := m.Update(tea.WindowSizeMsg{Width: 20, Height: 10})
-	m = nm.(tuiModel)
-	m.focus = focusActivity
-	if !strings.Contains(ansi.Strip(m.drawView()), "▁▁▁▁▁▁▁▄▄▄▁▁▁▁▁▁▁▁▁▁") {
-		t.Errorf("activity focus does not light the upper half:\n%s", ansi.Strip(m.drawView()))
 	}
 }
 

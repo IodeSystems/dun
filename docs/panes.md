@@ -26,7 +26,8 @@ order of the if-chain in `update`:
 
 Focus is one int with three values: input, convo, activity. Tab cycles them
 (`cycleFocus`). The pager, the job view and asks do not change focus. The
-divider leans up for any focus that is not the input.
+divider names input, messages and (while the strip has rows) jobs, the
+focused one bracketed in the accent (`renderDivider`).
 
 The owner rules that pin the layout (`docs/ui-decisions.md`) are enforced in
 the conversation's own code: no bounce (`holdTop`, `holdShrink`), total
@@ -52,9 +53,9 @@ conversation). Tests: `bounce_test.go`, `noshrink_test.go`, `pane_test.go`,
   (fill 1). The lower area goes away while it is up (owner, 2026-10-25), so
   tab moves between the table and the log. esc in a pushed screen pops it.
   The inspector is a screen with one pane.
-- **Dividers** are drawn between adjacent panes. A divider next to the
-  focused pane leans toward it, as now (the ▁/▄ and ▔/▀ mirror pairs). A
-  divider with focus on neither side is dim, with no bump.
+- **Dividers** are drawn between adjacent panes. Each divider is the
+  centered `─` line naming the screen's named panes (`screenPane.name`), the
+  focused one bracketed in the accent; a click on a name focuses that pane.
 - **Keys**: the screen handles the global keys first (ctrl+c, ctrl+g, tab
   and shift+tab to move focus between its focusable panes), then the focused
   pane. A pane that refuses up/down at its edge passes them to the screen's

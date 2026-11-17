@@ -41,7 +41,7 @@ var (
 	stNote = lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // proactive notifications
 	stAsk  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("213"))
 	stSel  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")) // selection gutter
-	stEdge = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))            // focused divider half
+	stEdge = lipgloss.NewStyle().Foreground(lipgloss.Color("212"))            // focused pane's name on the divider
 	// stCmd is a command's name in a list (the palette, /help): neutral and
 	// bold. Pink (212) is where you are; green is a thing that worked.
 	stCmd = lipgloss.NewStyle().Bold(true)
@@ -50,40 +50,134 @@ var (
 	stBrand = lipgloss.NewStyle().Bold(true)
 )
 
-// divider is the single rule between the panes — the tmux split look, no
-// boxes. It carries focus two ways (owner, 2026-10-24):
+// divider is the single rule between the panes: one dim "─" across the full
+// row, vertically centered, the same glyph whatever has focus (owner,
+// 2026-11-17; it replaces the half-line that leaned toward the focused pane).
+// The panes are named on it, left-aligned: "─ input ─ messages ─ jobs ───".
+// The focused pane's name is in the accent, bold and in brackets
+// ("[messages]", so it reads without colour); the others are dim. Neither
+// pane's CONTENT changes with focus: the person reads one pane while typing
+// in the other (owner, 2026-10-23).
 //
-//   - colour: the focused pane's half in the accent, the other dim — the
-//     first half when the upper side (conversation or activity strip) has the
-//     keys, the last when the input (or a form, picker or question in its
-//     place) has them;
-//   - side: a thin line on the cell's edge toward the focused pane, the
-//     bottom edge (▁) for the upper side, the top edge (▔) for the input.
-//
-// The two are mirror images (owner, 2026-10-25): a line 1/8 of a row, and
-// beside the center, on the lit side, a short bump of half a row (▄ left of
-// center for the upper side, ▀ right of it for the input). The ends used to
-// thicken to 3/8, and downward that was lower blocks in reverse video, which
-// drew much taller than the upward ramp; ▁/▔ and ▄/▀ are the mirror pairs
-// fonts have. Moving focus moves the line from one edge of its row to the
-// other; nothing else. Neither pane's CONTENT changes with focus: the person
-// reads one pane while typing in the other (owner, 2026-10-23).
-func divider(w int, focusUp bool) string {
-	if w < 2 {
-		w = 2
+// The names are also buttons: renderDivider returns the columns each one
+// covers, so the click test and the drawing share one source of truth. When
+// the row is too narrow it gives up names in this order: full names, short
+// names (in/msg/jobs), the focused name alone, then a plain line; the cue,
+// which is actionable, is kept before any of them.
+type divLabel struct {
+	full, short string
+	id          int // what a click on it focuses: a zone, or a pane index
+	focused     bool
+}
+
+// divSpan is the columns [x0, x1) of the row that a click acts on: a label
+// (id is what it focuses) or the cue (id is divCue).
+type divSpan struct{ x0, x1, id int }
+
+const (
+	divCue = -1
+	// below this width the row carries no names: a plain line.
+	divMinLabelW = 20
+)
+
+func renderDivider(w int, labels []divLabel, cue string) (string, []divSpan) {
+	w = max(w, 2)
+	cw, tail := lipgloss.Width(cue), 0
+	if cue == "" || w < 2*cw {
+		cue, cw = "", 0
+	} else {
+		tail = cw + 1 // the cue and one dash after it
 	}
-	// The split is at the middle of the CONTENT, not of the terminal: on a
-	// wide screen the text stops at bandCap, and a split at the terminal's
-	// middle sat inside the text's column, under nothing on one side.
-	half := min(w, bandCap) / 2
-	bump := min(max(half/3, 2), 8)
-	if focusUp {
-		return stEdge.Render(strings.Repeat("▁", max(0, half-bump))+strings.Repeat("▄", bump)) +
-			StDim.Render(strings.Repeat("▁", max(0, w-half)))
+	fill := func(n int) string { return StDim.Render(strings.Repeat("─", max(0, n))) }
+	line := func(parts []string, spans []divSpan, x int) (string, []divSpan) {
+		out := strings.Join(parts, "") + fill(w-tail-x)
+		if cue != "" {
+			out += stNote.Render(cue) + fill(1)
+			spans = append(spans, divSpan{w - cw - 1, w, divCue})
+		}
+		return out, spans
 	}
-	bump = min(bump, w-half)
-	return StDim.Render(strings.Repeat("▔", half)) +
-		stEdge.Render(strings.Repeat("▀", bump)+strings.Repeat("▔", max(0, w-half-bump)))
+	pick := func(l divLabel, short bool) string {
+		t := l.full
+		if short {
+			t = l.short
+		}
+		if l.focused {
+			return "[" + t + "]"
+		}
+		return t
+	}
+	var focused []divLabel
+	for _, l := range labels {
+		if l.focused {
+			focused = append(focused, l)
+		}
+	}
+	// each variant is the labels it keeps and whether it uses short names.
+	type variant struct {
+		ls    []divLabel
+		short bool
+	}
+	if w >= divMinLabelW {
+		for _, v := range []variant{{labels, false}, {labels, true}, {focused, false}, {focused, true}} {
+			if len(v.ls) == 0 {
+				continue
+			}
+			// "─ " + names joined by " ─ " + " ", then at least one dash.
+			width := 3 + 3*(len(v.ls)-1)
+			for _, l := range v.ls {
+				width += lipgloss.Width(pick(l, v.short))
+			}
+			if width+1 > w-tail {
+				continue
+			}
+			parts, spans, x := []string{StDim.Render("─ ")}, []divSpan(nil), 2
+			for i, l := range v.ls {
+				if i > 0 {
+					parts = append(parts, StDim.Render(" ─ "))
+					x += 3
+				}
+				t := pick(l, v.short)
+				if l.focused {
+					parts = append(parts, stEdge.Bold(true).Render(t))
+				} else {
+					parts = append(parts, StDim.Render(t))
+				}
+				spans = append(spans, divSpan{x, x + lipgloss.Width(t), l.id})
+				x += lipgloss.Width(t)
+			}
+			parts = append(parts, StDim.Render(" "))
+			return line(parts, spans, x+1)
+		}
+	}
+	return line(nil, nil, 0)
+}
+
+// divLabels names the base screen's panes on the divider, in tab order from
+// the bottom up. "jobs" (the activity strip) is named only while the strip
+// has rows: tab skips it when it is empty.
+func (m tuiModel) divLabels() []divLabel {
+	in := m.focus == focusInput || m.asking
+	ls := []divLabel{
+		{"input", "in", focusInput, in},
+		{"messages", "msg", focusConvo, !in && m.focus == focusConvo},
+	}
+	if len(m.actRows()) > 0 {
+		ls = append(ls, divLabel{"jobs", "jobs", focusActivity, !in && m.focus == focusActivity})
+	}
+	return ls
+}
+
+// baseDivider is the base screen's divider row and its click spans.
+func (m tuiModel) baseDivider() (string, []divSpan) {
+	cue := ""
+	if !m.scrollPinned {
+		cue = m.bottomCue()
+		if m.w < 2*lipgloss.Width(cue) { // no room for the key: the bare cue
+			cue = " ↓ newest "
+		}
+	}
+	return renderDivider(m.w, m.divLabels(), cue)
 }
 
 // bottomCue is drawn over the divider's right end while the conversation is
@@ -97,22 +191,18 @@ func (m tuiModel) bottomCue() string {
 	return " ↓ newest "
 }
 
-// withBottomCue puts the cue at the right end of a divider of width w, or
-// returns the divider unchanged when it is too narrow to keep the focus half.
-func withBottomCue(div, cue string, w int) string {
-	cw := lipgloss.Width(cue)
-	if w < 2*cw {
-		return div
+// dividerHit is what a click at column x on the base divider lands on: a
+// span's id, or false.
+func (m tuiModel) dividerHit(x int) (int, bool) {
+	_, spans := m.baseDivider()
+	for _, sp := range spans {
+		if x >= sp.x0 && x < sp.x1 {
+			return sp.id, true
+		}
 	}
-	return ansi.Truncate(div, w-cw, "") + stNote.Render(cue)
+	return 0, false
 }
 
-// onBottomCue reports whether a click at column x on the divider row lands on
-// the cue.
-func (m tuiModel) onBottomCue(x int) bool {
-	cw := lipgloss.Width(m.bottomCue())
-	return !m.scrollPinned && m.w >= 2*cw && x >= m.w-cw
-}
 func addGutter(block, marker string, style lipgloss.Style) string {
 	pre := style.Render(marker)
 	lines := strings.Split(block, "\n")
@@ -430,11 +520,8 @@ func (m tuiModel) drawView() string {
 	// join below consistent with the frame without mutating the model.
 	vp := m.vp
 	vp.setHeight(m.convoHeight())
-	// Focus cue lives entirely in the divider's bright half — no pane borders.
-	div := divider(m.w, m.focus != focusInput && !m.asking)
-	if !m.scrollPinned {
-		div = withBottomCue(div, m.bottomCue(), m.w)
-	}
+	// Focus cue lives entirely in the divider's pane names — no pane borders.
+	div, _ := m.baseDivider()
 
 	var status string
 	switch {

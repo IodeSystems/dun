@@ -117,9 +117,19 @@ func (m tuiModel) mouseLeft(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.drag = mouseSel{on: true, a: c, b: c}
 		case mo.Y >= m.actTopRow() && mo.Y < top:
 			return m.activityClick(mo.Y - m.actTopRow())
-		case mo.Y == top+h && m.onBottomCue(mo.X): // the divider's "↓ newest"
-			m.scrollToEnd()
-			m.refresh()
+		case mo.Y == top+h: // the divider: "↓ newest", or a pane's name
+			id, ok := m.dividerHit(mo.X)
+			switch {
+			case !ok:
+			case id == divCue:
+				m.scrollToEnd()
+				m.refresh()
+			case m.asking || m.picking || m.modelPicking || m.mcpForm:
+			default:
+				m.setFocus(id)
+				m.refresh()
+				return m, textinput.Blink
+			}
 			return m, nil
 		case mo.Y >= m.lowerTopRow() && mo.Y < m.lowerTopRow()+lipgloss.Height(m.lowerView()):
 			if !m.inputShown() {
@@ -454,4 +464,30 @@ func yankText(e convoEntry) string {
 		text = e.collapsed
 	}
 	return strings.TrimSpace(stripANSI(text))
+}
+
+// screenClick handles a left click on a pushed screen's divider: a pane's
+// name there focuses that pane. False: the click is not on one.
+func (m tuiModel) screenClick(mo tea.Mouse) bool {
+	s := m.activeScreen()
+	if s == nil || mo.Button != tea.MouseLeft || s.zoomed(m.w) >= 0 {
+		return false
+	}
+	y := lipgloss.Height(m.headView())
+	hs := s.heights(&m, m.w, m.screenRows())
+	for i := 0; i < len(hs)-1; i++ {
+		y += hs[i]
+		if mo.Y == y {
+			_, spans := renderDivider(m.w, s.labels(), "")
+			for _, sp := range spans {
+				if mo.X >= sp.x0 && mo.X < sp.x1 {
+					s.focus = sp.id
+					return true
+				}
+			}
+			return false
+		}
+		y++
+	}
+	return false
 }

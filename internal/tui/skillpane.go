@@ -100,7 +100,7 @@ func (m *tuiModel) openSkill(name string) {
 	p := s.skillPane()
 	if p == nil {
 		p = &skillPane{}
-		s.panes = append(s.panes, screenPane{body: p, weight: 3, min: 5, zoomUnder: narrowW})
+		s.panes = append(s.panes, screenPane{name: "skill", body: p, weight: 3, min: 5, zoomUnder: narrowW})
 	}
 	*p = skillPane{skill: name, docs: map[string]*skillDoc{}, at: skillPlace{file: "SKILL.md", sel: -1}}
 	s.focus = len(s.panes) - 1

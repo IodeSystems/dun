@@ -374,7 +374,7 @@ func (m *tuiModel) whoKey(v *whoView, k, text string) (bool, tea.Cmd) {
 
 func whoScreen() *paneScreen {
 	return &paneScreen{
-		panes: []screenPane{{body: viewStatusPane{}, fixed: true}, {body: whoPane{}, weight: 1, min: 3}},
+		panes: []screenPane{{body: viewStatusPane{}, fixed: true}, {name: "who", body: whoPane{}, weight: 1, min: 3}},
 		focus: 1,
 		valid: func(m *tuiModel) bool { return m.whoPaging() != nil },
 	}

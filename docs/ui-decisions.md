@@ -70,9 +70,11 @@ are in `decisions.md`.
   finger swipe arrives as plain up/down keys. A question you cannot scroll
   behind is one you cannot answer. History moves to ctrl+up/down (and up on an
   empty composer).
-- **Focus is a half-line divider in the accent colour, leaning toward the
-  focused pane. Never lower a pane's contrast for focus.** The owner's cue;
-  do not recommend dimming.
+- **Focus is a pane name on the divider: accent, bold, in brackets. Never
+  lower a pane's contrast for focus.** The owner's cue; do not recommend
+  dimming. The divider is one dim centered `─` line, labels left-aligned
+  (`─ input ─ [messages] ─ jobs ───`), clickable (2026-11-17; it replaced the
+  half-line lean).
 - **Process stays visible.** Calls stay in the turn, one readable line each;
   never hide or demote how an answer was produced. Server-prefixed tool names
   are shown as words (`notes · project notes`); logs, inspector and copy text

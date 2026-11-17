@@ -234,8 +234,8 @@ func (m *tuiModel) noteExtServers() {
 // extScreen is /ext: its status over the list over the selected one's log.
 func extScreen() *paneScreen {
 	return &paneScreen{
-		panes: []screenPane{{body: viewStatusPane{}, fixed: true}, {body: extListPane{}, weight: 3, min: 4},
-			{body: &serverLogPane{follow: true}, weight: 2, min: 3}},
+		panes: []screenPane{{body: viewStatusPane{}, fixed: true}, {name: "extensions", body: extListPane{}, weight: 3, min: 4},
+			{name: "log", body: &serverLogPane{follow: true}, weight: 2, min: 3}},
 		focus: 1,
 		valid: func(m *tuiModel) bool { return m.extPaging() != nil },
 	}
