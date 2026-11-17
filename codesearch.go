@@ -32,9 +32,8 @@ import (
 //     incremental: a file the index holds with the same bytes is not read
 //     again. This is the interim trigger, until raglit watches the tree
 //     itself: reindex is the one seam a raglit watcher replaces.
-//   - search: the `search` tool (when no docs server gives one), the docs
-//     server's search (its hits after the server's own, when it names no
-//     index), and the proactive search (codeFinder), each a rag_search of
+//   - search: the `search` tool (raglit's, with /rag on, is docs_search) and
+//     the proactive search (codeFinder), each a rag_search of
 //     both indexes, under the workspace's path, with the workspace as its
 //     root: in a linked worktree dund searches the worktree's branch of
 //     each index, over the main checkout's (docs/rag.md, "Worktrees").
@@ -335,9 +334,8 @@ func (h *Harness) codeIndexRoot() string {
 // codeSearchLimit is the hits a search tool call returns by default.
 const codeSearchLimit = 8
 
-// searchToolDef is the `search` tool over dund's code and docs indexes. Same
-// name as the docs server's search, so a session has one search tool
-// either way; it is listed only when no docs server gives one.
+// searchToolDef is the `search` tool over dund's code and docs indexes: the
+// one `search` of a session (the docs server's is docs_search).
 func searchToolDef() llm.ToolDef {
 	var td llm.ToolDef
 	td.Type = "function"
@@ -427,41 +425,6 @@ func formatCodeHits(root, q string, hits []codeHit) string {
 		}
 	}
 	return b.String()
-}
-
-// withCodeInDocsSearch adds the code and docs hits to the docs server's
-// search (/rag on: raglit's own corpora) when the call names no index: the
-// server's answer, then this project's code and docs. tool is its model
-// name.
-func withCodeInDocsSearch(inner agent.ToolDispatcher, h *Harness, l *codeLink, tool string) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
-		if tc.Function.Name != tool {
-			return inner(ctx, tc)
-		}
-		var a struct {
-			searchArgs
-			Index string `json:"index"`
-		}
-		if json.Unmarshal([]byte(tc.Function.Arguments), &a) != nil || strings.TrimSpace(a.Index) != "" || strings.TrimSpace(a.Query) == "" {
-			return inner(ctx, tc)
-		}
-		out, err := inner(ctx, tc)
-		if err != nil {
-			return out, err
-		}
-		code := h.codeSearchCall(ctx, l, tc.Function.Arguments)
-		return out + "\n\nThis project's code and docs (dund): " + strings.TrimPrefix(code, "search: "), nil
-	}
-}
-
-// describeCodeInDocsSearch says so in the docs server's search tool.
-func describeCodeInDocsSearch(defs []llm.ToolDef, tool string) {
-	for i := range defs {
-		if defs[i].Function.Name == tool {
-			defs[i].Function.Description += " With no `index`, this project's code and docs are searched too; " +
-				"their hits follow the JSON, as path:start-end and symbol (read one with file_read)."
-		}
-	}
 }
 
 // The proactive search's groups of a code and a docs hit.

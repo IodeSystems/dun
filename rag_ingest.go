@@ -15,7 +15,7 @@ import (
 	"github.com/iodesystems/dun/internal/numfmt"
 )
 
-// What the docs index is given (USER 2026-10-22: "a problem with extremely
+// What the workspace index (dund's code and docs) is given (USER 2026-10-22: "a problem with extremely
 // large files and rag indexing"). raglit extracts, segments and indexes
 // whatever it is handed and has no size defence of its own, so a workspace
 // with a node_modules, a data dump or a 300 MB JSON file costs minutes of
@@ -144,7 +144,7 @@ type SkippedFile struct {
 	Bytes int64
 }
 
-// IngestPlan is what the docs index is given, and what it is not.
+// IngestPlan is what the workspace index is given, and what it is not.
 type IngestPlan struct {
 	Files    []string // absolute paths
 	Dirs     []SkippedDir

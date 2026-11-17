@@ -161,17 +161,16 @@ func ServerDetail(st dun.ServerState) string {
 	case st.Via == dun.ViaShell:
 		s = "not hosted"
 	case st.Starting:
-		s = "starting…"
+		s = dun.ServerRunWord(st)
 	case st.Running && st.Index == dun.IndexBuilding:
-		s = fmt.Sprintf("running · indexing %ds · ", int(st.IndexSeconds+0.5)) + ToolCost(st)
+		s = dun.ServerRunWord(st) + fmt.Sprintf(" · indexing %ds · ", int(st.IndexSeconds+0.5)) + ToolCost(st)
 	case st.Running && st.Index == dun.IndexFailed:
-		s = "running · index failed: " + textfmt.OneLine(st.IndexErr) + " · " + ToolCost(st)
+		s = dun.ServerRunWord(st) + " · index failed: " + textfmt.OneLine(st.IndexErr) + " · " + ToolCost(st)
 	case st.Running:
-		s = "running · " + ToolCost(st)
-	case st.Err != "":
-		s = "stopped · last error: " + textfmt.OneLine(st.Err)
+		s = dun.ServerRunWord(st) + " · " + ToolCost(st)
 	default:
-		s = "stopped"
+		// The state column says off; this says stopped, with its last error.
+		s = dun.ServerRunWord(st)
 	}
 	if st.Auth != "" {
 		s += " · " + st.Auth

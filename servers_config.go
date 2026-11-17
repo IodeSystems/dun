@@ -391,7 +391,7 @@ type ServersFile struct {
 	// Files configures the built-in file tools (files.go). Merged field by
 	// field; ignore patterns accumulate across layers.
 	Files *FilesConfig `json:"files,omitempty"`
-	// Rag is what the docs index is given (rag_ingest.go). Limits merge field
+	// Rag is what dund's code and docs indexes are given (rag_ingest.go). Limits merge field
 	// by field; include and exclude accumulate across layers.
 	Rag *RagConfig `json:"rag,omitempty"`
 	// DefaultVia is the mode of a server no scope sets one for: "" or

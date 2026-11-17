@@ -193,7 +193,7 @@ func TestRulesRender_Modes(t *testing.T) {
 		t.Errorf("summary:\n%s", sum)
 	}
 	idx := set.render(RulesIndex, "")
-	if !strings.Contains(idx, "root verbatim") || !strings.Contains(idx, "- x.md") || strings.Contains(idx, "x full text") || !strings.Contains(idx, "search tool") {
+	if !strings.Contains(idx, "root verbatim") || !strings.Contains(idx, "- x.md") || strings.Contains(idx, "x full text") || !strings.Contains(idx, "docs_search") {
 		t.Errorf("index:\n%s", idx)
 	}
 }

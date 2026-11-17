@@ -144,12 +144,12 @@ func TestDocsPreparer_InlinesShortBodies(t *testing.T) {
 		want   string
 	}{
 		{"short", func(context.Context, string, int) (string, bool) { return "the whole note", true }, true, "the whole note"},
-		{"long", func(context.Context, string, int) (string, bool) { return "", false }, false, "Call the search tool"},
+		{"long", func(context.Context, string, int) (string, bool) { return "", false }, false, "Read it with get_document path=<its id>"},
 	} {
 		store, _ := openSessionStore("")
 		ctx := context.Background()
 		var notes []DocsNote
-		prep := docsPreparer(store, fixedFinder{{DocID: "n", Title: "n", Score: 5, Line: "q?"}}, agent.FinderOpts{}, nil, nil, tc.fetch, nil, nil, nil,
+		prep := docsPreparer(store, fixedFinder{{DocID: "n", Title: "n", Score: 5, Line: "q?"}}, agent.FinderOpts{}, nil, nil, tc.fetch, nil, nil, &hitSources{reader: "get_document"},
 			func(n DocsNote) { notes = append(notes, n) })
 		store.Append(ctx, "s", agent.Entry{Kind: agent.KindUser, Content: "q", CreatedAt: 1})
 		prep.PrepareNotifications(ctx, "s")

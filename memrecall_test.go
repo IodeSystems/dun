@@ -53,6 +53,10 @@ func (f *fakeRag) Search(_ context.Context, q proto.RagSearch) (*proto.RagHits, 
 	if mode == "" {
 		mode = "fts"
 	}
+	if q.Index == sessionsIndex {
+		f.searches = append(f.searches, q)
+		return &proto.RagHits{Mode: mode, Hits: f.sessionHits(q)}, nil
+	}
 	if q.Index == "code" || q.Index == "docs" {
 		f.searches = append(f.searches, q)
 		var out []proto.RagHit
@@ -64,6 +68,25 @@ func (f *fakeRag) Search(_ context.Context, q proto.RagSearch) (*proto.RagHits, 
 		return &proto.RagHits{Mode: mode, Hits: out}, nil
 	}
 	return &proto.RagHits{Mode: mode, Hits: f.hits[q.Project]}, nil
+}
+
+// sessionHits answers a sessions search from the files synced into it:
+// those that carry every tag of the filter and hold the query.
+func (f *fakeRag) sessionHits(q proto.RagSearch) []proto.RagHit {
+	var out []proto.RagHit
+	seen := map[string]bool{}
+	for i := len(f.syncs) - 1; i >= 0; i-- {
+		for _, sf := range f.syncs[i].Files {
+			if seen[sf.Path] || slices.ContainsFunc(q.Filter.Tags, func(t string) bool { return !slices.Contains(sf.Tags, t) }) {
+				continue
+			}
+			seen[sf.Path] = true
+			if b, err := os.ReadFile(sf.Path); err == nil && strings.Contains(string(b), q.Query) {
+				out = append(out, proto.RagHit{Path: "file://" + sf.Path, Title: sf.Title, Text: string(b), Score: 1})
+			}
+		}
+	}
+	return out
 }
 
 func (f *fakeRag) Index(_ context.Context, q proto.RagIndex) (*proto.RagIndexed, error) {

@@ -9,8 +9,16 @@ table: every index raglit lists (`raglit index --list --json`), each on, off
 or unset at the global, project and session scopes, the nearest scope that
 says deciding (`attach.go`, `indexkind.go`). Unset everywhere, this project's
 own indexes are on and every other one off. What is on is what the model's
-`search`/`get_document` read when they name no index, and what proactive
-surfacing reads. One of the project's own switched off turns `<project>:*`
+`docs_search`/`get_document` read when they name no index, and what proactive
+surfacing reads. Above raglit's rows is dund's project index, which has no
+switch (`rag.md`, "/rag").
+
+Search tools (USER 2026-11-17, `decisions.md` "Retrieval: dund default,
+raglit add-on"): `search` is dund's, over this project's code and docs, in
+every session with a dund link; `docs_search` is raglit's search (its tool
+is `search` on the server; `modelToolName` renames it), with `/rag on`;
+`session_search` is this session's folded history in dund's `sessions`
+index. Exactly one tool is named `search`. One of the project's own switched off turns `<project>:*`
 into its indexes named one by one (raglit's list, cached). The raglit
 server's own switch stays in `/mcp`; its verbs (`setup`, `watch`, `include`,
 `workspace`, …) are `/rag <verb>`, and `/rag status` is the capability report.

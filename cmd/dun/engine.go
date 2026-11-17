@@ -201,7 +201,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		// the session id, which only this scope has.
 		if id == "close" {
 			em.emit(&proto.ControlEvent{ID: id, Action: action,
-				Message: closeSession(cc.workspace, cc.sessionID, cc.wt)})
+				Message: closeSession(cc.workspace, cc.sessionID, cc.wt, cc.rag)})
 			return
 		}
 		// /suggest: the ONLY thing that asks for suggestions now. The engine no
@@ -949,7 +949,7 @@ func emitSuggestions(ctx context.Context, h *dun.Harness, em *emitter) {
 // the startup prune, which refuses to delete anything holding work. This is how
 // a human says "that work is finished with", which is the only way that call
 // can safely be made.
-func closeSession(workspace, sessionID string, wt *dun.Worktree) string {
+func closeSession(workspace, sessionID string, wt *dun.Worktree, rag dun.RagLink) string {
 	var parts []string
 	if wt != nil && wt.Branch != "" {
 		root := dun.RepoRoot(workspace)
@@ -960,6 +960,11 @@ func closeSession(workspace, sessionID string, wt *dun.Worktree) string {
 		}
 	}
 	if sessionID != "" {
+		// Its folded history's documents first: ForgetSession removes the
+		// files that name them.
+		if err := dun.ForgetSessionFolds(rag, workspace, sessionID); err != nil {
+			parts = append(parts, "folded history not yet removed from dund: "+err.Error())
+		}
 		dun.ForgetSession(workspace, sessionID)
 		parts = append(parts, "forgot session "+sessionID)
 	}

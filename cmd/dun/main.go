@@ -626,6 +626,15 @@ func main() {
 		}
 		res := dun.PruneWorktrees(repoRoot, live)
 		gone := dun.PruneSessions(absWS, repoRoot, sessionID)
+		// A pruned session's folded history leaves dund's sessions index; its
+		// span files stay, as its other archives do (dun.pruneTranscript).
+		if link := sessionRag(); link != nil {
+			for _, id := range gone {
+				if err := dun.ForgetSessionFolds(link, absWS, id); err != nil {
+					fmt.Fprintf(os.Stderr, "dun: session %s: folded history not yet removed from dund: %v\n", id, err)
+				}
+			}
+		}
 		if !*prog {
 			reportHousekeeping(res, gone)
 		}
@@ -780,8 +789,8 @@ func main() {
 	// on its socket per call: under dund or standalone alike, and with dund
 	// down from the note files (dun/memrecall.go). DUN_MEMORY=0: no memory
 	// tool and no recall.
-	if os.Getenv("DUN_MEMORY") != "0" {
-		cfg.Rag = dun.DundRag(dundcli.Socket(dun.DunHome()))
+	if link := sessionRag(); link != nil {
+		cfg.Rag = link
 	}
 	// The workspace's code and docs are indexed and searched through dund
 	// too (dun/codesearch.go). DUN_CODE_SEARCH=0: not (the Harbor adapter's
@@ -1134,7 +1143,7 @@ func main() {
 	}
 
 	if *prog {
-		runProgrammatic(ctx, h, em, in, peers, firstTask, closeCtx{workspace: absWS, sessionID: sessionID, wt: wt})
+		runProgrammatic(ctx, h, em, in, peers, firstTask, closeCtx{workspace: absWS, sessionID: sessionID, wt: wt, rag: cfg.Rag})
 		return
 	}
 	reply := runHuman(ctx, h, firstTask, absWS, media.inputs(), *noTools)
@@ -1172,6 +1181,16 @@ type closeCtx struct {
 	workspace string
 	sessionID string
 	wt        *dun.Worktree
+	rag       dun.RagLink // nil: DUN_MEMORY=0
+}
+
+// sessionRag is the session's link to dund's retrieval, nil with
+// DUN_MEMORY=0.
+func sessionRag() dun.RagLink {
+	if os.Getenv("DUN_MEMORY") == "0" {
+		return nil
+	}
+	return dun.DundRag(dundcli.Socket(dun.DunHome()))
 }
 
 func fatal(err error) {

@@ -113,6 +113,10 @@ func init() {
 	// Code edits return unified diffs (+ diagnostics) — always colorize.
 	registerRenderer("node_edit", rendererFunc(diffRender))
 	// These commonly return JSON payloads; pretty-print, else generic.
+	// docs_search is raglit's search; "search" (dund's) answers text, which
+	// jsonRender shows as it is, and is raglit's in transcripts from before
+	// the rename (2026-11-17).
+	registerRenderer("docs_search", rendererFunc(jsonRender))
 	registerRenderer("search", rendererFunc(jsonRender))
 	registerRenderer("node_query", rendererFunc(jsonRender))
 	registerRenderer("list_documents", rendererFunc(jsonRender))

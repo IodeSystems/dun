@@ -142,9 +142,10 @@ func TestCodeSearch_SurfacesAFragment(t *testing.T) {
 	}
 }
 
-// With the docs server's search (/rag on), there is one search tool: the
-// server's, which adds the code and docs hits when it names no index.
-func TestCodeSearch_DocsServerSearchAddsCode(t *testing.T) {
+// With the docs server (/rag on), there is one `search`, dund's over the
+// code and docs, and raglit's search is docs_search: each answers from its
+// own indexes (USER 2026-11-17: "dund default, raglit add-on").
+func TestCodeSearch_DocsServerSearchIsDocsSearch(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("DUN_HOME", home)
 	ws := t.TempDir()
@@ -153,13 +154,19 @@ func TestCodeSearch_DocsServerSearchAddsCode(t *testing.T) {
 		Symbol: "func Deploy", Text: "func Deploy() {}"}}}
 	h, logPath, _ := startFakeRaglitRag(t, ws, true, rag)
 	names := modelToolNames(h)
-	if n := len(slices.DeleteFunc(slices.Clone(names), func(s string) bool { return s != "search" })); n != 1 {
-		t.Fatalf("%d search tools: %v", n, names)
+	for _, tool := range []string{"search", "docs_search"} {
+		if n := len(slices.DeleteFunc(slices.Clone(names), func(s string) bool { return s != tool })); n != 1 {
+			t.Fatalf("%d %s tools: %v", n, tool, names)
+		}
 	}
 	out := callTool(t, h, "search", map[string]any{"query": "zebra"})
-	logHas(t, logPath, "call search", "zebra")
-	if !strings.Contains(out, "This project's code and docs (dund)") || !strings.Contains(out, "zebra.go:1-4 func Deploy") {
-		t.Errorf("result lacks the code hits:\n%s", out)
+	if !strings.Contains(out, "zebra.go:1-4 func Deploy") {
+		t.Errorf("search lacks the code hits:\n%s", out)
+	}
+	out = callTool(t, h, "docs_search", map[string]any{"query": "walrus"})
+	logHas(t, logPath, "call search", "walrus")
+	if strings.Contains(out, "zebra.go") {
+		t.Errorf("docs_search has dund's code hits:\n%s", out)
 	}
 	// The workspace is dund's: raglit does not ingest it.
 	b, _ := os.ReadFile(logPath)

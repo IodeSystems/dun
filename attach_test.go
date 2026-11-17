@@ -159,14 +159,14 @@ func TestAttachIndex_SearchGetAndSurfacing(t *testing.T) {
 	}
 	searchDesc := func() string {
 		for _, d := range h.Session.Tools {
-			if d.Function.Name == "search" {
+			if d.Function.Name == "docs_search" {
 				return d.Function.Description
 			}
 		}
 		return ""
 	}
 
-	callTool(t, h, "search", map[string]any{"query": q()})
+	callTool(t, h, "docs_search", map[string]any{"query": q()})
 	if c := last("search"); strings.Contains(c, `"index"`) {
 		t.Fatalf("nothing attached, no index: %s", c)
 	}
@@ -176,7 +176,7 @@ func TestAttachIndex_SearchGetAndSurfacing(t *testing.T) {
 	if err != nil || !changed || name != own+":notes" {
 		t.Fatalf("attach notes: %q %v %v", name, changed, err)
 	}
-	callTool(t, h, "search", map[string]any{"query": q()})
+	callTool(t, h, "docs_search", map[string]any{"query": q()})
 	if c := last("search"); strings.Contains(c, `"index"`) {
 		t.Errorf("an own index is read already: %s", c)
 	}
@@ -185,11 +185,11 @@ func TestAttachIndex_SearchGetAndSurfacing(t *testing.T) {
 		t.Fatal(err)
 	}
 	sel := own + ":*,other:handbook"
-	callTool(t, h, "search", map[string]any{"query": q()})
+	callTool(t, h, "docs_search", map[string]any{"query": q()})
 	if c := last("search"); !strings.Contains(c, `"index":"`+sel+`"`) {
 		t.Errorf("search: %s, want index %s", c, sel)
 	}
-	callTool(t, h, "search", map[string]any{"query": q(), "index": "skills"})
+	callTool(t, h, "docs_search", map[string]any{"query": q(), "index": "skills"})
 	if c := last("search"); !strings.Contains(c, `"index":"skills"`) {
 		t.Errorf("a named index is left alone: %s", c)
 	}
@@ -231,7 +231,7 @@ func TestAttachIndex_SearchGetAndSurfacing(t *testing.T) {
 	if _, _, changed, _ := h.SetIndex(ctx, ServerDocs, "other:handbook", ScopeSession, nil); !changed {
 		t.Error("unset session")
 	}
-	callTool(t, h, "search", map[string]any{"query": q()})
+	callTool(t, h, "docs_search", map[string]any{"query": q()})
 	if c := last("search"); !strings.Contains(c, `"index":"`+sel+`"`) {
 		t.Errorf("still attached at project: %s", c)
 	}
@@ -239,7 +239,7 @@ func TestAttachIndex_SearchGetAndSurfacing(t *testing.T) {
 	if _, _, changed, _ := h.AttachIndex(ctx, ServerDocs, "other:handbook", ScopeSession, false); !changed {
 		t.Error("off at session")
 	}
-	callTool(t, h, "search", map[string]any{"query": q()})
+	callTool(t, h, "docs_search", map[string]any{"query": q()})
 	if c := last("search"); strings.Contains(c, `"index"`) {
 		t.Errorf("off at the session: %s", c)
 	}
@@ -249,7 +249,7 @@ func TestAttachIndex_SearchGetAndSurfacing(t *testing.T) {
 	if _, _, changed, _ := h.SetIndex(ctx, ServerDocs, "other:handbook", ScopeProject, nil); !changed {
 		t.Error("unset project")
 	}
-	callTool(t, h, "search", map[string]any{"query": q()})
+	callTool(t, h, "docs_search", map[string]any{"query": q()})
 	if c := last("search"); strings.Contains(c, `"index"`) {
 		t.Errorf("detached everywhere: %s", c)
 	}
@@ -337,7 +337,7 @@ func TestSetIndex_OwnIndexOffNarrowsTheSearch(t *testing.T) {
 	if _, _, changed, err := h.SetIndex(ctx, ServerDocs, "memory", ScopeSession, ptr(false)); err != nil || !changed {
 		t.Fatalf("off: %v %v", changed, err)
 	}
-	callTool(t, h, "search", map[string]any{"query": "zzz"})
+	callTool(t, h, "docs_search", map[string]any{"query": "zzz"})
 	mu.Lock()
 	last := calls[len(calls)-1]
 	mu.Unlock()

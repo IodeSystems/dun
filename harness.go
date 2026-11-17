@@ -506,8 +506,12 @@ type Harness struct {
 	// call (serverrestart.go), on the harness that runs it.
 	restarts restartLog
 	// raglit's keys for this session, on the root (raglitauth.go).
-	ragMu                            sync.Mutex
-	ragSession, ragKey, ragBranchKey string
+	ragMu              sync.Mutex
+	ragSession, ragKey string
+	// sessIdx is where folds and recaps put what left the context
+	// (sessionindex_dund.go), on the root; nil without a dund link.
+	sessIdxOnce sync.Once
+	sessIdx     *dundSessionIndex
 	// turnMu is held for the length of a turn. A server command arrives on
 	// another goroutine (the -p reader), and swapping the Session's tools out
 	// from under a running turn is a data race — so a rebuild that cannot take
@@ -832,8 +836,8 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		Rehead: h.rehead,
 		// A fold thinks nothing and is told the session's state and what is
 		// in flight; its summary is sized by agentkit to the fold (fold.go).
-		// What a fold deletes stays searchable in the session's raglit
-		// branch (raglitauth.go); nil without a raglit that has keys.
+		// What a fold deletes stays searchable in dund's sessions index
+		// (sessionindex_dund.go); nothing is put without a dund link.
 		Index: lateSessionIndex{h},
 	}
 	h.foldWire(shaper)
@@ -896,6 +900,13 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// The workspace into dund's code and docs indexes, in the background
 	// (codesearch.go); again at each turn end.
 	h.codeReindex()
+	// Folded history written while dund was down, and forgets it did not
+	// take (sessionindex_dund.go): at start and on resume, in the background.
+	if !h.isChild() {
+		if x := h.sessionIndex(); x != nil {
+			x.startSync()
+		}
+	}
 	// Children of a resumed session are gone as processes but their transcripts
 	// are not. Register them (restarted, in a session that persists; else
 	// stopped) and SAY so — a model that spawned an agent last session must
@@ -983,6 +994,11 @@ func (h *Harness) Close() {
 	h.markClosed()
 	h.settleClose()
 	h.closeAgents()
+	// A sync of folded history in flight gets a moment, so a one-shot run
+	// that folded does not exit before its spans reach dund.
+	if !h.isChild() && h.sessIdx != nil {
+		h.sessIdx.wait(sessionSyncGrace)
+	}
 	// The shell this harness owns. A child's is its own (see childConfig), so
 	// closing it here does not touch the parent's.
 	if hs, ok := h.cfg.Exec.(*HostShell); ok {

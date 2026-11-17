@@ -13,15 +13,15 @@ package dun
 //     is RAGLIT_TOKEN for the session's raglit mcp and for every raglit CLI
 //     dun runs for it, so the model reads with the session's grants: the
 //     project, and its own branches.
-//   - The first fold mints a child key for the session's branch of the
-//     sessions index, <ns>:sessions@<id>, and writes there: what a fold or a
-//     recap took out of the context stays searchable (USER 2026-10-30: the
-//     branch is owned by a child of the session's key, and exists from its
-//     first write).
+//
+// Folded history used to go to the session's raglit branch,
+// <ns>:sessions@<id>; it goes to dund's sessions index now
+// (sessionindex_dund.go). Branches written before that are left to raglit's
+// reaper.
 //
 // Keys live in memory; only the principal token is on disk. A session key
-// expires after 7 days unused and a branch after 7 days unwritten (raglit's
-// reaper), so nothing here cleans up at close. /rag logout revokes the
+// expires after 7 days unused (raglit's reaper), so nothing here cleans up at
+// close. /rag logout revokes the
 // principal, and every key under it with it.
 //
 // A raglit without keys is left as it was: no login, no keys.
@@ -220,7 +220,7 @@ func (h *Harness) raglitLogin(ctx context.Context, s Server) (string, error) {
 	// The next start mints a session key from the new token.
 	r := h.ragRoot()
 	r.ragMu.Lock()
-	r.ragKey, r.ragBranchKey = "", ""
+	r.ragKey = ""
 	r.ragMu.Unlock()
 	return "logged in (dun's raglit token is in " + file + ")", nil
 }
@@ -248,120 +248,7 @@ func (h *Harness) raglitLogout(ctx context.Context, s Server) (string, error) {
 	_ = os.Remove(raglitKeyIDFile())
 	r := h.ragRoot()
 	r.ragMu.Lock()
-	r.ragKey, r.ragBranchKey = "", ""
+	r.ragKey = ""
 	r.ragMu.Unlock()
 	return msg + ")", nil
 }
-
-// sessionIndex is where folds and recaps put what left the context: the
-// session's branch of the sessions index. nil unless the docs server is a
-// keyed raglit with a session key.
-func (h *Harness) sessionIndex() agent.SessionIndex {
-	h.srvMu.Lock()
-	s, ok := h.spec(ServerDocs)
-	h.srvMu.Unlock()
-	if !ok {
-		return nil
-	}
-	command, keyed := raglitKeyed(s)
-	if !keyed {
-		return nil
-	}
-	return &raglitSessionIndex{h: h.ragRoot(), command: command}
-}
-
-// raglitSessionIndex writes to <ns>:sessions@<session> with the branch's
-// own key. Reading needs nothing of it: with the session key, raglit's
-// default read includes the branches that key and its children own
-// (raglit 080a46e), so Search is not used.
-type raglitSessionIndex struct {
-	h       *Harness
-	command string
-}
-
-func (x *raglitSessionIndex) branch() string { return "sessions@" + x.h.raglitSession() }
-
-// branchKey mints the branch's child key from the session key, once.
-func (x *raglitSessionIndex) branchKey(ctx context.Context) (string, error) {
-	r := x.h
-	r.ragMu.Lock()
-	sessionKey, have := r.ragKey, r.ragBranchKey
-	r.ragMu.Unlock()
-	if have != "" {
-		return have, nil
-	}
-	if sessionKey == "" {
-		return "", errors.New("no raglit session key yet (the docs server has not started)")
-	}
-	out, _, err := runRaglit(ctx, x.command, r.cfg.Workspace, []string{"RAGLIT_TOKEN=" + sessionKey}, "",
-		"key", "mint", "--branch", x.branch(), "--label", "dun folds "+x.h.raglitSession())
-	if err != nil {
-		return "", err
-	}
-	key := strings.TrimSpace(out)
-	if key == "" {
-		return "", errors.New("raglit key mint --branch printed no key")
-	}
-	r.ragMu.Lock()
-	r.ragBranchKey = key
-	r.ragMu.Unlock()
-	return key, nil
-}
-
-// Put queues the document and returns: the ingest runs beside the turn, and
-// a failure is logged to the docs server's activity, not the fold's.
-func (x *raglitSessionIndex) Put(ctx context.Context, d agent.SessionDoc) error {
-	go func() {
-		if err := x.put(context.WithoutCancel(ctx), d); err != nil {
-			x.h.noteServer(ServerDocs, "session history: %s", oneLine(err.Error(), 300))
-		}
-	}()
-	return nil
-}
-
-func (x *raglitSessionIndex) put(ctx context.Context, d agent.SessionDoc) error {
-	key, err := x.branchKey(ctx)
-	if err != nil {
-		return err
-	}
-	ident, err := json.Marshal(map[string]string{"name": d.Name, "summary": d.Summary, "kind": d.Kind})
-	if err != nil {
-		return err
-	}
-	f, err := os.CreateTemp("", "dun-identity-*.json")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name())
-	if _, err := f.Write(ident); err != nil {
-		f.Close()
-		return err
-	}
-	f.Close()
-	_, _, err = runRaglit(ctx, x.command, x.h.cfg.Workspace, []string{"RAGLIT_TOKEN=" + key}, d.Body,
-		"ingest", "--index", x.branch(), "--name", d.Key, "--text-file", "-", "--identity", f.Name())
-	return err
-}
-
-func (x *raglitSessionIndex) Search(context.Context, string, int) ([]agent.SessionHit, error) {
-	return nil, errors.New("a session's raglit search reads its branch; search through the docs server")
-}
-
-func (x *raglitSessionIndex) Close(context.Context) error { return nil } // raglit's reaper
-
-// lateSessionIndex is the shaper's index: built with the harness, before its
-// servers are known, so it asks for the session index at each fold.
-type lateSessionIndex struct{ h *Harness }
-
-func (l lateSessionIndex) Put(ctx context.Context, d agent.SessionDoc) error {
-	if x := l.h.sessionIndex(); x != nil {
-		return x.Put(ctx, d)
-	}
-	return nil
-}
-
-func (l lateSessionIndex) Search(context.Context, string, int) ([]agent.SessionHit, error) {
-	return nil, nil
-}
-
-func (l lateSessionIndex) Close(context.Context) error { return nil }

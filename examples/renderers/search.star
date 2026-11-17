@@ -1,7 +1,7 @@
 # Example dun tool-result renderer (Starlark).
 #
 # Drop this in ~/.dun/renderers/ (or $DUN_HOME/renderers/) and it OVERRIDES the
-# built-in "search" renderer. Scripts load at TUI startup, sorted by filename;
+# built-in "docs_search" renderer (raglit's search; dund's is "search"). Scripts load at TUI startup, sorted by filename;
 # the last registration for a tool wins.
 #
 # A renderer is a function ctx -> (preview, full):
@@ -36,4 +36,4 @@ def render(ctx):
     preview = dim("  → %d result(s)" % len(hits))
     return preview, "\n".join(lines)
 
-renderer("search", render)
+renderer("docs_search", render)

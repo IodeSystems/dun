@@ -221,10 +221,11 @@ func TestRemember_ForksWithTheTurnsPrefixAndRunsOnlyMemory(t *testing.T) {
 	}
 }
 
-func TestRemember_NeedsTheDocsIndex(t *testing.T) {
+// No RagLink is DUN_MEMORY=0: /rag on would not help, so it is not named.
+func TestRemember_NeedsTheProjectIndex(t *testing.T) {
 	h := newNoteHarness(t)
-	if _, err := h.Remember(context.Background(), "x"); err == nil || !strings.Contains(err.Error(), "/rag on") {
-		t.Errorf("want a pointer to /rag on, got %v", err)
+	if _, err := h.Remember(context.Background(), "x"); err == nil || !strings.Contains(err.Error(), "DUN_MEMORY=0") {
+		t.Errorf("want a pointer to DUN_MEMORY=0, got %v", err)
 	}
 }
 

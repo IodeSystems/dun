@@ -22,8 +22,8 @@ import (
 //
 // A file that is on is in the system prompt, as the mode says: full (copied),
 // summary (the imports condensed once by the model) or index (the imports in
-// the docs index, surfaced by relevance). A file that is off is out of every
-// request: the block names it, and it is in the rules index whenever the docs
+// raglit's index, surfaced by relevance). A file that is off is out of every
+// request: the block names it, and it is in the rules index whenever the raglit
 // server runs, so it is still found. The mode resolves session, project,
 // global like any kind; with none of them set, the mode /rules saved in the
 // project's rules.json before is used, so nothing set before is lost.
@@ -101,19 +101,19 @@ func (h *Harness) rulesSwitchKind() switchKind {
 		about: map[string]string{
 			RulesFull:    "every file that is on is copied into every request",
 			RulesSummary: "the root files are copied; the imports are replaced by a condensed version the model writes once",
-			RulesIndex:   "the root files are copied; the imports are in the docs index, surfaced when they fit",
+			RulesIndex:   "the root files are copied; the imports are in raglit's index (/rag on), surfaced when they fit",
 		},
 		prepare: func(mode string) error {
 			if mode == RulesSummary {
 				return h.ensureRulesSummary(context.Background(), h.loadRules())
 			}
 			if mode == RulesIndex && !h.hookStarted(HookRulesChanged) {
-				return fmt.Errorf("index mode needs the docs index: /rag on first")
+				return fmt.Errorf("index mode needs raglit's index: /rag on first")
 			}
 			return nil
 		},
 		search: func() []string { return rulesSearch(h.Workspace(), !h.cfg.NoUserRules) },
-		// No note: the status line says whether the docs index is on, and
+		// No note: the status line says whether raglit is on, and
 		// what that changes; the same thing twice was the warning (USER
 		// 2026-10-25).
 		status: func(string) []string {

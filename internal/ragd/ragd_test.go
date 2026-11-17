@@ -158,11 +158,32 @@ func TestGlobalAndProjectAreSeparate(t *testing.T) {
 	}
 }
 
+// A project's sessions index holds every session's folded history; the
+// session tag is what keeps one session's search to its own.
+func TestSessionsIndexByTag(t *testing.T) {
+	h := open(t, t.TempDir())
+	doc := writeDoc(t, "fold-1.md", "# fold-1\n\nThe build failed on the quartz fixture.\n")
+	ingest(t, h, proto.RagIngest{Project: "dun", Index: "sessions", Path: doc, Title: "fix the build",
+		Tags: []string{"session:a", "kind:fold"}})
+	q := proto.RagSearch{Project: "dun", Index: "sessions", Query: "quartz", Mode: "fts",
+		Filter: proto.RagFilter{Tags: []string{"session:a"}}}
+	if r := search(t, h, q); len(r.Hits) != 1 || r.Hits[0].Path != "file://"+doc || r.Hits[0].Title != "fix the build" {
+		t.Fatalf("session:a: %+v, want the fold", r.Hits)
+	}
+	q.Filter.Tags = []string{"session:b"}
+	if r := search(t, h, q); len(r.Hits) != 0 {
+		t.Fatalf("session:b sees %d hits of session:a", len(r.Hits))
+	}
+	if n := (storeSubset{h, []string{"memories", "strategies", "sessions"}}).Names(); !slices.Equal(n, []string{"dun/sessions"}) {
+		t.Fatalf("the memory runner's indexes %v, want dun/sessions", n)
+	}
+}
+
 func TestUnknownIndexIsRefused(t *testing.T) {
 	h := open(t, t.TempDir())
 	doc := writeDoc(t, "x.md", "x\n")
 	for _, c := range []struct{ project, index string }{
-		{"dun", "bogus"}, {"", "code"}, {"", "docs"}, {"global", "memories"}, {"../up", "docs"}, {"Dun", "docs"}, {"dun", ""},
+		{"dun", "bogus"}, {"", "code"}, {"", "docs"}, {"", "sessions"}, {"global", "memories"}, {"../up", "docs"}, {"Dun", "docs"}, {"dun", ""},
 	} {
 		if _, err := Name(c.project, c.index); err == nil {
 			t.Errorf("Name(%q, %q) accepted", c.project, c.index)

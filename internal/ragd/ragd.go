@@ -4,7 +4,7 @@
 // Layout, under root (<DUN_HOME>/dund/rag):
 //
 //	global/{memories,strategies}/
-//	<project-slug>/{code,docs,memories,strategies}/
+//	<project-slug>/{code,docs,memories,strategies,sessions}/
 //	<project-slug>/branches/<worktree>/{code,docs}/   (branch.go)
 //
 // Each index is its own raglit Home (raglit.OpenHome). An index is created on
@@ -46,7 +46,10 @@ import (
 const Global = "global"
 
 var (
-	projectIndexes = []string{"code", "docs", "memories", "strategies"}
+	// sessions holds the history folds and recaps took out of a session's
+	// context (dun's sessionindex_dund.go), each document tagged with its
+	// session: a project's, not global, as the sessions are.
+	projectIndexes = []string{"code", "docs", "memories", "strategies", "sessions"}
 	globalIndexes  = []string{"memories", "strategies"}
 )
 
@@ -73,8 +76,8 @@ const codeRunners = 2
 // Host owns every index and the job runners. It is a raglit.StoreSet.
 //
 // Two runners share one Channels (the per-model admission limits): one over
-// the memories and strategies indexes of every scope, one over code and
-// docs. A bulk code ingest then holds no runner a memory note waits for;
+// the memories, strategies and sessions indexes of every scope, one over
+// code and docs. A bulk code ingest then holds no runner a memory note waits for;
 // model capacity is still shared (raglit ragcore.md, R8 "Priority").
 type Host struct {
 	root    string
@@ -83,7 +86,7 @@ type Host struct {
 	dim     int              // the embed model's probed dimension; 0 when not probed
 	ident   *raglit.Identifier
 	code    raglit.CodeSegmenter // Models.Code of the code+docs runner
-	runners []*raglit.Runner     // memories+strategies, code+docs
+	runners []*raglit.Runner     // memories+strategies+sessions, code+docs
 	logf    func(string, ...any)
 
 	// bg bounds the vector backfills; Close cancels it and waits on fills.
@@ -142,14 +145,16 @@ func Open(root string, r Roles, logf func(string, ...any)) (*Host, error) {
 	}
 	h.openBranches()
 	// The code+docs runner cuts files at declarations and headings
-	// (Models.Code); the memory runner's models have no segmenter.
+	// (Models.Code); the memory runner's models have no segmenter. A folded
+	// span is prose and small, so sessions rides the memory runner: a bulk
+	// code ingest does not hold it up.
 	coded := h.models
 	coded.Code = h.code
 	for _, set := range []struct {
 		indexes []string
 		runners int
 		models  raglit.Models
-	}{{[]string{"memories", "strategies"}, memoryRunners, h.models}, {[]string{"code", "docs"}, codeRunners, coded}} {
+	}{{[]string{"memories", "strategies", "sessions"}, memoryRunners, h.models}, {[]string{"code", "docs"}, codeRunners, coded}} {
 		r := &raglit.Runner{
 			Stores: storeSubset{h, set.indexes},
 			NewWorker: func(s *raglit.Store) (*raglit.Worker, error) {

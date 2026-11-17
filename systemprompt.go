@@ -55,7 +55,7 @@ const (
 
 	systemCode  = "\n- code (poly-lsp-mcp): node_query to find/navigate code by selector (call it with selector \"?\" to learn the grammar), node_read to read a symbol whole, node_edit to edit/rename/refactor. Edits return diagnostics."
 	systemShell = "\n- shell (mcpshell): eval runs sandboxed script code for computation, data wrangling, and jailed file ops."
-	systemDocs  = "\n- docs (raglit): search the document/knowledge index; get_document to read a full hit."
+	systemDocs  = "\n- docs_search (raglit, attached indexes): search the document indexes attached to this workspace; get_document to read a full hit."
 
 	systemDocsNote = "\n\nRelevant docs may be pushed to you as [docs] notes — use them."
 
@@ -97,6 +97,11 @@ const (
 // remains".
 const systemRecap = "\n\nWhile work remains in a turn, recap what is settled (failed attempts, finished " +
 	"exploration, big results you have used): every later request is smaller by it. Not at the end of a turn."
+
+// systemSessionSearch is said with session_search (sessionindex_dund.go): a
+// summary that replaced a span reads as all there is, unless the model is
+// told the detail is still there.
+const systemSessionSearch = "\n\nDetail that a fold or recap summarized out of your context is still searchable with session_search."
 
 // systemExecCap quotes the clip limit, which must be the one number the code
 // enforces. Only with exec: the file it names is read with file_read, and the

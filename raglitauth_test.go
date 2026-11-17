@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/iodesystems/agentkit/agent"
 )
 
 // A raglit with keys (raglit never-open): dun logs in with its own token,
@@ -58,11 +56,6 @@ func fakeRaglit(t *testing.T) (*[]raglitRun, Server) {
 				return "", "", errors.New("401")
 			}
 			return "key-session\n", "", nil
-		case strings.HasPrefix(a, "key mint --branch"):
-			if r.token() != "key-session" {
-				return "", "", errors.New("403")
-			}
-			return "key-branch\n", "", nil
 		}
 		return "", "", nil
 	}
@@ -119,61 +112,6 @@ func TestRaglitAuth_OlderRaglitIsUntouched(t *testing.T) {
 	}
 	if env, err := h.raglitAuth(context.Background(), Server{ID: ServerCode, Command: "raglit"}); env != nil || err != nil {
 		t.Errorf("another server: %v, %v", env, err)
-	}
-}
-
-// A fold goes into the session's branch with the branch's own key, minted
-// once from the session key, with the summary as its identity.
-func TestRaglitSessionIndex_PutsIntoTheBranch(t *testing.T) {
-	runs, docs := fakeRaglit(t)
-	h := testHarness(t)
-	if _, err := h.raglitLogin(context.Background(), docs); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.raglitAuth(context.Background(), docs); err != nil {
-		t.Fatal(err)
-	}
-	x := &raglitSessionIndex{h: h, command: "raglit"}
-	var ident []string
-	runRaglitInner := runRaglit
-	runRaglit = func(ctx context.Context, c, d string, env []string, stdin string, args ...string) (string, string, error) {
-		for i, a := range args {
-			if a == "--identity" {
-				b, _ := os.ReadFile(args[i+1])
-				ident = append(ident, string(b))
-			}
-		}
-		return runRaglitInner(ctx, c, d, env, stdin, args...)
-	}
-	for _, key := range []string{"fold-1", "fold-2"} {
-		if err := x.put(context.Background(), agent.SessionDoc{Key: key, Kind: "fold", Name: "find the port", Summary: "S", Body: "1. [tool_result] 7420\n"}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	var branchMints, ingests []raglitRun
-	for _, r := range *runs {
-		switch a := strings.Join(r.args, " "); {
-		case strings.HasPrefix(a, "key mint --branch sessions@s"):
-			branchMints = append(branchMints, r)
-		case strings.HasPrefix(a, "ingest"):
-			ingests = append(ingests, r)
-		}
-	}
-	if len(branchMints) != 1 {
-		t.Errorf("%d branch mints, want 1", len(branchMints))
-	}
-	if len(ingests) != 2 {
-		t.Fatalf("%d ingests", len(ingests))
-	}
-	in := ingests[0]
-	if a := strings.Join(in.args, " "); !strings.HasPrefix(a, "ingest --index sessions@s --name fold-1 --text-file - --identity ") {
-		t.Errorf("ingest %q", a)
-	}
-	if in.token() != "key-branch" || in.stdin != "1. [tool_result] 7420\n" {
-		t.Errorf("ingest token %q stdin %q", in.token(), in.stdin)
-	}
-	if len(ident) != 2 || !strings.Contains(ident[0], `"summary":"S"`) || !strings.Contains(ident[0], `"kind":"fold"`) {
-		t.Errorf("identity %v", ident)
 	}
 }
 

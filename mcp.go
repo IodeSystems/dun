@@ -79,12 +79,26 @@ func mcpToolDefs(tools []mcpmgr.MCPTool) []llm.ToolDef {
 	return out
 }
 
+// raglitSearchTool is raglit's search tool; docsSearchName is what the model
+// calls it.
+const (
+	raglitSearchTool = "search"
+	docsSearchName   = "docs_search"
+)
+
 // modelToolName is the name the model calls a tool by. The built-in servers'
 // tools keep their own names — prompts, tool docs and policy refer to them.
 // Any other server's are "<server>__<tool>": two servers that both have a
 // "search" would otherwise collide, and the last one listed would silently
 // take every call.
+//
+// raglit's search (its search role, extension.json) is docs_search: `search`
+// is dund's, over this project's code and docs, in every session (USER
+// 2026-11-17: "dund default, raglit add-on").
 func modelToolName(t mcpmgr.MCPTool) string {
+	if t.ServerID == ServerDocs && t.Name == raglitSearchTool {
+		return docsSearchName
+	}
 	if t.ServerID == "" || builtinServer(t.ServerID) {
 		return t.Name
 	}

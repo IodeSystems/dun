@@ -697,7 +697,7 @@ func (s rulesSet) render(mode, summary string) string {
 				"Read a file itself when you need its exact words.\n\n" + strings.TrimSpace(summary))
 		case RulesIndex:
 			b.WriteString("\n\n### Imported files (searchable)\n\nThe rules above import these files. " +
-				"They are not copied here: they are in the docs index, so the search tool finds them, " +
+				"They are not copied here: they are in raglit's index, so docs_search finds them, " +
 				"and a part that matches what you are doing is surfaced to you. Read a file itself when you need it whole.")
 			list()
 		}
@@ -713,7 +713,7 @@ func (s rulesSet) offSection() string {
 	}
 	var b strings.Builder
 	b.WriteString("\n\n### Rule files kept out of these instructions\n\nThe user switched these files off " +
-		"(/rules): they are not copied here. They are in the docs index when it runs, so a part that " +
+		"(/rules): they are not copied here. They are in raglit's index when it runs, so a part that " +
 		"matches what you are doing is surfaced to you; read one when you need it.")
 	for _, d := range s.Off {
 		b.WriteString("\n- " + d.Name)
@@ -961,7 +961,7 @@ func (h *Harness) RulesStatus() string {
 			why = "no summary yet"
 		}
 		if saved == RulesIndex {
-			why = "the docs index is off (/rag on)"
+			why = "raglit is off (/rag on)"
 		}
 		fmt.Fprintf(&b, " (saved: %s, but %s)", saved, why)
 	}
@@ -1056,7 +1056,7 @@ func (h *Harness) SetRulesMode(ctx context.Context, mode string) (string, error)
 			return "", fmt.Errorf("the root rules import no files: there is nothing to index")
 		}
 		if !h.hookStarted(HookRulesChanged) {
-			return "", fmt.Errorf("index mode needs the docs index: /rag on first")
+			return "", fmt.Errorf("index mode needs raglit's index: /rag on first")
 		}
 	case RulesSummary:
 		if err := h.ensureRulesSummary(ctx, set); err != nil {

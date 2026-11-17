@@ -17,7 +17,7 @@ import (
 	"github.com/iodesystems/dun/proto"
 )
 
-// Tool servers the user can turn on and off: /rag (the docs index) and
+// Tool servers the user can turn on and off: /rag (raglit, the add-on index) and
 // /lsp (semantic code). Neither starts on its own — see
 // dun.DefaultServers for why — so this is how a session gets them, and how a
 // machine that wants them every time says so once.
@@ -354,7 +354,7 @@ func heavyHint(st dun.ServerState) string {
 	return hint
 }
 
-// mcpDocsLine syncs a server's documentation into the docs index and says
+// mcpDocsLine syncs a server's documentation into raglit's index and says
 // what happened.
 func mcpDocsLine(ctx context.Context, h *dun.Harness, id string) string {
 	msg, err := h.SyncMCPDocs(ctx, id)

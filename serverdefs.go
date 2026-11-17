@@ -174,7 +174,8 @@ func normalizeProject(name string) string {
 //
 // Only shell autostarts. The other two are opt-in because each costs real
 // startup time and neither is universally wanted: poly-lsp-mcp indexes the
-// repo, and raglit needs the workspace ingested before it answers anything.
+// repo, and raglit is an add-on for indexes beyond the project's own (dund
+// indexes this project's code and docs in every session, codesearch.go).
 // A session that is going to run a couple of shell commands should not pay for
 // either, and — more to the point — a machine missing one of those binaries
 // should still get a working dun. Persist a preference with /rag auto or

@@ -486,8 +486,8 @@ func unaskedSessionIDs(root string, cutoff time.Time) []string {
 
 // pruneTranscript is what an AUTOMATIC cleanup removes: the transcript and the
 // small files derived from it (metadata, stats). Never the sidecars — the
-// transcript /clear set aside, recap and re-heading archives, children — nor
-// the shell's saved output. A prune decides by a rule, not a person, and a
+// transcript /clear set aside, recap and re-heading archives, children, the
+// folded spans (<id>.folds) — nor the shell's saved output. A prune decides by a rule, not a person, and a
 // rule that misjudged (/clear's notices-only transcript, 2026-11-14) must not
 // cost the archives. Only /close (ForgetSession) removes those. It reports
 // whether the transcript was removed.
@@ -508,6 +508,9 @@ func ForgetSession(root, id string) {
 	_ = os.Remove(filepath.Join(RootDir(root), id+".jsonl"))
 	_ = os.Remove(MetaFile(root, id))
 	removeSidecars(root, id)
+	// Its folded history's span files (sessionindex_dund.go); their dund
+	// documents go first, with ForgetSessionFolds.
+	_ = os.RemoveAll(foldsDir(SessionFile(root, id)))
 	// The shell's saved output (Harness.overflowDir), the children's too.
 	over, _ := filepath.Glob(filepath.Join(RootDir(root), "overflow", id+".*"))
 	for _, d := range append(over, filepath.Join(RootDir(root), "overflow", id)) {

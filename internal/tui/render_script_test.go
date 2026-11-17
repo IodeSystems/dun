@@ -58,7 +58,7 @@ func TestScriptRenderer_ExampleParses(t *testing.T) {
 	if err := execRenderScript("../../examples/renderers/search.star"); err != nil {
 		t.Fatalf("shipped example failed to load: %v", err)
 	}
-	pv, _ := renderToolResult(renderCtx{tool: "search", result: `[{"title":"T","score":1.0,"line":"x"}]`})
+	pv, _ := renderToolResult(renderCtx{tool: "docs_search", result: `[{"title":"T","score":1.0,"line":"x"}]`})
 	if !strings.Contains(pv, "1 result") {
 		t.Fatalf("example renderer not active: %q", pv)
 	}

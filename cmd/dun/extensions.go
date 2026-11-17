@@ -292,9 +292,13 @@ func workspaceCmd(h *dun.Harness, slash string, args []string) string {
 		if from == "" {
 			from = "the default"
 		}
-		state := "read into this project's index"
+		if h.DundReadsWorkspace() {
+			return fmt.Sprintf("workspace: dund reads this workspace (always), into the project index; raglit does not read it, and /%s workspace on|off has no effect while dund does (raglit's switch: %s, %s)",
+				slash, map[bool]string{true: "on", false: "off"}[on], from)
+		}
+		state := "read into this project's raglit index"
 		if !on {
-			state = "not read; search reads the project's own indexes and attached ones"
+			state = "not read; docs_search reads the project's own indexes and attached ones"
 		}
 		return fmt.Sprintf("workspace: %s (%s) — /%s workspace on|off [--session|--project|--global]", state, from, slash)
 	}

@@ -1,8 +1,11 @@
 # Retrieval in dund (ragcore)
 
-Status: slices 2, 3 and 5 are built (below, "Built: slice 2", "Built: slice
-3", "Built: slice 5"), and the strategies index (`strategies.md`); the rest
-is a proposal.
+Status: slices 2 to 5 are built (below, "Built: slice 2", "Built: slice
+3", "Built: slice 5"; slice 4's filters are `RagFilter`), and the strategies
+index (`strategies.md`) and the sessions index (below, "Built: sessions
+index"). Slice 1 is raglit's; slice 6 and "Open" are not built.
+dund's index is the project index and raglit an add-on (USER 2026-11-17,
+`decisions.md`, "Retrieval: dund default, raglit add-on").
 Status note: raglit is at v0.9.0; RagHit carries start_line, end_line, symbol,
 content_id. The code and docs indexes are built by `rag_index` (below, "Built:
 code and docs indexes"), with poly-lsp-mcp's segmenter, pure Go, and sessions
@@ -13,7 +16,7 @@ Memory notes are indexed and recalled through dund (slice 5), with or
 without `/rag on`; so are the workspace's code and docs. `/rag on` (raglit, a
 separate server and a bundled extension) is only for raglitd's own corpora:
 attached indexes, include and add-document, the raglit UI. This file is
-why retrieval would move into dund, and what it would need from raglit.
+why retrieval moved into dund, and what it needs from raglit.
 Related: `memory.md` (write side, attestation), `surfacing.md` (the retrieval
 rule), `sessions-and-dund.md` (dund).
 
@@ -466,11 +469,12 @@ wiring), `notify.go` (the groups' kind and pointer).
   by similarity where there is one, then score. Each hit is shown as
   `path:start-end symbol` (the last line inclusive; raglit's span is
   half-open), the path relative to the workspace.
-- **Tools.** No docs server (no `/rag on`): one new tool, `search` (query,
-  path, limit), over the code and docs indexes; it reads nothing whole,
-  `file_read` does. With the docs server: no new tool; raglit's `search`
-  with no `index` gets the code and docs hits after its JSON, and its
-  description says so. One tool named `search` either way.
+- **Tools.** `search` (query, path, limit), over the code and docs
+  indexes, whenever the code link is up; it reads nothing whole,
+  `file_read` does. With the docs server (`/rag on`), raglit's search is
+  `docs_search` and reads only raglit's indexes (USER 2026-11-17; before,
+  raglit's tool was `search` and dund's hits were appended to it). One tool
+  named `search` either way.
 - **Proactive search.** `codeFinder` beside the memory finders and the docs
   server's. Groups `code` and `workspace-docs`, each ranked on its own
   (`surfacing.md`). A DocID is `path:start-end`; a fragment of at most 1500
@@ -489,6 +493,39 @@ wiring), `notify.go` (the groups' kind and pointer).
   through `rag_index`: the call 0.11 to 0.12 s, the hit in `rag_search`
   0.52 to 0.62 s after the edit (3 runs). Through a session, add the rest
   of the turn: the call goes when the turn ends.
+
+## Built: sessions index
+
+USER 2026-11-17. Code: `sessionindex_dund.go`, `internal/ragd/ragd.go`
+(`projectIndexes`), `servers_runtime.go` (the tool).
+
+- **Index.** `<project>/sessions`, a project's only (global refuses it), on
+  the memory runner (prose, small; a bulk code ingest does not hold it up).
+- **Put.** agentkit's `SessionIndex.Put`, after a fold (the Shaper) or a
+  recap (`recap.go`): the span is written to `<session>.folds/<key>.md`
+  beside the root session's log (a sub-agent's go under its root's), then
+  `rag_sync` of every span file in the directory, each tagged
+  `session:<id>` and `kind:<fold|recap>`, titled by the span's first
+  request. Current files cost a hash; a file written while dund was down is
+  queued at the next Put. A failure is a notice, once until a success.
+- **Search.** `session_search` (agentkit `SessionSearchTool`): `rag_search`
+  of the sessions index filtered to `session:<id>`. Offered with a dund link
+  (`Config.Rag`) and a session log; one system prompt line names it.
+- **Retention.** `/close` removes the documents (`ForgetSessionFolds`,
+  `rag_sync` gone) and then the files (`ForgetSession`); a prune removes the
+  documents only (`decisions.md`).
+- **Not done.** No removal of documents a session left when dund was down at
+  its `/close`; `/clear` does not split the history (same id).
+
+## /rag
+
+The first row is dund's project index: `project index (dund) · up | dund
+down | off (DUN_MEMORY=0) · code, docs, memories, strategies, sessions`. It
+has no switch. Below it, raglit's provider row (`rag add-on (docs_search) ·
+running | starting… | stopped | off · N indexes`, `ServerStateWord`) and
+raglit's indexes. With the code link up, the status line says "dund reads
+this workspace (always)", and `/rag workspace` says its switch has no
+effect.
 
 ## Built: worktree branches
 
@@ -591,7 +628,8 @@ USER 2026-11-09: worktrees are raglit branches. Code: `internal/ragd/branch.go`,
   Home per index) and is the single writer; a dund index is not reachable by raglit
   clients.
 - **Scope: decided.** dund keeps exactly four indexes: **code, documentation,
-  memories, strategies**. Strategies is new: the learned, reusable approaches
+  memories, strategies**; a fifth, **sessions** (folded history), was added
+  USER 2026-11-17. Strategies is new: the learned, reusable approaches
   from the learning-phase design (churn → resolved candidate → lesson), kept
   apart from memories so a lesson's retrieval is not crowded by project facts.
   The user's constraints share it, marked by `kind` (`strategies.md`). The

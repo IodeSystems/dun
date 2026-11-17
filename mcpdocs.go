@@ -15,7 +15,7 @@ import (
 	"github.com/iodesystems/dun/internal/proc"
 )
 
-// An MCP server's documentation, copied into the docs index.
+// An MCP server's documentation, copied into raglit's index.
 //
 // A server may serve resources (resources/list, resources/read): its manual,
 // API reference, runbooks. Read live, each one would cost the model a tool
@@ -111,7 +111,7 @@ func raglitDocsSink(docs Server, env []string) *mcpDocsSink {
 // answer to /mcp refresh, and nothing to say after /mcp add.
 const NoResources = "serves no resources — nothing to index"
 
-// SyncMCPDocs copies server id's text resources into the docs index and
+// SyncMCPDocs copies server id's text resources into raglit's index and
 // returns a line for the user.
 func (h *Harness) SyncMCPDocs(ctx context.Context, id string) (string, error) {
 	h.srvMu.Lock()
@@ -137,7 +137,7 @@ func (h *Harness) SyncMCPDocs(ctx context.Context, id string) (string, error) {
 		}
 	}
 	if sink == nil {
-		return "", fmt.Errorf("the docs index is raglit, and none is configured")
+		return "", fmt.Errorf("MCP docs go to raglit's index, and no raglit is configured")
 	}
 	return syncMCPDocs(ctx, h.mgr, id, mcpDocsDir(id), sink)
 }

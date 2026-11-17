@@ -722,6 +722,41 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   (sender, target). The engine unsets `DUN_DUND` at start so a dun run inside
   exec does not inherit the link. Children get no peer tools.
 
+## Retrieval: dund default, raglit add-on (USER 2026-11-17)
+
+- **dund's index is the project index; raglit is an add-on.** dund
+  (`internal/ragd`, raglit's engine as a Go module, reached through
+  `RagLink`, `raglink.go`) holds a project's code, docs, memories,
+  strategies and sessions indexes in every session, with no `/rag on`.
+  raglit (`/rag on`) is for its own document indexes: attached ones,
+  include, its UI. Reason: a feature that needs a second daemon, a login and
+  `/rag on` is off in most sessions; dund already runs.
+- **One `search`.** `search` is dund's (code and docs, `codesearch.go`).
+  raglit's search tool is `docs_search` for the model (`modelToolName`,
+  `mcp.go`); its server-side name is still `search`. Before, raglit's
+  `search` took the name and dund's hits were appended to its answer
+  (`withCodeInDocsSearch`, removed): two indexes behind one name, and a
+  session's search changed with `/rag on`. The "model-facing names left
+  unchanged" rule above holds for every other tool.
+- **Folded history goes to dund's `sessions` index**
+  (`sessionindex_dund.go`). Each span a fold or a recap removes is written to
+  `<session>.folds/<key>.md` beside the log, then synced into the project's
+  `sessions` index, tagged `session:<id>` and `kind:<fold|recap>`; the model
+  reads it with agentkit's `session_search`, filtered to its session's tag.
+  The file is the record and the only copy (a fold rewrites the log), so it
+  is written before the index is asked, and each Put syncs the whole
+  directory: a span written while dund was down is indexed at the next.
+  A failure (dund down, a dund from before `sessions`) is said once as a
+  notice, never dropped. Before, folds went to the session's raglit branch
+  (`<ns>:sessions@<id>`) only with a keyed raglit and a login, so most
+  sessions had none. Branches written then are left to raglit's reaper; no
+  dual write.
+- **Retention follows the log.** `/close` (`ForgetSession`) removes the span
+  files, after `ForgetSessionFolds` removes their documents. A prune
+  (`pruneTranscript`) removes only the documents: it keeps a session's
+  archives, and the span files are one (the 2026-11-14 rule). `/clear` keeps
+  the session id, so the spans of the cleared log stay with the session.
+
 ## Release updates
 
 - **para shares dun's signing key (Carl, 2026-11-10); manifests are bound to

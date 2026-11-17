@@ -3,11 +3,14 @@ package dun
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/iodesystems/dun/proto"
 )
 
 // The "indexes" switch kind (USER 2026-10-27, /rag 2026-10-28): /rag is the
@@ -16,7 +19,8 @@ import (
 // the nearest scope that says decides (attach.go). Unset everywhere, this
 // project's own indexes are on and every other one off. The list is
 // raglit's `index --list --json`; indexes a scope names that it does not
-// list are shown too.
+// list are shown too. Above raglit's rows is dund's project index
+// (projectIndexRow), which has no switch: it is in every session.
 
 const indexesKind = "indexes"
 
@@ -72,6 +76,9 @@ func (h *Harness) indexesSwitchKind() switchKind {
 
 func (h *Harness) indexesView() SwitchView {
 	v := SwitchView{Kind: indexesKind, Slash: "rag", Modes: map[string]string{}}
+	// dund's project index first (USER 2026-11-17: "dund default, raglit
+	// add-on"): always on, so it has no switches; raglit is the add-on below.
+	v.Items = append(v.Items, h.projectIndexRow())
 	s, err := h.knownServer(ServerDocs)
 	if err != nil {
 		v.Note = err.Error()
@@ -84,6 +91,7 @@ func (h *Harness) indexesView() SwitchView {
 		On: s.Autostart, From: s.Scopes.OnFrom,
 		Global: onOffWord(s.Scopes.GlobalOn(s.Via)), Project: tri(s.Scopes.Project), Session: tri(s.Scopes.Session)}
 	v.Items = append(v.Items, provider)
+	pi := len(v.Items) - 1
 	scopes := map[string]map[string]string{}
 	mark := func(list []string, scope, val string) {
 		for _, n := range list {
@@ -162,28 +170,66 @@ func (h *Harness) indexesView() SwitchView {
 			add(SwitchItem{Name: n, Source: "switched", Description: "not in raglit's list"})
 		}
 	}
-	state := "off"
-	switch {
-	case h.mgr.ServerStarted(ServerDocs):
-		state = "running"
-	case s.Autostart:
-		state = "on, not running"
+	state := ServerStateWord(ServerState{Auto: s.Autostart})
+	for _, st := range h.Servers() {
+		if st.ID == ServerDocs {
+			state = ServerStateWord(st)
+		}
 	}
-	v.Items[0].Source = fmt.Sprintf("rag provider · %s · %d indexes", state, len(v.Items)-1)
+	v.Items[pi].Source = fmt.Sprintf("rag add-on (docs_search) · %s · %d indexes", state, len(v.Items)-1-pi)
 	on, from := h.WorkspaceIndexed()
 	if from == "" {
 		from = "the default"
 	}
-	ws := "this workspace is read into " + own + "'s index (" + from + ") — /rag workspace off to stop"
-	if !on {
+	ws := "this workspace is read into raglit's " + own + " index (" + from + ") — /rag workspace off to stop"
+	switch {
+	case h.DundReadsWorkspace():
+		ws = "dund reads this workspace (always), into the project index; raglit reads only the indexes switched on"
+	case !on:
 		ws = "this workspace is not indexed (" + from + ") — search reads the indexes switched on"
 	}
 	v.Status = []string{ws, "the nearest scope that switches an index decides; unset, this project's are on · ctrl+g/p/s on → off → unset"}
 	return v
 }
 
+// projectIndexName is the /rag row of dund's project index.
+const projectIndexName = "dund"
+
+// dundIndexes are a project's indexes in dund (ragd's projectIndexes).
+var dundIndexes = []string{"code", "docs", "memories", "strategies", "sessions"}
+
+// projectIndexRow is dund's project index, with its link's state: dund
+// answers a search now (up), does not (dund down), or the session has no
+// link (DUN_MEMORY=0, off).
+func (h *Harness) projectIndexRow() SwitchState {
+	state := "off (DUN_MEMORY=0)"
+	if h.cfg.Rag != nil {
+		state = "up"
+		if !h.ragUp() {
+			state = "dund down"
+		}
+	}
+	return SwitchState{SwitchItem: SwitchItem{Name: projectIndexName,
+		Description: "project index (dund): this project's code and docs, notes, strategies and constraints, and folded session history; always on",
+		Source:      "project index (dund) · " + state + " · " + strings.Join(dundIndexes, ", "),
+		Detail:      "search reads code and docs; session_search reads this session's folded history; the memory tool keeps the notes"},
+		On: h.cfg.Rag != nil}
+}
+
+// ragUp is whether dund answers a search now: one word, by text, one hit.
+func (h *Harness) ragUp() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := h.cfg.Rag.Search(ctx, proto.RagSearch{Project: raglitProject(h.cfg.Workspace), Index: memoryIndex,
+		Query: "dun", Limit: 1, Mode: "fts"})
+	return !errors.Is(err, ErrRagDown) && ctx.Err() == nil
+}
+
 // setIndexAttach is a switch on an index at scope: on, off, or unset (nil).
 func (h *Harness) setIndexAttach(name, scope string, on *bool) (string, error) {
+	if name == projectIndexName {
+		return "", errors.New("the project index (dund) is always on: it has no switch (DUN_MEMORY=0 runs a session without it)")
+	}
 	if name == ServerDocs { // the provider row: /mcp's switch on raglit
 		return h.SetServerOn(context.Background(), ServerDocs, scope, on)
 	}

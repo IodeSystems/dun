@@ -23,6 +23,11 @@ func (h *Harness) WorkspaceIndexed() (bool, string) {
 	return on, from
 }
 
+// DundReadsWorkspace is whether dund indexes this workspace into the
+// project index (codesearch.go): then raglit never reads it, and the
+// workspace switch has no effect.
+func (h *Harness) DundReadsWorkspace() bool { return h.codeLink() != nil }
+
 // SetWorkspaceIndexed sets it at scope; the answer is the message shown.
 func (h *Harness) SetWorkspaceIndexed(on bool, scope string) (string, error) {
 	if h.cfg.NoDir {
@@ -40,6 +45,9 @@ func (h *Harness) SetWorkspaceIndexed(on bool, scope string) (string, error) {
 	msg := fmt.Sprintf("workspace indexing %s for %s", onOffWord(on), scopeWords(scope))
 	if now != on {
 		msg += fmt.Sprintf(" — but %s still says %s", from, onOffWord(now))
+	}
+	if h.DundReadsWorkspace() {
+		msg += " — no effect now: dund reads this workspace (always), and raglit does not"
 	}
 	return msg, nil
 }

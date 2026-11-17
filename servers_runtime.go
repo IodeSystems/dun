@@ -720,22 +720,10 @@ func (h *Harness) rebuildTools() {
 	describeAttached(toolDefs, searchers, h.specs, attached)
 	h.srvMu.Unlock()
 	dispatch = withAttached(dispatch, attachedTools(searchers, tools, attached))
-	// Code and docs search through dund (codesearch.go). With a docs server
-	// (/rag on), its search names no index → this project's code and docs
-	// too; outside withAttached, so the call is read as the model made it.
+	// Code and docs search through dund (codesearch.go): the `search` tool,
+	// below. The docs server's search is docs_search (modelToolName), so the
+	// two never share a name.
 	code := h.codeLink()
-	docsSearch := ""
-	if code != nil {
-		for _, e := range searchers {
-			if e.ID == ServerDocs {
-				docsSearch = modelToolName(mcpmgr.MCPTool{ServerID: e.ID, Name: e.Roles.Search.Tool})
-			}
-		}
-		if docsSearch != "" {
-			describeCodeInDocsSearch(toolDefs, docsSearch)
-			dispatch = withCodeInDocsSearch(dispatch, h, code, docsSearch)
-		}
-	}
 	mcpDefs := len(toolDefs) // after these: dun's own (builtins.go)
 	if cfg.Exec != nil {
 		toolDefs = append(toolDefs, execToolDef(!h.isChild() && !cfg.NonInteractive && !cfg.Worker))
@@ -860,15 +848,20 @@ func (h *Harness) rebuildTools() {
 		}
 		dispatch = withItemRead(dispatch, h)
 	}
-	// search: the code and docs indexes, when no docs server gives a search
-	// tool of its own (that one searches them too, above).
+	// search: the code and docs indexes, whenever the code link is up.
 	var codeF *codeFinder
 	if code != nil {
 		codeF = &codeFinder{l: code, root: func() string { return filepath.Clean(h.cfg.Workspace) }}
-		if !slices.ContainsFunc(toolDefs, func(d llm.ToolDef) bool { return d.Function.Name == "search" }) {
-			toolDefs = append(toolDefs, searchToolDef())
-			dispatch = withCodeSearch(dispatch, h, code, report)
-		}
+		toolDefs = append(toolDefs, searchToolDef())
+		dispatch = withCodeSearch(dispatch, h, code, report)
+	}
+	// session_search: what folds and recaps took out of the context, in
+	// dund's sessions index (sessionindex_dund.go). A child searches its
+	// root's session.
+	if h.sessionIndex() != nil {
+		td, run := agent.SessionSearchTool(lateSessionIndex{h})
+		toolDefs = append(toolDefs, td)
+		dispatch = withSessionSearch(dispatch, run, report)
 	}
 	// Skills into the index, off the turn lock: raglit takes a while.
 	if e, ok := hookExt(exts, HookSkillsChanged, tools); ok {
@@ -946,6 +939,9 @@ func (h *Harness) rebuildTools() {
 	}
 	if slices.ContainsFunc(toolDefs, func(d llm.ToolDef) bool { return d.Function.Name == "recap" }) {
 		sys += systemRecap
+	}
+	if slices.ContainsFunc(toolDefs, func(d llm.ToolDef) bool { return d.Function.Name == agent.SessionSearchName }) {
+		sys += systemSessionSearch
 	}
 	// agentkit's own {OUTPUT} note is off (OmitSlotInstructions); this is
 	// the shorter one, on the same terms: only when there are tools. Also
@@ -1038,6 +1034,9 @@ func (h *Harness) rebuildTools() {
 			group = sf.group(searchers[0].ID, inner)
 			src.index, src.attached, src.meta, src.meaning = sf.idx.get, sf.attached, sf.idx.metaOf, sf.meaning
 			finder, fetch = sf.finder, sf.fetch
+			if r := searchers[0].Roles.Search; r != nil && r.Get != "" {
+				src.reader = modelToolName(mcpmgr.MCPTool{ServerID: searchers[0].ID, Name: r.Get})
+			}
 		}
 		if memF != nil {
 			finder, fetch = withMemFinder(memF, finder, fetch, src)

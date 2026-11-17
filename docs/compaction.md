@@ -51,7 +51,9 @@ without a fold) only the bounding rungs ever run.
   60% of target (`shaper.go:794-801`). The summarizer is told the open plan
   and the work in flight (`fold.go:31-41`); after the fold an aside lists
   what is still running (`fold.go:79-125`); the folded span goes to the
-  session index (`harness.go:828`). The first user message is pinned for
+  session index: a file `<session>.folds/<key>.md` beside the log, synced
+  into dund's `sessions` index, read back with `session_search`
+  (`sessionindex_dund.go`, `rag.md` "Built: sessions index"). The first user message is pinned for
   children only (`harness.go:833`).
   **The current ask (2026-11-17).** On a long tool-heavy turn the pristine
   tail fills with tool entries, so the turn's user message lands in the older

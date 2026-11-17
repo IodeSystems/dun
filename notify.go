@@ -125,6 +125,10 @@ type hitSources struct {
 	// meaning: whether the hit's index searches by meaning (has
 	// embeddings); known is false when the index list does not name it.
 	meaning func(docID string) (meaning, known bool)
+	// reader is the model's name of the tool that reads a search
+	// extension's document by its id (raglit's get_document,
+	// modelToolName); "" without one.
+	reader string
 }
 
 // hitMeta is what raglit says about a hit besides its score (e66a3df on):
@@ -653,10 +657,14 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 					fmt.Fprintf(&b, "%d possibly-relevant document(s); surfacing 1 (%s):\n", w.n, info.Why())
 					fmt.Fprintf(&b, "- %q (id=%s) — %s\n", h.Title, h.DocID, h.Line)
 					fmt.Fprintf(&b, "Source: %s\n", info.Source())
-					if g == groupCode || g == groupDocs {
+					switch {
+					case g == groupCode || g == groupDocs, g == groupMemory, g == groupMemoryGlobal,
+						g == groupStrategy, g == groupStrategyGlobal, src == nil || src.reader == "":
+						// dund's hits: the id is a file (file_read takes a
+						// note's path too, withItemRead).
 						b.WriteString("Read it with file_read if it helps.")
-					} else {
-						b.WriteString("Call the search tool with an id to read a document if it helps.")
+					default:
+						fmt.Fprintf(&b, "Read it with %s path=<its id> if it helps.", src.reader)
 					}
 				}
 			}
