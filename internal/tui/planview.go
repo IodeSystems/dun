@@ -431,7 +431,7 @@ func (m tuiModel) notePlan(ev evMsg) tuiModel {
 // planScreen is /plan: its status over the tree.
 func planScreen() *paneScreen {
 	return &paneScreen{
-		panes: []screenPane{{body: viewStatusPane{}, fixed: true}, {body: planListPane{}, weight: 3, min: 4}},
+		panes: []screenPane{{body: viewStatusPane{}, fixed: true}, {name: "plan", body: planListPane{}, weight: 3, min: 4}},
 		focus: 1,
 		valid: func(m *tuiModel) bool { return m.planPaging() != nil },
 	}

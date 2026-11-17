@@ -13,8 +13,7 @@ import (
 // A pushed screen (docs/panes.md): panes stacked between the head row and
 // the status row, in place of the conversation, the input and the activity
 // strip, which go away while it is up (owner, 2026-10-25). Tab moves the
-// focus between its panes; a divider between two panes leans toward the
-// focused one; the status row is the focused pane's keys; esc in a pane that
+// focus between its panes; a divider names the panes, the focused one marked; the status row is the focused pane's keys; esc in a pane that
 // does not take it pops the screen.
 //
 // /mcp is the first: the server table on top, the selected server's
@@ -32,8 +31,9 @@ type paneBody interface {
 
 type screenPane struct {
 	body   paneBody
-	weight int // its share of the height
-	min    int // rows it keeps however small the terminal
+	name   string // on the dividers; empty: unnamed
+	weight int    // its share of the height
+	min    int    // rows it keeps however small the terminal
 	// fixed: its height is its content's (statusLines), up to half the
 	// screen, before the others share the rest. A fixed pane takes no focus.
 	fixed bool
@@ -147,23 +147,32 @@ func (s *paneScreen) view(m *tuiModel, w, rows int) string {
 	out := make([]string, 0, 2*len(s.panes))
 	for i, p := range s.panes {
 		if i > 0 {
-			out = append(out, paneDivider(w, i-1, s.focus))
+			out = append(out, s.paneDivider(w))
 		}
 		out = append(out, p.body.view(m, w, hs[i]))
 	}
 	return strings.Join(out, "\n")
 }
 
-// paneDivider is the divider below pane i: it leans toward the focused pane
-// when that is one of the two it divides, and is dim between two others.
-func paneDivider(w, i, focus int) string {
-	switch focus {
-	case i:
-		return divider(w, true)
-	case i + 1:
-		return divider(w, false)
+// paneDivider is the divider between panes: the same centered line as the
+// base screen's, naming the screen's panes with the focused one marked.
+func (s *paneScreen) paneDivider(w int) string {
+	d, _ := renderDivider(w, s.labels(), "")
+	return d
+}
+
+// labels names the screen's focusable panes for its dividers. The short name
+// is the first three letters.
+func (s *paneScreen) labels() []divLabel {
+	var out []divLabel
+	for i, p := range s.panes {
+		if p.fixed || p.name == "" {
+			continue
+		}
+		r := []rune(p.name)
+		out = append(out, divLabel{p.name, string(r[:min(3, len(r))]), i, i == s.focus})
 	}
-	return StDim.Render(strings.Repeat("▁", max(2, w)))
+	return out
 }
 
 // focusables is the panes tab visits, in order.
@@ -252,8 +261,8 @@ func (m *tuiModel) popScreen() {
 // mcpScreen is the server table over the selected server's log.
 func mcpScreen() *paneScreen {
 	return &paneScreen{
-		panes: []screenPane{{body: viewStatusPane{}, fixed: true}, {body: tablePane{}, weight: 3, min: 4},
-			{body: &serverLogPane{follow: true}, weight: 2, min: 3}},
+		panes: []screenPane{{body: viewStatusPane{}, fixed: true}, {name: "servers", body: tablePane{}, weight: 3, min: 4},
+			{name: "log", body: &serverLogPane{follow: true}, weight: 2, min: 3}},
 		focus: 1,
 		valid: func(m *tuiModel) bool { return m.serversPaging() != nil },
 	}
@@ -387,7 +396,7 @@ func (p *serverLogPane) hint(*tuiModel) string {
 // list saying where the kind looks (/rules: its files).
 func switchScreen(search bool) *paneScreen {
 	s := &paneScreen{
-		panes: []screenPane{{body: viewStatusPane{}, fixed: true}, {body: switchListPane{}, weight: 1, min: 3}},
+		panes: []screenPane{{body: viewStatusPane{}, fixed: true}, {name: "list", body: switchListPane{}, weight: 1, min: 3}},
 		focus: 1,
 		valid: func(m *tuiModel) bool { return m.switchesPaging() != nil },
 	}

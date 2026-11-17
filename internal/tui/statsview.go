@@ -94,7 +94,7 @@ func (m *tuiModel) syncStats() {
 
 func statsScreen() *paneScreen {
 	return &paneScreen{
-		panes: []screenPane{{body: viewStatusPane{}, fixed: true}, {body: statsPane{}, weight: 1, min: 3}},
+		panes: []screenPane{{body: viewStatusPane{}, fixed: true}, {name: "stats", body: statsPane{}, weight: 1, min: 3}},
 		focus: 1,
 		valid: func(m *tuiModel) bool { return m.statsPaging() != nil },
 	}

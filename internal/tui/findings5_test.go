@@ -3,7 +3,6 @@ package tui
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -125,33 +124,6 @@ func TestToolRow5_OnlyTheMarkIsGreen(t *testing.T) {
 	}
 	if strings.Count(row, "38;5;42m") != 1 {
 		t.Errorf("green more than once: %q", row)
-	}
-}
-
-// At 180 columns the divider splits at the middle of the 100-column
-// content, not at the terminal's middle (inside the text's column).
-func TestDivider5_SplitsAtTheContentMiddle(t *testing.T) {
-	// runs is the width of each styled run: the dim and the accent halves.
-	runs := func(d string) []int {
-		var n []int
-		for _, r := range strings.Split(strings.TrimSuffix(d, "\x1b[m"), "\x1b[m") {
-			n = append(n, ansi.StringWidth(r))
-		}
-		return n
-	}
-	for _, tc := range []struct {
-		w    int
-		up   bool
-		want []int
-	}{
-		{180, false, []int{50, 130}}, // dim to 50, accent
-		{180, true, []int{50, 130}},  // accent to 50, dim
-		{49, false, []int{24, 25}},
-	} {
-		d := divider(tc.w, tc.up)
-		if got := runs(d); !slices.Equal(got, tc.want) || ansi.StringWidth(d) != tc.w {
-			t.Errorf("%d up=%v: runs %v, want %v", tc.w, tc.up, got, tc.want)
-		}
 	}
 }
 
