@@ -337,10 +337,10 @@ func routeSlash(line string, r slashRoutes) {
 		case (arg(0) == dun.RulesFull || arg(0) == dun.RulesSummary || arg(0) == dun.RulesIndex) &&
 			(len(args) == 1 || len(args) == 2 && strings.HasPrefix(args[1], "--")):
 			r.control(name, strings.Join(append([]string{arg(0)}, args[1:]...), " "))
-		case (arg(0) == "on" || arg(0) == "off" || arg(0) == "unset" || arg(0) == "mode") && len(args) >= 2:
+		case (arg(0) == "on" || arg(0) == "off" || arg(0) == "unset" || arg(0) == "mode" || arg(0) == "add" || arg(0) == "remove") && len(args) >= 2:
 			r.control(name, strings.Join(append([]string{arg(0)}, args[1:]...), " "))
 		default:
-			r.reply("usage: /rules [full|summary|index [--scope] | on|off|unset <file|glob> [--global|--project|--session] | mode <mode|unset> [--scope]]")
+			r.reply("usage: /rules [full|summary|index [--scope] | on|off|unset <file|glob> [--global|--project|--session] | add|remove <path> [--scope] | mode <mode|unset> [--scope]]")
 		}
 	case "memories":
 		// The rest of the line as typed: a detail keeps its case.

@@ -2,7 +2,15 @@ package dun
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+
+	"github.com/iodesystems/dun/internal/numfmt"
 )
 
 // The rules files: the user's ~/AGENTS.md, ~/CLAUDE.md and
@@ -35,6 +43,7 @@ func (h *Harness) rulesSwitchKind() switchKind {
 		modes: []string{RulesFull, RulesSummary, RulesIndex},
 		items: func() []SwitchItem {
 			set := h.loadRules()
+			on := h.switchRules(set)
 			var out []SwitchItem
 			add := func(d rulesDoc, desc string) {
 				it := SwitchItem{Name: d.Name, Description: desc, Source: "root", Parent: d.From}
@@ -47,11 +56,18 @@ func (h *Harness) rulesSwitchKind() switchKind {
 				if d.From != "" {
 					it.Source = "import"
 				}
+				if d.Added != "" {
+					it.Source = "added · " + d.Added
+				}
 				if d.Note != "" {
 					it.Detail = d.Note
 					if d.Text == "" {
-						it.Source = "import · " + d.Note
+						it.Source += " · " + d.Note
 					}
+				}
+				if n := d.includesNote(on); n != "" {
+					it.Source += " · " + n
+					it.Detail = strings.TrimSpace(it.Detail + "\n" + n)
 				}
 				out = append(out, it)
 			}
@@ -72,6 +88,9 @@ func (h *Harness) rulesSwitchKind() switchKind {
 				desc := "the project's rules (a root file: off takes the project's own rules out of every request)"
 				if d.User {
 					desc = "the user's rules, read in every project (off at global scope takes them out of every project's requests)"
+				}
+				if d.Added != "" {
+					desc = "a file /rules add made a root file for " + scopeWords(d.Added) + " (/rules remove " + d.Name + " --" + d.Added + " takes it back)"
 				}
 				add(d, desc)
 				walk(d)
@@ -135,4 +154,152 @@ func (h *Harness) contextFileMode(saved string) string {
 		return m
 	}
 	return saved
+}
+
+// /rules add <path> [--scope] (USER 2026-11-17): a file that is not a root
+// file by name, nor imported, made one at a scope, kept in that scope's
+// context-files.json "add". It is a root file like the others: in the block,
+// a row in /rules, switched by its name. A path is kept relative to the
+// workspace when inside it, else absolute, at session scope; absolute at
+// project and global scope, whose file is read from other workspaces (a
+// project's worktrees and subdirectories, every project). A relative path is
+// the workspace's, ~/ is home. A file that is not there is a row with a
+// note. DUN_USER_RULES=0 leaves the global adds out, with the user files.
+
+// rulesAddPath is p as /rules add takes it: absolute, and as kept.
+func (h *Harness) rulesAddPath(p string) (abs, key string, err error) {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return "", "", fmt.Errorf("which file? /rules add <path>")
+	}
+	ws := h.Workspace()
+	switch {
+	case p == "~" || strings.HasPrefix(p, "~/"):
+		home, _ := userHomeDir()
+		if home == "" {
+			return "", "", fmt.Errorf("%s: no home directory", p)
+		}
+		abs = filepath.Join(home, strings.TrimPrefix(p, "~"))
+	case filepath.IsAbs(p):
+		abs = filepath.Clean(p)
+	case ws == "":
+		return "", "", fmt.Errorf("%s: no workspace to be relative to", p)
+	default:
+		abs = filepath.Join(ws, p)
+	}
+	key = abs
+	if ws != "" {
+		if r, err := filepath.Rel(ws, abs); err == nil && r != "." && !outside(r) {
+			key = r
+		}
+	}
+	return abs, key, nil
+}
+
+// rulesAdds is the files /rules add made root files, the session's first;
+// a file added at two scopes is the nearer one's.
+func (h *Harness) rulesAdds() []rulesAdd {
+	sw := h.switchSet(rulesKind)
+	var out []rulesAdd
+	seen := map[string]bool{}
+	for _, sc := range switchScopes {
+		for _, p := range sw[sc].Add {
+			abs, _, err := h.rulesAddPath(p)
+			if err != nil || seen[abs] {
+				continue
+			}
+			seen[abs] = true
+			out = append(out, rulesAdd{Path: abs, Scope: sc})
+		}
+	}
+	return out
+}
+
+// listsPath says keys (a scope's "add") name the file whose real path is
+// real.
+func (h *Harness) listsPath(keys []string, real string) bool {
+	return slices.ContainsFunc(keys, func(k string) bool { return h.addKeyIs(k, real) })
+}
+
+// addKeyIs says key names the file whose real path is real.
+func (h *Harness) addKeyIs(key, real string) bool {
+	a, _, err := h.rulesAddPath(key)
+	return err == nil && realPath(a) == real
+}
+
+// AddRule makes p a root file at scope and returns what to say. A file
+// already in the block (a root file, or imported) is not added again.
+func (h *Harness) AddRule(p, scope string) (string, error) {
+	abs, key, err := h.rulesAddPath(p)
+	if err != nil {
+		return "", err
+	}
+	if h.switchFile(rulesKind, scope) == "" {
+		return "", fmt.Errorf("there is no %s scope here", scope)
+	}
+	if scope != ScopeSession {
+		// Read from other workspaces: relative would name a different file in each.
+		key = abs
+	}
+	set := h.loadRules()
+	real := realPath(abs)
+	for _, d := range append(slices.Clone(set.Roots), set.Imports...) {
+		// A global add is read in every project: only the user files (and
+		// what they import) are in every project's block too.
+		if realPath(d.Path) != real || d.Added != "" || scope == ScopeGlobal && !d.User {
+			continue
+		}
+		how := "a root file"
+		if d.From != "" {
+			how = "imported by " + d.From
+		}
+		return fmt.Sprintf("rules: %s is already loaded (%s): nothing to add", d.Name, how), nil
+	}
+	had := false
+	if err := h.editSwitchFile(rulesKind, scope, func(f *SwitchFile) {
+		if had = h.listsPath(f.Add, real); !had {
+			f.Add = append(f.Add, key)
+		}
+	}); err != nil {
+		return "", err
+	}
+	if had {
+		return fmt.Sprintf("rules: %s is already added for %s", key, scopeWords(scope)), nil
+	}
+	h.applyTools()
+	msg := fmt.Sprintf("rules: %s added for %s", key, scopeWords(scope))
+	st, err := os.Stat(abs)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		msg += " · it is not there: listed as not found until it is"
+	case err != nil:
+		msg += " · not readable: " + err.Error()
+	default:
+		msg += " (" + numfmt.HumanBytes(st.Size()) + ")"
+	}
+	return msg + " · /rules remove " + key + " --" + scope + " takes it back", nil
+}
+
+// RemoveRule takes back a file /rules add made a root file at scope: p is
+// its path or the name /rules shows.
+func (h *Harness) RemoveRule(p, scope string) (string, error) {
+	abs, key, err := h.rulesAddPath(p)
+	if err != nil {
+		return "", err
+	}
+	if h.switchFile(rulesKind, scope) == "" {
+		return "", fmt.Errorf("there is no %s scope here", scope)
+	}
+	real, had := realPath(abs), false
+	if err := h.editSwitchFile(rulesKind, scope, func(f *SwitchFile) {
+		had = h.listsPath(f.Add, real)
+		f.Add = slices.DeleteFunc(f.Add, func(k string) bool { return h.addKeyIs(k, real) })
+	}); err != nil {
+		return "", err
+	}
+	if !had {
+		return "", fmt.Errorf("%s is not added for %s (/rules lists them)", key, scopeWords(scope))
+	}
+	h.applyTools()
+	return "rules: " + key + " taken back for " + scopeWords(scope), nil
 }

@@ -89,7 +89,8 @@ func errUsage(kind, usage string) error {
 
 // rulesCmd is /rules' engine side, for every client: "" the files, their
 // cost and the mode; a bare mode word sets the project's mode (as /rules
-// always did) or, with a scope, that scope's; the rest are the switches'.
+// always did) or, with a scope, that scope's; add|remove <path> [--scope]
+// makes a file a root file or takes it back; the rest are the switches'.
 func rulesCmd(ctx context.Context, h *dun.Harness, action string) (string, error) {
 	f := strings.Fields(action)
 	switch {
@@ -100,6 +101,18 @@ func rulesCmd(ctx context.Context, h *dun.Harness, action string) (string, error
 			return h.SetRulesMode(ctx, f[0])
 		}
 		return switchOp(h, "rules", append([]string{"mode"}, f...))
+	case f[0] == "add" || f[0] == "remove":
+		if len(f) < 2 {
+			return "", errUsage("rules", f[0]+" <path> [--global|--project|--session]")
+		}
+		scope, err := scopeArg(f[2:], dun.ScopeSession)
+		if err != nil {
+			return "", err
+		}
+		if f[0] == "add" {
+			return h.AddRule(f[1], scope)
+		}
+		return h.RemoveRule(f[1], scope)
 	}
 	return switchOp(h, "rules", f)
 }

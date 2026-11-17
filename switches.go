@@ -8,6 +8,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/iodesystems/dun/internal/fsutil"
 )
@@ -32,6 +33,9 @@ import (
 type SwitchFile struct {
 	Mode string          `json:"mode,omitempty"`
 	On   map[string]bool `json:"on,omitempty"`
+	// Add is the paths /rules add made root files at this scope (the rules
+	// kind only): relative to the workspace when inside it, else absolute.
+	Add []string `json:"add,omitempty"`
 }
 
 // SwitchItem is one thing a kind switches, as its kind describes it.
@@ -304,12 +308,19 @@ func (h *Harness) setSwitchMode(k switchKind, mode, scope string) (string, error
 	return fmt.Sprintf("%s: %s for %s (in force: %s)", k.name, set, scopeWords(scope), now), nil
 }
 
-// editSwitchFile reads, edits and writes one file.
+// switchFileMu orders the switch files' read-edit-writes in this process,
+// so two edits at once cannot lose one.
+var switchFileMu sync.Mutex
+
+// editSwitchFile reads, edits and writes one file, under switchFileMu: edit
+// may decide on what it reads (an add checks the path is not there yet).
 func (h *Harness) editSwitchFile(kind, scope string, edit func(*SwitchFile)) error {
 	p := h.switchFile(kind, scope)
 	if p == "" {
 		return fmt.Errorf("there is no %s scope here", scope)
 	}
+	switchFileMu.Lock()
+	defer switchFileMu.Unlock()
 	f := loadSwitchFile(p)
 	edit(&f)
 	b, err := json.MarshalIndent(f, "", "  ")

@@ -96,6 +96,20 @@ type rulesDoc struct {
 	Size int    // bytes on disk
 	Note string // why it is missing, unread or cut
 	User bool   // a user file (userRulesRoots) or a file one imports
+	// Added is the scope /rules add made it a root file at (contextfiles.go);
+	// "" for a file found by name or imported.
+	Added string
+	// Includes is the files it imports that were already in the block (a
+	// root, or an earlier import), so not copied again: its row says so.
+	Includes []string
+}
+
+// rulesAdd is a file /rules add made a root file at a scope. A global one
+// counts in the user files' budget, a project or session one in the
+// project's.
+type rulesAdd struct {
+	Path  string // absolute
+	Scope string
 }
 
 // rulesSet is the root files and, in reading order, what they import: the
@@ -113,6 +127,7 @@ type rulesSet struct {
 type rulesLoader struct {
 	ws, home string
 	seen     map[string]bool
+	shown    map[string]string // a seen file's real path → its Name
 	out      *[]rulesDoc
 	user     bool   // the group is the user's
 	left     int    // what the group may still add
@@ -123,12 +138,19 @@ type rulesLoader struct {
 // loadRules reads the user's rule files (with user set), then the
 // workspace's root rule files, and what each imports.
 func loadRules(workspace string, user bool) rulesSet {
+	return loadRulesAdded(workspace, user, nil)
+}
+
+// loadRulesAdded is loadRules with the files /rules add made root files:
+// each after its group's own root files and their imports, so a file
+// already in the block is not read again.
+func loadRulesAdded(workspace string, user bool, adds []rulesAdd) rulesSet {
 	var set rulesSet
 	if workspace == "" {
 		return set
 	}
 	home, _ := userHomeDir()
-	l := &rulesLoader{ws: workspace, home: home, seen: map[string]bool{}}
+	l := &rulesLoader{ws: workspace, home: home, seen: map[string]bool{}, shown: map[string]string{}}
 	type root struct {
 		path string
 		data []byte
@@ -159,6 +181,7 @@ func loadRules(workspace string, user bool) rulesSet {
 	var kept []*root
 	for _, r := range roots {
 		l.seen[realPath(r.path)] = true
+		l.shown[realPath(r.path)] = l.rootName(r.path, r.user)
 		dup := false
 		for _, k := range kept {
 			if realPath(k.path) == realPath(r.path) || string(k.data) == string(r.data) {
@@ -170,6 +193,10 @@ func loadRules(workspace string, user bool) rulesSet {
 		if !dup {
 			kept = append(kept, r)
 		}
+	}
+	keptData, addedData := map[string]bool{}, map[string]bool{}
+	for _, r := range kept {
+		keptData[string(r.data)] = true
 	}
 	// Each group has its own budget, so a large user file cannot crowd out
 	// the project's rules.
@@ -188,8 +215,34 @@ func loadRules(workspace string, user bool) rulesSet {
 				set.Roots = append(set.Roots, d)
 			}
 		}
-		for _, d := range set.Roots[start:] {
-			l.imports(d, 1)
+		for i := start; i < len(set.Roots); i++ {
+			set.Roots[i].Includes = l.imports(set.Roots[i], 1)
+		}
+		for _, a := range adds {
+			if (a.Scope == ScopeGlobal) != g.user || a.Scope == ScopeGlobal && !user {
+				continue // DUN_USER_RULES=0 leaves the global adds out with the user files
+			}
+			real := realPath(a.Path)
+			if l.seen[real] {
+				continue // already in the block
+			}
+			l.seen[real], l.shown[real] = true, l.name(a.Path)
+			var d rulesDoc
+			data, err := os.ReadFile(a.Path)
+			switch {
+			case errors.Is(err, fs.ErrNotExist):
+				d = rulesDoc{Path: a.Path, Name: l.name(a.Path), Note: "not found", User: l.user}
+			case err != nil:
+				d = rulesDoc{Path: a.Path, Name: l.name(a.Path), Note: "not read: " + err.Error(), User: l.user}
+			case keptData[string(data)] || addedData[string(data)]:
+				continue // the same bytes as a root file: in once, as roots are
+			default:
+				addedData[string(data)] = true
+				d = l.doc(a.Path, "", data)
+			}
+			d.Added = a.Scope
+			d.Includes = l.imports(d, 1)
+			set.Roots = append(set.Roots, d)
 		}
 	}
 	return set
@@ -199,7 +252,7 @@ func loadRules(workspace string, user bool) rulesSet {
 // does not read as the project's.
 func (l *rulesLoader) rootName(p string, user bool) string {
 	if user && l.home != "" {
-		if r, err := filepath.Rel(l.home, p); err == nil && !strings.HasPrefix(r, "..") {
+		if r, err := filepath.Rel(l.home, p); err == nil && !outside(r) {
 			return "~/" + r
 		}
 	}
@@ -207,9 +260,10 @@ func (l *rulesLoader) rootName(p string, user bool) string {
 }
 
 // loadRules is the session's rules: the user's files unless NoUserRules,
-// then the workspace's. A child has its parent's Config, so the same.
+// then the workspace's, then the files /rules add made root files. A child
+// has its parent's Config, so the same.
 func (h *Harness) loadRules() rulesSet {
-	return loadRules(h.Workspace(), !h.cfg.NoUserRules)
+	return loadRulesAdded(h.Workspace(), !h.cfg.NoUserRules, h.rulesAdds())
 }
 
 // rulesRoots are the root files' names, each a list tried in order (the
@@ -272,7 +326,8 @@ func rulesSearch(workspace string, user bool) []string {
 	look(workspace, "", rulesRoots)
 	out = append(out,
 		fmt.Sprintf("imports: @path in a file read (relative to that file, ~ is home), %d deep at most", rulesImportDepth),
-		fmt.Sprintf("caps: %d KiB a file; %d KiB for the user files, %d KiB for the project's · not read: subdirectories, the workspace's .dun/ and .claude/ (import one with @path)", rulesFileMax>>10, rulesUserMax>>10, rulesTotalMax>>10))
+		fmt.Sprintf("caps: %d KiB a file; %d KiB for the user files, %d KiB for the project's · not read: subdirectories, the workspace's .dun/ and .claude/ (import one with @path)", rulesFileMax>>10, rulesUserMax>>10, rulesTotalMax>>10),
+		"more root files: /rules add <path> [--session|--project|--global] (a global one counts in the user files' cap)")
 	return out
 }
 
@@ -293,15 +348,22 @@ func (l *rulesLoader) doc(path, from string, data []byte) rulesDoc {
 	return d
 }
 
-// imports reads, depth-first, what d imports.
-func (l *rulesLoader) imports(d rulesDoc, depth int) {
+// imports reads, depth-first, what d imports. It returns the names of the
+// files d imports that were already in the block.
+func (l *rulesLoader) imports(d rulesDoc, depth int) []string {
+	var dups []string
+	mine := map[string]bool{} // what this file brought in
 	for _, raw := range importPaths(d.Text) {
 		p := l.resolve(raw, filepath.Dir(d.Path))
 		real := realPath(p)
 		if l.seen[real] {
-			continue // already in the block: a repeat, or a cycle
+			// Already in the block: a repeat, or a cycle.
+			if n := firstNonEmptyStr(l.shown[real], l.name(p)); !mine[real] && !slices.Contains(dups, n) {
+				dups = append(dups, n)
+			}
+			continue
 		}
-		l.seen[real] = true
+		l.seen[real], l.shown[real], mine[real] = true, l.name(p), true
 		note := func(s string) {
 			*l.out = append(*l.out, rulesDoc{Path: p, Name: l.name(p), From: d.Name, Note: s, User: l.user})
 		}
@@ -322,9 +384,12 @@ func (l *rulesLoader) imports(d rulesDoc, depth int) {
 			continue
 		}
 		nd := l.doc(p, d.Name, data)
+		i := len(*l.out)
 		*l.out = append(*l.out, nd)
-		l.imports(nd, depth+1)
+		inc := l.imports(nd, depth+1)
+		(*l.out)[i].Includes = inc
 	}
+	return dups
 }
 
 func (l *rulesLoader) resolve(raw, dir string) string {
@@ -339,11 +404,11 @@ func (l *rulesLoader) resolve(raw, dir string) string {
 
 // name is how a path is shown: relative to the workspace, else to home.
 func (l *rulesLoader) name(p string) string {
-	if r, err := filepath.Rel(l.ws, p); err == nil && !strings.HasPrefix(r, "..") {
+	if r, err := filepath.Rel(l.ws, p); err == nil && !outside(r) {
 		return r
 	}
 	if l.home != "" {
-		if r, err := filepath.Rel(l.home, p); err == nil && !strings.HasPrefix(r, "..") {
+		if r, err := filepath.Rel(l.home, p); err == nil && !outside(r) {
 			return "~/" + r
 		}
 	}
@@ -478,7 +543,47 @@ func (d rulesDoc) heading() string {
 
 // noteLine is a doc that has no text: one line, not a section.
 func (d rulesDoc) noteLine() string {
-	return "\n\n(" + d.Name + ", imported by " + d.From + ": " + d.Note + ")"
+	by := "imported by " + d.From
+	if d.From == "" {
+		by = "added with /rules add"
+	}
+	return "\n\n(" + d.Name + ", " + by + ": " + d.Note + ")"
+}
+
+// missing is a doc that was not read: a note, no text.
+func (d rulesDoc) missing() bool {
+	return d.Text == "" && d.Note != "" && (d.From != "" || d.Added != "")
+}
+
+// includesNote is what its row says about the files it imports that were
+// already in the block and are in it: on is the set after switchRules. ""
+// when none (an include that is off, or was not found, is not "loaded").
+func (d rulesDoc) includesNote(on rulesSet) string {
+	var in []string
+	for _, n := range d.Includes {
+		if on.loaded(n) {
+			in = append(in, n)
+		}
+	}
+	if len(in) == 0 {
+		return ""
+	}
+	return "includes " + strings.Join(in, ", ") + " (already loaded)"
+}
+
+// loaded says the file shown as name is read into the block and on.
+func (s rulesSet) loaded(name string) bool {
+	for _, d := range append(slices.Clone(s.Roots), s.Imports...) {
+		if (d.Name == name || d.Also == name) && d.Text != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// outside says a filepath.Rel result leaves its base.
+func outside(rel string) bool {
+	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // files is each context file's share of the block in mode, estimated: the
@@ -491,7 +596,11 @@ func (s rulesSet) files(mode string) []ContextPart {
 	}
 	var out []ContextPart
 	for _, d := range s.Roots {
-		out = append(out, ContextPart{Name: d.Name, Tokens: estimateTokens(d.heading() + "\n\n" + d.Text)})
+		text := d.heading() + "\n\n" + d.Text
+		if d.missing() {
+			text = d.noteLine()
+		}
+		out = append(out, ContextPart{Name: d.Name, Tokens: estimateTokens(text)})
 	}
 	if len(s.Imports) == 0 {
 		return out
@@ -540,6 +649,10 @@ func (s rulesSet) render(mode, summary string) string {
 		}
 		b.WriteString("\n\n## " + title + " (" + rulesSet{Roots: roots}.rootNames() + ")\n\n" + intro)
 		for _, d := range roots {
+			if d.missing() {
+				b.WriteString(d.noteLine())
+				continue
+			}
 			b.WriteString(d.heading() + "\n\n" + d.Text)
 			if d.Note != "" {
 				b.WriteString("\n\n(" + d.Note + ")")
@@ -829,6 +942,7 @@ func syncIndex(sink *mcpDocsSink, index string, have, want map[string]string) (m
 // RulesStatus is bare /rules: the files, their sizes and cost, and the mode.
 func (h *Harness) RulesStatus() string {
 	set := h.loadRules()
+	on := h.switchRules(set)
 	if len(set.Roots) == 0 {
 		return "rules: no AGENTS.md or CLAUDE.md at the workspace root" + h.userRulesLine()
 	}
@@ -853,8 +967,12 @@ func (h *Harness) RulesStatus() string {
 	}
 	row := func(d rulesDoc) {
 		fmt.Fprintf(&b, "\n  %-28s ", d.Name)
-		if d.Text == "" && d.From != "" {
-			b.WriteString(d.Note)
+		added := ""
+		if d.Added != "" {
+			added = "  added · " + d.Added
+		}
+		if d.missing() {
+			b.WriteString(d.Note + added)
 			return
 		}
 		fmt.Fprintf(&b, "%7s  ~%s tokens", numfmt.HumanBytes(int64(d.Size)), numfmt.Grouped(h.meter.Estimate(d.Text)))
@@ -866,6 +984,10 @@ func (h *Harness) RulesStatus() string {
 		}
 		if d.Note != "" {
 			b.WriteString("  " + d.Note)
+		}
+		b.WriteString(added)
+		if n := d.includesNote(on); n != "" {
+			b.WriteString("  " + n)
 		}
 	}
 	for _, d := range set.Roots {
@@ -890,7 +1012,7 @@ func (h *Harness) RulesStatus() string {
 	if len(set.Imports) == 0 {
 		b.WriteString("\n  no imports: summary and index change nothing (they act on imported files only)")
 	}
-	b.WriteString("\n  /rules full · /rules summary · /rules index")
+	b.WriteString("\n  /rules full · /rules summary · /rules index · /rules add|remove <path> [--session|--project|--global]")
 	return b.String()
 }
 

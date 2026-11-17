@@ -679,6 +679,23 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   Config, as it does the rules); the Harbor adapter sets it by default so a
   trial does not depend on the image's home. Each user file is also a `/rules`
   switch, so global scope off takes one out of every project.
+- **`/rules add <path> [--session|--project|--global]` makes any file a root
+  rules file** (USER 2026-11-17; `contextfiles.go`). Kept in the scope's
+  `context-files.json` as `"add": [...]` (session when no scope is given, as
+  `/rules on`): a session add relative to the workspace when inside it, a
+  project or global add always absolute (the project's file is read from its
+  worktrees and subdirectories, the global one from every project); `~/` is
+  home. Loaded after its group's own roots and their imports: a global add
+  counts in the user files' budget, a project or session add in the
+  project's; `DUN_USER_RULES=0` leaves the global adds out with the user
+  files. A file already in the block (a root, an import; for a global add,
+  only the user files and their imports), or with a root's bytes, is not
+  added again; a file that is not there is a root row with the note "not
+  found".
+  `/rules remove <path> [--scope]` takes one back; on/off switch it by name.
+  A file whose `@import` was skipped because the target was already loaded
+  says so on its row ("includes ~/AGENTS.md (already loaded)"), only while
+  that file is read and on.
 - **Shared raglit indexes** (`attach.go`): raglit's daemon is shared and its
   watcher keeps indexes fresh; dun only reads. `/rag attach` adds a
   qualified `proj:idx` to the search selector at session, project or global
