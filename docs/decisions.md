@@ -820,7 +820,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   `dun.local.json` are read, never created (`mcp-and-tools.md`).
 - **The divider is a centered line with pane labels (2026-11-17).** One dim
   `─` across the full row, the same glyph whatever has focus, with the panes
-  named left-aligned: `─ input ─ [messages] ─ jobs ───`. The focused name is
+  named left-aligned: `─ input ─[messages]─ jobs ───`. The focused name is
   accent, bold and bracketed, so it reads without colour; `jobs` shows only
   while the activity strip has rows. Narrow rows drop names in order: full,
   short (in/msg/jobs), the focused one alone, a plain line below 20 columns;

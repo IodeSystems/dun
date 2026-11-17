@@ -17,8 +17,8 @@ func TestDividerLabels_EachFocus(t *testing.T) {
 		focus int
 		want  string
 	}{
-		{focusInput, "─ [input] ─ messages ─"},
-		{focusConvo, "─ input ─ [messages] ─"},
+		{focusInput, "─[input]─ messages ─"},
+		{focusConvo, "─ input ─[messages]─"},
 	} {
 		m.focus = tc.focus
 		d, _ := m.baseDivider()
@@ -31,18 +31,18 @@ func TestDividerLabels_EachFocus(t *testing.T) {
 	m.agents = []agentRow{{id: 1, state: "running"}}
 	m.focus = focusActivity
 	d, _ := m.baseDivider()
-	if got := ansi.Strip(d); !strings.HasPrefix(got, "─ input ─ messages ─ [jobs] ─") || ansi.StringWidth(got) != 80 {
+	if got := ansi.Strip(d); !strings.HasPrefix(got, "─ input ─ messages ─[jobs]─") || ansi.StringWidth(got) != 80 {
 		t.Errorf("activity focus: %q", got)
 	} else {
 		t.Logf("%s", got)
 	}
 	// The focused name is accent and bold; the others are dim.
-	if !strings.Contains(d, stEdge.Bold(true).Render("[jobs]")) || !strings.Contains(d, StDim.Render("input")) {
+	if !strings.Contains(d, stEdge.Bold(true).Render("[jobs]")) || !strings.Contains(d, StDim.Render(" input ")) {
 		t.Errorf("styles: %q", d)
 	}
 	m.focus, m.asking = focusConvo, true // a question has the keys
 	d, _ = m.baseDivider()
-	if got := ansi.Strip(d); !strings.HasPrefix(got, "─ [input] ─") {
+	if got := ansi.Strip(d); !strings.HasPrefix(got, "─[input]─") {
 		t.Errorf("asking: %q", got)
 	}
 }
@@ -64,11 +64,11 @@ func TestDividerLabels_NarrowWidths(t *testing.T) {
 		w    int
 		want string // prefix; "" = a plain line
 	}{
-		{80, "─ input ─ [messages] ─ jobs ─"},
-		{30, "─ input ─ [messages] ─ jobs ─"},
-		{25, "─ in ─ [msg] ─ jobs ─"},
-		{21, "─ in ─ [msg] ─ jobs ─"},
-		{20, "─ [messages] ─"},
+		{80, "─ input ─[messages]─ jobs ─"},
+		{30, "─ input ─[messages]─ jobs ─"},
+		{25, "─ in ─[msg]─ jobs ─"},
+		{21, "─ in ─[msg]─ jobs ─"},
+		{20, "─ in ─[msg]─ jobs ─"},
 		{19, ""},
 		{15, ""},
 		{2, ""},
@@ -95,7 +95,7 @@ func TestDividerLabels_CueKeepsRoom(t *testing.T) {
 	m.w = 80
 	d, spans := m.baseDivider()
 	got := ansi.Strip(d)
-	if !strings.HasPrefix(got, "─ input ─ [messages] ─") || !strings.HasSuffix(got, " ↓ newest · ctrl+end ─") || ansi.StringWidth(got) != 80 {
+	if !strings.HasPrefix(got, "─ input ─[messages]─") || !strings.HasSuffix(got, " ↓ newest · ctrl+end ─") || ansi.StringWidth(got) != 80 {
 		t.Errorf("%q", got)
 	}
 	t.Logf("%s", got)
@@ -156,13 +156,13 @@ func TestDividerLabels_PaneScreen(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m.w, m.h = 80, 24
 	s := mcpScreen()
-	if got := ansi.Strip(s.paneDivider(80)); !strings.HasPrefix(got, "─ [servers] ─ log ─") || ansi.StringWidth(got) != 80 {
+	if got := ansi.Strip(s.paneDivider(80)); !strings.HasPrefix(got, "─[servers]─ log ─") || ansi.StringWidth(got) != 80 {
 		t.Errorf("%q", got)
 	}
 	s.focus = 2
 	got := ansi.Strip(s.paneDivider(80))
 	t.Logf("%s", got)
-	if !strings.HasPrefix(got, "─ servers ─ [log] ─") {
+	if !strings.HasPrefix(got, "─ servers ─[log]─") {
 		t.Errorf("%q", got)
 	}
 	s.valid = func(*tuiModel) bool { return true }
@@ -176,5 +176,44 @@ func TestDividerLabels_PaneScreen(t *testing.T) {
 	}
 	if m.screenClick(tea.Mouse{Button: tea.MouseLeft, X: 79, Y: y}) {
 		t.Error("a click past the names took")
+	}
+}
+
+// Names must not move when focus changes: each label's columns are the same
+// in every focus state, at wide and narrow widths, with and without the cue.
+func TestDividerLabels_NamesDoNotMove(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	m.agents = []agentRow{{id: 1, state: "running"}}
+	for _, w := range []int{80, 30, 25} {
+		for _, scrolled := range []bool{false, true} {
+			if scrolled && w == 25 {
+				continue // too narrow for every name beside the cue: only the focused one shows
+			}
+			m.w, m.scrollPinned = w, !scrolled
+			var base []divSpan
+			for _, f := range []int{focusInput, focusConvo, focusActivity} {
+				m.focus = f
+				_, spans := m.baseDivider()
+				if base == nil {
+					base = spans
+				}
+				if len(spans) != len(base) {
+					t.Fatalf("w=%d focus %d: %d spans, want %d", w, f, len(spans), len(base))
+				}
+				for i := range spans {
+					if spans[i] != base[i] {
+						t.Errorf("w=%d scrolled=%v focus %d: span %d is %+v, was %+v", w, scrolled, f, i, spans[i], base[i])
+					}
+				}
+			}
+		}
+	}
+	// The pushed screen too.
+	s := mcpScreen()
+	_, a := renderDivider(80, s.labels(), "")
+	s.focus = 2
+	_, b := renderDivider(80, s.labels(), "")
+	if len(a) != len(b) || a[0] != b[0] || a[1] != b[1] {
+		t.Errorf("pane screen names moved: %+v then %+v", a, b)
 	}
 }

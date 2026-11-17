@@ -53,7 +53,7 @@ var (
 // divider is the single rule between the panes: one dim "─" across the full
 // row, vertically centered, the same glyph whatever has focus (owner,
 // 2026-11-17; it replaces the half-line that leaned toward the focused pane).
-// The panes are named on it, left-aligned: "─ input ─ messages ─ jobs ───".
+// The panes are named on it, left-aligned: "─ input ─[messages]─ jobs ───".
 // The focused pane's name is in the accent, bold and in brackets
 // ("[messages]", so it reads without colour); the others are dim. Neither
 // pane's CONTENT changes with focus: the person reads one pane while typing
@@ -102,10 +102,12 @@ func renderDivider(w int, labels []divLabel, cue string) (string, []divSpan) {
 		if short {
 			t = l.short
 		}
+		// Brackets or spaces: a name is the same width focused or not, so
+		// moving focus moves nothing.
 		if l.focused {
 			return "[" + t + "]"
 		}
-		return t
+		return " " + t + " "
 	}
 	var focused []divLabel
 	for _, l := range labels {
@@ -123,19 +125,19 @@ func renderDivider(w int, labels []divLabel, cue string) (string, []divSpan) {
 			if len(v.ls) == 0 {
 				continue
 			}
-			// "─ " + names joined by " ─ " + " ", then at least one dash.
-			width := 3 + 3*(len(v.ls)-1)
+			// "─" + names joined by "─" + at least one dash.
+			width := 2 + (len(v.ls) - 1)
 			for _, l := range v.ls {
 				width += lipgloss.Width(pick(l, v.short))
 			}
-			if width+1 > w-tail {
+			if width > w-tail {
 				continue
 			}
-			parts, spans, x := []string{StDim.Render("─ ")}, []divSpan(nil), 2
+			parts, spans, x := []string{StDim.Render("─")}, []divSpan(nil), 1
 			for i, l := range v.ls {
 				if i > 0 {
-					parts = append(parts, StDim.Render(" ─ "))
-					x += 3
+					parts = append(parts, StDim.Render("─"))
+					x++
 				}
 				t := pick(l, v.short)
 				if l.focused {
@@ -146,8 +148,7 @@ func renderDivider(w int, labels []divLabel, cue string) (string, []divSpan) {
 				spans = append(spans, divSpan{x, x + lipgloss.Width(t), l.id})
 				x += lipgloss.Width(t)
 			}
-			parts = append(parts, StDim.Render(" "))
-			return line(parts, spans, x+1)
+			return line(parts, spans, x)
 		}
 	}
 	return line(nil, nil, 0)

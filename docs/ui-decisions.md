@@ -73,7 +73,7 @@ are in `decisions.md`.
 - **Focus is a pane name on the divider: accent, bold, in brackets. Never
   lower a pane's contrast for focus.** The owner's cue; do not recommend
   dimming. The divider is one dim centered `─` line, labels left-aligned
-  (`─ input ─ [messages] ─ jobs ───`), clickable (2026-11-17; it replaced the
+  (`─ input ─[messages]─ jobs ───`), clickable (2026-11-17; it replaced the
   half-line lean).
 - **Process stays visible.** Calls stay in the turn, one readable line each;
   never hide or demote how an answer was produced. Server-prefixed tool names
