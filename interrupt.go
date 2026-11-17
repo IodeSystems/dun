@@ -361,21 +361,29 @@ func interruptedCallFor(name, reason string) string {
 		"Whether it took effect is unknown: verify the current state before repeating it.", name, reason)
 }
 
+// stoppedBy is who stopped the turn, as a result names it. A budget cut is
+// not the user, and must not read as one.
+func stoppedBy(ctx context.Context) string {
+	if r := interruptReason(ctx); r != "" {
+		return "the turn was stopped (" + r + ")"
+	}
+	return "the user interrupted the turn"
+}
+
+// unrunResult is the result of a call the turn never ran: dispatched after
+// the interrupt, or skipped by agentkit after a cancel (Session.UnrunResult).
+func unrunResult(ctx context.Context, tc llm.ToolCall) string {
+	return fmt.Sprintf("ERROR: not run — %s before this %s call started.", stoppedBy(ctx), tc.Function.Name)
+}
+
 // withInterrupt is the outermost dispatcher: a call the turn reaches after the
 // interrupt is not run, and one the interrupt cut short says so.
 func withInterrupt(inner agent.ToolDispatcher) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		name := tc.Function.Name
-		// Who stopped the turn, as the result names it. A budget cut is not
-		// the user, and must not read as one.
-		by := func() string {
-			if r := interruptReason(ctx); r != "" {
-				return "the turn was stopped (" + r + ")"
-			}
-			return "the user interrupted the turn"
-		}
+		by := func() string { return stoppedBy(ctx) }
 		if interrupted(ctx) {
-			return fmt.Sprintf("ERROR: not run — %s before this %s call started.", by(), name), nil
+			return unrunResult(ctx, tc), nil
 		}
 		out, err := inner(ctx, tc)
 		if !interrupted(ctx) {

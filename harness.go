@@ -852,13 +852,15 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		// dun writes the {OUTPUT} convention itself, shorter (systemSlots).
 		OmitSlotInstructions: true,
 		OnCompactionComplete: h.noteCompaction,
-		Store:                store,
-		Runner:               h.teeTurn(cfg.Client, cfg.OnReasoning),
-		OnAssistantToken:     cfg.OnToken,
-		OnUsage:              h.noteUsage,
-		MaxTurns:             h.turnLimit(),
-		Build:                measuredBuild(shaper, h),
-		ToolFormat:           toolFormat(),
+		// A call a cancel skipped says who stopped the turn (interrupt.go).
+		UnrunResult:      unrunResult,
+		Store:            store,
+		Runner:           h.teeTurn(cfg.Client, cfg.OnReasoning),
+		OnAssistantToken: cfg.OnToken,
+		OnUsage:          h.noteUsage,
+		MaxTurns:         h.turnLimit(),
+		Build:            measuredBuild(shaper, h),
+		ToolFormat:       toolFormat(),
 		// The same estimator the Shaper uses, so `Active` and the budget cannot
 		// disagree about how big the context is.
 		Estimate: &h.meter,
