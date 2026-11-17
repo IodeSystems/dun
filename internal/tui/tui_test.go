@@ -2351,6 +2351,31 @@ func TestMultilineInput_HistoryViaCtrl(t *testing.T) {
 	}
 }
 
+// A slash line goes into the same history as prompts, in order; a repeat of
+// the last entry is not added twice.
+func TestMultilineInput_HistoryHoldsSlashCommands(t *testing.T) {
+	proc := &dunProc{stdin: discardWC{}}
+	m := newTUIModel(proc, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = nm.(tuiModel)
+	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
+
+	m = typeStr(m, "a prompt")
+	m = key(m, kEnter)
+	m = typeStr(m, "/rules on ./PARA.md --session")
+	m = key(m, kEnter)
+	m = typeStr(m, "/rules on ./PARA.md --session")
+	m = key(m, kEnter)
+	want := []string{"a prompt", "/rules on ./PARA.md --session"}
+	if len(m.history) != len(want) || m.history[0] != want[0] || m.history[1] != want[1] {
+		t.Fatalf("history = %q, want %q", m.history, want)
+	}
+	m = key(m, tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModCtrl})
+	if m.input.Value() != want[1] {
+		t.Fatalf("ctrl+up should recall the slash line, got %q", m.input.Value())
+	}
+}
+
 // The placeholder shows whether or not the box has focus — a hint that
 // disappears the moment you focus the field is the wrong way round.
 func TestMultilineInput_EmptyInput(t *testing.T) {

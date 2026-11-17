@@ -410,6 +410,15 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.sendUserImages(v, nil), nil
 			}
 			if strings.HasPrefix(v, "/") {
+				// A slash line is recalled like a prompt: a failed one is
+				// fixed, not retyped. No command takes a secret as an
+				// argument (login keys and MCP tokens go through forms), so
+				// none is left out. Stored with the next
+				// saveUI (a prompt, or quit).
+				if n := len(m.history); n == 0 || m.history[n-1] != v {
+					m.history = append(m.history, v)
+				}
+				m.histIdx = len(m.history)
 				return m, m.runPaletteEnter(v)
 			}
 			// Bare "exit" (no slash) is a hidden command: exits silently.
