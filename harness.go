@@ -1009,6 +1009,7 @@ func (h *Harness) managerFor() (*mcpmgr.Manager, bool) {
 
 // Reset clears the session store, starting a fresh conversation log.
 func (h *Harness) Reset() {
+	h.settleCancel() // a settle owed to the cleared conversation must not fire on the new one
 	h.store.Reset()
 	h.clearAsk() // the ask belonged to the conversation just cleared
 }

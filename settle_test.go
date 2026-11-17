@@ -89,6 +89,26 @@ func TestSettle_UserMessageCancels(t *testing.T) {
 	}
 }
 
+// /clear (Reset) cancels an armed settle: it must not prompt the empty session.
+func TestSettle_ResetCancels(t *testing.T) {
+	r := &scriptRunner{rounds: []roundFn{toolRound("c1", "x"), textRound("done")}}
+	h := startSettle(t, r, "", nil)
+	if _, err := h.Ask(context.Background(), "work"); err != nil {
+		t.Fatal(err)
+	}
+	h.Reset()
+	if settleArmed(h) {
+		t.Fatal("Reset left the timer armed")
+	}
+	time.Sleep(3 * testSettle)
+	if n := settleQueued(h); n != 0 {
+		t.Errorf("a timer armed before Reset queued %d prompts", n)
+	}
+	if _, err := os.Stat(settleFile(h.cfg.SessionFile)); err == nil {
+		t.Error("the owed-settle sidecar survived Reset")
+	}
+}
+
 // Presence restarts the delay: with pings the prompt comes later than without.
 func TestSettle_PresenceRestartsTimer(t *testing.T) {
 	r := &scriptRunner{rounds: []roundFn{toolRound("c1", "x"), textRound("done")}}
