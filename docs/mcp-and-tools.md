@@ -93,7 +93,8 @@ it decides, as `via` does (`ServerScopes.Instance*`, `ServerSpec.Instance`,
   so the tool names the model sees do not change, and stops with the child.
 
 Isolated sub-agents (USER 2026-11-06): a child in a tree of its own
-(isolation worktree or docker) resolves its servers against that tree. Each
+(isolation worktree or docker, or a spawn's `dir`) resolves its servers
+against that tree. Each
 server whose args or env name `{{workspace}}` (poly-lsp's manifest does) is
 then an instance of its own for that tree, by the same rule as any other:
 `shared` with the tree in the key is one per workspace, and poly-lsp's

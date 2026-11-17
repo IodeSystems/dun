@@ -501,6 +501,22 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   would make the child re-derive it or hand back a patch that conflicts.
   A resume must REUSE the existing tree, never create a second one — the
   child's commits are in it.
+- **`agent({dir})` names where a new child works (USER, 2026-11-17).** A
+  parent whose workspace is a non-git overseer directory could not give a
+  child a worktree of a repo below it ("isolation worktree needs a git
+  repository"), and an unknown `dir` was dropped, so the child worked in the
+  wrong place. `dir` is absolute, `~/` or relative to the parent's
+  workspace, and any directory ("Any directory"), inside the parent's tree or
+  not. With isolation none the child works in it in place (a host shell on
+  it; refused when the parent's commands run in a container). With worktree
+  or docker the worktree is branched from the HEAD of dir's repo (`git
+  rev-parse --show-toplevel`), in that repo's project store, and the child
+  works in the same subdirectory of it (`isolation.Sub`); git calls stay on
+  the worktree root. A dir in no repo is refused, naming the repos up to two
+  levels below it. A repo not the parent's gets its own mounts, and the merge
+  hint says `git -C <repo> merge <branch>`. `dir` is a spawn's only: with
+  `id` it is refused unless it is where that agent works. It is kept in
+  `<sub>.iso.json`, so a resume goes back to the same directory.
 - **Known risks:** resident children with no cap accumulate; the pane makes it
   visible, nothing prevents it. A shared-tree child writing freely means the
   parent's `ship` can find dirt that is not its own. Children do not use the

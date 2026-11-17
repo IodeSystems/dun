@@ -10,6 +10,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -742,7 +744,10 @@ func (b *shLineBuf) popLine() (string, bool) {
 // /work (the cwd). The container is the sandbox: model-authored commands can't
 // touch the host, only the mounted worktree.
 type DockerExec struct {
-	Dir   string
+	Dir string
+	// Sub is the working directory below Dir (a sub-agent's dir in its
+	// worktree, subisolation.go); "" is Dir itself.
+	Sub   string
 	Image string
 	// Network, if false, runs with --network none (no egress). Default false.
 	Network bool
@@ -778,7 +783,7 @@ func (d DockerExec) runArgs(name, command string) []string {
 	args := []string{
 		"run", "--rm", "--name", name,
 		"--user", uid + ":" + gid,
-		"-v", d.Dir + ":/work", "-w", "/work",
+		"-v", d.Dir + ":/work", "-w", path.Join("/work", filepath.ToSlash(d.Sub)),
 	}
 	if !d.Network {
 		args = append(args, "--network", "none")

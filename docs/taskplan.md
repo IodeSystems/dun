@@ -179,7 +179,7 @@ resolved, main agent can reassign to newly unblocked or create new agents for th
 ## A child starts only on a node (USER 2026-11-10)
 
 "Subagents should only be launchable via plan nodes!" `agent` has no `prompt`:
-`agent({node: "<id>", model?, effort?, isolation?, wait?})` starts a child, and its
+`agent({node: "<id>", model?, effort?, isolation?, dir?, wait?})` starts a child, and its
 first message is "Work this plan node." and the node's brief (`planBrief`: title,
 details, done_when, and to publish it). The task goes in the node's details. The
 child reports onto the node: it publishes it with `plan_close` (done with an
