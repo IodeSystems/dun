@@ -628,7 +628,9 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   (`mcpscope.go`): on/off, mode (standalone, or scripted = hosted in mcpshell
   and called through `eval`), and per-tool switches. Stored mode values stay
   `direct`/`shell` because an older dun rejects any other `via` and would fail
-  to load `mcp.json`. Session writes go to `<session>.mcp.json` beside the
+  to load `mcp.json`. A global standalone is stored as `direct`, never as
+  absence: with `default_via` (top level of `mcp.json`, set by `/mcp default`)
+  scripted, absence means scripted. Session writes go to `<session>.mcp.json` beside the
   transcript. Project and global switch files are separate so a repo can ship
   defaults and a person can override them.
 - **Ids were renamed `code`/`docs` to `poly-lsp`/`raglit`.** Old ids are still

@@ -213,7 +213,7 @@ func TestMoveServer_BothWays(t *testing.T) {
 	if !h.mgr.ServerStarted("corp") || !slices.Contains(h.ToolNames(), "corp__search") {
 		t.Fatalf("direct: started %v tools %v", h.mgr.ServerStarted("corp"), h.ToolNames())
 	}
-	if f, _ := readServersFile(UserServersFile()); f.Servers[0].Via != "" {
+	if f, _ := readServersFile(UserServersFile()); f.Servers[0].Via != ViaDirect {
 		t.Errorf("saved %+v", f.Servers[0])
 	}
 

@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/iodesystems/dun/internal/fsutil"
 )
@@ -65,6 +66,14 @@ func ParseScope(s string) (string, bool) {
 	return "", false
 }
 
+// ViaFrom values beside the scope names: no scope set a mode, and the global
+// default (LoadDefaultVia) is scripted. The second is that default overruled:
+// the server's instance is agent, which a scripted server cannot be.
+const (
+	ViaFromDefault      = "default"
+	ViaFromDefaultAgent = "default, instance agent"
+)
+
 // ServerScopes is one server's switches at each scope, and which one
 // decided. nil and "" are unset.
 type ServerScopes struct {
@@ -72,7 +81,7 @@ type ServerScopes struct {
 	OnFrom                   string // the scope that decided Autostart
 	ViaGlobal, ViaProject    string // "", ViaDirect, ViaShell
 	ViaSession               string
-	ViaFrom                  string // the scope that decided Via; "" for a built-in
+	ViaFrom                  string // the scope that decided Via, or ViaFromDefault*; "" for a built-in
 	// The instance switch at each scope ("", InstanceShared, InstanceSession,
 	// InstanceAgent) and the scope that decided Server.Instance; "" for a
 	// built-in, whose instance is fixed (builtinInstances).
@@ -235,7 +244,7 @@ func switchesOnly(s ServerSpec) bool {
 // resolve turns a catalog entry and this session's switches into the Server
 // it runs as. ok=false: the server is not in this workspace (disabled, or
 // only switches name it).
-func (e catalogEntry) resolve(sess SessionServer, flag *bool, workspace, raglitHome string) (Server, bool, error) {
+func (e catalogEntry) resolve(sess SessionServer, flag *bool, workspace, raglitHome, defVia string) (Server, bool, error) {
 	s := e.def
 	if s.Disabled {
 		return Server{}, false, nil
@@ -272,6 +281,14 @@ func (e catalogEntry) resolve(sess SessionServer, flag *bool, workspace, raglitH
 		via, sc.ViaFrom = sc.ViaProject, ScopeProject
 	case sc.ViaGlobal != "":
 		via, sc.ViaFrom = sc.ViaGlobal, ScopeGlobal
+	case defVia == ViaShell && !builtinServer(s.ID):
+		// The global default places it. A server whose instance is agent
+		// cannot be scripted (a sub-agent has no shell of its own): it stays
+		// standalone, and the cell says why.
+		via, sc.ViaFrom = ViaShell, ViaFromDefault
+		if agentInstance(e.global.Instance, e.project.Instance, sess.Instance) {
+			via, sc.ViaFrom = ViaDirect, ViaFromDefaultAgent
+		}
 	default:
 		sc.ViaFrom = ScopeGlobal
 	}
@@ -330,6 +347,28 @@ func (e catalogEntry) resolve(sess SessionServer, flag *bool, workspace, raglitH
 		LSPRoots:       s.LSPRoots,
 		Wake:           s.Wake,
 	}, true, nil
+}
+
+var warned sync.Map
+
+// warnOnce logs msg the first time only: the servers resolve every turn.
+func warnOnce(msg string) {
+	if _, seen := warned.LoadOrStore(msg, true); !seen {
+		log.Printf("%s — using standalone until it is fixed (/mcp default standalone|scripted)", msg)
+	}
+}
+
+// agentInstance reports whether the nearest scope that sets an instance says
+// agent. An unreadable value is left to resolveInstance to refuse.
+func agentInstance(global, project, session string) bool {
+	for _, v := range []string{session, project, global} {
+		if v == "" {
+			continue
+		}
+		inst, err := NormalizeInstance(v)
+		return err == nil && inst == InstanceAgent
+	}
+	return false
 }
 
 // workspaceKeyed reports whether s's args or env name {{workspace}}: as
@@ -417,13 +456,18 @@ func resolveServers(dir, workspace, raglitHome string, base []Server, sess map[s
 	if err != nil {
 		return nil, err
 	}
+	defVia, err := LoadDefaultVia()
+	if err != nil { // a bad value must not take every server down with it
+		warnOnce(err.Error())
+		defVia = ViaDirect
+	}
 	out := make([]Server, 0, len(cat))
 	for _, e := range cat {
 		var flag *bool
 		if v, ok := flags[e.def.ID]; ok {
 			flag = &v
 		}
-		s, ok, err := e.resolve(sess[e.def.ID], flag, workspace, raglitHome)
+		s, ok, err := e.resolve(sess[e.def.ID], flag, workspace, raglitHome, defVia)
 		if err != nil {
 			return nil, err
 		}
@@ -709,7 +753,7 @@ func (h *Harness) SetServerOn(ctx context.Context, id, scope string, on *bool) (
 }
 
 // SetServerVia places id at scope: ViaShell, ViaDirect, or "" to unset (not
-// at global, where unset is direct). It returns the file written.
+// at global, where unset follows the default mode, SetDefaultMode). It returns the file written.
 func (h *Harness) SetServerVia(ctx context.Context, id, scope, via string) (string, error) {
 	if _, ok := builtinID(id); ok {
 		return "", fmt.Errorf("%s is dun's own: it has no mode", id)
@@ -721,10 +765,7 @@ func (h *Harness) SetServerVia(ctx context.Context, id, scope, via string) (stri
 		return "", fmt.Errorf("%q is a built-in server: it is always standalone", id)
 	}
 	switch via {
-	case "":
-		if scope == ScopeGlobal {
-			return "", fmt.Errorf("the global mode is standalone or scripted — it has no unset")
-		}
+	case "": // unset: the next scope down, at global the default mode
 	case ViaDirect, ViaShell:
 	default:
 		return "", fmt.Errorf("mode %q: want standalone or scripted", via)
@@ -732,14 +773,22 @@ func (h *Harness) SetServerVia(ctx context.Context, id, scope, via string) (stri
 	if s, _ := h.knownServer(id); via == ViaShell && s.Instance == InstanceAgent {
 		return "", fmt.Errorf("%s has instance agent: a scripted server runs in the session's shell, which a sub-agent shares — set its instance to session or shared first", id)
 	}
-	stored := via
-	if scope == ScopeGlobal && via == ViaDirect {
-		stored = "" // the global layer's direct is its absence
-	}
+	// Global standalone is stored as "direct", not as absence: with a
+	// scripted default (SetDefaultVia) absence means scripted.
 	path, err := h.writeScope(id, scope,
-		func(s *ServerSpec) { s.Via = stored },
-		func(s *ServerSpec) { s.Via = stored },
-		func(s *SessionServer) { s.Via = stored })
+		func(s *ServerSpec) { s.Via = via },
+		func(s *ServerSpec) { s.Via = via },
+		func(s *SessionServer) { s.Via = via })
+	if err != nil {
+		return "", err
+	}
+	return path, h.reloadServers(ctx, true, nil)
+}
+
+// SetDefaultMode sets the mode of a server no scope sets one for: ViaShell or
+// ViaDirect. It returns the file written (mcp.json, every workspace).
+func (h *Harness) SetDefaultMode(ctx context.Context, via string) (string, error) {
+	path, err := SetDefaultVia(via)
 	if err != nil {
 		return "", err
 	}
@@ -767,7 +816,9 @@ func (h *Harness) SetServerInstance(ctx context.Context, id, scope, instance str
 		}
 	case InstanceShared, InstanceSession:
 	case InstanceAgent:
-		if s.Via == ViaShell {
+		// Scripted by the default alone gives way: the server stays
+		// standalone (ViaFromDefaultAgent). A mode set at a scope refuses.
+		if s.Via == ViaShell && s.Scopes.ViaFrom != ViaFromDefault {
 			return "", fmt.Errorf("%s is scripted: it runs in the session's shell, which a sub-agent shares — agent is for a standalone server", id)
 		}
 	default:

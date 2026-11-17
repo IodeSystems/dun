@@ -254,6 +254,8 @@ func runMCPCmd(ctx context.Context, h *dun.Harness, action string) string {
 		return msg
 	case "mode", "via", "move":
 		return runViaCmd(ctx, h, strings.Fields(arg))
+	case "default":
+		return runDefaultViaCmd(ctx, h, arg)
 	case "instance":
 		return runInstanceCmd(ctx, h, strings.Fields(arg))
 	case "refresh":

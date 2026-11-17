@@ -20,6 +20,7 @@ import (
 //	/mcp unset <id> --project|--session
 //	/mcp mode <id> standalone|scripted|unset [--scope]
 //	                                   via, move and shell|direct are synonyms
+//	/mcp default standalone|scripted   the mode no scope sets (mcp.json "default_via")
 //	/mcp instance <id> shared|session|agent|unset [--scope]
 //	/mcp toggle <id> <tool> on|off|unset [--scope]
 
@@ -128,6 +129,32 @@ func runViaCmd(ctx context.Context, h *dun.Harness, f []string) string {
 			msg += "\nthe shell is not running — it hosts " + id + " when it starts (/mcp on shell)"
 		}
 		msg += "\n" + shellPlacementNote
+	}
+	return msg
+}
+
+// runDefaultViaCmd sets the mode of a server no scope sets one for:
+// default standalone|scripted. A server whose instance is agent stays
+// standalone, a built-in always is.
+func runDefaultViaCmd(ctx context.Context, h *dun.Harness, arg string) string {
+	const usage = "usage: /mcp default standalone|scripted"
+	via, err := dun.NormalizeVia(arg)
+	if err != nil || strings.TrimSpace(arg) == "" {
+		return usage
+	}
+	if via == "" {
+		via = dun.ViaDirect
+	}
+	path, err := h.SetDefaultMode(ctx, via)
+	if path == "" && err != nil {
+		return "mcp default: " + textfmt.OneLine(err.Error())
+	}
+	msg := "default mode: " + dun.ModeWord(via) + " (saved to " + path + ") — for a server no scope sets a mode for; /mcp mode <id> overrides it (unset follows it); other running sessions pick it up when they are next idle"
+	if via == dun.ViaShell {
+		msg += "; a server with instance agent, and the built-ins, stay standalone"
+	}
+	if err != nil {
+		msg += "\nsome servers did not come up — " + textfmt.OneLine(err.Error())
 	}
 	return msg
 }

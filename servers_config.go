@@ -394,6 +394,47 @@ type ServersFile struct {
 	// Rag is what the docs index is given (rag_ingest.go). Limits merge field
 	// by field; include and exclude accumulate across layers.
 	Rag *RagConfig `json:"rag,omitempty"`
+	// DefaultVia is the mode of a server no scope sets one for: "" or
+	// ViaDirect (standalone), or ViaShell (scripted). Read from
+	// $DUN_HOME/mcp.json only (LoadDefaultVia); a project file's is ignored.
+	DefaultVia string `json:"default_via,omitempty"`
+}
+
+// LoadDefaultVia is the global default mode for a server with no mode at any
+// scope: ViaShell or ViaDirect. Unset is ViaDirect.
+func LoadDefaultVia() (string, error) {
+	path := UserServersFile()
+	f, err := readServersFile(path)
+	if err != nil || f == nil || f.DefaultVia == "" {
+		return ViaDirect, err
+	}
+	via, err := NormalizeVia(f.DefaultVia)
+	if err != nil {
+		return "", fmt.Errorf("dun: %s: default_via: %w", path, err)
+	}
+	if via == "" {
+		via = ViaDirect
+	}
+	return via, nil
+}
+
+// SetDefaultVia stores the default mode (ViaShell or ViaDirect) in
+// $DUN_HOME/mcp.json. Standalone is stored as "direct", not as absence:
+// absence is whatever the default is, and an old dun reads "direct" too.
+func SetDefaultVia(via string) (string, error) {
+	if via != ViaShell && via != ViaDirect {
+		return "", fmt.Errorf("default mode %q: want %s or %s", via, ModeStandalone, ModeScripted)
+	}
+	path := UserServersFile()
+	f, err := readServersFile(path)
+	if err != nil {
+		return "", err
+	}
+	if f == nil {
+		f = &ServersFile{}
+	}
+	f.DefaultVia = via
+	return path, writeUserServers(path, f)
 }
 
 // LoadCommit resolves the effective commit config for a workspace. nil means
@@ -682,8 +723,13 @@ func UserServersFile() string {
 }
 
 // PutUserServer adds spec to the user server list, replacing one of the same
-// id. It returns the file written.
+// id. A mode or instance spec leaves empty is kept from the entry it replaces:
+// they are switches, not part of the definition. It returns the file written.
 func PutUserServer(spec ServerSpec) (string, error) {
+	spec, err := keepSwitches(spec)
+	if err != nil {
+		return "", err
+	}
 	path := UserServersFile()
 	f, err := readServersFile(path)
 	if err != nil {
@@ -702,6 +748,27 @@ func PutUserServer(spec ServerSpec) (string, error) {
 		f.Servers = append(f.Servers, spec)
 	}
 	return path, writeUserServers(path, f)
+}
+
+// keepSwitches fills in the mode and instance spec leaves empty from the
+// user-list entry of the same id, as PutUserServer will store it.
+func keepSwitches(spec ServerSpec) (ServerSpec, error) {
+	f, err := readServersFile(UserServersFile())
+	if err != nil || f == nil {
+		return spec, err
+	}
+	for _, old := range f.Servers {
+		if old.ID != spec.ID {
+			continue
+		}
+		if spec.Via == "" {
+			spec.Via = old.Via
+		}
+		if spec.Instance == "" {
+			spec.Instance = old.Instance
+		}
+	}
+	return spec, nil
 }
 
 // RemoveUserServer drops id from the user server list; it reports whether

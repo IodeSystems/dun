@@ -122,8 +122,31 @@ mode`: it runs in the session's shell, and a child has no shell of its own.
 A hand-edited file that still holds the pair runs it as `session`. With no
 dund (a test, a bare `dun -p`), `shared` acts as `session`.
 
-In the TUI's `/mcp` table, `i` cycles the instance at the mode scope (`M`
-then g/p/s picks it): shared → session → agent → unset; global has no unset.
+In the TUI's `/mcp` table, `i` cycles the instance: shared → session → agent
+→ unset; global has no unset. `m` cycles the mode likewise, unset included
+at global, where it follows the default mode (`/mcp mode <id> unset --global`). Both write at the
+scope that decides the selected row's value now (global when nothing sets it;
+the hint names it, "m mode at global"), so a globally configured server stays
+global. `M` then g/p/s picks one scope for every row until changed. When a
+write at a broader scope cannot change what the row does, because a project's
+or session's value still decides, the flash names that value and the keys that
+unset it.
+
+**Default mode** (2026-11-16). A server no scope sets a mode for takes the
+global default: `/mcp default standalone|scripted`, stored as `"default_via"`
+at the top of `$DUN_HOME/mcp.json` (beside `servers`; a project file's is
+ignored). Unset is standalone. The table reads `scripted (default)`. The
+built-ins stay standalone. A server whose instance is agent stays standalone
+too, since a scripted one cannot be agent: its cell reads `standalone
+(default, instance agent)`. A global standalone set with `/mcp mode <id>
+standalone --global` is stored as `"via": "direct"`, not as absence, because
+absence now means the default; `unset --global` removes it. A bad `default_via`
+logs once and reads as standalone. `/mcp default` changes reach other running
+sessions when they are next idle. Setting instance agent on a server scripted
+only by the default is allowed and leaves it standalone.
+
+`/mcp add` with an id that exists replaces its definition and keeps its mode
+and instance when the new entry names none.
 
 **The key** is the spec as the engine resolves it: the command found on PATH,
 args (placeholders expanded, so a `{{workspace}}` server is per workspace),

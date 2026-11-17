@@ -1222,15 +1222,30 @@ func (h *Harness) AddServer(ctx context.Context, spec ServerSpec) (string, error
 	if (spec.URL == "") == (spec.Command == "") {
 		return "", fmt.Errorf("a server has a url or a command, not both")
 	}
+	// A value the spec names stays explicit ("direct", "shared"): empty
+	// means unspecified, and keeps the stored entry's (PutUserServer).
 	via, err := NormalizeVia(spec.Via)
 	if err != nil {
 		return "", err
 	}
-	spec.Via = via
+	named := strings.TrimSpace(spec.Via) != ""
+	if spec.Via = via; named && via == "" {
+		spec.Via = ViaDirect
+	}
+	namedInstance := strings.TrimSpace(spec.Instance) != ""
 	if spec.Instance, err = NormalizeInstance(spec.Instance); err != nil {
 		return "", err
 	}
-	if spec.Instance == InstanceAgent && via == ViaShell {
+	if namedInstance && spec.Instance == "" {
+		spec.Instance = InstanceShared
+	}
+	// Validate what will be stored: the spec with the old entry's switches
+	// filled in.
+	merged, err := keepSwitches(spec)
+	if err != nil {
+		return "", err
+	}
+	if mv, _ := NormalizeVia(merged.Via); merged.Instance == InstanceAgent && mv == ViaShell {
 		return "", fmt.Errorf("instance agent is for a standalone server: a scripted one runs in the session's shell, which a sub-agent shares")
 	}
 	// A remote server with no credentials that answers with an OAuth

@@ -211,6 +211,12 @@ func routeSlash(line string, r slashRoutes) {
 				return
 			}
 			r.control("mcp", "mode "+strings.Join(lowerAll(args[1:]), " "))
+		case "default":
+			if _, err := dun.NormalizeVia(arg(1)); len(args) != 2 || err != nil {
+				r.reply("usage: /mcp default standalone|scripted — the mode of a server no scope sets one for (every project)")
+				return
+			}
+			r.control("mcp", "default "+arg(1))
 		case "instance":
 			if _, err := dun.NormalizeInstance(arg(2)); len(args) < 3 || len(args) > 4 || (err != nil && arg(2) != "unset") {
 				r.reply("usage: /mcp instance <id> shared|session|agent|unset [--global|--project|--session] (bare: this session)")

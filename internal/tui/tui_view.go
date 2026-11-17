@@ -455,7 +455,7 @@ func (m tuiModel) drawView() string {
 		status = StDim.Render(m.jv.hint())
 	case m.paging:
 		if v := m.serversPaging(); v != nil {
-			status = v.hint() // styled itself: its hotkeys are marked
+			status = v.hint(m.pg.cur) // styled itself: its hotkeys are marked
 		} else if v := m.switchesPaging(); v != nil {
 			status = StDim.Render(v.hint())
 		} else {

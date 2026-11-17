@@ -274,7 +274,7 @@ func (tablePane) key(m *tuiModel, msg tea.KeyPressMsg) bool {
 
 func (tablePane) hint(m *tuiModel) string {
 	if v := m.serversPaging(); v != nil {
-		return v.hint()
+		return v.hint(m.pg.cur)
 	}
 	return StDim.Render(m.pg.hint())
 }

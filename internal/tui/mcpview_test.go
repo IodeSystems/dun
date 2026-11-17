@@ -21,13 +21,22 @@ func tableStates() []dun.ServerState {
 			ViaSession: dun.ViaDirect, Global: "off", Project: "on", From: dun.ScopeProject,
 			Instance: dun.InstanceAgent, InstanceSession: dun.InstanceAgent, InstanceFrom: dun.ScopeSession},
 		{ID: dun.ServerShell, Proto: "stdio", Global: "on", Session: "off", From: dun.ScopeSession, Instance: dun.InstanceSession},
+		// Mode set at global and overridden by the project; instance set at global.
+		{ID: "acme", Proto: "http", Auto: true, Via: dun.ViaDirect, ViaFrom: dun.ScopeProject, ViaGlobal: dun.ViaShell, ViaProject: dun.ViaDirect,
+			Global: "on", From: dun.ScopeGlobal, Instance: dun.InstanceSession, InstanceGlobal: dun.InstanceSession, InstanceFrom: dun.ScopeGlobal},
+		// Nothing sets a mode: the scripted global default decides.
+		{ID: "dflt", Proto: "http", Auto: true, Via: dun.ViaShell, ViaFrom: dun.ViaFromDefault,
+			Global: "on", From: dun.ScopeGlobal, Instance: dun.InstanceShared, InstanceFrom: dun.ScopeGlobal},
+		// The default is scripted, but its instance is agent: standalone, and why.
+		{ID: "dagent", Proto: "http", Auto: true, Via: dun.ViaDirect, ViaFrom: dun.ViaFromDefaultAgent,
+			Global: "on", From: dun.ScopeGlobal, Instance: dun.InstanceAgent, InstanceGlobal: dun.InstanceAgent, InstanceFrom: dun.ScopeGlobal},
 	}
 }
 
 // The text listing every client gets: the columns, a mark per switch, the
 // mode and the state each with the scope that decided it.
 func TestServerTable_Plain(t *testing.T) {
-	out := mcptable.ServerTable(tableStates(), mcptable.PlainKey)
+	out := mcptable.ServerTable(tableStates()[:3], mcptable.PlainKey)
 	lines := strings.Split(out, "\n")
 	if want := "  server      proto  global   project  session  mode                   instance            → state"; lines[0] != want {
 		t.Errorf("header:\n%q\n%q", lines[0], want)
@@ -80,7 +89,7 @@ func TestMCPServersView_Keys(t *testing.T) {
 	if strings.Contains(convoText(m), "mcp servers …") {
 		t.Error("the table opened; the listing must not also land in the scrollback")
 	}
-	if h := stripANSI(m.serversPaging().hint()); !strings.Contains(h, "instance at session") {
+	if h := stripANSI(m.serversPaging().hint(m.pg.cur)); !strings.Contains(h, "mode at global · instance at global") {
 		t.Errorf("hint names the mode scope: %q", h)
 	}
 	if v := stripANSI(m.pg.view(140, 10)); !strings.Contains(v, "playwright  stdio     ●        –        –     scripted (global)") {
@@ -103,8 +112,8 @@ func TestMCPServersView_Keys(t *testing.T) {
 		{"g", "mcp off playwright --global"},
 		{"p", "mcp on playwright --project"},
 		{"s", "mcp on playwright --session"},
-		{"m", "mcp mode playwright scripted --session"},
-		{"i", "mcp instance playwright shared --session"},
+		{"m", "mcp mode playwright standalone --global"},
+		{"i", "mcp instance playwright session --global"},
 		{"j", ""},
 		{"i", "mcp instance figma unset --session"},
 		{"p", "mcp off figma --project"},
@@ -120,8 +129,133 @@ func TestMCPServersView_Keys(t *testing.T) {
 			t.Errorf("%s: sent %q, want %q", c.key, got, c.want)
 		}
 	}
-	if h := stripANSI(m.serversPaging().hint()); !strings.Contains(h, "instance at global") {
+	if h := stripANSI(m.serversPaging().hint(m.pg.cur)); !strings.Contains(h, "instance at global") {
 		t.Errorf("after M g: %q", h)
+	}
+}
+
+// openedTable is the /mcp table on tableStates, and a sender of one key that
+// returns the command it wrote.
+func openedTable(t *testing.T) (*tuiModel, *bytes.Buffer) {
+	t.Helper()
+	var buf bytes.Buffer
+	m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
+	m = nm.(tuiModel)
+	m.openMCPServers()
+	list := []any{}
+	for _, st := range tableStates() {
+		b, _ := json.Marshal(enginecmd.ServersProto([]dun.ServerState{st})[0])
+		var o map[string]any
+		_ = json.Unmarshal(b, &o)
+		list = append(list, o)
+	}
+	m = m.feed(evMsg{"type": "server", "id": enginecmd.AllServers, "message": "mcp servers …", "servers": list})
+	if m.serversPaging() == nil {
+		t.Fatal("bare /mcp must open the table")
+	}
+	return &m, &buf
+}
+
+// pressKey sends a key to the table and returns the command it wrote.
+func pressKey(m *tuiModel, buf *bytes.Buffer, k string) string {
+	buf.Reset()
+	var cur tea.Model = *m
+	cur, _ = cur.Update(runesKey([]rune(k)))
+	*m = cur.(tuiModel)
+	var got map[string]string
+	_ = json.Unmarshal(buf.Bytes(), &got)
+	return got["action"]
+}
+
+// m and i write where the row's value is decided (global when nothing sets
+// it), the hint says so per row, and a narrower value that still decides is
+// named when a write at a broader scope cannot change what the row does.
+func TestMCPServersView_AutoScope(t *testing.T) {
+	m, buf := openedTable(t)
+	at := func(cur int) string { return stripANSI(m.serversPaging().hint(cur)) }
+	for cur, want := range map[int]string{0: "mode at global · instance at global", 1: "mode at session · instance at session",
+		3: "mode at project · instance at global", 4: "mode at global · instance at global"} {
+		if h := at(cur); !strings.Contains(h, want) {
+			t.Errorf("row %d hint %q lacks %q", cur, h, want)
+		}
+	}
+	for _, c := range []struct {
+		row        int
+		key, want  string
+		flashWords string
+	}{
+		{3, "m", "mcp mode acme unset --project", ""},      // the project decides: standalone there cycles to unset
+		{3, "i", "mcp instance acme agent --global", ""},   // set at global
+		{4, "m", "mcp mode dflt standalone --global", ""},  // the scripted default reads as global scripted: next is standalone, stored explicitly
+		{4, "i", "mcp instance dflt session --global", ""}, // nothing set: global
+	} {
+		m.pg.cur = c.row
+		if got := pressKey(m, buf, c.key); got != c.want {
+			t.Errorf("row %d %s: sent %q, want %q", c.row, c.key, got, c.want)
+		}
+		if c.flashWords != "" && !strings.Contains(m.flashText, c.flashWords) {
+			t.Errorf("row %d %s: flash %q lacks %q", c.row, c.key, m.flashText, c.flashWords)
+		}
+	}
+
+	// The default-agent row: m is not sent, and says why; i still is.
+	m.pg.cur = 5
+	if h := at(5); !strings.Contains(h, "mode at global · instance at global") {
+		t.Errorf("default-agent hint: %q", h)
+	}
+	if got := pressKey(m, buf, "m"); got != "" || !strings.Contains(m.flashText, "press i to change the instance first") {
+		t.Errorf("default-agent m: sent %q, flash %q", got, m.flashText)
+	}
+	if got := pressKey(m, buf, "i"); got != "mcp instance dagent unset --global" && got != "mcp instance dagent shared --global" {
+		t.Errorf("default-agent i: %q", got)
+	}
+	// Global unset follows the default: standalone at global cycles to unset.
+	m.pg.cur = 0
+	pressKey(m, buf, "M")
+	pressKey(m, buf, "g")
+	if got := pressKey(m, buf, "m"); got != "mcp mode playwright standalone --global" {
+		t.Errorf("global scripted: %q", got)
+	}
+	pressKey(m, buf, "M") // back to the row's own scope for the checks below
+	pressKey(m, buf, "s")
+
+	// An explicit pick is sticky across rows, and a session override that
+	// still decides is named.
+	m.pg.cur = 1 // figma: session decides its mode and its instance
+	pressKey(m, buf, "M")
+	pressKey(m, buf, "p")
+	m.pg.cur = 3
+	if got := pressKey(m, buf, "m"); got != "mcp mode acme unset --project" {
+		t.Errorf("sticky project: %q", got)
+	}
+	m.pg.cur = 1
+	if got := pressKey(m, buf, "m"); got != "mcp mode figma scripted --project" {
+		t.Errorf("sticky project on figma: %q", got)
+	}
+	if !strings.Contains(m.flashText, "the session's mode (direct) still decides") || !strings.Contains(m.flashText, "M s then m") {
+		t.Errorf("override flash: %q", m.flashText)
+	}
+	pressKey(m, buf, "M")
+	pressKey(m, buf, "g")
+	if got := pressKey(m, buf, "i"); got != "mcp instance figma session --global" {
+		t.Errorf("sticky global: %q", got)
+	}
+	if !strings.Contains(m.flashText, "the session's instance (agent) still decides") {
+		t.Errorf("instance override flash: %q", m.flashText)
+	}
+	// At the deciding scope there is nothing to say.
+	pressKey(m, buf, "M")
+	pressKey(m, buf, "s")
+	if pressKey(m, buf, "m"); strings.Contains(m.flashText, "still decides") {
+		t.Errorf("session write flashed an override: %q", m.flashText)
+	}
+	// A project value decides over global: acme at global is overridden.
+	m.pg.cur = 3
+	pressKey(m, buf, "M")
+	pressKey(m, buf, "g")
+	if pressKey(m, buf, "m"); !strings.Contains(m.flashText, "the project's mode (direct) still decides") {
+		t.Errorf("project override flash: %q", m.flashText)
 	}
 }
 

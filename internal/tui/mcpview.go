@@ -19,11 +19,12 @@ import (
 //	g  global   on ↔ off
 //	p  project  unset → on → off → unset
 //	s  session  unset → on → off → unset
-//	m  mode     scripted → standalone → unset, at the mode scope (session
-//	            unless changed); global has no unset, so it is the two
-//	i  instance shared → session → agent → unset, at the mode scope; global
-//	            has no unset
-//	M  then g/p/s chooses the mode scope (m and i write there)
+//	m  mode     scripted → standalone → unset, at the scope that decides the
+//	            row's mode now (global when none does); unset at global
+//	            follows the default mode (/mcp default)
+//	i  instance shared → session → agent → unset, likewise at the scope that
+//	            decides the row's instance; global has no unset
+//	M  then g/p/s chooses one scope for m and i on every row, until changed
 //
 // Each key sends the typed command (/mcp on <id> --global …) through the
 // engine like any other client, and the server event that answers refreshes
@@ -47,7 +48,7 @@ func hotKey(word, key string) string {
 type mcpServersView struct {
 	rows     []dun.ServerState
 	details  []string
-	viaScope string // the scope m writes
+	viaScope string // the scope m and i write, once M picked one; "" is auto: each row's deciding scope
 	pickVia  bool   // M was pressed: the next g/p/s picks viaScope
 	spin     string // the spinner's frame, for a row still starting
 	width    int    // the pane's; under narrowW a row is two lines
@@ -151,15 +152,64 @@ func (v *mcpServersView) page() pageDoc {
 	return pageDoc{title: "servers", header: "  " + mcptable.ServerHeader(cw, hotKey), nodes: nodes}
 }
 
-// hint is the status line: the keys, with the scope m writes to.
-func (v *mcpServersView) hint() string {
+// scopeOf is the scope that decides a mode or an instance, as a write scope:
+// global when none does (nothing is set, the global default decides, or it is
+// fixed).
+func scopeOf(from string) string {
+	if s, ok := dun.ParseScope(from); ok && len(from) > 1 {
+		return s
+	}
+	return dun.ScopeGlobal
+}
+
+// modeScope is where m writes for st: the scope M picked, else the one
+// deciding its mode.
+func (v *mcpServersView) modeScope(st dun.ServerState) string {
+	if v.viaScope != "" {
+		return v.viaScope
+	}
+	return scopeOf(st.ViaFrom)
+}
+
+// instanceScope is where i writes for st.
+func (v *mcpServersView) instanceScope(st dun.ServerState) string {
+	if v.viaScope != "" {
+		return v.viaScope
+	}
+	return scopeOf(st.InstanceFrom)
+}
+
+// overrideNote says which narrower scope's value still decides after a write
+// at scope, and how to reach it ("" when none does). project and session are
+// the switch's values there; word names it.
+func overrideNote(scope, word, project, session string) string {
+	switch {
+	case scope == dun.ScopeSession:
+		return ""
+	case session != "":
+		return "the session's " + word + " (" + session + ") still decides — M s then m/i unsets it"
+	case scope == dun.ScopeGlobal && project != "":
+		return "the project's " + word + " (" + project + ") still decides — M p then m/i unsets it"
+	}
+	return ""
+}
+
+// hint is the status line: the keys, with the scopes m and i write to on the
+// selected row (cur).
+func (v *mcpServersView) hint(cur int) string {
 	if v.pickVia {
 		return StDim.Render("mode scope: ") + hotKey("global", "g") + StDim.Render(" · ") + hotKey("project", "p") +
 			StDim.Render(" · ") + hotKey("session", "s") + StDim.Render(" · esc cancel")
 	}
+	ms, is := dun.ScopeGlobal, dun.ScopeGlobal
+	if st, ok := v.selectedServer(cur); ok {
+		ms, is = v.modeScope(st), v.instanceScope(st)
+	} else if v.viaScope != "" {
+		ms, is = v.viaScope, v.viaScope
+	}
 	return hotKey("global", "g") + StDim.Render(" on/off · ") + hotKey("project", "p") + StDim.Render("/") +
-		hotKey("session", "s") + StDim.Render(" unset→on→off · ") + hotKey("mode", "m") +
-		StDim.Render("/") + hotKey("instance", "i") + StDim.Render(" at "+v.viaScope+" (M+g/p/s: scope) · ") + hotKey("tools", "t") + StDim.Render(" · enter details · esc back")
+		hotKey("session", "s") + StDim.Render(" unset→on→off · ") + hotKey("mode", "m") + StDim.Render(" at "+ms+" · ") +
+		hotKey("instance", "i") + StDim.Render(" at "+is+" (M+g/p/s: scope) · ") + hotKey("tools", "t") + StDim.Render(" · enter details · esc back")
 }
 
 // serverStates reads a server event's list.
@@ -243,7 +293,7 @@ func (m *tuiModel) openServerTable(list []any) bool {
 	if len(rows) == 0 {
 		return false
 	}
-	m.pg = newPager(-1, &mcpServersView{rows: rows, details: details, viaScope: dun.ScopeSession, spin: m.spin.View()})
+	m.pg = newPager(-1, &mcpServersView{rows: rows, details: details, spin: m.spin.View()})
 	m.paging = true
 	m.scr = mcpScreen() // the table over the selected server's log (panes.go)
 	m.syncPager()
@@ -261,15 +311,13 @@ func nextTri(v string) string {
 	return "unset"
 }
 
-// nextVia is scripted → standalone → unset → scripted; global has no unset.
-func nextVia(v, scope string) string {
+// nextVia is scripted → standalone → unset → scripted, at every scope: unset
+// at global follows the default mode.
+func nextVia(v string) string {
 	switch v {
 	case dun.ViaShell:
 		return dun.ViaDirect
 	case dun.ViaDirect:
-		if scope == dun.ScopeGlobal {
-			return dun.ViaShell
-		}
 		return "unset"
 	}
 	return dun.ViaShell
@@ -322,7 +370,7 @@ func (m *tuiModel) serverKey(v *mcpServersView, k string) bool {
 		return true
 	}
 	st := v.rows[m.pg.cur]
-	var line string
+	var line, note string
 	switch k {
 	case "g", "p", "s":
 		line = switchLine(st, k)
@@ -335,15 +383,21 @@ func (m *tuiModel) serverKey(v *mcpServersView, k string) bool {
 			m.flashText, m.flashUntil = st.ID+" is built in: it is always standalone", time.Now().Add(flashFor)
 			return true
 		}
-		cur := map[string]string{dun.ScopeGlobal: st.ViaGlobal, dun.ScopeProject: st.ViaProject, dun.ScopeSession: st.ViaSession}[v.viaScope]
-		if v.viaScope == dun.ScopeGlobal && cur == "" {
-			cur = dun.ViaDirect
+		if st.ViaFrom == dun.ViaFromDefaultAgent {
+			m.flashText, m.flashUntil = st.ID+": instance agent keeps it standalone — press i to change the instance first", time.Now().Add(flashFor)
+			return true
 		}
-		next := nextVia(cur, v.viaScope)
+		scope := v.modeScope(st)
+		cur := map[string]string{dun.ScopeGlobal: st.ViaGlobal, dun.ScopeProject: st.ViaProject, dun.ScopeSession: st.ViaSession}[scope]
+		if scope == dun.ScopeGlobal && cur == "" && st.ViaFrom == dun.ViaFromDefault {
+			cur = dun.ViaShell // nothing set globally: the scripted default is the value shown
+		}
+		next := nextVia(cur)
 		if next != "unset" {
 			next = dun.ModeWord(next)
+			note = overrideNote(scope, "mode", st.ViaProject, st.ViaSession)
 		}
-		line = "mcp mode " + st.ID + " " + next + " --" + v.viaScope
+		line = "mcp mode " + st.ID + " " + next + " --" + scope
 	case "i":
 		if strings.HasPrefix(st.ID, dun.BuiltinPrefix) {
 			m.flashText, m.flashUntil = st.ID+" is dun's own tools: they have no instance — t lists them", time.Now().Add(flashFor)
@@ -353,17 +407,25 @@ func (m *tuiModel) serverKey(v *mcpServersView, k string) bool {
 			m.flashText, m.flashUntil = st.ID+" is built in: its instance is fixed ("+st.Instance+")", time.Now().Add(flashFor)
 			return true
 		}
-		cur := map[string]string{dun.ScopeGlobal: st.InstanceGlobal, dun.ScopeProject: st.InstanceProject, dun.ScopeSession: st.InstanceSession}[v.viaScope]
-		if v.viaScope == dun.ScopeGlobal && cur == "" {
+		scope := v.instanceScope(st)
+		cur := map[string]string{dun.ScopeGlobal: st.InstanceGlobal, dun.ScopeProject: st.InstanceProject, dun.ScopeSession: st.InstanceSession}[scope]
+		if scope == dun.ScopeGlobal && cur == "" {
 			cur = dun.InstanceShared
 		}
-		line = "mcp instance " + st.ID + " " + nextInstance(cur, v.viaScope) + " --" + v.viaScope
+		next := nextInstance(cur, scope)
+		if next != "unset" {
+			note = overrideNote(scope, "instance", st.InstanceProject, st.InstanceSession)
+		}
+		line = "mcp instance " + st.ID + " " + next + " --" + scope
 	}
 	if !m.proc.controlCmd("slash", line) {
 		m.flashText, m.flashUntil = "no engine right now — /reconnect first", time.Now().Add(flashFor)
 		return true
 	}
 	m.flashText, m.flashUntil = "/"+line, time.Now().Add(flashFor)
+	if note != "" {
+		m.flashText += " — " + note
+	}
 	return true
 }
 
@@ -463,7 +525,13 @@ func modeSentence(st dun.ServerState) string {
 	} else {
 		s += ": its tools are sent with every request"
 	}
-	if st.ViaFrom != "" {
+	switch st.ViaFrom {
+	case "":
+	case dun.ViaFromDefault:
+		s += " (the default for a server with no mode set — /mcp default standalone changes it)"
+	case dun.ViaFromDefaultAgent:
+		s += " (the default is scripted, but its instance is agent: a scripted server runs in the session's shell, which a sub-agent shares)"
+	default:
 		s += " (set " + map[string]string{dun.ScopeGlobal: "for every project", dun.ScopeProject: "for this project", dun.ScopeSession: "for this session"}[st.ViaFrom] + ")"
 	}
 	return s + " — m changes it"
