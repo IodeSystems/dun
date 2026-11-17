@@ -151,8 +151,9 @@ func (h *Harness) noteCompactionCause(ci agent.CompactionInfo, cause foldCause) 
 			h.compactTurn)
 	}
 	// What the summary may have dropped, from dun's own records.
+	// Keyed: a second fold in the turn replaces the first one's note.
 	if n := h.foldRestoreNote(); n != "" {
-		h.Aside(n)
+		h.AsideWith(n, AsideOpts{Key: "fold-restore"})
 	}
 	if h.cfg.OnCompaction != nil {
 		h.cfg.OnCompaction(note)

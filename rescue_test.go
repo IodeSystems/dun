@@ -113,6 +113,14 @@ func TestRescue_FoldsAndRetries(t *testing.T) {
 		t.Fatalf("folded %d times; want 1", gotFolded)
 	}
 	remaining := len(entries) - 1 // minus the marker
+	for _, e := range entries {
+		// Only what this fold adds: the after-fold note and the plan's aside.
+		// Any other leftover still counts as history and fails the test.
+		if e.Kind == agent.KindNotification &&
+			(strings.HasPrefix(e.Content, "Context was just compacted") || strings.HasPrefix(e.Content, "[plan]")) {
+			remaining--
+		}
+	}
 	if remaining != 17-wantFolded {
 		t.Errorf("history after fold = %d entries; want %d (17 folded by half)", remaining, 17-wantFolded)
 	}

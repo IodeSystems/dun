@@ -52,7 +52,21 @@ without a fold) only the bounding rungs ever run.
   and the work in flight (`fold.go:31-41`); after the fold an aside lists
   what is still running (`fold.go:79-125`); the folded span goes to the
   session index (`harness.go:828`). The first user message is pinned for
-  children only (`harness.go:833`). The fold call has its own system prompt
+  children only (`harness.go:833`).
+  **The current ask (2026-11-17).** On a long tool-heavy turn the pristine
+  tail fills with tool entries, so the turn's user message lands in the older
+  part and the fold subsumed it ("Your message carried no task"). dun side
+  (`fold.go`): `noteAsk` remembers the latest `KindUser` entry (asides,
+  notices and settle prompts are notifications, so they never count) and
+  adds it to the plan as a node in progress, once per ask id, before the fold
+  runs (`foldTask` is the hook); the fold is told the ask and must write
+  `## Ask / Done / Learned / Next`, short, with the ask copied word for word;
+  `foldRunner` checks each summary and asks once more with the failure stated
+  (agentkit v0.29.0 has no hook between summary and commit, so the check
+  wraps the Shaper's Runner); `foldRestoreNote` always carries the ask
+  verbatim (cap 8000) and the open plan, keyed so a second fold in the turn
+  replaces the first note. Open: pin the latest user entry in the Shaper
+  itself (request to the agentkit owner). The fold call has its own system prompt
   ("You are a compaction worker", `shaper.go:808`), so it reads the raw
   history **uncached**; the next round re-reads the new prompt uncached too.
 - **Rescue and overflow [D].** `rescue.go` folds when the endpoint refuses a

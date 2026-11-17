@@ -123,6 +123,7 @@ func (h *Harness) rescueFold(ctx context.Context) (int, error) {
 // its last few exchanges are what it needs to continue — while the OLDER half,
 // which has already been acted on, is what can become a paragraph.
 func (h *Harness) foldHistory(ctx context.Context, cause foldCause) (int, error) {
+	h.noteAsk(ctx) // before the fold takes it: the restore note quotes it
 	entries, err := h.store.Context(ctx, "dun")
 	if err != nil {
 		return 0, fmt.Errorf("load history: %w", err)

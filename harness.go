@@ -581,6 +581,9 @@ type Harness struct {
 	// for, so the thrash warning does not blame the budget for them.
 	compactOverflow int
 	compactLast     time.Time
+	// ask is the latest user message a fold has seen (fold.go noteAsk).
+	askMu sync.Mutex
+	ask   foldAsk
 	// Session-level counters for /context stats. Guarded by noteMu alongside
 	// the queue, since they are incremented when items are drained from it.
 	// meter is the chars-per-token ratio measured from the provider's own usage
@@ -821,12 +824,11 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		Rehead: h.rehead,
 		// A fold thinks nothing and is told the session's state and what is
 		// in flight; its summary is sized by agentkit to the fold (fold.go).
-		SummaryOpts: h.foldOpts(),
-		TaskFunc:    h.foldTask,
 		// What a fold deletes stays searchable in the session's raglit
 		// branch (raglitauth.go); nil without a raglit that has keys.
 		Index: lateSessionIndex{h},
 	}
+	h.foldWire(shaper)
 	// A sub-agent's first user message IS its task (the parent's brief), so it
 	// must survive folds. Not for a root session: its first message may be
 	// "hi" or a pasted log, and a pinned entry rides every round for good.
@@ -991,7 +993,10 @@ func (h *Harness) managerFor() (*mcpmgr.Manager, bool) {
 }
 
 // Reset clears the session store, starting a fresh conversation log.
-func (h *Harness) Reset() { h.store.Reset() }
+func (h *Harness) Reset() {
+	h.store.Reset()
+	h.clearAsk() // the ask belonged to the conversation just cleared
+}
 
 // ExecBackend returns the current exec backend.
 func (h *Harness) ExecBackend() ExecBackend {
