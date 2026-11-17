@@ -512,7 +512,11 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   or docker the worktree is branched from the HEAD of dir's repo (`git
   rev-parse --show-toplevel`), in that repo's project store, and the child
   works in the same subdirectory of it (`isolation.Sub`); git calls stay on
-  the worktree root. A dir in no repo is refused, naming the repos up to two
+  the worktree root. A dir in a linked worktree (another child's) branches
+  off that worktree's HEAD, but its repo is the main checkout
+  (`--git-common-dir`): the store, the merge hint and the release use it.
+  A dir not in HEAD (untracked, ignored, empty) is refused, and the tree made
+  for it removed. A dir in no repo is refused, naming the repos up to two
   levels below it. A repo not the parent's gets its own mounts, and the merge
   hint says `git -C <repo> merge <branch>`. `dir` is a spawn's only: with
   `id` it is refused unless it is where that agent works. It is kept in

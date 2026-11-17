@@ -92,7 +92,9 @@ func (h *Harness) newIsolation(mode, dir string) (isolation, error) {
 		}
 		// The child gets a host shell on dir; a parent sandboxed in a
 		// container must not hand one out.
-		if _, ok := h.cfg.Exec.(*HostShell); h.cfg.Exec != nil && !ok {
+		switch h.cfg.Exec.(type) {
+		case nil, *HostShell, HostExec, *HostExec:
+		default:
 			return isolation{}, fmt.Errorf("dir without isolation needs a host shell, and this session's commands run in %T", h.cfg.Exec)
 		}
 		return isolation{Mode: IsoNone, Dir: dir}, nil
@@ -118,20 +120,10 @@ func (h *Harness) newIsolation(mode, dir string) (isolation, error) {
 				return isolation{}, fmt.Errorf("isolation docker needs docker on PATH: %v", err)
 			}
 		}
-		src, mounts := h.cfg.Workspace, h.cfg.ExtraMounts
-		var foreign bool
 		if dir != "" {
-			repo := RepoRoot(dir)
-			if repo == "" {
-				return isolation{}, notARepo(dir)
-			}
-			src, foreign = dir, !sameDir(repo, RepoRoot(h.cfg.Workspace))
-			if foreign {
-				// The parent's mounts are its go.mod's; this repo has its own.
-				mounts = LoadMounts(repo, repo)
-			}
+			return h.dirWorktree(mode, dir)
 		}
-		wt, isRepo, err := NewWorktree(src, mounts)
+		wt, isRepo, err := NewWorktree(h.cfg.Workspace, h.cfg.ExtraMounts)
 		if err != nil {
 			return isolation{}, err
 		}
@@ -139,15 +131,40 @@ func (h *Harness) newIsolation(mode, dir string) (isolation, error) {
 			return isolation{}, fmt.Errorf("isolation %s needs a git repository, and %s is not in one", mode, h.cfg.Workspace)
 		}
 		base, _ := git("", "-C", wt.Path, "rev-parse", "HEAD")
-		iso := isolation{Mode: mode, Path: wt.Path, Branch: wt.Branch, Base: strings.TrimSpace(base), Repo: wt.RepoRoot(), Dir: dir, Foreign: foreign}
-		if dir != "" {
-			if rel, err := filepath.Rel(wt.RepoRoot(), dir); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
-				iso.Sub = rel
-			}
-		}
-		return iso, nil
+		return isolation{Mode: mode, Path: wt.Path, Branch: wt.Branch, Base: strings.TrimSpace(base), Repo: wt.RepoRoot()}, nil
 	}
 	return isolation{}, fmt.Errorf("isolation %q: want none, worktree, docker or nodir", mode)
+}
+
+// dirWorktree is a worktree for a spawn's dir: off the HEAD of the checkout
+// holding dir, in its main repo's store (dir may be in a linked worktree,
+// another child's), the child in the same subdirectory of it.
+func (h *Harness) dirWorktree(mode, dir string) (isolation, error) {
+	top, repo := RepoRoot(dir), MainRepo(dir)
+	if top == "" || repo == "" {
+		return isolation{}, notARepo(dir)
+	}
+	foreign := !sameDir(repo, MainRepo(h.cfg.Workspace))
+	mounts := h.cfg.ExtraMounts
+	if foreign {
+		// The parent's mounts are its go.mod's; this repo has its own.
+		mounts = LoadMounts(repo, repo)
+	}
+	wt, err := newWorktreeIn(top, repo, mounts)
+	if err != nil {
+		return isolation{}, err
+	}
+	base, _ := git("", "-C", wt.Path, "rev-parse", "HEAD")
+	iso := isolation{Mode: mode, Path: wt.Path, Branch: wt.Branch, Base: strings.TrimSpace(base), Repo: repo, Dir: dir, Foreign: foreign}
+	if rel, err := filepath.Rel(top, dir); err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		iso.Sub = rel
+	}
+	// An untracked, ignored or empty dir is not in HEAD, so not in the tree.
+	if fi, err := os.Stat(iso.workspace()); err != nil || !fi.IsDir() {
+		iso.release()
+		return isolation{}, fmt.Errorf("%s is not in %s's HEAD (untracked, ignored or empty): commit it, or pass the repo root as dir", dir, top)
+	}
+	return iso, nil
 }
 
 // resolveDir is a spawn's dir as a real directory: absolute, ~/, or relative

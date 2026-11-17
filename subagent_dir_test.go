@@ -209,3 +209,93 @@ func TestSubAgent_DirWorktreeResumes(t *testing.T) {
 		t.Errorf("resumed in %q (iso %+v), was %q", got, one.iso, was)
 	}
 }
+
+// A dir that is not in HEAD (untracked here) is refused, and the worktree
+// made for it is gone with its branch.
+func TestSubAgent_DirNotInHead(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	repo := gitRepoT(t, t.TempDir())
+	if err := os.Mkdir(filepath.Join(repo, "new"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	h, err := Start(context.Background(), Config{Workspace: repo, Client: &scriptRunner{}, Exec: &HostShell{Dir: repo}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	_, err = h.spawnAgentIn(context.Background(), "x", "", IsoWorktree, filepath.Join(repo, "new"))
+	if err == nil || !strings.Contains(err.Error(), "is not in "+repo+"'s HEAD") {
+		t.Fatalf("untracked dir: %v", err)
+	}
+	if br := gitT(t, repo, "branch", "--list", "dun/*"); br != "" {
+		t.Errorf("its branch was kept: %q", br)
+	}
+	if wl := gitT(t, repo, "worktree", "list"); strings.Contains(wl, "\n") {
+		t.Errorf("its worktree was kept:\n%s", wl)
+	}
+}
+
+// A dir in a linked worktree (another child's): the new tree is off that
+// worktree's HEAD, but its repo is the main one, and dismissing it removes
+// it and its branch from there.
+func TestSubAgent_DirInALinkedWorktree(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	over := t.TempDir()
+	repo := gitRepoT(t, filepath.Join(over, "proj"))
+	linked := filepath.Join(over, "linked")
+	gitT(t, repo, "worktree", "add", "-q", "-b", "other", linked)
+	h, err := Start(context.Background(), Config{Workspace: over, Client: &scriptRunner{}, Exec: &HostShell{Dir: over}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	sa, err := h.spawnAgentIn(context.Background(), "x", "", IsoWorktree, filepath.Join(linked, "sub"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitIdle(t, sa)
+	if sa.iso.Repo != repo || sa.iso.Sub != "sub" || sa.h.cfg.Workspace != filepath.Join(sa.iso.Path, "sub") {
+		t.Fatalf("iso %+v, child workspace %q", sa.iso, sa.h.cfg.Workspace)
+	}
+	if br := gitT(t, repo, "branch", "--list", sa.iso.Branch); br == "" {
+		t.Errorf("branch %s is not in %s", sa.iso.Branch, repo)
+	}
+	if out := sa.quit(); !strings.Contains(out, "held nothing and was removed") {
+		t.Errorf("quit: %s", out)
+	}
+	if _, err := os.Stat(sa.iso.Path); !os.IsNotExist(err) {
+		t.Errorf("the worktree was kept: %v", err)
+	}
+	if br := gitT(t, repo, "branch", "--list", sa.iso.Branch); br != "" {
+		t.Errorf("its branch was kept: %q", br)
+	}
+}
+
+// A subdirectory whose name starts with ".." is still a subdirectory.
+func TestSubAgent_DirDotDotName(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	repo := gitRepoT(t, t.TempDir())
+	odd := filepath.Join(repo, "..odd")
+	if err := os.Mkdir(odd, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(odd, "x.txt"), []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitT(t, repo, "add", ".")
+	gitT(t, repo, "commit", "-qm", "odd")
+	h, err := Start(context.Background(), Config{Workspace: repo, Client: &scriptRunner{}, Exec: &HostShell{Dir: repo}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	sa, err := h.spawnAgentIn(context.Background(), "x", "", IsoWorktree, odd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitIdle(t, sa)
+	if sa.iso.Sub != "..odd" || sa.h.cfg.Workspace != filepath.Join(sa.iso.Path, "..odd") {
+		t.Errorf("iso %+v, child workspace %q", sa.iso, sa.h.cfg.Workspace)
+	}
+	sa.quit()
+}
