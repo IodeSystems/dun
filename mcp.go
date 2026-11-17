@@ -50,7 +50,7 @@ var toolDocs = map[string]string{
 	// node_edit: rename is the right tool for renaming; oldText/newText for snippets.
 	"node_edit": "\n\nRENAMING a symbol? Use the rename op — ONE call renames the declaration AND every usage across the WHOLE workspace, atomically. Do NOT rename by hand-editing files one at a time with oldText/newText: that misses usages and leaves the build broken between edits. For snippets, oldText must occur exactly once WITHIN the node — keep it short. Pass the node's whole text to rewrite it entirely.",
 	"eval": "\n\nmcpshell is a JS subset — do the whole task in ONE eval that ENDS in the value:\n" +
-		"  let total = [1,2,3].reduce((a,b) => a + b, 0)   // lasts the session (like a REPL); redeclare to replace it\n" +
+		"  let total = [1,2,3].reduce((a,b) => a + b, 0)\n" +
 		"  const c = 1; c = 2                              // error: const is enforced (c++ and c += too); a later eval may redeclare it\n" +
 		"  total * 2                                       // the LAST expression is the output (console.log is not the result)\n" +
 		"  [3,1,2,1] |> unique()                           // dedup; new Set(xs) also works ([...set] for pipes)\n" +
@@ -58,9 +58,9 @@ var toolDocs = map[string]string{
 		"class/this/new/instanceof, Map/Set and Error subclasses work as in JS. No import, generators, Symbol or Proxy. " +
 		"Unlike JS: == and === compare plain objects by structure; Map/Set keys(), values() and entries() return arrays; " +
 		"an error mcpshell raises itself is a string in catch. xs.sort(), xs.reverse() and xs.fill(v) mutate xs in place and return it (JS); " +
-		"sort(xs), xs |> sort and xs.toSorted() return copies. Dedup, count, sort etc. are pipe commands — help() lists them; " +
-		"on a hosted server's namespace, <ns>.help() or <ns>.help(\"cmd\") does the same.\n" +
-		"`dun` is bound in every eval (reserved, overwrites a vars.dun of yours): dun.harness, dun.harness_version, dun.model_id, dun.effort, dun.provider — for a commit or PR that names the agent.",
+		"sort(xs), xs |> sort and xs.toSorted() return copies. Dedup, count, sort etc. are pipe commands. " +
+		"On a hosted server's namespace, <ns>.help() or <ns>.help(\"cmd\") lists its commands.\n" +
+		"`dun` is bound in every eval (reserved): dun.harness, dun.harness_version, dun.model_id, dun.effort, dun.provider.",
 }
 
 // mcpToolDefs bridges discovered MCP tools into the OpenAI tool format. The MCP

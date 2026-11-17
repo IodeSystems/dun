@@ -77,6 +77,10 @@ type subAgent struct {
 	state  agentState
 	status string
 	final  string
+	// account is what the child published on its plan nodes (plan_close done
+	// with the account, or dropped with why). It is the answer: it wins over
+	// final and over the prose a turn ends with.
+	account string
 	// started/ended bound THIS run, not the child's life. A child that is told
 	// something new starts a new run, and the report has to be about that one —
 	// see startRunLocked.
@@ -278,6 +282,26 @@ func (s *subAgent) setStatus(status string) {
 	s.parent.agentsChanged()
 }
 
+// addAccount records one published node's account as part of the answer.
+func (s *subAgent) addAccount(line string) {
+	s.mu.Lock()
+	if s.account != "" {
+		s.account += "\n"
+	}
+	s.account += line
+	s.mu.Unlock()
+	s.parent.agentsChanged()
+}
+
+// answerLocked is the answer the parent reads: the plan accounts when there
+// are any, else final. Callers hold mu.
+func (s *subAgent) answerLocked() string {
+	if s.account != "" {
+		return s.account
+	}
+	return s.final
+}
+
 func (s *subAgent) setFinal(msg string) {
 	s.mu.Lock()
 	s.final = msg
@@ -291,12 +315,12 @@ func (s *subAgent) snapshot() (state agentState, status, final string, since tim
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.started.IsZero() {
-		return s.state, s.status, s.final, 0
+		return s.state, s.status, s.answerLocked(), 0
 	}
 	if !s.ended.IsZero() {
-		return s.state, s.status, s.final, s.ended.Sub(s.started)
+		return s.state, s.status, s.answerLocked(), s.ended.Sub(s.started)
 	}
-	return s.state, s.status, s.final, time.Since(s.started)
+	return s.state, s.status, s.answerLocked(), time.Since(s.started)
 }
 
 // line is the child as one row in a list.
@@ -359,7 +383,7 @@ func (s *subAgent) report() string {
 	if final != "" {
 		b.WriteString("\nanswer: " + final)
 	} else if state == agentIdle {
-		b.WriteString("\nanswer: (it stopped without calling tell_parent — ask it with agent({id:" +
+		b.WriteString("\nanswer: (none: it ended without closing a plan node or replying — plan_show has the node, or ask it with agent({id:" +
 			strconv.Itoa(s.num) + ", tell:\"…\"}))")
 	}
 	b.WriteString(s.iso.status())
@@ -647,7 +671,7 @@ func (s *subAgent) run(ctx context.Context, prompt string) {
 	case err != nil:
 		s.setFinal("FAILED: " + err.Error())
 	default:
-		// A child that answered in prose without calling tell_parent still
+		// A child that answered in prose, without a plan_close account, still
 		// answered. Silence is distinguished from failure; an unreported answer
 		// is not.
 		if reply := strings.TrimSpace(res.Reply); reply != "" && s.finalIsEmpty() {
@@ -738,7 +762,7 @@ func (s *subAgent) tell(msg string) string {
 	}
 	// A new task is a new RUN: the clock and the answer both reset, or the next
 	// report describes the previous task.
-	s.final = ""
+	s.final, s.account = "", ""
 	s.startRunLocked()
 	h, ctx := s.h, context.Background()
 	if s.cancel != nil {
@@ -1162,14 +1186,11 @@ func (h *Harness) restoredAgentsNote(resumed []*subAgent, cut map[int]bool) stri
 // nothing to add to the agent tool's description.
 func roleSystem(child bool) string {
 	if child {
-		return "\n\nYou are a SUB-AGENT working for another agent, not for a human. Do the task you were given and " +
-			"nothing else. Report with tell_parent: set `status` as you go (it overwrites, so keep it short and " +
-			"current), and call it with `final` when you are done — `final` is the ANSWER, and it is the only " +
-			"thing your parent reliably reads, so make it complete on its own. Everything you looked at to " +
-			"produce it stays in your context and dies with you; that is the point of you. To ask your " +
-			"parent something, end your turn with the question; its answer arrives as your next message. " +
-			"You cannot reach the human and you cannot spawn agents of your own. If the task turns out to " +
-			"need either, say so in `final` rather than working around it."
+		return "\n\nYou are a SUB-AGENT working a plan node for another agent, not for a human. Do only that node. " +
+			"Publish it with plan_close: done with the full answer as the account, or drop with why. " +
+			"tell_parent status says what you do now. " +
+			"To ask your parent something, end your turn with the question. " +
+			"You cannot reach the human and you cannot spawn agents; if the node needs either, say so in the account."
 	}
 	// A root's side is the agent tool's description: said once, there.
 	return ""
@@ -1195,10 +1216,13 @@ func agentToolDef(defaultModel, defaultProvider, defaultEffort string, providers
 	td.Type = "function"
 	td.Function.Name = "agent"
 	td.Function.Description = "Start a sub-agent on a plan node: for work that would cost you a lot of context for a " +
-		"small answer (reading a long log, scanning a large file), or for work on Y that does not depend on X, so X continues. Add the node with plan first, then agent({node:\"<id>\"}): " +
+		"small answer (reading a long log, scanning a large file), or for work on Y that does not depend on X, so X continues. Add the node with plan_add first, then agent({node:\"<id>\"}): " +
 		"the node's title, details and done_when are the child's whole brief (it cannot see your conversation), and " +
-		"it publishes its answer onto the node. It has your tools and spends its own context; what it read never " +
-		"enters yours. It returns at once and you are notified each time the child ends a turn, unless wait:true. " +
+		"it publishes its answer onto the node. It spends its own context; what it read never enters yours. " +
+		"isolation none: it has your tools, in your tree. worktree and docker: your tools, in its own tree. " +
+		"nodir: NO project and NO file tools; its shell runs in a scratch dir, deleted on dismiss. Never use nodir " +
+		"for work that reads or edits project files. If a child drops its node with \"missing tools\", start it again " +
+		"with isolation none or worktree. It returns at once and you are notified each time the child ends a turn, unless wait:true. " +
 		"Then act on it by id: agent({id:N, tell:\"…\"}) answers its question or gives it new work, node gives it " +
 		"another plan node, resume restarts a stopped one, dismiss:true ends it. It stays resident until you dismiss " +
 		"it; nothing cleans it up for you. Default model: " + model + ". Default effort: " + effort + "."
@@ -1212,7 +1236,7 @@ func agentToolDef(defaultModel, defaultProvider, defaultEffort string, providers
 			"node": map[string]any{"type": "string", "description": "the plan node a new child works: a ready one (todo, no child on it, " +
 				"its needs done). Its title, details and done_when are the child's brief; it owns the node alone and owes you a " +
 				"publish of it (done with notes, or dropped with why); the node leaves your ready list. It gets plan tools that " +
-				"changes only its own nodes. With id: give idle agent #id this node; tell adds to its brief"},
+				"change only its own nodes. With id: give idle agent #id this node; tell adds to its brief"},
 			"id":      map[string]any{"type": "integer", "description": "act on existing agent #id instead of starting one"},
 			"tell":    map[string]any{"type": "string", "description": "with id: its next message: the answer to its question, or new work"},
 			"resume":  map[string]any{"type": "boolean", "description": "with id: restart a stopped agent from its transcript"},
@@ -1221,7 +1245,7 @@ func agentToolDef(defaultModel, defaultProvider, defaultEffort string, providers
 				"description": "where the child works. none (default): this tree. worktree: its own git worktree branched " +
 					"from this tree's last commit (uncommitted changes are not in it); it commits there and you merge its " +
 					"branch — use it for children that edit at the same time. docker: the same, its commands in a " +
-					"container. nodir: no project, no file tools; for research and summaries."},
+					"container. nodir: no project, no file tools, shell in a scratch dir deleted on dismiss; only for work that needs no project files."},
 		},
 	}
 	if len(providers) > 1 {
@@ -1359,6 +1383,9 @@ func spawnCall(ctx context.Context, h *Harness, callID, provider, model, effort,
 			if sa.iso.Branch != "" {
 				where += " (branch " + sa.iso.Branch + ")"
 			}
+			if sa.iso.Mode == IsoNoDir {
+				where += ". nodir: no file tools; shell in a scratch dir, deleted on dismiss"
+			}
 		}
 		// No model name when the child runs on the parent's own client: it
 		// read "Started agent #1 on ." live.
@@ -1418,14 +1445,13 @@ func tellParentToolDef() llm.ToolDef {
 	td.Function.Name = "tell_parent"
 	td.Function.Description = "Report to the agent that spawned you. `status` OVERWRITES — it is what you are doing " +
 		"right now, not a log, and it never interrupts your parent. `message` is an event worth its attention. " +
-		"`final` is your ANSWER: everything your parent needs, standing on its own, because what you read to " +
-		"produce it is not visible to anyone else."
+		"With a plan node, the answer is not here: publish it with plan_close. `final` is for a child with no node."
 	td.Function.Parameters = map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"status":  map[string]any{"type": "string", "description": "what you are doing now (overwrites the last one)"},
 			"message": map[string]any{"type": "string", "description": "something your parent should know now"},
-			"final":   map[string]any{"type": "string", "description": "your answer — complete on its own"},
+			"final":   map[string]any{"type": "string", "description": "for a child with no plan node: your answer, complete on its own. With a node, publish with plan_close instead"},
 		},
 	}
 	return td

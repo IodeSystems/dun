@@ -64,6 +64,10 @@ Tools:
   dun_stop       end the session's engine; with forget, delete the session
   dun_usage      the session's tokens and, when the provider reports it, cost
 
+dun_start sessions run in worker mode (--worker) for their whole life, also
+when a person attaches: no reply formatting and no dun_list, dun_msg or
+loop_ctl. A standalone "dun --resume <id>" gets the full prompt.
+
 A reply ends one of four ways: done (the reply), asking (a question and
 its options: answer with dun_answer), error, or still working when the
 wait ran out (timeout_s, default 600): call dun_wait with the event
@@ -557,7 +561,7 @@ func (s *mcpServer) start(ws, prompt, model, provider string, settle bool, wait 
 	if st, err := os.Stat(abs); err != nil || !st.IsDir() {
 		return "", fmt.Errorf("workspace %s is not a directory", abs)
 	}
-	var args []string
+	args := []string{"--worker"}
 	if provider != "" {
 		p, ok := dunconfig.LoadConfig().Named(provider)
 		if !ok {

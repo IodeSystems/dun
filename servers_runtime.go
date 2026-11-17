@@ -738,7 +738,7 @@ func (h *Harness) rebuildTools() {
 	}
 	mcpDefs := len(toolDefs) // after these: dun's own (builtins.go)
 	if cfg.Exec != nil {
-		toolDefs = append(toolDefs, execToolDef())
+		toolDefs = append(toolDefs, execToolDef(!h.isChild() && !cfg.NonInteractive && !cfg.Worker))
 		// ONE backend for everything. A long command used to need a stateless
 		// backend of its own so it would not hold the shell that every other
 		// command serializes on; now it donates that shell when it is promoted
@@ -794,12 +794,12 @@ func (h *Harness) rebuildTools() {
 	//
 	// dun_list and dun_msg: a root under dund only (cfg.Peers is nil
 	// otherwise, and always for a child — see childConfig).
-	if cfg.Peers != nil && !h.isChild() {
+	if cfg.Peers != nil && !h.isChild() && !cfg.Worker {
 		toolDefs = append(toolDefs, dunListToolDef(), dunMsgToolDef())
 		dispatch = withPeers(dispatch, cfg.Peers, report)
 	}
 	// loop_ctl: a root under dund (its scheduler runs /loop).
-	if cfg.Loops != nil && !h.isChild() {
+	if cfg.Loops != nil && !h.isChild() && !cfg.Worker {
 		toolDefs = append(toolDefs, loopCtlToolDef())
 		dispatch = withLoopCtl(dispatch, cfg.Loops, report)
 	}
@@ -852,8 +852,12 @@ func (h *Harness) rebuildTools() {
 			h.strategies.Store(s)
 			stratF = &memFinder{l: sl, m: s, skip: h.listedImportant}
 		}
-		toolDefs = append(toolDefs, memoryToolDef())
-		dispatch = withMemory(dispatch, h, m, report)
+		// A child reads notes with file_read (withItemRead) but is not offered
+		// the memory tool: it works a node, it does not curate notes.
+		if !h.isChild() {
+			toolDefs = append(toolDefs, memoryToolDef())
+			dispatch = withMemory(dispatch, h, m, report)
+		}
 		dispatch = withItemRead(dispatch, h)
 	}
 	// search: the code and docs indexes, when no docs server gives a search
@@ -875,7 +879,7 @@ func (h *Harness) rebuildTools() {
 	// The skills that are on; listed, or left to the proactive search
 	// (skillKind).
 	if skills := h.enabledSkills(); len(skills) > 0 {
-		list := skillList(skills)
+		list := skillList(skillsUsable(skills, tools, hostedNS...))
 		if h.skillMode() == SkillsSurfaced {
 			list = skillSurfacedNote
 		}
@@ -893,7 +897,7 @@ func (h *Harness) rebuildTools() {
 		dispatch = withPlan(dispatch, tg, report)
 	} else if h.cfg.Parent != nil && h.cfg.Parent.planOwns(planOwner(h.cfg.AgentID)) {
 		tg := h.childPlanTool()
-		toolDefs = append(toolDefs, tg.Defs()...)
+		toolDefs = append(toolDefs, childPlanDefs(tg)...)
 		dispatch = withPlan(dispatch, tg, report)
 	}
 	// Watches what every OTHER tool call produces, so a suggestion arrives at
@@ -917,13 +921,14 @@ func (h *Harness) rebuildTools() {
 	sys := cfg.System
 	rules, rulesMode, rulesSet := "", "", rulesSet{}
 	if sys == "" {
-		sys = systemFor(tools, cfg.Exec, cfg.Worktree, systemFiles(ft), cfg.NonInteractive, hostedNS...)
+		sys = systemBuild(tools, cfg.Exec, cfg.Worktree, systemFiles(ft), cfg.NonInteractive,
+			!cfg.NonInteractive && !cfg.Worker && !h.isChild(), hostedNS...)
 		sys += roleSystem(h.isChild())
 		sys += h.identityLine()
 		if h.cfg.NoDir {
 			sys += noDirSystem
 		}
-		if !cfg.NonInteractive {
+		if !cfg.NonInteractive && !cfg.Worker && !h.isChild() { // a child's reply goes to its parent
 			sys += replyFormatSystem
 			sys += h.formatPromptSystem()
 		}
@@ -947,7 +952,11 @@ func (h *Harness) rebuildTools() {
 	// under --non-interactive: the ENGINE expands the slots (agentkit expandSlots), so a
 	// script gets the output and the model does not retype it.
 	if len(toolDefs) > 0 {
-		sys += systemSlots
+		if h.isChild() || cfg.Worker {
+			sys += systemSlotsModel
+		} else {
+			sys += systemSlots
+		}
 		sys += systemTurnLimit(h.turnLimit())
 	}
 	if cfg.Worktree != nil && cfg.Worktree.IsRepo() && cfg.Worktree.Branch != "" {

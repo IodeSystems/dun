@@ -231,21 +231,17 @@ func (h *Harness) planChanged() {
 // checkable: the plan is a sidecar (planNow), not entries, so recap and a
 // fold never cut it; a fold is given it (foldTask) and each turn starts with
 // its open nodes (planTurnLine).
-const planDesc = "Add a node to the plan. The plan is what survives. It is kept outside the conversation: recap and " +
-	"context folds do not cut it, a fold's summary is given it, and each turn starts with its open nodes. What is " +
-	"only in the conversation can be lost when context is cut. Make nodes for work with several steps; a " +
-	"one-step task needs none. Keep the plan current as you work, not only at the start: add a node when work appears, plan_update when you begin one, plan_close when it is done. A node has a title, details, done_when (what must be true when it is done) and " +
-	"needs (ids it waits on; it is ready when all of them are done). Begin a node: plan_update it to status doing. " +
-	"When done_when is true: plan_close done, with an account of how it was met. plan_close block: you are stuck, " +
-	"with a reason; waiting on other nodes is not blocked. A dropped node keeps its dependents waiting: plan_add a " +
-	"node with replaces, then plan_update their needs. plan_show lists titles, statuses and done_when, then what " +
-	"is ready; plan_show with an id gives the node with its details."
+const planDesc = "Add a node to the plan. The plan is what survives: recap and context folds do not cut it, and each turn " +
+	"starts with its open nodes. Make nodes for work with several steps; a one-step task needs none. Keep it current: " +
+	"add a node when work appears, plan_update it to doing when you begin, plan_close it when it is done. " +
+	"needs: ids it waits on; the node is ready when they are done. A dropped node keeps its dependents waiting: " +
+	"plan_add a node with replaces, then plan_update their needs."
 
-// planNote is the interactive part: the person, and plan mode. Left out under
-// --non-interactive, where no one reads, edits or approves the plan.
-const planNote = "The user can read and edit the plan. While plan mode is on, the user " +
-	"must approve the plan before you change files or run commands: make the nodes, then ask them to " +
-	"approve it (/plan approve); until then reading, searching and the plan tools work. " +
+// planNote is the interactive part: the person. Left out under
+// --non-interactive, where no one reads or edits the plan. Plan mode is not
+// here: it can change mid-session, and the tool definition must not (the
+// prompt cache). The gate's refusal (withPlanGate) says what to do.
+const planNote = "The user can read and edit the plan. " +
 	"When the user asks about Y while you do X, stop and decide. If Y changes X, plan_update X or replace it. If Y is separate, plan_add Y, then finish or park X. Never drop X or ignore Y without saying so. If unclear, ask."
 
 // planDescFor is the plan_add description for this session. It depends only on
@@ -997,10 +993,22 @@ func (h *Harness) planOwed(owner string) []*taskgraph.Node {
 	return out
 }
 
-// childPlanNote is the child's plan tools' extra sentence (plan_add and plan_show).
+// childPlanNote is the child's plan tools' extra sentence, on plan_add only
+// (childPlanDefs): taskgraph.WithNote would put it on plan_show too.
 const childPlanNote = "This is your parent's plan. You own some of its nodes and may change, add under and " +
 	"finish only those; the rest are shown so you can see what yours wait on and what waits on yours. " +
 	"You owe a publish for each node you own: plan_close done with an account of what you found or made, or drop with why."
+
+// childPlanDefs is tg's defs with childPlanNote on plan_add.
+func childPlanDefs(tg *taskgraph.Tools) []llm.ToolDef {
+	defs := tg.Defs()
+	for i := range defs {
+		if defs[i].Function.Name == taskgraph.ToolAdd {
+			defs[i].Function.Description += " " + childPlanNote
+		}
+	}
+	return defs
+}
 
 // childPlanTool is a child's plan tools: its parent's graph, as its owner
 // ("agent:N"), changing only that owner's nodes. What it changes reaches the
@@ -1008,11 +1016,20 @@ const childPlanNote = "This is your parent's plan. You own some of its nodes and
 // main agent, with what became ready, and any other change rides its next turn.
 func (h *Harness) childPlanTool() *taskgraph.Tools {
 	parent, actor := h.cfg.Parent, planOwner(h.cfg.AgentID)
-	return taskgraph.New(planStore{parent}, actor, taskgraph.WithNote(childPlanNote),
+	return taskgraph.New(planStore{parent}, actor,
 		taskgraph.WithMayChange(func(a string, n *taskgraph.Node) bool { return n != nil && n.Owner == a }),
 		taskgraph.WithOnChange(func(_ context.Context, _ string, cs []taskgraph.Change) {
 			parent.planFromChild(h.cfg.AgentID, cs)
 		}))
+}
+
+// planAccountLine is a published node as the child's answer: the account of a
+// done node, the reason of a dropped one.
+func planAccountLine(n *taskgraph.Node) string {
+	if n.Status == taskgraph.Dropped {
+		return fmt.Sprintf("node %s dropped: %s", n.ID, n.Why)
+	}
+	return fmt.Sprintf("node %s done: %s", n.ID, n.Account)
 }
 
 // planFromChild tells the main agent what child num changed.
@@ -1024,6 +1041,10 @@ func (h *Harness) planFromChild(num int, cs []taskgraph.Change) {
 		}
 		if c.After != nil && !planOpen(c.After) && (c.Before == nil || planOpen(c.Before)) {
 			published = append(published, fmt.Sprintf("%s %s", c.ID, c.After.Status))
+			// The account is the child's answer (subAgent.account).
+			if sa := h.agentByID(num); sa != nil {
+				sa.addAccount(planAccountLine(c.After))
+			}
 		}
 		if c.Ready && c.After != nil && c.After.Owner == "" {
 			ready = append(ready, c.ID)

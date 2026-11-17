@@ -279,6 +279,9 @@ func main() {
 	planStallRounds := flag.Int("plan-stall-rounds", 0, "after this many rounds in a turn with open plan nodes and no node moved, the main agent is made to update the plan, at most 3 times per turn (0 is off; unset: DUN_PLAN_STALL_ROUNDS, else 30)")
 	planNudgeFails := flag.Int("plan-nudge-fails", 0, "after this many failed tool results in a row with no open plan node, the main agent is made to write the plan, once per turn (0 is off; unset: DUN_PLAN_NUDGE_FAILS, else 4)")
 	nonInteractive := flag.Bool("non-interactive", false, "with -p: a run no one answers or reads along (a script, a benchmark): no ask_user, and the model is told it is on its own")
+	// Set by dun_start (through dund): a worker's reply goes to the MCP client
+	// model, not to a person, and no other session reaches it.
+	workerFlag := flag.Bool("worker", false, "with -p, set by dun_start: a worker for an MCP client. The prompt leaves out the person-facing parts (answer formatting, thinking headings) and the peer and loop tools")
 	tuiFlag := flag.Bool("tui", false, "launch the interactive Bubble Tea UI")
 	// --web-tui: this terminal TUI in a browser tab, byte for byte through a
 	// pty (serveterm.go). Not dund's web app (dund --web-experimental), which is its own
@@ -741,6 +744,7 @@ func main() {
 		NoDir:           *noDir,
 		NoTools:         *noTools,
 		NonInteractive:  *nonInteractive && *prog,
+		Worker:          *workerFlag && *prog,
 		TurnLimit:       *turnLimit,
 		AsideEscalate:   time.Duration(*asideEscalateMS) * time.Millisecond,
 		SettleDelay:     settleDelayFlag(*settleDelay),
@@ -799,8 +803,10 @@ func main() {
 		// (peers.go); standalone, the tools are absent.
 		if underDund() {
 			peers = newPeerLink(em)
-			cfg.Peers = peers
-			cfg.Loops = peers
+			if !cfg.Worker {
+				cfg.Peers = peers
+				cfg.Loops = peers
+			}
 			cfg.OAuthBroker = peers.oauth // dund holds the OAuth tokens
 			cfg.Gateway = peers           // and the shared MCP servers' connections
 		}

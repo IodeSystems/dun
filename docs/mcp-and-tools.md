@@ -534,6 +534,11 @@ serves dun's sessions to another agent over MCP on stdio
 provider reported it, from the latest `usage` event in a snapshot's state).
 `dun mcp --help` is the user's documentation.
 
+- `dun_start` passes `--worker`: the session runs in worker mode for its whole
+  life, also when a person attaches. Its prompt has no reply formatting and no
+  thinking headings, and it has no `dun_list`, `dun_msg` or `loop_ctl`
+  (`ask_user` stays; `dun_answer` answers it). A standalone `dun --resume <id>`
+  gets the full prompt. dund accepts `--worker` in `allowedFlags`.
 - `dun_start` passes `--settle-delay=-1s` (settle off) unless its boolean
   `settle` is true: settle self-prompts an idle session after a tool-using
   turn, and an MCP client never signals presence. dund accepts

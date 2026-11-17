@@ -38,7 +38,7 @@ func TestShaperPolicy_UnknownWindowKeepsLOD(t *testing.T) {
 
 // toolLOD is keyed by tool name; a rename would silently fall back to head.
 func TestToolLOD_NamesAreRealTools(t *testing.T) {
-	real := map[string]bool{execToolDef().Function.Name: true}
+	real := map[string]bool{execToolDef(true).Function.Name: true}
 	for name := range toolLOD() {
 		if !real[name] {
 			t.Errorf("toolLOD names %q, which is not a tool dun defines", name)

@@ -9,9 +9,11 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
@@ -57,7 +59,7 @@ type Skill struct {
 }
 
 const (
-	skillDescMax   = 300 // a description's share of the system prompt
+	skillDescMax   = 120 // a description's share of the tool description
 	skillListMax   = 80  // skills listed in the system prompt
 	skillBodyMax   = 64 << 10
 	skillResPrefix = "skill://"
@@ -568,6 +570,68 @@ func (h *Harness) RenderPrompt(ctx context.Context, server, name string, args ma
 	return strings.Join(parts, "\n\n"), nil
 }
 
+// skillToolRef finds the tool names a skill's description gives in Claude's
+// form, mcp__<server>__<tool> or mcp__<server>__*; the match is the server.
+var skillToolRef = regexp.MustCompile(`mcp__([A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*?)__`)
+
+// skillNorm compares server names: letters and digits only, without case
+// ("claude.ai X", "claude_ai_X" and "claude-ai-x" are one).
+func skillNorm(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// skillDesc cuts a description to skillDescMax runes at a word boundary,
+// marked with "…".
+func skillDesc(d string) string {
+	r := []rune(d)
+	if len(r) <= skillDescMax {
+		return d
+	}
+	n := skillDescMax - 1 // room for the "…"
+	cut := r[:n]
+	if r[n] != ' ' {
+		if k := slices.Index(slices.Clone(cut), ' '); k >= 0 {
+			for k = len(cut) - 1; cut[k] != ' '; k-- {
+			}
+			cut = cut[:k]
+		}
+	}
+	return strings.TrimRight(string(cut), " ,;:.") + "…"
+}
+
+// skillsUsable drops the skills whose description names MCP tools of servers
+// this session has none of: the skill would send the model to tools that are
+// not there. Rule: a description with mcp__<server>__ names stays when at least
+// one of those servers is among tools (compared without case, `-` and `_`);
+// a description with none stays. Only the description is read, not the body.
+func skillsUsable(skills []Skill, tools []mcpmgr.MCPTool, hosted ...string) []Skill {
+	have := map[string]bool{}
+	for _, t := range tools {
+		have[skillNorm(t.ServerID)] = true
+	}
+	for _, ns := range hosted {
+		have[skillNorm(ns)] = true
+	}
+	var out []Skill
+	for _, s := range skills {
+		refs := skillToolRef.FindAllStringSubmatch(s.Description, -1)
+		ok := len(refs) == 0
+		for _, r := range refs {
+			ok = ok || have[skillNorm(r[1])]
+		}
+		if ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // skillList renders the model's skills as "- name: description" lines, or
 // "" when there are none it may use.
 func skillList(skills []Skill) string {
@@ -581,11 +645,7 @@ func skillList(skills []Skill) string {
 			fmt.Fprintf(&b, "\n- … and more; call skill with a name you expect to exist")
 			break
 		}
-		d := s.Description
-		if len(d) > skillDescMax {
-			d = d[:skillDescMax] + "…"
-		}
-		fmt.Fprintf(&b, "\n- %s: %s", s.Name, d)
+		fmt.Fprintf(&b, "\n- %s: %s", s.Name, skillDesc(s.Description))
 		n++
 	}
 	return b.String()

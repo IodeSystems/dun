@@ -494,8 +494,7 @@ func recapToolDef() llm.ToolDef {
 	// span cannot reach back past a user message (USER 2026-10-28).
 	// When to recap is the system prompt's (systemRecap), said once.
 	td.Function.Description = "Replace a span of this conversation with a summary once it stops being worth its " +
-		"context: a big result you have taken what you need from, failed attempts before one worked, a " +
-		"misunderstanding cleared up later. It covers this turn only, from the user's latest message; what the " +
+		"context. It covers this turn only, from the user's latest message; what the " +
 		"user typed in it is kept word for word. Each removed tool call stays as a one-line stub: the tool, its " +
 		"arguments, the outcome, and the path of a file with its result, to read with file_read. keep holds " +
 		"results in full; drop removes calls with no stub. All other text is replaced by your summary, so make " +

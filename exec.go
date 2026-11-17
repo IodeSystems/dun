@@ -897,17 +897,23 @@ const execGrace = 30 * time.Second
 var execGraceMax = 5 * time.Minute
 
 // execToolDef is the tool the model calls to run commands.
-func execToolDef() llm.ToolDef {
+//
+// person says whether someone may write while a command runs: not a
+// sub-agent, a --non-interactive run or an MCP worker.
+func execToolDef(person bool) llm.ToolDef {
 	var td llm.ToolDef
 	td.Type = "function"
 	td.Function.Name = "exec"
+	waitNote := "It becomes a job at once when"
+	if person {
+		waitNote = "If the user writes while you wait, it becomes a job at once and their message is in the result. The same happens when"
+	}
 	td.Function.Description = "Run a shell command (build, test, git, …) in the project root. Each call starts " +
 		"there; a variable you `export` persists into the next call. Returns stdout and stderr together; a " +
 		"non-zero exit is shown as [exit: …].\n" +
 		"A command still running after `timeout` (30s) is not killed: it becomes background job #N and you " +
-		"are notified when it finishes: do not sleep or poll for it. If the user writes while you wait, it " +
-		"becomes a job at once and their message is in the result. The same happens when another background " +
-		"job or a sub-agent finishes while you wait: its notice is in the result. Its output is its log: read " +
+		"are notified when it finishes: do not sleep or poll for it. " + waitNote +
+		" another background job or a sub-agent finishes while you wait: its notice is in the result. Its output is its log: read " +
 		"it with file_read while it runs. " +
 		"Do not run anything interactive: there is no terminal and no input, so it can only hang."
 	td.Function.Parameters = map[string]any{

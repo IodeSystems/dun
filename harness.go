@@ -284,6 +284,11 @@ type Config struct {
 	// DUN_USER_RULES=0, as under the Harbor adapter, where a trial must not
 	// depend on the machine's home directory.
 	NoUserRules bool
+	// Worker (--worker): a session an MCP client started with dun_start. Its
+	// replies go to that client's model: no answer formatting, no thinking
+	// headings, and no dun_list, dun_msg or loop_ctl. ask_user stays: dun_answer
+	// answers it.
+	Worker bool
 	// NoFormatPrompt leaves bubbleteandmd's answer-formatting section out of the
 	// system prompt (replyformat.go): DUN_FORMAT_PROMPT=0. A child and a
 	// --non-interactive run never have it.

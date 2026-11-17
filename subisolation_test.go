@@ -153,3 +153,25 @@ func TestIsolation_SavedBesideTheTranscript(t *testing.T) {
 		t.Errorf("a child with none: %+v", got)
 	}
 }
+
+// A parent is told what a nodir child lacks: in the agent tool, in the spawn
+// result, and the child in its brief.
+func TestNoDir_SaysWhatTheChildLacks(t *testing.T) {
+	desc := agentToolDef("", "", "", nil).Function.Description
+	for _, want := range []string{"NO project and NO file tools", "Never use nodir", "missing tools"} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("agent description lacks %q", want)
+		}
+	}
+	brief := isolation{Mode: IsoNoDir, Path: "/s"}.brief()
+	if !strings.Contains(brief, "missing tools: <names>") || !strings.Contains(brief, "plan_close") {
+		t.Errorf("nodir brief: %q", brief)
+	}
+	h := startParentOf(t, &scriptRunner{})
+	planCall(t, h, "plan_add", `{"title":"scan","done_when":"x"}`)
+	id := planIDs(h)["scan"]
+	out := callTool(t, h, "agent", map[string]any{"node": id, "isolation": IsoNoDir})
+	if !strings.Contains(out, "nodir: no file tools; shell in a scratch dir, deleted on dismiss") {
+		t.Errorf("spawn result: %q", out)
+	}
+}

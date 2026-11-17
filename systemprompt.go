@@ -80,6 +80,12 @@ const (
 	systemSlots = "\n\nTo show the user a tool's output verbatim, write {OUTPUT} (the latest tool result) or {name} " +
 		"(a section the tool wrapped in <name>…</name>) instead of retyping it. The user sees the complete output " +
 		"there, even when your view of it was clipped."
+
+	// systemSlotsModel is systemSlots for a reply that goes to a model (a
+	// sub-agent's parent, an MCP worker's client), not to a person.
+	systemSlotsModel = "\n\nTo give a tool's output verbatim, write {OUTPUT} (the latest tool result) or {name} " +
+		"(a section the tool wrapped in <name>…</name>) instead of retyping it. The reader gets the complete output " +
+		"there, even when your view of it was clipped."
 )
 
 // systemRecap is when to recap, in the system prompt rather than a cue
@@ -125,6 +131,13 @@ func HostedLine(hosted []string) string {
 // says, and no client shows the thinking, so the heading convention for the
 // TUI's thought line is left out.
 func systemFor(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree, files string, alone bool, hosted ...string) string {
+	return systemBuild(tools, exec, wt, files, alone, !alone, hosted...)
+}
+
+// systemBuild is systemFor with the thinking headings chosen apart from
+// alone: a sub-agent and an MCP worker are read by a model, so they have
+// neither (their reasoning reaches no TUI).
+func systemBuild(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree, files string, alone, thinking bool, hosted ...string) string {
 	have := map[string]bool{}
 	for _, t := range tools {
 		have[t.ServerID] = true
@@ -148,7 +161,7 @@ func systemFor(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree, files str
 	} else {
 		b.WriteString(".")
 	}
-	if !alone {
+	if thinking {
 		b.WriteString(systemThinking)
 	}
 	var fam strings.Builder

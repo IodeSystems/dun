@@ -222,7 +222,7 @@ func TestDockerExec_ContainerIsStoppableByName(t *testing.T) {
 }
 
 func TestExecToolDef(t *testing.T) {
-	td := execToolDef()
+	td := execToolDef(true)
 	if td.Function.Name != "exec" {
 		t.Fatalf("name = %q", td.Function.Name)
 	}

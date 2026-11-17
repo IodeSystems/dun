@@ -43,8 +43,8 @@ func jobsToolDef(commands, agents bool) llm.ToolDef {
 		props["mute"] = map[string]any{"type": "boolean", "description": "true: no more reports about it, its finish included; it keeps running"}
 		props["every_bytes"] = map[string]any{"type": "integer", "description": "report each time this many more bytes are written; 0 = off"}
 		props["every_secs"] = map[string]any{"type": "integer", "description": "report new output at most this often; 0 = off"}
-		desc = "Manage a command that outlived its exec timeout (job:N): a monitor is on it, and you are told when " +
-			"it finishes, so there is nothing to check. Its output is its log; read it with file_read. Reports as " +
+		desc = "Manage a command that outlived its exec timeout (job:N). " +
+			"Its output is its log; read it with file_read. Reports as " +
 			"output grows are off until you set every_bytes or every_secs (whichever comes first); they say how " +
 			"much was written, not what, and count only what the command prints to stdout/stderr: progress it " +
 			"writes to a file is not seen. With no job, lists background work"

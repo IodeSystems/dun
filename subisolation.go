@@ -124,7 +124,8 @@ func (iso isolation) brief() string {
 		return s
 	case IsoNoDir:
 		return "\n\n[isolation] You have no project: no file tools, and commands run in a scratch directory. " +
-			"Work from what you know, your tools and what the task gives you."
+			"If the node needs project files, plan_close it dropped at once with the reason \"missing tools: <names>\"; " +
+			"do not work around it in the scratch directory. Otherwise work from what you know, your tools and what the task gives you."
 	}
 	return ""
 }

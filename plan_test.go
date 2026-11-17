@@ -2,6 +2,7 @@ package dun
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -89,7 +90,7 @@ func TestPlan_ToolIsAGroupAndNamesNeitherModeNorFilesInTheGraph(t *testing.T) {
 	}
 	h := planHarness(t, false)
 	desc := planAddDesc(h)
-	if !strings.Contains(desc, "plan mode") || !strings.Contains(desc, "details") || strings.Contains(desc, "goal") || strings.Contains(desc, "list files") {
+	if !strings.Contains(desc, "edit the plan") || strings.Contains(desc, "goal") || strings.Contains(desc, "list files") {
 		t.Errorf("the host's note is missing: %s", desc)
 	}
 	if got := groupOfTool("plan_show"); got != "plan" {
@@ -559,20 +560,26 @@ func TestPlan_OrphanedNodesAreReleased(t *testing.T) {
 	}
 }
 
-// --non-interactive: no one approves or edits the plan, so the description
-// says neither; interactive keeps both. Both say what the plan is for, and a
+// --non-interactive: no one edits the plan, so the description says so no
+// more; interactive keeps it (plan mode is in the gate's refusal, not here). Both say what the plan is for, and a
 // session gets the same description every time (the prompt cache).
 func TestPlan_DescriptionByMode(t *testing.T) {
 	h := planHarness(t, false)
 	inter := planAddDesc(h)
-	for _, want := range []string{"The plan is what survives", "done_when", "/plan approve", "plan mode", "edit the plan"} {
+	// done_when is in the schema, not the description.
+	for _, d := range h.planDefs(h.planTools()) {
+		if b, _ := json.Marshal(d.Function.Parameters); d.Function.Name == "plan_add" && !strings.Contains(string(b), "done_when") {
+			t.Errorf("plan_add's schema lacks done_when: %s", b)
+		}
+	}
+	for _, want := range []string{"The plan is what survives", "edit the plan"} {
 		if !strings.Contains(inter, want) {
 			t.Errorf("interactive description lacks %q: %s", want, inter)
 		}
 	}
 	h.cfg.NonInteractive = true
 	non := planAddDesc(h)
-	if !strings.Contains(non, "The plan is what survives") || !strings.Contains(non, "done_when") {
+	if !strings.Contains(non, "The plan is what survives") || !strings.Contains(non, "plan_close") {
 		t.Errorf("non-interactive description lacks the purpose or the mechanics: %s", non)
 	}
 	for _, not := range []string{"approve", "plan mode", "user", "User"} {

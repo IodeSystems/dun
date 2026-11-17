@@ -302,7 +302,7 @@ func TestMCP_StartSettleOffByDefault(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(created) != 2 || strings.Join(created[0], " ") != "--settle-delay=-1s" || len(created[1]) != 0 {
+	if len(created) != 2 || strings.Join(created[0], " ") != "--worker --settle-delay=-1s" || strings.Join(created[1], " ") != "--worker" {
 		t.Errorf("create args %q", created)
 	}
 }
