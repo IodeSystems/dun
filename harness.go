@@ -841,8 +841,14 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// must survive folds. Not for a root session: its first message may be
 	// "hi" or a pasted log, and a pinned entry rides every round for good.
 	shaper.Policy.PinFirstUser = h.isChild()
+	// The turn's ask survives a tool-heavy fold: without this the tail fills
+	// with tool entries and the user message is summarized (fold.go keeps a
+	// copy in the plan and the summary; this keeps it verbatim).
+	shaper.Policy.PinLatestUser = true
 	sess := &agent.Session{
-		SessionID: "dun",
+		// agentkit derives prompt_cache_key from it: one shared value would put
+		// every dun session on one endpoint in one cache slot.
+		SessionID: h.cacheSessionID(),
 		// dun writes the {OUTPUT} convention itself, shorter (systemSlots).
 		OmitSlotInstructions: true,
 		OnCompactionComplete: h.noteCompaction,

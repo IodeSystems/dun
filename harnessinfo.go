@@ -2,6 +2,7 @@ package dun
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -63,6 +64,15 @@ type ContextInfo struct {
 // SessionID is this session's id: its log's name; "" in memory.
 func (h *Harness) SessionID() string {
 	return strings.TrimSuffix(filepath.Base(h.cfg.SessionFile), ".jsonl")
+}
+
+// cacheSessionID names this session to agentkit (prompt_cache_key): its log's
+// name, or a random id for an in-memory session, fixed for the harness.
+func (h *Harness) cacheSessionID() string {
+	if id := h.SessionID(); id != "" {
+		return id
+	}
+	return "dun-mem-" + rand.Text()
 }
 
 // HarnessInfo is what dun is now.
