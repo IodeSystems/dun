@@ -1,6 +1,9 @@
 package harness
 
 import (
+	"context"
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -121,4 +124,36 @@ func (s *sideCallStats) summary() map[string]map[string]any {
 		out[string(k)] = m
 	}
 	return out
+}
+
+// askOnce is one side call of kind: prompt as the one user message to the
+// session's model, outside the conversation. It takes no turn lock, so it
+// neither waits for a running turn nor holds the next one back (/worklog
+// write, /plan summary, /journal now). The answer is trimmed; usage is the
+// final chunk's, nil when the provider did not report one.
+func (h *Harness) askOnce(ctx context.Context, kind, prompt string) (string, *llm.Usage, error) {
+	if h.Session == nil || h.Session.Runner == nil {
+		return "", nil, fmt.Errorf("no model to ask")
+	}
+	start := time.Now()
+	ch, err := untee(h.Session.Runner).ChatStream(ctx, []llm.Message{{Role: "user", Content: prompt}}, nil, nil)
+	if err != nil {
+		h.noteSideCall(kind, start, nil)
+		return "", nil, err
+	}
+	var out strings.Builder
+	var usage *llm.Usage
+	// Read to the close, not to Done: the usage can arrive after the finish.
+	for c := range ch {
+		if c.Error != "" {
+			h.noteSideCall(kind, start, nil)
+			return "", nil, fmt.Errorf("%s", c.Error)
+		}
+		out.WriteString(c.Content)
+		if c.Usage != nil {
+			usage = c.Usage
+		}
+	}
+	h.noteSideCall(kind, start, usage)
+	return strings.TrimSpace(out.String()), usage, nil
 }

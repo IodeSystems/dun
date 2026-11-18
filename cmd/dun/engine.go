@@ -356,12 +356,60 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 			return
 		}
+		// /journal: what the agent did, in time order (dun/journal.go).
+		// "screen" is the TUI's data; now is detached, since it waits on
+		// one model call.
+		if id == "journal" {
+			verb := strings.ToLower(strings.TrimSpace(action))
+			switch verb {
+			case "screen":
+				em.emit(journalEvent(h))
+				return
+			case "now":
+				em.emit(&proto.ControlEvent{ID: id, Action: action, Message: "journal: writing an entry…"})
+				go func() {
+					e, n, err := h.JournalNow(ctx)
+					msg := ""
+					if err != nil {
+						msg = "journal: " + err.Error()
+					} else {
+						msg = "journal: " + e.Line(n) + " · /journal view " + strconv.Itoa(n)
+					}
+					em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
+					em.emit(journalEvent(h)) // an open screen refreshes
+				}()
+				return
+			}
+			msg, err := h.JournalCmd(action)
+			if err != nil {
+				msg = "journal: " + err.Error()
+			}
+			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
+			return
+		}
 		// /plan: the task plan (dun/plan.go). "view" is the screen's
 		// data; the rest are the person's changes, answered with the plan
 		// again so an open screen refreshes.
 		if id == "plan" {
 			if action == "view" {
 				em.emit(planEvent(h, ""))
+				return
+			}
+			// summary: one side call, detached, beside any turn
+			// (dun/plansummary.go). The plan events it sends carry
+			// "summarizing…" and then the summary; the reply is the text,
+			// for a client with no screen.
+			if strings.EqualFold(strings.TrimSpace(action), "summary") {
+				go func() {
+					s, err := h.SummarizePlan(ctx)
+					msg := ""
+					if err != nil {
+						msg = "plan summary: " + err.Error()
+					} else {
+						msg = "plan summary · " + s.Made() + "\n\n" + s.Text
+					}
+					em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
+				}()
 				return
 			}
 			msg, err := h.PlanCmd(ctx, action)

@@ -6,7 +6,7 @@ import (
 )
 
 // planEvent is the session's task plan for a client's /plan screen
-// (dun/plan.go).
+// (dun/plan.go), with the last /plan summary (dun/plansummary.go).
 func planEvent(h *harness.Harness, msg string) *proto.Plan {
 	s := h.Plan()
 	ev := &proto.Plan{Mode: s.Mode, Approved: s.Approved, Total: s.Total, Done: s.Done, Rows: []proto.PlanNode{}, Message: msg}
@@ -14,6 +14,24 @@ func planEvent(h *harness.Harness, msg string) *proto.Plan {
 		ev.Rows = append(ev.Rows, proto.PlanNode{ID: r.ID, Title: r.Title, Details: r.Details, Status: r.Status, DoneWhen: r.DoneWhen,
 			Needs: r.Needs, Owner: r.Owner, Replaces: r.Replaces, Why: r.Why, Account: r.Account,
 			Waiting: r.Waiting, Ready: r.Ready, Depth: r.Depth, Repeat: r.Repeat})
+	}
+	if sum := h.PlanSummaryNow(); sum.Running || sum.Text != "" || sum.Err != "" {
+		ev.Summary = &proto.PlanSummary{Text: sum.Text, Made: sum.Made(), Running: sum.Running, Error: sum.Err,
+			Tokens: sum.Tokens, Cost: sum.Cost, Currency: sum.Currency}
+		if !sum.At.IsZero() {
+			ev.Summary.At = sum.At.Unix()
+		}
+	}
+	return ev
+}
+
+// journalEvent is the session's /journal for a client's screen
+// (dun/journal.go).
+func journalEvent(h *harness.Harness) *proto.Journal {
+	ev := &proto.Journal{Entries: []proto.JournalItem{}}
+	for i, e := range h.Journal() {
+		ev.Entries = append(ev.Entries, proto.JournalItem{N: i + 1, At: e.At.Unix(), Kind: e.Kind, Title: e.Title,
+			Tokens: e.Tokens, Line: e.Line(i + 1), Text: e.Body(), Path: e.Path})
 	}
 	return ev
 }

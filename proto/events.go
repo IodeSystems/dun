@@ -59,6 +59,7 @@ func init() {
 	event[SkillFile]("skill_file")
 	event[Extensions]("extensions")
 	event[Plan]("plan")
+	event[Journal]("journal")
 	// The protocol's own.
 	event[Ack]("ack")
 	event[Snapshot]("snapshot")
@@ -1131,6 +1132,9 @@ type Plan struct {
 	Note string `json:"note,omitempty"`
 	// Message answers the command that asked, when it was not the view.
 	Message string `json:"message,omitempty"`
+	// Summary is the last /plan summary, or the one being made; nil before
+	// the first.
+	Summary *PlanSummary `json:"summary,omitempty"`
 }
 
 // PlanNode is one row of a Plan.
@@ -1150,4 +1154,36 @@ type PlanNode struct {
 	Ready   bool     `json:"ready,omitempty"`
 	Depth   int      `json:"depth,omitempty"`
 	Repeat  bool     `json:"repeat,omitempty"`
+}
+
+// PlanSummary is the last /plan summary (dun/plansummary.go): Done / Doing /
+// Next as markdown, from one side call. Running while one is being made;
+// Error is the last attempt's failure, the previous Text kept.
+type PlanSummary struct {
+	Text     string  `json:"text,omitempty"`
+	At       int64   `json:"at,omitempty"`   // unix seconds
+	Made     string  `json:"made,omitempty"` // "made 14:02:11 · 3.1k tok · $0.0021"
+	Running  bool    `json:"running,omitempty"`
+	Error    string  `json:"error,omitempty"`
+	Tokens   int     `json:"tokens,omitempty"`
+	Cost     float64 `json:"cost,omitempty"`
+	Currency string  `json:"currency,omitempty"`
+}
+
+// Journal is the session's /journal (dun/journal.go), oldest first, answering
+// the control command "journal" with the action "screen".
+type Journal struct {
+	Entries []JournalItem `json:"entries"`
+}
+
+// JournalItem is one journal entry. N is its number for /journal view.
+type JournalItem struct {
+	N      int    `json:"n"`
+	At     int64  `json:"at"`   // unix seconds
+	Kind   string `json:"kind"` // fold, now, worklog
+	Title  string `json:"title"`
+	Tokens int    `json:"tokens,omitempty"`
+	Line   string `json:"line"` // the entry as /journal lists it
+	Text   string `json:"text"` // the entry: its own, or its file's
+	Path   string `json:"path,omitempty"`
 }

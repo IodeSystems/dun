@@ -278,6 +278,7 @@ type tuiModel struct {
 	scrCmd       tea.Cmd        // what a screen's key left to run (/who asking dund again)
 	extWant      bool           // /ext asked for the list (extview.go)
 	planWant     bool           // /plan asked for the plan (planview.go)
+	journalWant  bool           // /journal asked for the entries (journalview.go)
 	planTelling  *planTellTo    // the composer is telling a plan node's owner (planview.go)
 	ctxSettings  map[string]any // /context config's settings in force, from the settings event
 	effort       string         // /effort's level, from the settings event
