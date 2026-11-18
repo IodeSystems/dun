@@ -30,6 +30,25 @@ func TestAdoptAcrossDundReexec(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds dun twice and runs a dund")
 	}
+	adoptAcrossRestart(t, false)
+}
+
+// The same through a real systemd user manager: dund runs as a transient
+// service, the upgrade is the handover (the new build copied over the
+// unit's binary, exit 75, systemd starts it again), and the engine, in a
+// scope of its own, outlives the service's cgroup. Opt-in
+// (DUN_TEST_SYSTEMD=1): it runs units in the user's own systemd manager.
+func TestAdoptAcrossSystemdHandover(t *testing.T) {
+	if os.Getenv("DUN_TEST_SYSTEMD") != "1" {
+		t.Skip("DUN_TEST_SYSTEMD=1 runs it in the user's systemd manager")
+	}
+	if _, err := exec.LookPath("systemd-run"); err != nil {
+		t.Skip("no systemd-run")
+	}
+	adoptAcrossRestart(t, true)
+}
+
+func adoptAcrossRestart(t *testing.T, viaSystemd bool) {
 	const words = 30
 	bins := t.TempDir()
 	v1, v2 := filepath.Join(bins, "v1", "dun"), filepath.Join(bins, "v2", "dun")
@@ -79,33 +98,66 @@ func TestAdoptAcrossDundReexec(t *testing.T) {
 	defer os.RemoveAll(home)
 	ws := t.TempDir()
 	sock := filepath.Join(home, "d.sock")
-	env := []string{"DUN_HOME=" + home, "HOME=" + home, "XDG_RUNTIME_DIR=" + home, "DUN_REGISTRY=off",
+	env := []string{"DUN_HOME=" + home, "HOME=" + home, "DUN_REGISTRY=off",
 		"DUN_NO_AUTOBUILD=1", "DUN_NO_SELFUPDATE=1", "DUN_MEMORY=0", "DUN_CODE_SEARCH=0", "DUN_USER_RULES=0",
 		"DUN_NO_BROWSER=1", "POLY_LSP_NO_DAEMON=1", "DUN_URL=" + llm.URL + "/v1", "DUN_MODEL=m", "DUN_LLM_KEY=k",
-		"INVOCATION_ID=", "XPC_SERVICE_NAME=", "DUN_CHILD=", "DUN_DUND="}
+		"DUN_CHILD=", "DUN_DUND="}
 	logPath := filepath.Join(home, "dund.log")
 	logf, err := os.Create(logPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer logf.Close()
-	dund := exec.Command(v1, "dund", "--home", home, "--socket", sock, "serve")
-	dund.Env = append(os.Environ(), env...)
-	dund.Stdout, dund.Stderr = logf, logf
-	if err := dund.Start(); err != nil {
-		t.Fatal(err)
+	argv := []string{v1, "dund", "--home", home, "--socket", sock, "serve"}
+	var stopDund func()
+	if viaSystemd {
+		// The unit as `dund service install` writes it, in what matters
+		// here: restart on 75, output to a file.
+		unit := fmt.Sprintf("dun-adopt-test-%d", os.Getpid())
+		run := []string{"--user", "--unit=" + unit, "--collect", "-p", "Restart=on-failure", "-p", "RestartSec=1",
+			"-p", "SuccessExitStatus=75", "-p", "RestartForceExitStatus=75",
+			"-p", "StandardOutput=append:" + logPath, "-p", "StandardError=append:" + logPath}
+		for _, e := range env {
+			run = append(run, "--setenv="+e)
+		}
+		// The user manager's bus, which TestMain's XDG_RUNTIME_DIR hides.
+		mgr := func(name string, args ...string) *exec.Cmd {
+			c := exec.Command(name, args...)
+			c.Env = append(os.Environ(), fmt.Sprintf("XDG_RUNTIME_DIR=/run/user/%d", os.Getuid()))
+			return c
+		}
+		if out, err := mgr("systemd-run", append(append(run, "--"), argv...)...).CombinedOutput(); err != nil {
+			t.Fatalf("systemd-run: %v\n%s", err, out)
+		}
+		stopDund = func() {
+			_ = mgr("systemctl", "--user", "stop", unit).Run()
+			_ = mgr("systemctl", "--user", "reset-failed", unit).Run()
+		}
+	} else {
+		dund := exec.Command(argv[0], argv[1:]...)
+		// Not a service: no handover, no scopes; XDG_RUNTIME_DIR off the
+		// user's own.
+		dund.Env = append(os.Environ(), append(env, "XDG_RUNTIME_DIR="+home, "INVOCATION_ID=", "XPC_SERVICE_NAME=")...)
+		dund.Stdout, dund.Stderr = logf, logf
+		if err := dund.Start(); err != nil {
+			t.Fatal(err)
+		}
+		stopDund = func() {
+			// SIGTERM: a stop, which ends the engines.
+			_ = dund.Process.Signal(syscall.SIGTERM)
+			exited := make(chan struct{})
+			go func() { _ = dund.Wait(); close(exited) }()
+			select {
+			case <-exited:
+			case <-time.After(30 * time.Second):
+				_ = dund.Process.Kill()
+			}
+		}
 	}
 	engines := filepath.Join(home, "dund", "engines")
 	defer func() {
-		// SIGTERM: a stop, which ends the engines; then any left, by pid.
-		_ = dund.Process.Signal(syscall.SIGTERM)
-		exited := make(chan struct{})
-		go func() { _ = dund.Wait(); close(exited) }()
-		select {
-		case <-exited:
-		case <-time.After(30 * time.Second):
-			_ = dund.Process.Kill()
-		}
+		stopDund()
+		// Then any engine left, by pid.
 		for _, info := range engineInfos(engines) {
 			_ = syscall.Kill(info.Pid, syscall.SIGKILL)
 		}
@@ -139,6 +191,13 @@ func TestAdoptAcrossDundReexec(t *testing.T) {
 		t.Fatalf("engines: %+v", infos)
 	}
 	enginePid := engineInfos(engines)[0].Pid
+	if viaSystemd {
+		// In a scope of its own, not in the service's cgroup.
+		cg, _ := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", enginePid))
+		if !strings.Contains(string(cg), ".scope") || strings.Contains(string(cg), "dun-adopt-test-") {
+			t.Fatalf("engine cgroup: %s", cg)
+		}
+	}
 	c.send("c3", id, &proto.User{Content: "COUNT SLOWLY to thirty"})
 
 	// Mid-turn: the upgrade, at once (an adoptable engine is waited for by
@@ -173,7 +232,8 @@ func TestAdoptAcrossDundReexec(t *testing.T) {
 	}
 	old := len(got)
 
-	// The new dund: same pid (an exec), the engine still running.
+	// The new dund (the same pid after an exec, a new one after a
+	// handover), the engine still running.
 	c2 := dialAdoptDund(t, sock)
 	c2.send("h", "", &proto.Hello{Version: "test"})
 	hello := c2.until("hello", func(ev proto.Event) bool { return ev.Re == "h" })
@@ -231,6 +291,16 @@ func TestAdoptAcrossDundReexec(t *testing.T) {
 	}
 	if syscall.Kill(enginePid, 0) == nil {
 		t.Fatal("the old engine still runs")
+	}
+	b, _ := os.ReadFile(logPath)
+	want = []string{"restarting into " + v2, "adopted engine"}
+	if viaSystemd {
+		want[0] = "exiting 75 for the service manager"
+	}
+	for _, w := range want {
+		if !strings.Contains(string(b), w) {
+			t.Errorf("dund's log does not say %q", w)
+		}
 	}
 }
 
@@ -314,4 +384,3 @@ func (d *adoptConn) until(what string, match func(proto.Event) bool) proto.Event
 		}
 	}
 }
-
