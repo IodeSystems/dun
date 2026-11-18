@@ -1,7 +1,10 @@
 package dundapi_test
 
 import (
+	"bufio"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -241,5 +244,77 @@ func TestSessionCookie(t *testing.T) {
 		if code, _, _ := get(t, noRedirect(), f.srv.URL+p); code != 200 {
 			t.Errorf("%s: %d", p, code)
 		}
+	}
+}
+
+// A ".." segment, decoded or escaped, is refused before the open-path check:
+// "/auth/../tui/ws" must not pass as /auth.
+func TestDotDotPathsDoNotSkipSignIn(t *testing.T) {
+	f := setupFront(t)
+	f.tuiOn.Store(true)
+	for _, p := range []string{"/auth/../tui/ws", "/auth/%2e%2e/tui/ws", "/auth/%2E%2E/tui/", "/auth/.%2e/web/", "/releases/../api/v1/sessions"} {
+		c, err := net.Dial("tcp", strings.TrimPrefix(f.srv.URL, "http://"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = fmt.Fprintf(c, "GET %s HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n", p)
+		resp, err := http.ReadResponse(bufio.NewReader(c), nil)
+		c.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("%s: %d, want 400", p, resp.StatusCode)
+		}
+	}
+}
+
+// A return a browser would read as another host is refused: control bytes
+// (a tab is dropped, "/\t/evil" is "//evil"), schemes, hosts.
+func TestReturnIsNotAnOpenRedirect(t *testing.T) {
+	f := setupFront(t)
+	for _, bad := range []string{"/\t/evil.example", "/\n/evil.example", "/\x7f/evil.example", "//evil.example", "/\\evil.example"} {
+		resp, _ := noRedirect().PostForm(f.srv.URL+"/auth/signin", url.Values{"token": {f.tok}, "return": {bad}})
+		if loc := resp.Header.Get("Location"); loc != "/" {
+			t.Errorf("sign-in return %q went to %q", bad, loc)
+		}
+		if code, _, body := get(t, noRedirect(), f.srv.URL+"/auth/signin?return="+url.QueryEscape(bad)); code != 200 || strings.Contains(body, "evil") {
+			t.Errorf("sign-in page return %q: %d", bad, code)
+		}
+	}
+	idp := newIdP(t)
+	srv := ssoServer(t, idp)
+	for _, bad := range []string{"/%09/evil.com", "/%0a/evil.com", "/%7f/evil.com"} {
+		resp, _ := noRedirect().Get(srv.URL + "/auth/login?return=" + bad)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("login return %s: %d", bad, resp.StatusCode)
+		}
+	}
+}
+
+// Signing out ends the session: its token is revoked, not only the cookie
+// cleared.
+func TestSignOutRevokesTheSession(t *testing.T) {
+	f := setupFront(t)
+	c := signedIn(t, f.srv, f.tok)
+	u, _ := url.Parse(f.srv.URL)
+	var session string
+	for _, k := range c.Jar.Cookies(u) {
+		if k.Name == "dun_session" {
+			session = k.Value
+		}
+	}
+	resp, err := c.PostForm(f.srv.URL+"/auth/signout", nil)
+	if err != nil || resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("sign-out: %v %v", resp, err)
+	}
+	if code, loc, _ := get(t, c, f.srv.URL+"/"); code != http.StatusFound || !strings.HasPrefix(loc, "/auth/signin") {
+		t.Errorf("after sign-out: %d %s", code, loc)
+	}
+	// The old cookie value, replayed, is dead too.
+	req, _ := http.NewRequest("GET", f.srv.URL+"/api/v1/sessions", nil)
+	req.AddCookie(&http.Cookie{Name: "dun_session", Value: session})
+	if resp, _ := noRedirect().Do(req); resp.StatusCode != 401 {
+		t.Errorf("replayed cookie after sign-out: %d", resp.StatusCode)
 	}
 }

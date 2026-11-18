@@ -122,10 +122,11 @@ type webCtl struct {
 	term  *webterm.Handler
 	tuiOn atomic.Bool
 
-	mu   sync.Mutex
-	st   webState
-	hs   *http.Server
-	addr string // where hs listens; "" when it does not
+	mu      sync.Mutex
+	st      webState
+	hs      *http.Server
+	addr    string // where hs listens; "" when it does not
+	stopped bool   // stop ran: dund is exiting, re-execing or handing over
 }
 
 // newWebCtl builds the HTTP surface for svc. The TUI at /tui runs bin, the
@@ -140,6 +141,9 @@ func newWebCtl(home, bin string, svc *dund.Service, o dundapi.Options) (*webCtl,
 		Env:  tuiEnv(os.Environ(), home),
 		Dir:  userHome,
 		Back: "/?choose=1",
+		// Checked again as each pty registers: a socket that got past
+		// /tui's check just before `disable tui` is killed, not missed.
+		Allow: c.tuiOn.Load,
 	})
 	o.Owner = dundapi.Owner(os.Getuid())
 	o.Term, o.TUIOn = c.term, c.tuiOn.Load
@@ -181,20 +185,26 @@ func (c *webCtl) start(st webState) {
 // apply makes the listener match st; on an error it stays as it was. c.mu
 // is held.
 func (c *webCtl) apply(st webState) error {
+	same := st.Enabled && c.hs != nil && st.Addr == c.addr
+	var ln net.Listener
+	if st.Enabled && !same { // the new one first: a port in use leaves everything as it was
+		var err error
+		if ln, err = net.Listen("tcp", st.Addr); err != nil {
+			return fmt.Errorf("listen %s: %w", st.Addr, err)
+		}
+	}
+	// Only now, with nothing left to fail: a refused change must not leave
+	// /tui on while c.st and web.json say off.
 	c.tuiOn.Store(st.TUI)
 	if !st.TUI {
 		c.term.KillAll()
 	}
-	if st.Enabled && c.hs != nil && st.Addr == c.addr {
+	if same {
 		c.said(st)
 		return nil
 	}
 	var hs *http.Server
-	if st.Enabled { // the new one first: a port in use leaves the old one serving
-		ln, err := net.Listen("tcp", st.Addr)
-		if err != nil {
-			return fmt.Errorf("listen %s: %w", st.Addr, err)
-		}
+	if ln != nil {
 		hs = &http.Server{Handler: c.h, ReadHeaderTimeout: 10 * time.Second}
 		go func() {
 			if err := hs.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -236,6 +246,7 @@ func (c *webCtl) stop() {
 	c.term.Close()
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.stopped = true
 	if c.hs != nil {
 		c.shutdown()
 		c.hs, c.addr = nil, ""
@@ -248,6 +259,9 @@ func (c *webCtl) set(ws proto.WebSet) (proto.WebState, error) {
 	defer c.mu.Unlock()
 	if ws == (proto.WebSet{}) { // a question: nothing changes, nothing is saved
 		return c.state(), nil
+	}
+	if c.stopped { // a listener bound now would outlive the handover's exit
+		return proto.WebState{}, errors.New("dund is stopping; change the web listener when it is back")
 	}
 	st, err := applyWebSet(c.st, ws)
 	if err != nil {

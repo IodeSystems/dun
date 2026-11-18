@@ -219,7 +219,13 @@ func newRouter(svc *dund.Service, o Options, auth bool) (http.Handler, error) {
 // already; the Origin check holds where a browser ignores it).
 func (s *Server) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if openPath(r.URL.Path) || isUpgrade(r) {
+		// The open-path check reads the cleaned path; a ".." segment is
+		// refused outright, so "/auth/../tui/ws" cannot pass as /auth.
+		if dotDot(r.URL.Path) || dotDot(r.URL.EscapedPath()) {
+			http.Error(w, "bad path", http.StatusBadRequest)
+			return
+		}
+		if openPath(path.Clean("/"+r.URL.Path)) || isUpgrade(r) {
 			next.ServeHTTP(w, r)
 			return
 		}

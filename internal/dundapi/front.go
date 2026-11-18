@@ -48,6 +48,16 @@ func openPath(p string) bool {
 	return false
 }
 
+// dotDot: p has a ".." segment (decoded, or as %2e%2e still escaped).
+func dotDot(p string) bool {
+	for _, seg := range strings.Split(p, "/") {
+		if seg == ".." || strings.EqualFold(seg, "%2e%2e") || strings.EqualFold(seg, ".%2e") || strings.EqualFold(seg, "%2e.") {
+			return true
+		}
+	}
+	return false
+}
+
 // secure: the browser reached dund over TLS (directly, or through hz).
 func secure(r *http.Request) bool {
 	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")

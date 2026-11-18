@@ -132,13 +132,25 @@ func (s *sso) redirectFor(r *http.Request) string {
 // safeReturn accepts where a sign-in may land: a path on this site or the
 // app's own scheme. Anything else would make dund an open redirect that hands
 // out tokens.
+//
+// A control byte is refused anywhere: a browser drops a tab or a newline from
+// a URL, so "/\t/evil.example" becomes "//evil.example", another host. A path
+// must parse with no scheme and no host.
 func safeReturn(ret string) (string, bool) {
+	for i := 0; i < len(ret); i++ {
+		if ret[i] < 0x20 || ret[i] == 0x7f {
+			return "", false
+		}
+	}
 	switch {
 	case ret == "":
 		return "/", true
 	case strings.HasPrefix(ret, appScheme):
 		return ret, true
 	case strings.HasPrefix(ret, "/") && !strings.HasPrefix(ret, "//") && !strings.Contains(ret, "\\"):
+		if u, err := url.Parse(ret); err != nil || u.Scheme != "" || u.Host != "" {
+			return "", false
+		}
 		return ret, true
 	}
 	return "", false

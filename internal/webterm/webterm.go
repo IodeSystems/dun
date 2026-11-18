@@ -49,6 +49,10 @@ type Config struct {
 	// Back, when set, is a link on the page back to where the user came from
 	// (dund's chooser).
 	Back string
+	// Allow, when set, is asked again as each pty registers, under the
+	// lock KillAll takes: a connection that passed the caller's own gate
+	// just before it closed (and KillAll ran) is killed rather than missed.
+	Allow func() bool
 	// CheckOrigin decides whether a WebSocket upgrade is from this site. Nil
 	// is SameOrigin. Never a function that answers true: any page the user
 	// visits could then open a shell here (cross-site WebSocket hijacking).
@@ -124,6 +128,10 @@ func (h *Handler) Active() int {
 
 // KillAll kills every live pty's process group and closes its socket. New
 // connections are still taken.
+//
+// Callers that gate connections themselves turn the gate off first and set
+// Config.Allow to it: a pty registers under h.mu after asking Allow, so it
+// is either in the set taken here or refused at registration.
 func (h *Handler) KillAll() {
 	h.mu.Lock()
 	all := make([]*term, 0, len(h.live))
@@ -206,7 +214,7 @@ func (h *Handler) ws(w http.ResponseWriter, r *http.Request) {
 	}
 	t := &term{cmd: cmd, conn: conn}
 	h.mu.Lock()
-	if h.closed {
+	if h.closed || h.cfg.Allow != nil && !h.cfg.Allow() {
 		h.mu.Unlock()
 		t.kill()
 		_ = ptmx.Close()
