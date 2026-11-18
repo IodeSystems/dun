@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"maps"
 	"os"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -41,11 +43,15 @@ func PlanFile(sessionFile string) string {
 // planFileData is the sidecar's content: the graph, the host's two flags, and
 // the ids of archived nodes (/plan clear): finished trees the graph keeps, so
 // edges stay valid, and every view of the plan leaves out (hideArchived).
+// By is who wrote a node when it was not the agent: id → planBySuggest for a
+// done node the idle suggestion call recorded (suggestdone.go). taskgraph's
+// node has no such field, so the host keeps it beside the graph, as Archived.
 type planFileData struct {
-	Graph    taskgraph.Graph `json:"graph"`
-	Mode     bool            `json:"mode,omitempty"`
-	Approved bool            `json:"approved,omitempty"`
-	Archived []string        `json:"archived,omitempty"`
+	Graph    taskgraph.Graph   `json:"graph"`
+	Mode     bool              `json:"mode,omitempty"`
+	Approved bool              `json:"approved,omitempty"`
+	Archived []string          `json:"archived,omitempty"`
+	By       map[string]string `json:"by,omitempty"`
 }
 
 // hideArchived takes the archived nodes out of g. A component with a node
@@ -118,6 +124,9 @@ type planState struct {
 	mode, approved bool
 	// archived: ids /plan clear set aside. Guarded by Harness.planMu.
 	archived []string
+	// by: who wrote a node, when not the agent (planFileData.By). Guarded by
+	// Harness.planMu.
+	by map[string]string
 }
 
 // planNow is the session's plan, read from its sidecar on first use.
@@ -133,7 +142,7 @@ func (h *Harness) planNow() *planState {
 		if b, err := os.ReadFile(PlanFile(p.file)); err == nil {
 			var d planFileData
 			if json.Unmarshal(b, &d) == nil {
-				g, p.mode, p.approved, p.archived = d.Graph, d.Mode, d.Approved, d.Archived
+				g, p.mode, p.approved, p.archived, p.by = d.Graph, d.Mode, d.Approved, d.Archived, d.By
 			}
 		}
 	}
@@ -154,7 +163,7 @@ func (h *Harness) savePlan(p *planState, g taskgraph.Graph) error {
 		return nil
 	}
 	h.planMu.Lock()
-	d := planFileData{Graph: g, Mode: p.mode, Approved: p.approved, Archived: slices.Clone(p.archived)}
+	d := planFileData{Graph: g, Mode: p.mode, Approved: p.approved, Archived: slices.Clone(p.archived), By: maps.Clone(p.by)}
 	h.planMu.Unlock()
 	b, err := json.MarshalIndent(d, "", " ")
 	if err != nil {
@@ -174,6 +183,18 @@ type planMemStore struct {
 	// hide takes the archived nodes out of a copy View hands out; Update's
 	// function still sees the whole graph. Nil: nothing is archived.
 	hide func(g *taskgraph.Graph)
+	// rev counts the kept changes that changed the graph (an archive changes
+	// only the host's list, not the graph). A turn notes it as it begins, so
+	// the idle suggestion call can tell whether the turn changed the plan
+	// (suggestdone.go).
+	rev int
+}
+
+// revNow is the store's revision.
+func (s *planMemStore) revNow() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.rev
 }
 
 func (s *planMemStore) View(context.Context) (taskgraph.Graph, error) {
@@ -197,6 +218,9 @@ func (s *planMemStore) Update(_ context.Context, fn func(g *taskgraph.Graph) err
 		if err := s.save(next); err != nil {
 			return err
 		}
+	}
+	if !reflect.DeepEqual(s.g, next) {
+		s.rev++
 	}
 	s.g = next
 	return nil
@@ -460,6 +484,8 @@ type PlanRow struct {
 	Repeat bool
 	// Ready: it can start now (the graph's own answer).
 	Ready bool
+	// By: who wrote it when not the agent: planBySuggest, or "".
+	By string
 }
 
 // PlanSnapshot is the plan for a screen.
@@ -475,6 +501,7 @@ func (h *Harness) Plan() PlanSnapshot {
 	g, _ := p.store.View(context.Background())
 	h.planMu.Lock()
 	s := PlanSnapshot{Mode: p.mode, Approved: p.approved, Total: len(g.Nodes)}
+	by := maps.Clone(p.by)
 	h.planMu.Unlock()
 	for _, n := range g.Nodes {
 		if n.Status == taskgraph.Done {
@@ -486,7 +513,7 @@ func (h *Harness) Plan() PlanSnapshot {
 		ready, _ := g.CanStart(n.ID)
 		row := PlanRow{ID: n.ID, Title: n.Title, Details: n.Details, Status: string(n.Status), DoneWhen: n.DoneWhen, Owner: n.Owner,
 			Why: n.Why, Account: n.Account, Replaces: n.Replaces, Needs: n.Needs,
-			Depth: r.Depth, Repeat: r.Repeat, Ready: ready}
+			Depth: r.Depth, Repeat: r.Repeat, Ready: ready, By: by[n.ID]}
 		if n.Status == taskgraph.Todo {
 			row.Waiting = g.Waiting(n.ID)
 		}
@@ -506,7 +533,10 @@ func (h *Harness) PlanCmd(ctx context.Context, action string) (string, error) {
 	switch strings.ToLower(verb) {
 	case "", "view":
 		g, _ := p.store.View(ctx)
-		return g.List() + h.planModeSuffix(p), nil
+		h.planMu.Lock()
+		by := maps.Clone(p.by)
+		h.planMu.Unlock()
+		return planListBy(g.List(), by) + h.planModeSuffix(p), nil
 	case "mode":
 		switch strings.ToLower(rest) {
 		case "":

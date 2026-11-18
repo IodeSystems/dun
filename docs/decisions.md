@@ -811,6 +811,42 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   is planned, not where the work stands; a summary on request answers that
   without a turn.
 
+## Idle plans: the suggestion call records done work (USER 2026-11-17)
+
+- **The idle suggestion call also returns what the last turn finished that
+  the plan does not record, and those become done plan nodes**
+  (`internal/harness/suggestdone.go`). One request, not two: the
+  instruction gets a `"done"` part and the plan as text, after the history,
+  so the turn's cached prefix holds as before. Still side call kind
+  `suggest`.
+- **Marked as the suggester's.** taskgraph's node has no author field and
+  agentkit is not changed for this: dun keeps `by` beside the graph in the
+  sidecar (`planFileData.By`, id → `suggest`), as it keeps `Archived`. It
+  reaches every client as `PlanNode.by` on the `plan` event; the TUI shows
+  `auto` beside the ✓, `/plan` text `[done] (auto)`. The model's own
+  `plan_show` does not mark it: the agent sees these nodes as any other and
+  may edit them.
+- **Under the node the model names** (`under`): the new node `needs` it, the
+  graph's own "under" (as a child adds under its node). An id the visible
+  plan lacks puts it at the top level.
+- **Only adds, and only when safe.** It never closes, edits or reorders a
+  node. Nothing is added when the plan changed since the turn began
+  (`planMemStore.rev`, noted in `prepareTurn`; a user edit while idle counts
+  too), when the plan is empty and the turn made no tool call
+  (`sessionStore.toolCalls`), when no turn ran in this process (a resumed
+  session), when a turn began during the call, or when the call is off
+  (`--no-suggest`: `emitSuggestions` never calls `Suggestions`). A second
+  call in the same idle adds nothing: the first one's nodes moved the plan.
+- **Bounded.** At most 3 nodes per call, titles cut to 60 runes, none whose
+  title (case and spaces aside) the plan already has, archived nodes
+  included. A malformed done part adds nothing; `parseSuggestions` reads the
+  object again without it, so the suggestions still arrive.
+- **Reason.** A turn that did the work without touching the plan leaves the
+  plan behind what happened; the idle call already reads the whole turn, so
+  recording it there costs only the extra output tokens.
+- **Risk, known.** `prepareTurn` runs before each attempt of a retried
+  turn, so a plan change in a failed attempt is not seen as the turn's.
+
 ## dund's HTTP listener: runtime, one listener, chooser (USER 2026-11-17)
 
 - **dund starts and stops its HTTP listener while it runs.** `dun dund

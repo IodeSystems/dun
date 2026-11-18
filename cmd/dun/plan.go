@@ -13,7 +13,7 @@ func planEvent(h *harness.Harness, msg string) *proto.Plan {
 	for _, r := range s.Rows {
 		ev.Rows = append(ev.Rows, proto.PlanNode{ID: r.ID, Title: r.Title, Details: r.Details, Status: r.Status, DoneWhen: r.DoneWhen,
 			Needs: r.Needs, Owner: r.Owner, Replaces: r.Replaces, Why: r.Why, Account: r.Account,
-			Waiting: r.Waiting, Ready: r.Ready, Depth: r.Depth, Repeat: r.Repeat})
+			Waiting: r.Waiting, Ready: r.Ready, Depth: r.Depth, Repeat: r.Repeat, By: r.By})
 	}
 	if sum := h.PlanSummaryNow(); sum.Running || sum.Text != "" || sum.Err != "" {
 		ev.Summary = &proto.PlanSummary{Text: sum.Text, Made: sum.Made(), Running: sum.Running, Error: sum.Err,

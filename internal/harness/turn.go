@@ -203,6 +203,7 @@ func (h *Harness) prepareTurn(ctx context.Context) {
 	// message starts, which is where "the tool set changed" most often lands.
 	// Healing already lifted them into the interrupted call's result.
 	h.planTurnLine()     // before flushSilent: it rides this turn (plan.go)
+	h.planMarkTurn()     // what the idle suggestion call compares (suggestdone.go)
 	h.writeHarnessInfo() // $DUN_HARNESS: the branch may have moved since
 	h.flushSilent()
 }

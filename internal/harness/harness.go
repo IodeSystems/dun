@@ -336,6 +336,9 @@ type Harness struct {
 	// The session's task plan (plan.go), read from its sidecar on first use.
 	planMu sync.Mutex
 	plan   *planState
+	// planTurn is the plan as the last turn began, for the idle suggestion
+	// call (suggestdone.go). Guarded by planMu.
+	planTurn planTurnMark
 
 	mgr     *mcpmgr.Manager
 	Session *agent.Session

@@ -1154,6 +1154,9 @@ type PlanNode struct {
 	Ready   bool     `json:"ready,omitempty"`
 	Depth   int      `json:"depth,omitempty"`
 	Repeat  bool     `json:"repeat,omitempty"`
+	// By is who wrote the node when not the agent: "suggest" for a done node
+	// the idle suggestion call recorded from the last turn.
+	By string `json:"by,omitempty"`
 }
 
 // PlanSummary is the last /plan summary (dun/plansummary.go): Done / Doing /
