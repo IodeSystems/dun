@@ -442,3 +442,34 @@ func TestPlanScreen_OutlineFinishedCountsDistinctNodes(t *testing.T) {
 		t.Errorf("count:\n%s", p)
 	}
 }
+
+// A node the idle suggestion call recorded (by "suggest") shows "auto" beside
+// its mark, in a live tree and in the finished row; the agent's do not.
+func TestPlanScreen_AutoTag(t *testing.T) {
+	m, _ := planModel(t, 100, 30)
+	m = m.notePlan(evMsg{"type": "plan", "total": 4.0, "done": 3.0, "rows": []any{
+		map[string]any{"id": "1", "title": "Parse the file", "status": "doing", "done_when": "tests pass"},
+		map[string]any{"id": "2", "title": "Wrote the parser tests", "status": "done", "needs": []any{"1"}, "depth": 1.0, "by": "suggest"},
+		map[string]any{"id": "3", "title": "Fixed the lint", "status": "done", "by": "suggest"},
+		map[string]any{"id": "4", "title": "Old work", "status": "done"},
+	}})
+	plain := ansi.Strip(m.drawView())
+	if !strings.Contains(plain, "2 ✓ auto Wrote the parser tests") {
+		t.Errorf("live row lacks the tag:\n%s", plain)
+	}
+	for i := 0; i < 2; i++ { // to the finished row, and open it
+		nm, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+		m = nm.(tuiModel)
+	}
+	nm, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = nm.(tuiModel)
+	plain = ansi.Strip(m.drawView())
+	for _, want := range []string{"3 ✓ auto Fixed the lint", "4 ✓ Old work"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("lacks %q:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, "auto Parse") || strings.Contains(plain, "auto Old") {
+		t.Errorf("agent's node tagged:\n%s", plain)
+	}
+}

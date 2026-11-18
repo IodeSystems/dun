@@ -231,6 +231,20 @@ gone, stopped or dismissed goes to the main agent.
 agentkit's `Graph.Subtree` and `Graph.Assign` (a node and what needs it) are unused
 by dun now.
 
+## Idle plans (USER 2026-11-17)
+
+The idle suggestion call (`suggest.go`, after a turn when the person sits still)
+also says what the last turn finished that the plan does not record. Each item
+becomes a DONE node, `by: suggest` (kept in the sidecar's `by` map, beside the
+graph: taskgraph's node has no such field), under the node the model names
+(`needs: [id]`), else at the top level. `/plan` shows it with an `auto` tag beside
+the ✓ (text: `[done] (auto)`); the `plan` event carries `by`. It never changes a
+node the agent wrote. It adds nothing when the turn changed the plan, when the
+plan is empty and the turn made no tool call, or under `--no-suggest`. At most 3
+per call, short titles, none the plan already has; a malformed done part adds
+nothing and the suggestions still arrive. The agent sees and may edit them like
+any node. `internal/harness/suggestdone.go`; docs/decisions.md, "Idle plans".
+
 ## Later
 
 Each node may name a model and effort. Unrelated nodes can run in parallel with

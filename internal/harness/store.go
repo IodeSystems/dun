@@ -40,6 +40,9 @@ type sessionStore struct {
 	mu        sync.Mutex
 	entries   []agent.Entry
 	unclaimed int
+	// toolCalls counts the tool calls appended since open; never goes back
+	// (a fold does not lower it). Whether a turn made any (suggestdone.go).
+	toolCalls uint64
 	path      string // "" = memory only
 	onNotify  func(string)
 	// onEntry sees every entry appended, with its number (seq): a sub-agent's
@@ -332,6 +335,9 @@ func (s *sessionStore) ClaimPending(_ context.Context, _ string, _ int64) (int, 
 func (s *sessionStore) Append(_ context.Context, _ string, e agent.Entry) error {
 	s.mu.Lock()
 	s.entries = append(s.entries, e)
+	if e.Kind == agent.KindToolCall {
+		s.toolCalls++
+	}
 	s.flushLocked()
 	cb := s.onNotify
 	s.seq++
@@ -348,6 +354,13 @@ func (s *sessionStore) Append(_ context.Context, _ string, e agent.Entry) error 
 		cb(e.Content)
 	}
 	return nil
+}
+
+// toolCallsNow is toolCalls.
+func (s *sessionStore) toolCallsNow() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.toolCalls
 }
 
 func (s *sessionStore) Context(_ context.Context, _ string) ([]agent.Entry, error) {

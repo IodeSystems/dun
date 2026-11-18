@@ -40,9 +40,12 @@ import (
 
 type planRow struct {
 	id, title, details, status, doneWhen, owner, replaces, why, account string
-	needs, waiting                                                      []string
-	ready, repeat                                                       bool
-	depth                                                               int
+	// by: who wrote it when not the agent ("suggest": the idle suggestion
+	// call recorded it from the last turn; shown "auto" beside the mark).
+	by             string
+	needs, waiting []string
+	ready, repeat  bool
+	depth          int
 }
 
 type planView struct {
@@ -199,6 +202,15 @@ type planTellTo struct {
 
 func (v *planView) setWidth(w int) { v.width = w }
 
+// planBy is the tag beside a node's mark for who wrote it: " auto" for one
+// the idle suggestion call recorded, else "".
+func planBy(r planRow) string {
+	if r.by == "suggest" {
+		return " auto"
+	}
+	return ""
+}
+
 // planMark is a status in one cell.
 func planMark(status string) string {
 	switch status {
@@ -263,7 +275,7 @@ func (v *planView) page() pageDoc {
 		i, r := d.i, v.rows[d.i]
 		mark, style, ownerTag := v.motion(r)
 		indent := strings.Repeat("  ", d.depth)
-		head := indent + r.id + " " + mark + " " + r.title
+		head := indent + r.id + " " + mark + planBy(r) + " " + r.title
 		var tags []string
 		if d.repeat {
 			tags = append(tags, "again")
@@ -316,7 +328,7 @@ func (v *planView) page() pageDoc {
 		var body []string
 		for _, d := range done {
 			r := v.rows[d.i]
-			line := strings.Repeat("  ", d.depth) + r.id + " " + planMark(r.status) + " " + r.title
+			line := strings.Repeat("  ", d.depth) + r.id + " " + planMark(r.status) + planBy(r) + " " + r.title
 			if n, ok := planAgentOf(r.owner); ok {
 				line += fmt.Sprintf("  · agent %d", n)
 			}
@@ -445,7 +457,7 @@ func (m tuiModel) notePlan(ev evMsg) tuiModel {
 	for _, x := range rows {
 		o, _ := x.(map[string]any)
 		r := planRow{id: str(o["id"]), title: str(o["title"]), details: str(o["details"]), status: str(o["status"]), doneWhen: str(o["done_when"]),
-			owner: str(o["owner"]), replaces: str(o["replaces"]), why: str(o["why"]), account: str(o["account"]),
+			owner: str(o["owner"]), replaces: str(o["replaces"]), why: str(o["why"]), account: str(o["account"]), by: str(o["by"]),
 			needs: strList(o["needs"]), waiting: strList(o["waiting"]), depth: intOf(o["depth"])}
 		r.ready, _ = o["ready"].(bool)
 		r.repeat, _ = o["repeat"].(bool)

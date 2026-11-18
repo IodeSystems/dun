@@ -46,6 +46,9 @@ import (
 // the prompt. json_object together with tools is a 400 there ("failed to
 // parse grammar"), so JSON mode is asked for only when no tools are sent.
 
+// The same call also records what the last turn finished as done plan nodes
+// (USER 2026-11-17, "idle plans"): suggestdone.go.
+
 // Suggestion is one predicted next user message.
 type Suggestion struct {
 	Text string  `json:"text"`
@@ -80,7 +83,14 @@ func (h *Harness) Suggestions(ctx context.Context) ([]Suggestion, error) {
 	if len(msgs) == 0 {
 		return nil, nil
 	}
-	msgs = append(msgs, llm.Message{Role: "user", Content: suggestInstruction})
+	// Idle plans (suggestdone.go): the same call says what the last turn
+	// finished that the plan does not record, when it may add any.
+	mark, plan, withDone := h.suggestDoneScope(ctx)
+	instr := suggestInstruction
+	if withDone {
+		instr += suggestDoneInstruction(plan)
+	}
+	msgs = append(msgs, llm.Message{Role: "user", Content: instr})
 
 	tools, choice := forkTools(h.Session)
 	opts := &llm.ChatOpts{ToolChoice: choice}
@@ -109,6 +119,9 @@ func (h *Harness) Suggestions(ctx context.Context) ([]Suggestion, error) {
 		}
 	}
 	h.noteSideCall("suggest", start, usage)
+	if withDone {
+		h.addSuggestDone(ctx, mark, parseSuggestDone(b.String()))
+	}
 	return parseSuggestions(b.String()), nil
 }
 
@@ -217,7 +230,12 @@ func parseSuggestions(s string) []Suggestion {
 		Suggestions []Suggestion `json:"suggestions"`
 	}
 	if json.Unmarshal([]byte(s[i:j+1]), &out) != nil {
-		return nil
+		// A broken done part (suggestdone.go) must not cost the suggestions:
+		// read the object again without it.
+		cut, ok := withoutDone(s[i : j+1])
+		if !ok || json.Unmarshal([]byte(cut), &out) != nil {
+			return nil
+		}
 	}
 	res := out.Suggestions[:0:0]
 	for _, sg := range out.Suggestions {
