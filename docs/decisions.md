@@ -919,6 +919,18 @@ From the 2026-11-18 inventory of model calls nobody typed for.
   not show. `collectText` now reads to the stream's close after the finish,
   as `askOnce` does, because the usage can arrive in its own chunk after it.
   Measurement only: what the Shaper receives is unchanged.
+- **Heartbeat escalation is bounded** (`internal/harness/asidettl.go`,
+  `heartbeatOpts`). A job's or child's "still running, quiet" heartbeat is
+  an aside that escalates to a wake when no turn carried it in 5 s. Before,
+  that wake repeated for every heartbeat for as long as the job ran, so a
+  job nobody watched bought one model call per beat (hourly at the end of
+  the backoff, forever). Now: `--aside-escalate-ms 0` (or
+  `DUN_ASIDE_ESCALATE_MS=0`) turns escalation off (it meant 5000 before);
+  one job or one child escalates at most 3 times (counted when an aside
+  actually becomes a notification, through `AsideOpts.OnEscalate`), then
+  its heartbeats stay asides; an IDLE child's heartbeat never escalates,
+  because it waits for the parent and is not wedged. Only a running, silent
+  child's does.
 
 ## Release updates
 

@@ -54,6 +54,8 @@ type queued struct {
 	key        string
 	escalateAt time.Time
 	turnScoped bool
+	// onEscalate runs once when the aside becomes a notification.
+	onEscalate func()
 	// tag marks the history entry it becomes, so it can be dropped later
 	// (settle.go).
 	tag string

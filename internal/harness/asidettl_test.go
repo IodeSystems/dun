@@ -2,6 +2,7 @@ package harness
 
 import (
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -90,4 +91,120 @@ func TestAside_TurnScoped(t *testing.T) {
 	if strings.Contains(got, "this turn only") || !strings.Contains(got, "keep") {
 		t.Errorf("lifted %q", got)
 	}
+}
+
+// --aside-escalate-ms 0 (Config.AsideEscalate negative) and
+// DUN_ASIDE_ESCALATE_MS=0 turn escalation off: a heartbeat stays an aside.
+func TestAsideEscalate_ZeroIsOff(t *testing.T) {
+	var n atomic.Int32
+	for _, tc := range []struct {
+		name string
+		cfg  time.Duration
+		env  string
+		want time.Duration
+	}{
+		{"flag 0 (off)", -time.Millisecond, "", 0},
+		{"env 0 (off)", 0, "0", 0},
+		{"env 250", 0, "250", 250 * time.Millisecond},
+		{"unset", 0, "", 5 * time.Second},
+		{"flag wins", 40 * time.Millisecond, "0", 40 * time.Millisecond},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("DUN_ASIDE_ESCALATE_MS", tc.env)
+			h := newNoteHarness(t)
+			h.cfg.AsideEscalate = tc.cfg
+			if got := h.asideEscalate(); got != tc.want {
+				t.Errorf("asideEscalate = %s, want %s", got, tc.want)
+			}
+			if o := h.heartbeatOpts("job:1:quiet", &n, true); (o.EscalateAfter > 0) != (tc.want > 0) {
+				t.Errorf("heartbeat EscalateAfter = %s with escalation %s", o.EscalateAfter, tc.want)
+			}
+		})
+	}
+}
+
+// One job's (or child's) heartbeats wake the agent at most three times; the
+// fourth stays an aside and wakes nothing.
+func TestHeartbeat_EscalationCappedAtThree(t *testing.T) {
+	h := newNoteHarness(t)
+	h.cfg.AsideEscalate = 5 * time.Millisecond
+	var n atomic.Int32
+	for i := 1; i <= maxHeartbeatEscalations; i++ {
+		h.AsideWith("exec #1 quiet", h.heartbeatOpts("job:1:quiet", &n, true))
+		select {
+		case <-h.wake:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("escalation %d did not wake", i)
+		}
+		waitFor(t, 2*time.Second, func() bool { return n.Load() == int32(i) })
+		h.liftQueued("r") // a turn carried it
+	}
+	o := h.heartbeatOpts("job:1:quiet", &n, true)
+	if o.EscalateAfter != 0 {
+		t.Fatalf("after %d escalations a heartbeat must stay an aside: %+v", n.Load(), o)
+	}
+	h.AsideWith("exec #1 quiet", o)
+	select {
+	case <-h.wake:
+		t.Error("a fourth escalation woke the agent")
+	case <-time.After(60 * time.Millisecond):
+	}
+	if a, notes := kinds(h); len(a) != 1 || len(notes) != 0 {
+		t.Errorf("want one aside, got asides %q notes %q", a, notes)
+	}
+}
+
+// A delivered heartbeat did not escalate, so it does not count toward the cap.
+func TestHeartbeat_DeliveredDoesNotCount(t *testing.T) {
+	h := newNoteHarness(t)
+	h.cfg.AsideEscalate = 20 * time.Millisecond
+	var n atomic.Int32
+	h.AsideWith("exec #1 quiet", h.heartbeatOpts("job:1:quiet", &n, true))
+	h.liftQueued("r")
+	time.Sleep(60 * time.Millisecond)
+	if n.Load() != 0 {
+		t.Errorf("a delivered heartbeat counted as an escalation: %d", n.Load())
+	}
+}
+
+// An IDLE child's heartbeat never escalates: it waits for the parent, it is
+// not wedged. A running child's does.
+func TestSubAgent_IdleHeartbeatNeverEscalates(t *testing.T) {
+	h, sa := testAgent(t, 4, "summarize the build log")
+	h.cfg.AsideEscalate = 5 * time.Millisecond
+	sa.mu.Lock()
+	sa.startRunLocked()
+	sa.mu.Unlock()
+	sa.settle(agentIdle)
+	go sa.heartbeat()
+	defer sa.settle(agentDismissed)
+
+	waitFor(t, 3*time.Second, func() bool {
+		a, _ := kinds(h)
+		return len(a) > 0
+	})
+	select {
+	case <-h.wake:
+		t.Error("an idle child's heartbeat woke the parent")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if _, notes := kinds(h); len(notes) != 0 || sa.escalations.Load() != 0 {
+		t.Errorf("idle child escalated: notes %q, count %d", notes, sa.escalations.Load())
+	}
+}
+
+func TestSubAgent_RunningHeartbeatEscalates(t *testing.T) {
+	h, sa := testAgent(t, 5, "long job")
+	h.cfg.AsideEscalate = 5 * time.Millisecond
+	sa.mu.Lock()
+	sa.startRunLocked()
+	sa.mu.Unlock()
+	go sa.heartbeat()
+	defer sa.settle(agentDismissed)
+	select {
+	case <-h.wake:
+	case <-time.After(3 * time.Second):
+		t.Fatal("a running, silent child's heartbeat did not escalate")
+	}
+	waitFor(t, 2*time.Second, func() bool { return sa.escalations.Load() >= 1 })
 }

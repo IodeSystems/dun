@@ -199,7 +199,7 @@ func main() {
 	// prog are the two; *prog below always means the engine.
 	headless := flag.Bool("p", false, "run one task headless and exit: the answer on stdout, the work and the diff on stderr; with no task, the task is read from stdin")
 	prog := flag.Bool("engine", false, "engine mode: line-delimited JSON events on stdin/stdout (what dund runs)")
-	asideEscalateMS := flag.Int("aside-escalate-ms", 0, "how long a heartbeat about a silent background job or child waits for a turn to carry it before it wakes the agent (0: DUN_ASIDE_ESCALATE_MS, else 5000)")
+	asideEscalateMS := flag.Int("aside-escalate-ms", 0, "how long a heartbeat about a silent background job or child waits for a turn to carry it before it wakes the agent (0 is off: heartbeats stay asides; unset: DUN_ASIDE_ESCALATE_MS, else 5000; at most 3 wakes per job or child)")
 	turnLimit := flag.Int("tool-call-turn-limit", 0, "the most tool-call rounds one turn may make (0: DUN_MAX_TURNS, else 400); the model is told it, and warned at 80%")
 	settleDelay := flag.Duration("settle-delay", 0, "interactive: how long after a turn that used tools, with no reply and no sign of the person at the TUI, the agent is woken to report what is done, left, or needs them (0 is off; unset: DUN_SETTLE_DELAY, else 2m)")
 	planNudgeRounds := flag.Int("plan-nudge-rounds", 0, "after this many rounds in a turn with no open plan node, the main agent is made to write the plan, once per turn (0 is off; unset: DUN_PLAN_NUDGE_ROUNDS, else 25)")
@@ -695,7 +695,7 @@ func main() {
 		NonInteractive:  *nonInteractive && *prog,
 		Worker:          *workerFlag && *prog,
 		TurnLimit:       *turnLimit,
-		AsideEscalate:   time.Duration(*asideEscalateMS) * time.Millisecond,
+		AsideEscalate:   time.Duration(intFlagOff("aside-escalate-ms", *asideEscalateMS)) * time.Millisecond,
 		SettleDelay:     settleDelayFlag(*settleDelay),
 		PlanNudgeRounds: intFlagOff("plan-nudge-rounds", *planNudgeRounds),
 		PlanNudgeFails:  intFlagOff("plan-nudge-fails", *planNudgeFails),

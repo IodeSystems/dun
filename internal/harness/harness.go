@@ -172,7 +172,7 @@ type Config struct {
 	TurnLimit int
 	// AsideEscalate is how long a silent job's or child's heartbeat waits
 	// for a turn to carry it before it wakes the agent (--aside-escalate-ms;
-	// 0 is DUN_ASIDE_ESCALATE_MS, else 5s; asidettl.go).
+	// 0 is DUN_ASIDE_ESCALATE_MS, else 5s; negative is off; asidettl.go).
 	AsideEscalate time.Duration
 	// SettleDelay is how long the person may be away after a turn that used
 	// tools before dun makes the agent report (--settle-delay; 0 is

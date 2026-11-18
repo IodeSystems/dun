@@ -72,7 +72,8 @@ A notify starts a turn through `h.wake`: the engine's loop, and in `--engine` mo
   updates cannot postpone a wake forever.
 - **EscalateAfter.** If the aside is still undelivered after this long, it
   becomes a notify and wakes the agent. Used only by the job and child
-  heartbeats (`--aside-escalate-ms`, default 5 s). If it is delivered first
+  heartbeats (`--aside-escalate-ms`, default 5 s, 0 is off), at most 3 times
+  per job or child, and never for an idle child. If it is delivered first
   (lifted mid-turn), it never escalates. This closed a gap measured on the
   design: an agent that ended its turn to wait on a job that then went silent
   was never told, because "still running, quiet for 5m" could not wake it.
@@ -98,7 +99,7 @@ trigger on an error line; the pattern filter was removed in the jobs rework, and
 
 - A child's report (it finished, or it asks something) is a notify to the parent.
 - While it works, a quiet reminder with its status is a keyed aside that
-  escalates, like a job's.
+  escalates, like a job's. An idle child's reminder never escalates.
 - `agent({id, tell})` steers it.
 
 ### The plan (`internal/harness/plan.go`, `docs/taskplan.md`)

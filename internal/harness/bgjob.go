@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/iodesystems/dun/internal/heartbeat"
@@ -112,6 +113,10 @@ type bgJob struct {
 	// long the job had run then. Set once, by kill.
 	killedBy  string
 	killAfter time.Duration
+
+	// escalations counts the heartbeats that woke the agent (capped at
+	// maxHeartbeatEscalations, asidettl.go).
+	escalations atomic.Int32
 }
 
 // bgEarlyMax bounds the in-memory buffer a not-yet-promoted job keeps. Its
@@ -514,7 +519,8 @@ func (h *Harness) workEnded() <-chan struct{} {
 
 // notifyQuietly is what a REMINDER gets: the human sees it immediately, the
 // model reads it whenever it next runs a turn anyway, and it never buys a turn
-// of its own.
+// of its own. (notifyQuietlyWith can: a heartbeat with EscalateAfter wakes the
+// agent if no turn carried it in time, a bounded number of times.)
 //
 // The distinction matters because a heartbeat is not news. It reports the
 // ABSENCE of news — "still running, still quiet" — and routing it through
@@ -532,7 +538,8 @@ func (h *Harness) notifyQuietly(text string) { h.notifyQuietlyWith(text, AsideOp
 
 // notifyQuietlyWith is notifyQuietly with an aside's delivery rule
 // (asidettl.go): a heartbeat is keyed, so the newer one replaces the older,
-// and escalates, so an agent asleep on a silent job is woken to decide.
+// and may escalate, so an agent asleep on a silent job is woken to decide
+// (heartbeatOpts: off at 0, at most maxHeartbeatEscalations per job or child).
 func (h *Harness) notifyQuietlyWith(text string, o AsideOpts) {
 	h.AsideWith(text, o)
 	if cb := h.store.notifyCallback(); cb != nil {
@@ -662,12 +669,13 @@ func (j *bgJob) heartbeat() {
 				}
 			}
 			// notifyQuietly, NOT j.notify: the reminder must not reset the
-			// silence it is reporting on, and must not buy a turn to report it
-			// — a job being quiet is not a reason to call the model.
+			// silence it is reporting on. It is an aside; it buys a turn only
+			// by escalating (undelivered after asideEscalate), and at most
+			// maxHeartbeatEscalations times for this job.
 			j.h.notifyQuietlyWith(fmt.Sprintf(
 				"exec #%d is STILL RUNNING, quiet for %s — `%s` (%s).\n%s\n%s",
 				j.id, roundDur(quiet), j.command, out, j.logLine(), read),
-				AsideOpts{Key: fmt.Sprintf("job:%d:quiet", j.id), EscalateAfter: j.h.asideEscalate()})
+				j.h.heartbeatOpts(fmt.Sprintf("job:%d:quiet", j.id), &j.escalations, true))
 		},
 	)
 }

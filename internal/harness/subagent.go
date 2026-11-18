@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/iodesystems/agentkit/agent"
@@ -93,6 +94,9 @@ type subAgent struct {
 	// hb is the "still there" reminder (internal/heartbeat), debounced by anything
 	// this child says — which is why every notification goes through s.notify.
 	hb *heartbeat.Beat
+	// escalations counts the heartbeats that woke the parent (capped at
+	// maxHeartbeatEscalations, asidettl.go).
+	escalations atomic.Int32
 	// lastActivity is the last time the child showed any sign of life inside
 	// its harness: a tool call, a chat round completing, or a transcript entry.
 	// This is the cheap signal that distinguishes "working" from "wedged" —
@@ -174,11 +178,14 @@ func (s *subAgent) heartbeat() {
 				}
 			}
 			// Not s.notify: the reminder must not reset the silence it is
-			// reporting on. A reminder is the absence of news, so it never buys
-			// a turn. (A child that asked something is idle, and its question
-			// was the report that already woke the parent.)
-			s.parent.notifyQuietlyWith(line, AsideOpts{Key: fmt.Sprintf("agent:%d:quiet", s.num),
-				EscalateAfter: s.parent.asideEscalate()})
+			// reporting on. It is an aside, and buys a turn only by escalating:
+			// a RUNNING child's, undelivered after asideEscalate, wakes the
+			// parent, at most maxHeartbeatEscalations times for this child.
+			// An idle child's never does: it is waiting for the parent, not
+			// wedged, and a child that asked something is idle, its question
+			// the report that already woke the parent (USER 2026-11-18).
+			s.parent.notifyQuietlyWith(line, s.parent.heartbeatOpts(fmt.Sprintf("agent:%d:quiet", s.num),
+				&s.escalations, state == agentRunning))
 		},
 	)
 }
