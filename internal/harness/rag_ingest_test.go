@@ -8,6 +8,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/dun/internal/project"
 )
 
 // tree writes files (rel → size in bytes, or content via body) under a new
@@ -101,7 +104,7 @@ func TestPlanIngest_LargeDirSkippedAtHighest(t *testing.T) {
 		files["blobs/"+string(rune('a'+i))+".txt"] = 600 << 10
 	}
 	ws := tree(t, files)
-	p := planIngest(ws, &RagConfig{MaxDirFiles: 10, MaxDirMB: 1})
+	p := planIngest(ws, &mcpserver.RagConfig{MaxDirFiles: 10, MaxDirMB: 1})
 	got := relFiles(t, ws, p)
 	if !reflect.DeepEqual(got, []string{"src/a.go", "src/b.go"}) {
 		t.Errorf("files = %v, want src only", got)
@@ -133,7 +136,7 @@ func TestPlanIngest_RootNeverSkipped(t *testing.T) {
 		files[string(rune('a'+i))+".md"] = 10
 	}
 	ws := tree(t, files)
-	p := planIngest(ws, &RagConfig{MaxDirFiles: 5})
+	p := planIngest(ws, &mcpserver.RagConfig{MaxDirFiles: 5})
 	if len(p.Files) != 20 || !p.Huge || len(p.Dirs) != 0 {
 		t.Fatalf("files=%d huge=%v dirs=%v", len(p.Files), p.Huge, p.Dirs)
 	}
@@ -177,7 +180,7 @@ func TestPlanIngest_IncludeAndExclude(t *testing.T) {
 		files["data/"+string(rune('a'+i))+".csv"] = 10
 	}
 	ws := tree(t, files)
-	cfg := &RagConfig{
+	cfg := &mcpserver.RagConfig{
 		Include:     []string{"node_modules/keep/", "dump.json", "data/", "*.js"},
 		Exclude:     []string{"fixtures/", "data/raw/"},
 		MaxDirFiles: 10,
@@ -309,12 +312,12 @@ func TestLoadRag_Layers(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if LoadRag(dir) != nil {
+	if mcpserver.LoadRag(dir) != nil {
 		t.Fatal("no section anywhere must be nil (the defaults)")
 	}
-	write(ProjectServersFile, `{"rag":{"include":["data/"],"exclude":["fixtures/"],"max_file_kb":2048,"max_dir_files":100}}`)
-	write(LocalServersFile, `{"rag":{"include":["docs/big.json"],"max_dir_files":9000}}`)
-	c := LoadRag(dir)
+	write(project.ProjectServersFile, `{"rag":{"include":["data/"],"exclude":["fixtures/"],"max_file_kb":2048,"max_dir_files":100}}`)
+	write(project.LocalServersFile, `{"rag":{"include":["docs/big.json"],"max_dir_files":9000}}`)
+	c := mcpserver.LoadRag(dir)
 	if c == nil {
 		t.Fatal("nil")
 	}
@@ -324,7 +327,7 @@ func TestLoadRag_Layers(t *testing.T) {
 	if c.MaxFileKB != 2048 || c.MaxDirFiles != 9000 {
 		t.Errorf("limits: %+v (an unstated one inherits, a stated one wins)", c)
 	}
-	f, files, b := c.limits()
+	f, files, b := ragLimits(c)
 	if f != 2048<<10 || files != 9000 || b != defaultRagMaxDirMB<<20 {
 		t.Errorf("limits() = %d %d %d", f, files, b)
 	}

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 func writeSkill(t *testing.T, root, dir, md string) {
@@ -313,10 +314,10 @@ func TestSkills_Switches(t *testing.T) {
 	writeSkill(t, filepath.Join(home, ".dun", "skills"), "deploy", "---\nname: deploy\ndescription: ship it\n---\nbody")
 	h := newNoteHarness(t)
 	h.mgr, h.cfg.ConfigDir = mcpmgr.NewManager(), proj
-	if err := h.editSwitchFile("skills", ScopeGlobal, func(f *SwitchFile) { f.On = map[string]bool{"pdf-*": false} }); err != nil {
+	if err := h.editSwitchFile("skills", mcpserver.ScopeGlobal, func(f *SwitchFile) { f.On = map[string]bool{"pdf-*": false} }); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.editSwitchFile("skills", ScopeProject, func(f *SwitchFile) { f.On = map[string]bool{"pdf-merge": true} }); err != nil {
+	if err := h.editSwitchFile("skills", mcpserver.ScopeProject, func(f *SwitchFile) { f.On = map[string]bool{"pdf-merge": true} }); err != nil {
 		t.Fatal(err)
 	}
 	var on []string
@@ -340,14 +341,14 @@ func TestSkills_Switches(t *testing.T) {
 		if it.Tokens <= 0 {
 			t.Errorf("%s costs nothing listed: %+v", it.Name, it)
 		}
-		if it.Name == "pdf-fill" && (it.On || it.From != ScopeGlobal || it.Global != "off") {
+		if it.Name == "pdf-fill" && (it.On || it.From != mcpserver.ScopeGlobal || it.Global != "off") {
 			t.Errorf("pdf-fill: %+v", it)
 		}
-		if it.Name == "pdf-merge" && (!it.On || it.From != ScopeProject || it.Global != "off" || it.Project != "on") {
+		if it.Name == "pdf-merge" && (!it.On || it.From != mcpserver.ScopeProject || it.Global != "off" || it.Project != "on") {
 			t.Errorf("pdf-merge: %+v", it)
 		}
 	}
-	if err := h.editSwitchFile("skills", ScopeProject, func(f *SwitchFile) { f.Mode = SkillsSurfaced }); err != nil {
+	if err := h.editSwitchFile("skills", mcpserver.ScopeProject, func(f *SwitchFile) { f.Mode = SkillsSurfaced }); err != nil {
 		t.Fatal(err)
 	}
 	if h.skillMode() != SkillsSurfaced {

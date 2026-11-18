@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/numfmt"
 )
 
@@ -44,58 +45,13 @@ import (
 // naming that directory or a path in it ("node_modules/foo/") reaches files —
 // a bare glob like "*.json" does not reopen every node_modules.
 
-// RagConfig is the "rag" section of dun.json.
-type RagConfig struct {
-	Include     []string `json:"include,omitempty"`
-	Exclude     []string `json:"exclude,omitempty"`
-	MaxFileKB   int      `json:"max_file_kb,omitempty"`
-	MaxDirFiles int      `json:"max_dir_files,omitempty"`
-	MaxDirMB    int      `json:"max_dir_mb,omitempty"`
-}
-
 const (
 	defaultRagMaxFileKB   = 1024
 	defaultRagMaxDirFiles = 5000
 	defaultRagMaxDirMB    = 200
 )
 
-// LoadRag resolves the effective rag config across the same layers as
-// LoadFiles. nil means no section anywhere: the defaults.
-func LoadRag(dir string) *RagConfig {
-	var out *RagConfig
-	for _, p := range append([]string{UserServersFile()}, serverConfigPaths(dir)...) {
-		f, err := readServersFile(p)
-		if err != nil || f == nil || f.Rag == nil {
-			continue
-		}
-		if out == nil {
-			cp := *f.Rag
-			out = &cp
-			continue
-		}
-		merged := mergeRag(*out, *f.Rag)
-		out = &merged
-	}
-	return out
-}
-
-// mergeRag layers next over prev: limits next states win, patterns add up.
-func mergeRag(prev, next RagConfig) RagConfig {
-	prev.Include = append(append([]string(nil), prev.Include...), next.Include...)
-	prev.Exclude = append(append([]string(nil), prev.Exclude...), next.Exclude...)
-	if next.MaxFileKB != 0 {
-		prev.MaxFileKB = next.MaxFileKB
-	}
-	if next.MaxDirFiles != 0 {
-		prev.MaxDirFiles = next.MaxDirFiles
-	}
-	if next.MaxDirMB != 0 {
-		prev.MaxDirMB = next.MaxDirMB
-	}
-	return prev
-}
-
-func (c *RagConfig) limits() (maxFile int64, maxDirFiles int, maxDirBytes int64) {
+func ragLimits(c *mcpserver.RagConfig) (maxFile int64, maxDirFiles int, maxDirBytes int64) {
 	kb, files, mb := defaultRagMaxFileKB, defaultRagMaxDirFiles, defaultRagMaxDirMB
 	if c != nil {
 		if c.MaxFileKB > 0 {
@@ -164,8 +120,8 @@ type ingestEntry struct {
 }
 
 // planIngest decides what raglit indexes in workspace.
-func planIngest(workspace string, cfg *RagConfig) IngestPlan {
-	maxFile, maxDirFiles, maxDirBytes := cfg.limits()
+func planIngest(workspace string, cfg *mcpserver.RagConfig) IngestPlan {
+	maxFile, maxDirFiles, maxDirBytes := ragLimits(cfg)
 	plan := IngestPlan{MaxFile: maxFile}
 	var inc, exc *globRules
 	if cfg != nil {
@@ -549,7 +505,7 @@ func (p IngestPlan) Summary() string {
 // (rag_index): the files these rules choose, with root's rag config, and the
 // summary line. A root that cannot be read yields no files.
 func IndexFiles(root string) ([]string, string) {
-	plan := planIngest(root, LoadRag(root))
+	plan := planIngest(root, mcpserver.LoadRag(root))
 	var files []string
 	for _, f := range plan.Files {
 		if fi, err := os.Stat(f); err == nil && fi.Mode().IsRegular() {
@@ -562,4 +518,4 @@ func IndexFiles(root string) ([]string, string) {
 
 // ProjectSlug is the project slug of workspace (raglitProject): the name of
 // its indexes in dund.
-func ProjectSlug(workspace string) string { return raglitProject(workspace) }
+func ProjectSlug(workspace string) string { return mcpserver.RaglitProject(workspace) }

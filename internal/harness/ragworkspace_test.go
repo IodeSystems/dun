@@ -3,6 +3,8 @@ package harness
 import (
 	"context"
 	"testing"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // /rag workspace: on by default; a scope's off holds until a nearer
@@ -21,15 +23,15 @@ func TestWorkspaceIndexed_Scopes(t *testing.T) {
 		}
 	}
 	check(true, "")
-	if _, err := h.SetWorkspaceIndexed(false, ScopeGlobal); err != nil {
+	if _, err := h.SetWorkspaceIndexed(false, mcpserver.ScopeGlobal); err != nil {
 		t.Fatal(err)
 	}
-	check(false, ScopeGlobal)
-	msg, err := h.SetWorkspaceIndexed(true, ScopeSession)
+	check(false, mcpserver.ScopeGlobal)
+	msg, err := h.SetWorkspaceIndexed(true, mcpserver.ScopeSession)
 	if err != nil {
 		t.Fatal(err)
 	}
-	check(true, ScopeSession)
+	check(true, mcpserver.ScopeSession)
 	if msg == "" {
 		t.Error("no message")
 	}
@@ -42,7 +44,7 @@ func TestWorkspaceIndexed_Scopes(t *testing.T) {
 	if on, from := nd.WorkspaceIndexed(); on || from != "--no-dir" {
 		t.Errorf("--no-dir: %v %q", on, from)
 	}
-	if _, err := nd.SetWorkspaceIndexed(true, ScopeProject); err == nil {
+	if _, err := nd.SetWorkspaceIndexed(true, mcpserver.ScopeProject); err == nil {
 		t.Error("--no-dir took a setting")
 	}
 }

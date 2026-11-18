@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/oauth"
 )
 
@@ -136,7 +137,7 @@ func NewGateway(b *oauth.Broker) *Gateway {
 // the session and the agent's path.
 func (r ShareRequest) Key(session string) string {
 	b, _ := json.Marshal(r.Spec)
-	if r.Instance == InstanceAgent {
+	if r.Instance == mcpserver.InstanceAgent {
 		b = append(b, "\x00"+session+"\x00"+r.Agent...)
 	}
 	sum := sha256.Sum256(b)

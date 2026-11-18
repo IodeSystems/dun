@@ -15,6 +15,7 @@ import (
 
 	filetools "github.com/iodesystems/agentkit/files"
 	"github.com/iodesystems/dun/internal/fsutil"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // /file (USER 2026-10-27, scoped 2026-10-28): files and directories outside
@@ -91,7 +92,7 @@ func (h *Harness) pathsFile(scope string) string { return h.switchFile(pathsKind
 func (h *Harness) loadPaths(scope string) map[string]PathEntry { return h.loadPathsFile(scope).Paths }
 
 func (h *Harness) loadPathsFile(scope string) pathsFile {
-	if scope == ScopeSession {
+	if scope == mcpserver.ScopeSession {
 		h.migrateAdded()
 	}
 	var f pathsFile
@@ -109,7 +110,7 @@ func (h *Harness) loadPathsFile(scope string) pathsFile {
 // workspaceWrite is whether the file tools may change the working tree, and
 // the scope that decided it ("" : dun.json's files.read_only, or the default).
 func (h *Harness) workspaceWrite() (write bool, from string) {
-	for _, sc := range []string{ScopeSession, ScopeProject, ScopeGlobal} {
+	for _, sc := range []string{mcpserver.ScopeSession, mcpserver.ScopeProject, mcpserver.ScopeGlobal} {
 		if p := h.pathsFile(sc); p == "" {
 			continue
 		}
@@ -232,7 +233,7 @@ func (h *Harness) migrateAdded() {
 	if json.Unmarshal(b, &list) != nil {
 		return
 	}
-	p := h.pathsFile(ScopeSession)
+	p := h.pathsFile(mcpserver.ScopeSession)
 	var f pathsFile
 	if b, err := os.ReadFile(p); err == nil {
 		_ = json.Unmarshal(b, &f)
@@ -257,7 +258,7 @@ func (h *Harness) AddedEntries() []AddedPath {
 	layers := []struct {
 		scope string
 		m     map[string]PathEntry
-	}{{ScopeSession, h.loadPaths(ScopeSession)}, {ScopeProject, h.loadPaths(ScopeProject)}, {ScopeGlobal, h.loadPaths(ScopeGlobal)}}
+	}{{mcpserver.ScopeSession, h.loadPaths(mcpserver.ScopeSession)}, {mcpserver.ScopeProject, h.loadPaths(mcpserver.ScopeProject)}, {mcpserver.ScopeGlobal, h.loadPaths(mcpserver.ScopeGlobal)}}
 	names := map[string]bool{}
 	for _, l := range layers {
 		for p := range l.m {
@@ -372,7 +373,7 @@ func (h *Harness) RemovePath(p, scope string) (string, error) {
 		return "", fmt.Errorf("%s is not added for %s (/file lists them)", abs, scopeWords(scope))
 	}
 	if name != "" {
-		_, _, _, _ = h.SetIndex(context.Background(), ServerDocs, name, scope, nil)
+		_, _, _, _ = h.SetIndex(context.Background(), mcpserver.ServerDocs, name, scope, nil)
 	}
 	h.applyTools()
 	return "files: " + abs + " taken back for " + scopeWords(scope), nil
@@ -451,17 +452,17 @@ func (h *Harness) indexPath(abs, scope string, on bool) string {
 		if name == "" {
 			return "not indexed"
 		}
-		if _, _, _, err := h.SetIndex(context.Background(), ServerDocs, name, scope, ptrBool(false)); err != nil {
+		if _, _, _, err := h.SetIndex(context.Background(), mcpserver.ServerDocs, name, scope, ptrBool(false)); err != nil {
 			return "not indexed (" + err.Error() + ")"
 		}
 		return "not searched: " + name + " off in /rag for " + scopeWords(scope) + " (its index is kept)"
 	}
 	if name == "" {
-		idx, _, err := h.WatchDir(context.Background(), ServerDocs, abs, pathIndexName(abs))
+		idx, _, err := h.WatchDir(context.Background(), mcpserver.ServerDocs, abs, pathIndexName(abs))
 		if err != nil {
 			return "not indexed: " + err.Error()
 		}
-		if s, err := h.knownServer(ServerDocs); err == nil {
+		if s, err := h.knownServer(mcpserver.ServerDocs); err == nil {
 			name = h.ownProject(s) + ":" + idx
 		}
 		_ = h.editPaths(scope, func(m map[string]PathEntry) {
@@ -470,7 +471,7 @@ func (h *Harness) indexPath(abs, scope string, on bool) string {
 			m[abs] = e
 		})
 	}
-	if _, _, _, err := h.SetIndex(context.Background(), ServerDocs, name, scope, ptrBool(true)); err != nil {
+	if _, _, _, err := h.SetIndex(context.Background(), mcpserver.ServerDocs, name, scope, ptrBool(true)); err != nil {
 		return "indexed as " + name + ", but not switched on: " + err.Error()
 	}
 	return "indexed as " + name + " (raglit keeps it fresh), on in /rag for " + scopeWords(scope)
@@ -480,7 +481,7 @@ func (h *Harness) indexPath(abs, scope string, on bool) string {
 // short hash of its path, so two directories of one name do not share one.
 func pathIndexName(abs string) string {
 	sum := sha256.Sum256([]byte(abs))
-	return "file-" + normalizeProject(filepath.Base(abs)) + "-" + hex.EncodeToString(sum[:3])
+	return "file-" + mcpserver.NormalizeProject(filepath.Base(abs)) + "-" + hex.EncodeToString(sum[:3])
 }
 
 func ptrBool(b bool) *bool { return &b }
@@ -513,7 +514,7 @@ func cleanAdded(p string) (string, error) {
 // a write routed to one is refused (withFiles).
 func (h *Harness) addedWriters() (out []*filetools.Toolset, readOnly map[*filetools.Toolset]bool) {
 	readOnly = map[*filetools.Toolset]bool{}
-	cfg, ok := h.cfg.Files.toolsetConfig(h.cfg.Workspace)
+	cfg, ok := filesToolset(h.cfg.Files, h.cfg.Workspace)
 	if !ok {
 		return nil, readOnly
 	}
@@ -636,7 +637,7 @@ func (h *Harness) pathsView() SwitchView {
 		v.Items = append(v.Items, SwitchState{
 			SwitchItem: SwitchItem{Name: a.Path, Source: src},
 			On:         a.On, From: a.From,
-			Global: a.Scopes[ScopeGlobal], Project: a.Scopes[ScopeProject], Session: a.Scopes[ScopeSession],
+			Global: a.Scopes[mcpserver.ScopeGlobal], Project: a.Scopes[mcpserver.ScopeProject], Session: a.Scopes[mcpserver.ScopeSession],
 		})
 	}
 	v.Status = []string{"/file add <path> [--global|--project|--session] [--write] [--no-index] · /file mode <path> read|write · /file index <path> on|off",

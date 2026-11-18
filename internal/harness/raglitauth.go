@@ -40,6 +40,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/agent"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/proc"
 )
 
@@ -89,11 +90,11 @@ var raglitHasKeys = func(command string) bool {
 
 // raglitKeyed is the resolved raglit command when s is the docs server and
 // its raglit has keys.
-func raglitKeyed(s Server) (string, bool) {
-	if s.ID != ServerDocs || s.URL != "" || filepath.Base(s.Command) != "raglit" {
+func raglitKeyed(s mcpserver.Server) (string, bool) {
+	if s.ID != mcpserver.ServerDocs || s.URL != "" || filepath.Base(s.Command) != "raglit" {
 		return "", false
 	}
-	command, err := FindCommand(s.Command)
+	command, err := mcpserver.FindCommand(s.Command)
 	if err != nil || !raglitHasKeys(command) {
 		return "", false
 	}
@@ -102,7 +103,7 @@ func raglitKeyed(s Server) (string, bool) {
 
 // raglitAuth is the docs server's env for a keyed raglit: RAGLIT_TOKEN set
 // to the session's key, minted on first use. nil, nil for any other server.
-func (h *Harness) raglitAuth(ctx context.Context, s Server) ([]string, error) {
+func (h *Harness) raglitAuth(ctx context.Context, s mcpserver.Server) ([]string, error) {
 	command, ok := raglitKeyed(s)
 	if !ok {
 		return nil, nil
@@ -165,7 +166,7 @@ func (h *Harness) raglitSessionKey(ctx context.Context, command string) (string,
 	out, _, err := runRaglit(ctx, command, r.cfg.Workspace, []string{"RAGLIT_TOKEN=" + token}, "",
 		// The project names the shared daemon's namespace; without it a
 		// directory with no .raglit/config.json is refused ("no project name").
-		"key", "mint", "--session", session, "--project", raglitProject(r.cfg.Workspace), "--label", "dun session "+session)
+		"key", "mint", "--session", session, "--project", mcpserver.RaglitProject(r.cfg.Workspace), "--label", "dun session "+session)
 	if err != nil {
 		return "", fmt.Errorf("%w — /rag login again if dun's token was revoked", err)
 	}
@@ -194,7 +195,7 @@ func loadRaglitToken() string {
 }
 
 // raglitLogin mints dun's raglit token with the caller's own credential.
-func (h *Harness) raglitLogin(ctx context.Context, s Server) (string, error) {
+func (h *Harness) raglitLogin(ctx context.Context, s mcpserver.Server) (string, error) {
 	command, ok := raglitKeyed(s)
 	if !ok {
 		return "", fmt.Errorf("%s is not a raglit with keys: nothing to log in to", s.ID)
@@ -228,7 +229,7 @@ func (h *Harness) raglitLogin(ctx context.Context, s Server) (string, error) {
 }
 
 // raglitLogout revokes dun's token, and every key under it, and deletes it.
-func (h *Harness) raglitLogout(ctx context.Context, s Server) (string, error) {
+func (h *Harness) raglitLogout(ctx context.Context, s mcpserver.Server) (string, error) {
 	command, ok := raglitKeyed(s)
 	if !ok {
 		return "", fmt.Errorf("%s is not a raglit with keys", s.ID)

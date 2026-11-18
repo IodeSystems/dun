@@ -60,7 +60,7 @@ engine: `dun --engine` — one process per session (internal/harness/harness.go)
   mcpshell ("scripted" mode) to save context; see `decisions.md`.
 - Servers are declarative: built-in defaults, then `dun.json` (committed,
   describes the project), then `dun.local.json` (gitignored, describes this
-  machine), then Go-set values. The extension manifest (`internal/harness/extension.go`) says
+  machine), then Go-set values. The extension manifest (`internal/mcpserver/extension.go`) says
   how a server plays a role (search, index) and which slash commands it adds.
 - Per-workspace state lives in `.dun/` (worktrees, local config).
   Per-user state lives in `$DUN_HOME` (default `~/.dun`): config, sessions,

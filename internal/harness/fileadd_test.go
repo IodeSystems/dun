@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 func fileCall(t *testing.T, h *Harness, name string, args map[string]any) string {
@@ -45,7 +46,7 @@ func TestFileAdd(t *testing.T) {
 	if !strings.Contains(out, "Ask the user to add it: /file add "+agents) {
 		t.Fatalf("outside: %s", out)
 	}
-	if _, err := h.AddPath(agents, ScopeSession, PathOptions{Write: true}); err != nil {
+	if _, err := h.AddPath(agents, mcpserver.ScopeSession, PathOptions{Write: true}); err != nil {
 		t.Fatal(err)
 	}
 	if out := fileCall(t, h, "file_read", map[string]any{"path": agents}); !strings.Contains(out, "keep tests green") {
@@ -71,13 +72,13 @@ func TestFileAdd(t *testing.T) {
 	if ps := h2.AddedPaths(); len(ps) != 1 {
 		t.Fatalf("resumed: %v", ps)
 	}
-	if _, err := h2.AddPath(other, ScopeSession, PathOptions{Write: true, NoIndex: true}); err != nil {
+	if _, err := h2.AddPath(other, mcpserver.ScopeSession, PathOptions{Write: true, NoIndex: true}); err != nil {
 		t.Fatal(err)
 	}
 	if out := fileCall(t, h2, "file_read", map[string]any{"path": filepath.Join(other, "secret.txt")}); !strings.Contains(out, "no") || strings.Contains(out, "ERROR") {
 		t.Errorf("directory: %s", out)
 	}
-	if _, err := h2.RemovePath(other, ScopeSession); err != nil {
+	if _, err := h2.RemovePath(other, mcpserver.ScopeSession); err != nil {
 		t.Fatal(err)
 	}
 	if out := fileCall(t, h2, "file_read", map[string]any{"path": filepath.Join(other, "secret.txt")}); !strings.Contains(out, "only the files added") {
@@ -106,7 +107,7 @@ func TestFileAdd_ThroughASymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer h.Close()
-	if _, err := h.AddPath(link, ScopeSession, PathOptions{Write: true, NoIndex: true}); err != nil {
+	if _, err := h.AddPath(link, mcpserver.ScopeSession, PathOptions{Write: true, NoIndex: true}); err != nil {
 		t.Fatal(err)
 	}
 	deep := filepath.Join(link, "a", "b", "deep.txt")
@@ -146,7 +147,7 @@ func TestFilePaths_ScopesModeAndPrecedence(t *testing.T) {
 	}
 	defer h.Close()
 
-	msg, err := h.AddPath(other, ScopeGlobal, PathOptions{})
+	msg, err := h.AddPath(other, mcpserver.ScopeGlobal, PathOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,16 +161,16 @@ func TestFilePaths_ScopesModeAndPrecedence(t *testing.T) {
 	if out := fileCall(t, h, "file_edit", edit); !strings.Contains(out, "for reading only") || !strings.Contains(out, "/file mode") {
 		t.Errorf("a read-only edit: %s", out)
 	}
-	if _, err := h.SetPathOn(other, ScopeSession, false); err != nil {
+	if _, err := h.SetPathOn(other, mcpserver.ScopeSession, false); err != nil {
 		t.Fatal(err)
 	}
 	if out := fileCall(t, h, "file_read", map[string]any{"path": f}); !strings.Contains(out, "outside this workspace") {
 		t.Errorf("off at the session: %s", out)
 	}
-	if _, err := h.RemovePath(other, ScopeSession); err != nil {
+	if _, err := h.RemovePath(other, mcpserver.ScopeSession); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.SetPathMode(other, ScopeProject, "write"); err != nil {
+	if _, err := h.SetPathMode(other, mcpserver.ScopeProject, "write"); err != nil {
 		t.Fatal(err)
 	}
 	if out := fileCall(t, h, "file_edit", edit); strings.Contains(out, "ERROR") {
@@ -179,7 +180,7 @@ func TestFilePaths_ScopesModeAndPrecedence(t *testing.T) {
 		t.Errorf("not edited: %q", b)
 	}
 	es := h.AddedEntries()
-	if len(es) != 1 || !es[0].On || !es[0].Write || es[0].From != ScopeGlobal || es[0].Scopes[ScopeGlobal] != "on" {
+	if len(es) != 1 || !es[0].On || !es[0].Write || es[0].From != mcpserver.ScopeGlobal || es[0].Scopes[mcpserver.ScopeGlobal] != "on" {
 		t.Errorf("entries: %+v", es)
 	}
 	if v, ok := h.SwitchView(pathsKind); !ok || len(v.Items) != 2 || !strings.Contains(v.Items[1].Source, "read and write") { // [0]: the workspace
@@ -223,12 +224,12 @@ func TestFilePaths_IndexedDirectoryIsOnInRag(t *testing.T) {
 	}
 	other := t.TempDir()
 	h, err := Start(context.Background(), Config{Workspace: t.TempDir(), SessionFile: filepath.Join(t.TempDir(), "s.jsonl"),
-		Servers: []Server{{ID: ServerDocs, Command: filepath.Join(bin, "raglit"), Args: []string{"serve", "--project", "p", "--index", "w"}}}})
+		Servers: []mcpserver.Server{{ID: mcpserver.ServerDocs, Command: filepath.Join(bin, "raglit"), Args: []string{"serve", "--project", "p", "--index", "w"}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer h.Close()
-	msg, err := h.AddPath(other, ScopeProject, PathOptions{})
+	msg, err := h.AddPath(other, mcpserver.ScopeProject, PathOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,14 +240,14 @@ func TestFilePaths_IndexedDirectoryIsOnInRag(t *testing.T) {
 	if b, _ := os.ReadFile(argv); !strings.Contains(string(b), "watch "+other+" --index "+pathIndexName(other)) {
 		t.Errorf("raglit was not asked to watch it: %q", b)
 	}
-	s, _ := h.knownServer(ServerDocs)
+	s, _ := h.knownServer(mcpserver.ServerDocs)
 	if !slices.Contains(s.Attach, name) {
 		t.Errorf("not on in /rag: %v", s.Attach)
 	}
-	if _, err := h.SetPathIndex(other, ScopeProject, false); err != nil {
+	if _, err := h.SetPathIndex(other, mcpserver.ScopeProject, false); err != nil {
 		t.Fatal(err)
 	}
-	s, _ = h.knownServer(ServerDocs)
+	s, _ = h.knownServer(mcpserver.ServerDocs)
 	if slices.Contains(s.Attach, name) || !slices.Contains(s.Detach, name) {
 		t.Errorf("index off should switch it off in /rag: on %v off %v", s.Attach, s.Detach)
 	}
@@ -268,19 +269,19 @@ func TestFilePaths_WorkspaceRow(t *testing.T) {
 	if len(v.Items) == 0 || v.Items[0].Name != filepath.Clean(ws) || !v.Items[0].On || !strings.HasPrefix(v.Items[0].Source, "read and write · this workspace") {
 		t.Fatalf("first row: %+v", v.Items)
 	}
-	if _, err := h.setPathSwitch(ws, ScopeSession, new(bool)); err == nil {
+	if _, err := h.setPathSwitch(ws, mcpserver.ScopeSession, new(bool)); err == nil {
 		t.Error("the workspace was switched off")
 	}
-	if _, err := h.SetPathMode(".", ScopeProject, "read"); err != nil {
+	if _, err := h.SetPathMode(".", mcpserver.ScopeProject, "read"); err != nil {
 		t.Fatal(err)
 	}
-	if v := h.pathsView(); !strings.HasPrefix(v.Items[0].Source, "read · this workspace") || v.Items[0].From != ScopeProject {
+	if v := h.pathsView(); !strings.HasPrefix(v.Items[0].Source, "read · this workspace") || v.Items[0].From != mcpserver.ScopeProject {
 		t.Errorf("after read at project: %+v", v.Items[0])
 	}
 	if out := fileCall(t, h, "file_edit", map[string]any{"path": "a.txt", "edits": []map[string]any{{"old": "one", "new": "two"}}}); !strings.Contains(out, "ERROR") {
 		t.Errorf("a read-only workspace took an edit: %s", out)
 	}
-	if _, err := h.SetPathMode(ws, ScopeSession, "write"); err != nil { // the nearer scope wins
+	if _, err := h.SetPathMode(ws, mcpserver.ScopeSession, "write"); err != nil { // the nearer scope wins
 		t.Fatal(err)
 	}
 	if out := fileCall(t, h, "file_edit", map[string]any{"path": "a.txt", "edits": []map[string]any{{"old": "one", "new": "two"}}}); strings.Contains(out, "ERROR") {
@@ -311,13 +312,13 @@ func TestFileAdd_DuringATurn(t *testing.T) {
 	if out := fileCall(t, h, "file_write", map[string]any{"path": notes, "content": "new\n", "overwrite": true}); !strings.Contains(out, "/file add "+notes+" --write") {
 		t.Fatalf("outside: want the command with --write: %s", out)
 	}
-	if _, err := h.AddPath(notes, ScopeSession, PathOptions{}); err != nil {
+	if _, err := h.AddPath(notes, mcpserver.ScopeSession, PathOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if out := fileCall(t, h, "file_write", map[string]any{"path": notes, "content": "new\n", "overwrite": true}); !strings.Contains(out, "reading only") {
 		t.Errorf("added read only, in the turn: want the read-only refusal: %s", out)
 	}
-	if _, err := h.SetPathMode(notes, ScopeSession, "write"); err != nil {
+	if _, err := h.SetPathMode(notes, mcpserver.ScopeSession, "write"); err != nil {
 		t.Fatal(err)
 	}
 	if out := fileCall(t, h, "file_write", map[string]any{"path": notes, "content": "new\n", "overwrite": true}); strings.Contains(out, "ERROR") {
@@ -346,7 +347,7 @@ func TestFileAdd_ANewFile(t *testing.T) {
 	if !strings.Contains(out, "/file add "+fresh+" --write") || !strings.Contains(out, "/file add "+other+" --write") {
 		t.Fatalf("outside, not there yet: want the file and its directory: %s", out)
 	}
-	if _, err := h.AddPath(fresh, ScopeSession, PathOptions{Write: true}); err != nil {
+	if _, err := h.AddPath(fresh, mcpserver.ScopeSession, PathOptions{Write: true}); err != nil {
 		t.Fatalf("a file not there yet, in a directory that is: %v", err)
 	}
 	if out := fileCall(t, h, "file_write", map[string]any{"path": fresh, "content": "x\n"}); strings.Contains(out, "ERROR") {
@@ -355,7 +356,7 @@ func TestFileAdd_ANewFile(t *testing.T) {
 	if out := fileCall(t, h, "file_write", map[string]any{"path": filepath.Join(other, "else.md"), "content": "x\n"}); !strings.Contains(out, "only the files added") {
 		t.Errorf("its neighbour: %s", out)
 	}
-	if _, err := h.AddPath(filepath.Join(t.TempDir(), "no", "such", "dir.md"), ScopeSession, PathOptions{}); err == nil {
+	if _, err := h.AddPath(filepath.Join(t.TempDir(), "no", "such", "dir.md"), mcpserver.ScopeSession, PathOptions{}); err == nil {
 		t.Error("a file in a directory that is not there: want an error")
 	}
 }
@@ -366,15 +367,15 @@ func TestFilesAside_ListsEveryPathWithItsMode(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	ws, ro, rw := t.TempDir(), t.TempDir(), t.TempDir()
 	sf := filepath.Join(t.TempDir(), "s.jsonl")
-	h, err := Start(context.Background(), Config{Workspace: ws, SessionFile: sf, Servers: []Server{}})
+	h, err := Start(context.Background(), Config{Workspace: ws, SessionFile: sf, Servers: []mcpserver.Server{}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer h.Close()
-	if _, err := h.AddPath(ro, ScopeSession, PathOptions{NoIndex: true}); err != nil {
+	if _, err := h.AddPath(ro, mcpserver.ScopeSession, PathOptions{NoIndex: true}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.AddPath(rw, ScopeSession, PathOptions{Write: true, NoIndex: true}); err != nil {
+	if _, err := h.AddPath(rw, mcpserver.ScopeSession, PathOptions{Write: true, NoIndex: true}); err != nil {
 		t.Fatal(err)
 	}
 	a := h.FilesAside()
@@ -392,7 +393,7 @@ func TestSystemPrompt_NamesNoOpenPaths(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	ws, ro := t.TempDir(), t.TempDir()
 	sf := filepath.Join(t.TempDir(), "s.jsonl")
-	h, err := Start(context.Background(), Config{Workspace: ws, SessionFile: sf, Servers: []Server{}})
+	h, err := Start(context.Background(), Config{Workspace: ws, SessionFile: sf, Servers: []mcpserver.Server{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -403,7 +404,7 @@ func TestSystemPrompt_NamesNoOpenPaths(t *testing.T) {
 			t.Errorf("the system prompt names modes (%q):\n%s", no, before)
 		}
 	}
-	if _, err := h.AddPath(ro, ScopeSession, PathOptions{NoIndex: true}); err != nil {
+	if _, err := h.AddPath(ro, mcpserver.ScopeSession, PathOptions{NoIndex: true}); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(h.Session.System, ro) {

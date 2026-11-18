@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -19,6 +17,7 @@ import (
 	filetools "github.com/iodesystems/agentkit/files"
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/mounttool"
 	"github.com/iodesystems/dun/internal/oauth"
 )
@@ -44,29 +43,18 @@ import (
 // through by default. An entry is a tool name or a glob ("tts_*", path.Match).
 //
 // The deny-list is resolved per tool across the scopes (Server.toolState).
-func filterTools(tools []mcpmgr.MCPTool, specs []Server) []mcpmgr.MCPTool {
-	by := make(map[string]Server, len(specs))
+func filterTools(tools []mcpmgr.MCPTool, specs []mcpserver.Server) []mcpmgr.MCPTool {
+	by := make(map[string]mcpserver.Server, len(specs))
 	for _, s := range specs {
 		by[s.ID] = s
 	}
 	out := make([]mcpmgr.MCPTool, 0, len(tools))
 	for _, t := range tools {
-		if on, _, _ := by[t.ServerID].toolState(t.Name); on {
+		if on, _, _ := by[t.ServerID].ToolState(t.Name); on {
 			out = append(out, t)
 		}
 	}
 	return out
-}
-
-// hiddenBy is the first Disable entry that hides name, or "". A malformed
-// glob still matches its own exact text.
-func hiddenBy(name string, disable []string) string {
-	for _, p := range disable {
-		if ok, err := path.Match(p, name); ok || (err != nil && p == name) {
-			return p
-		}
-	}
-	return ""
 }
 
 // ServerState is one tool server's state, for a UI.
@@ -78,7 +66,7 @@ type ServerState struct {
 	Tools int    `json:"tools"`
 	Err   string `json:"err,omitempty"` // why the last start attempt failed
 	// Missing: Err is a MissingError — the command is not installed, a setup
-	// step rather than a failure (missing.go).
+	// step rather than a failure (mcpserver/missing.go).
 	Missing bool `json:"missing,omitempty"`
 	// Starting is a start in flight: launched, not yet answering with its
 	// tools (Running may already be true: the handshake is done, discovery
@@ -182,19 +170,19 @@ func (h *Harness) Servers() []ServerState {
 	h.srvMu.Lock()
 	defer h.srvMu.Unlock()
 	counts, cost, hidden := map[string]int{}, map[string]int{}, map[string]int{}
-	by := map[string]Server{}
+	by := map[string]mcpserver.Server{}
 	for _, s := range h.specs {
 		by[s.ID] = s
 	}
 	for _, t := range h.mgr.GetTools() {
-		if on, _, _ := by[t.ServerID].toolState(t.Name); !on {
+		if on, _, _ := by[t.ServerID].ToolState(t.Name); !on {
 			hidden[t.ServerID]++
 			continue
 		}
 		counts[t.ServerID]++
 		cost[t.ServerID] += h.toolTokens(t)
 	}
-	shellUp := h.mgr.ServerStarted(ServerShell)
+	shellUp := h.mgr.ServerStarted(mcpserver.ServerShell)
 	out := make([]ServerState, 0, len(h.specs))
 	for _, s := range h.specs {
 		st := ServerState{
@@ -209,7 +197,7 @@ func (h *Harness) Servers() []ServerState {
 			Hidden:       hidden[s.ID],
 			Auth:         h.authState(s),
 			Proto:        serverProto(s),
-			Global:       onOffWord(s.Scopes.GlobalOn(s.Via)),
+			Global:       mcpserver.OnOffWord(s.Scopes.GlobalOn(s.Via)),
 			Project:      tri(s.Scopes.Project),
 			Session:      tri(s.Scopes.Session),
 			From:         s.Scopes.OnFrom,
@@ -244,14 +232,14 @@ func (h *Harness) Servers() []ServerState {
 		}
 		st.Exclude, st.IndexBudget, st.IndexAnyway = s.Exclude, s.IndexBudget, s.IndexAnyway
 		switch {
-		case s.Via == ViaShell:
-			st.Via, st.Namespace, st.Err, st.Tools = ViaShell, ShellNamespace(s.ID), "", 0
+		case s.Via == mcpserver.ViaShell:
+			st.Via, st.Namespace, st.Err, st.Tools = mcpserver.ViaShell, ShellNamespace(s.ID), "", 0
 			if hs, ok := h.hosted[s.ID]; ok && shellUp {
 				st.Hosted, st.Tools, st.Err = hs.Connected, hs.Tools, hs.Err
 				st.Standalone, st.Help = h.bytesToTokens(hs.SchemaBytes), h.bytesToTokens(hs.HelpBytes)
 			}
-		case !builtinServer(s.ID):
-			st.Via = ViaDirect
+		case !mcpserver.IsBuiltin(s.ID):
+			st.Via = mcpserver.ViaDirect
 		}
 		out = append(out, st)
 	}
@@ -259,7 +247,7 @@ func (h *Harness) Servers() []ServerState {
 }
 
 // serverProto is "stdio" for a command, else the URL's scheme.
-func serverProto(s Server) string {
+func serverProto(s mcpserver.Server) string {
 	if s.URL == "" {
 		return "stdio"
 	}
@@ -274,7 +262,7 @@ func tri(b *bool) string {
 	if b == nil {
 		return ""
 	}
-	return onOffWord(*b)
+	return mcpserver.OnOffWord(*b)
 }
 
 // StartServer spawns a configured server by id and rebuilds the tool set.
@@ -286,7 +274,7 @@ func (h *Harness) StartServer(ctx context.Context, id string) error {
 	spec, ok := h.spec(id)
 	h.srvMu.Unlock()
 	if !ok {
-		return fmt.Errorf("dun: no server %q (have %s)", id, strings.Join(ServerIDs(h.specs), ", "))
+		return fmt.Errorf("dun: no server %q (have %s)", id, strings.Join(mcpserver.IDs(h.specs), ", "))
 	}
 	if h.mgr.ServerStarted(id) || h.isStarting(id) {
 		return nil
@@ -384,20 +372,20 @@ func (h *Harness) StopServer(id string) error {
 }
 
 // spec finds a configured server by id. Caller holds srvMu.
-func (h *Harness) spec(id string) (Server, bool) {
+func (h *Harness) spec(id string) (mcpserver.Server, bool) {
 	for _, s := range h.specs {
 		if s.ID == id {
 			return s, true
 		}
 	}
-	return Server{}, false
+	return mcpserver.Server{}, false
 }
 
 // startServer spawns one server, waits for its tools, and rebuilds the tool
 // set. The error it returns is also recorded, so a UI can show why a family is
 // missing long after the attempt.
-func (h *Harness) startServer(ctx context.Context, s Server) error {
-	if s.Via == ViaShell {
+func (h *Harness) startServer(ctx context.Context, s mcpserver.Server) error {
+	if s.Via == mcpserver.ViaShell {
 		return fmt.Errorf("%s is scripted — the model calls it through eval as %s; /mcp mode %s standalone to run it on its own",
 			s.ID, ShellNamespace(s.ID), s.ID)
 	}
@@ -440,12 +428,12 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	//
 	// With the code and docs search through dund (codesearch.go), the
 	// workspace is dund's to index, and raglit keeps its own corpora only.
-	if indexed, _ := h.WorkspaceIndexed(); isExt && ext.Subscribes(HookWorkspaceOpen) && indexed && authErr == nil && h.codeLink() == nil {
+	if indexed, _ := h.WorkspaceIndexed(); isExt && ext.Subscribes(mcpserver.HookWorkspaceOpen) && indexed && authErr == nil && h.codeLink() == nil {
 		dir := h.cfg.ConfigDir
 		if dir == "" {
 			dir = h.cfg.Workspace
 		}
-		note := ingestWorkspace(h.indexSink(ext), h.cfg.Workspace, LoadRag(dir))
+		note := ingestWorkspace(h.indexSink(ext), h.cfg.Workspace, mcpserver.LoadRag(dir))
 		h.srvMu.Lock()
 		h.ingestNote, h.ingestID = note, s.ID
 		h.srvMu.Unlock()
@@ -458,18 +446,18 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 		env = append(env, hostHookEnv(ext, h.cfg.Workspace)...)
 	}
 	args := s.Args
-	if s.ID == ServerShell {
+	if s.ID == mcpserver.ServerShell {
 		h.shareHosted(ctx, s.ID, phase) // before the login: a shared one is dund's to log in
 		h.loginHosted(ctx, s.ID, phase)
 		args = h.shellArgs(s) // + --mcp <file> when servers are placed in it
 		env = h.shellEnv(s, env)
 	}
-	// A local command is looked for on PATH, then beside dun (missing.go);
+	// A local command is looked for on PATH, then beside dun (mcpserver/missing.go);
 	// one in neither place is not started at all.
 	command := s.Command
 	err := authErr
 	if err == nil && s.URL == "" && command != "" {
-		command, err = FindCommand(command)
+		command, err = mcpserver.FindCommand(command)
 	}
 	switch {
 	case err != nil:
@@ -504,7 +492,7 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 		}
 	}
 	// The /lsp language switches, to a build that takes them (lspkind.go).
-	if sup.LSP && s.ID == ServerCode {
+	if sup.LSP && s.ID == mcpserver.ServerCode {
 		args = append(slices.Clone(args), h.codeLSPArgs()...)
 	}
 	// One shared poly-lsp daemon for every session (USER 2026-10-24): one
@@ -577,10 +565,10 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	}
 	// Skills and prompts are read once, at start, so the tool rebuild below
 	// can list them. Only for an added server: the built-ins serve neither.
-	if err == nil && !builtinServer(s.ID) && h.parent == nil { // a child's catalog is its parent's
+	if err == nil && !mcpserver.IsBuiltin(s.ID) && h.parent == nil { // a child's catalog is its parent's
 		h.discoverCatalog(ctx, s.ID)
 	}
-	if err == nil && s.ID == ServerShell {
+	if err == nil && s.ID == mcpserver.ServerShell {
 		h.readHosted()
 	}
 	if why := context.Cause(ctx); err != nil && parent.Err() == nil && why != nil && why != context.Canceled {
@@ -591,7 +579,7 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	if h.missing == nil {
 		h.missing = map[string]bool{}
 	}
-	var miss *MissingError
+	var miss *mcpserver.MissingError
 	h.missing[s.ID] = errors.As(err, &miss)
 	if err != nil {
 		h.lastErr[s.ID] = err.Error()
@@ -865,7 +853,7 @@ func (h *Harness) rebuildTools() {
 		dispatch = withSessionSearch(dispatch, run, report)
 	}
 	// Skills into the index, off the turn lock: raglit takes a while.
-	if e, ok := hookExt(exts, HookSkillsChanged, tools); ok {
+	if e, ok := hookExt(exts, mcpserver.HookSkillsChanged, tools); ok {
 		go h.syncSkillIndex(h.indexSink(e))
 	}
 	// skill, when any skill is in reach: the list rides the tool's
@@ -931,7 +919,7 @@ func (h *Harness) rebuildTools() {
 		// are standing context: the model needs the project's rules from the
 		// first message, and a system block survives compaction so a fold
 		// never drops them (rules.go).
-		_, rulesIndexed := hookExt(exts, HookRulesChanged, tools)
+		_, rulesIndexed := hookExt(exts, mcpserver.HookRulesChanged, tools)
 		rules, rulesMode, rulesSet = h.rulesBlock(rulesIndexed)
 		sys += rules
 		// The important memories, strategies and constraints, by path
@@ -1008,7 +996,7 @@ func (h *Harness) rebuildTools() {
 	}()
 	// The rules index follows the mode: filled in index mode, emptied of an
 	// earlier session's files otherwise. A root session's job, off the lock.
-	if e, ok := hookExt(exts, HookRulesChanged, tools); ok && !h.isChild() {
+	if e, ok := hookExt(exts, mcpserver.HookRulesChanged, tools); ok && !h.isChild() {
 		go h.syncRulesIndex(h.indexSink(e), rulesSet, rulesMode)
 	}
 
@@ -1145,7 +1133,7 @@ func missing(want, have []string) []string {
 // args name (raglit's --project) — the same as the serve command's, or the
 // agent searches an index nothing was ingested into. A nil sink (a server
 // that is not raglit, with no index tools) is left alone.
-func ingestWorkspace(sink *mcpDocsSink, workspace string, cfg *RagConfig) string {
+func ingestWorkspace(sink *mcpDocsSink, workspace string, cfg *mcpserver.RagConfig) string {
 	if sink == nil {
 		return ""
 	}
@@ -1163,7 +1151,7 @@ func ingestWorkspace(sink *mcpDocsSink, workspace string, cfg *RagConfig) string
 	log.Printf("dun: %s", summary)
 	// The sink chunks, so a large repository cannot overflow argv. Each call
 	// queues and the daemon drains them.
-	if err := sink.ingest(raglitIndex(workspace), plan.Files); err != nil {
+	if err := sink.ingest(mcpserver.RaglitIndex(workspace), plan.Files); err != nil {
 		// Best-effort: proactive RAG simply has less to ping without it.
 		// Worth logging, since "search finds nothing" is otherwise
 		// unexplained.
@@ -1202,30 +1190,15 @@ func ingestTargets(workspace string) []string {
 	return planIngest(workspace, nil).Files
 }
 
-// builtinServer reports whether id is one of dun's own three servers: the
-// shell and the bundled extensions.
-func builtinServer(id string) bool {
-	if canonicalServerID(id) == ServerShell {
-		return true
-	}
-	_, ok := bundledExt(id)
-	return ok
-}
-
-// serverIDPattern is what /mcp add accepts as an id: it becomes the tool
-// namespace ("<id>__<tool>") and a raglit index name, so it is kept to
-// characters both allow.
-var serverIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
-
 // AddServer saves spec to the user server list ($DUN_HOME/mcp.json, every
 // workspace) with autostart on, and starts it — restarting it when one of
 // that id is running. It returns the file written; a server that saved but
 // did not start returns both the path and the error.
-func (h *Harness) AddServer(ctx context.Context, spec ServerSpec) (string, error) {
-	if !serverIDPattern.MatchString(spec.ID) {
+func (h *Harness) AddServer(ctx context.Context, spec mcpserver.Spec) (string, error) {
+	if !mcpserver.IDPattern.MatchString(spec.ID) {
 		return "", fmt.Errorf("an id is lowercase letters, digits, - and _ (got %q)", spec.ID)
 	}
-	if builtinServer(spec.ID) {
+	if mcpserver.IsBuiltin(spec.ID) {
 		return "", fmt.Errorf("%q is a built-in server; pick another id", spec.ID)
 	}
 	if (spec.URL == "") == (spec.Command == "") {
@@ -1233,28 +1206,28 @@ func (h *Harness) AddServer(ctx context.Context, spec ServerSpec) (string, error
 	}
 	// A value the spec names stays explicit ("direct", "shared"): empty
 	// means unspecified, and keeps the stored entry's (PutUserServer).
-	via, err := NormalizeVia(spec.Via)
+	via, err := mcpserver.NormalizeVia(spec.Via)
 	if err != nil {
 		return "", err
 	}
 	named := strings.TrimSpace(spec.Via) != ""
 	if spec.Via = via; named && via == "" {
-		spec.Via = ViaDirect
+		spec.Via = mcpserver.ViaDirect
 	}
 	namedInstance := strings.TrimSpace(spec.Instance) != ""
-	if spec.Instance, err = NormalizeInstance(spec.Instance); err != nil {
+	if spec.Instance, err = mcpserver.NormalizeInstance(spec.Instance); err != nil {
 		return "", err
 	}
 	if namedInstance && spec.Instance == "" {
-		spec.Instance = InstanceShared
+		spec.Instance = mcpserver.InstanceShared
 	}
 	// Validate what will be stored: the spec with the old entry's switches
 	// filled in.
-	merged, err := keepSwitches(spec)
+	merged, err := mcpserver.KeepSwitches(spec)
 	if err != nil {
 		return "", err
 	}
-	if mv, _ := NormalizeVia(merged.Via); merged.Instance == InstanceAgent && mv == ViaShell {
+	if mv, _ := mcpserver.NormalizeVia(merged.Via); merged.Instance == mcpserver.InstanceAgent && mv == mcpserver.ViaShell {
 		return "", fmt.Errorf("instance agent is for a standalone server: a scripted one runs in the session's shell, which a sub-agent shares")
 	}
 	// A remote server with no credentials that answers with an OAuth
@@ -1262,12 +1235,12 @@ func (h *Harness) AddServer(ctx context.Context, spec ServerSpec) (string, error
 	if spec.OAuth == nil && wantsOAuth(ctx, spec) {
 		spec.OAuth = &oauth.Spec{}
 	}
-	if err := checkOAuth(spec, via); err != nil {
+	if err := mcpserver.CheckOAuth(spec, via); err != nil {
 		return "", err
 	}
 	on := true
 	spec.Autostart = &on
-	path, err := PutUserServer(spec)
+	path, err := mcpserver.PutUserServer(spec)
 	if err != nil {
 		return "", err
 	}
@@ -1277,13 +1250,13 @@ func (h *Harness) AddServer(ctx context.Context, spec ServerSpec) (string, error
 	old, had := h.spec(spec.ID)
 	h.srvMu.Unlock()
 	restart := map[string]bool{spec.ID: true}
-	if had && old.Via == ViaShell {
-		restart[ServerShell] = true
+	if had && old.Via == mcpserver.ViaShell {
+		restart[mcpserver.ServerShell] = true
 	}
 	if err := h.reloadServers(ctx, true, restart); err != nil {
 		return path, err
 	}
-	if s, err := h.knownServer(spec.ID); err == nil && s.Autostart && s.Via != ViaShell && !h.mgr.ServerStarted(s.ID) && !h.isStarting(s.ID) {
+	if s, err := h.knownServer(spec.ID); err == nil && s.Autostart && s.Via != mcpserver.ViaShell && !h.mgr.ServerStarted(s.ID) && !h.isStarting(s.ID) {
 		return path, h.startServer(ctx, s)
 	}
 	return path, nil
@@ -1294,12 +1267,12 @@ func (h *Harness) AddServer(ctx context.Context, spec ServerSpec) (string, error
 // remove. Its entries in the current project's state and in this session's
 // sidecar go too, and are returned; other projects' files are not read.
 func (h *Harness) RemoveServer(id string) ([]string, error) {
-	ok, err := RemoveUserServer(id)
+	ok, err := mcpserver.RemoveUserServer(id)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return nil, fmt.Errorf("no server %q in %s — a server from dun.json is removed there", id, UserServersFile())
+		return nil, fmt.Errorf("no server %q in %s — a server from dun.json is removed there", id, mcpserver.UserServersFile())
 	}
 	// Its stored login goes with it: a token for a server dun no longer
 	// knows is a secret with no owner.
@@ -1307,7 +1280,7 @@ func (h *Harness) RemoveServer(id string) ([]string, error) {
 	h.oauthMu.Lock()
 	delete(h.oauth, id)
 	h.oauthMu.Unlock()
-	cleared, err := removeLocalServer(h.configDir(), id)
+	cleared, err := mcpserver.RemoveLocalServer(h.configDir(), id)
 	if err != nil {
 		return cleared, fmt.Errorf("removed, but its project entry stays: %w", err)
 	}
@@ -1315,7 +1288,7 @@ func (h *Harness) RemoveServer(id string) ([]string, error) {
 	_, inSession := h.sessSw[id]
 	h.srvMu.Unlock()
 	if inSession {
-		path, err := h.editSession(id, func(s *SessionServer) { *s = SessionServer{} })
+		path, err := h.editSession(id, func(s *mcpserver.SessionServer) { *s = mcpserver.SessionServer{} })
 		if err != nil {
 			return cleared, fmt.Errorf("removed, but its session entry stays: %w", err)
 		}
@@ -1354,7 +1327,7 @@ func underHome(dir string) bool {
 // manifest's description; "" for a server added with /mcp add (what it says
 // about itself in the handshake is its description then).
 func (h *Harness) describe(id string) string {
-	if id == ServerShell {
+	if id == mcpserver.ServerShell {
 		return shellDescription
 	}
 	for _, e := range h.exts {

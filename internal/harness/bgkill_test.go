@@ -15,6 +15,7 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/proc"
 )
 
@@ -305,7 +306,7 @@ func TestInterrupt_ListsRunningJobs(t *testing.T) {
 	dir := t.TempDir()
 	be := &HostShell{Dir: dir}
 	h, err := Start(context.Background(), Config{
-		Workspace: dir, Servers: []Server{}, Client: r, Exec: be,
+		Workspace: dir, Servers: []mcpserver.Server{}, Client: r, Exec: be,
 		SessionFile: filepath.Join(dir, "s.jsonl"),
 	})
 	if err != nil {

@@ -3,11 +3,13 @@ package harness
 import (
 	"context"
 	"encoding/json"
-	"github.com/iodesystems/dun/internal/dunconfig"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // What dun is, three ways: the session tool, the file dun session info
@@ -91,7 +93,7 @@ func TestHarnessInfo_ModelSwitchLeavesRunningRecordTrue(t *testing.T) {
 	// The restart: a new engine on the same session file, on the new model.
 	h.Close()
 	h2, err := Start(context.Background(), Config{
-		Workspace: h.cfg.Workspace, Servers: []Server{}, Client: &scriptRunner{},
+		Workspace: h.cfg.Workspace, Servers: []mcpserver.Server{}, Client: &scriptRunner{},
 		Endpoint:    Endpoint{URL: "http://other.test/v1", Model: "small"},
 		SessionFile: sf,
 	})
@@ -113,7 +115,7 @@ func TestHarnessInfo_ChildCommandsNameTheChild(t *testing.T) {
 	dir := t.TempDir()
 	kid := &scriptRunner{rounds: []roundFn{textRound("done")}}
 	h, err := Start(context.Background(), Config{
-		Workspace: dir, Servers: []Server{}, Client: &scriptRunner{},
+		Workspace: dir, Servers: []mcpserver.Server{}, Client: &scriptRunner{},
 		Endpoint: Endpoint{URL: "http://claude.test/v1", Model: "big"},
 		Exec:     &HostShell{Dir: dir},
 		ClientFor: func(provider, model string) (ChildClient, error) {
@@ -168,7 +170,7 @@ func TestHarnessInfo_LiveEnvFollowsTheSession(t *testing.T) {
 	kid := &scriptRunner{rounds: []roundFn{textRound("done")}}
 	sh := &HostShell{Dir: dir}
 	h, err := Start(context.Background(), Config{
-		Workspace: dir, Servers: []Server{}, Client: &scriptRunner{}, Version: "v9.9.9",
+		Workspace: dir, Servers: []mcpserver.Server{}, Client: &scriptRunner{}, Version: "v9.9.9",
 		Endpoint: Endpoint{URL: "http://claude.test/v1", Model: "big"}, Exec: sh,
 		ClientFor: func(provider, model string) (ChildClient, error) {
 			return ChildClient{Runner: kid, Endpoint: Endpoint{URL: "http://local.test/v1", Model: model}}, nil

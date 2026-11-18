@@ -8,6 +8,7 @@ import (
 
 	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/numfmt"
 )
 
@@ -16,10 +17,10 @@ import (
 func infoServers() []harness.ServerState {
 	return []harness.ServerState{
 		{ID: "shell", Running: true, Auto: true, Tools: 1},
-		{ID: "notes", Running: true, Auto: true, Tools: 12, Via: harness.ViaDirect},
-		{ID: "tiny", Running: true, Auto: true, Tools: 2, Via: harness.ViaDirect},
-		{ID: "corp", Auto: true, Tools: 30, Via: harness.ViaShell, Hosted: true},
-		{ID: "figma", Auto: true, Via: harness.ViaDirect, Err: "connect: connection refused"},
+		{ID: "notes", Running: true, Auto: true, Tools: 12, Via: mcpserver.ViaDirect},
+		{ID: "tiny", Running: true, Auto: true, Tools: 2, Via: mcpserver.ViaDirect},
+		{ID: "corp", Auto: true, Tools: 30, Via: mcpserver.ViaShell, Hosted: true},
+		{ID: "figma", Auto: true, Via: mcpserver.ViaDirect, Err: "connect: connection refused"},
 		{ID: "raglit", Slash: "raglit"},
 	}
 }
@@ -94,7 +95,7 @@ func TestMCPInfo_Quiet(t *testing.T) {
 func TestMCPInfo_ShellOff(t *testing.T) {
 	srv := infoServers()
 	srv[0].Running = false
-	srv = append(srv, harness.ServerState{ID: "snow", Running: true, Auto: true, Tools: 40, Via: harness.ViaDirect, Auth: "logged in"})
+	srv = append(srv, harness.ServerState{ID: "snow", Running: true, Auto: true, Tools: 40, Via: mcpserver.ViaDirect, Auth: "logged in"})
 	parts := append(infoParts(), harness.ContextPart{Name: "mcp: snow", Tokens: 9000})
 	s := plainInfo(enginecmd.McpInfoIn{Servers: srv, Parts: parts, Counted: true})
 	line := numfmt.EstimateTok(harness.HostedLine([]string{"notes"}))

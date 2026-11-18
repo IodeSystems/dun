@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/agent"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // fakeRagCaps is raglit's capability list (cmd/raglit/doctorreport.go) with
@@ -80,7 +81,7 @@ func startRagSetup(t *testing.T, mode string, client agent.LLMRunner) (*Harness,
 	lines := make(chan string, 8)
 	h, err := Start(context.Background(), Config{
 		Workspace: ws, Client: client, SessionFile: filepath.Join(ws, "s.jsonl"),
-		Servers:       []Server{{ID: ServerDocs, Command: rag, Args: []string{"serve"}, Timeout: 20, Autostart: true}},
+		Servers:       []mcpserver.Server{{ID: mcpserver.ServerDocs, Command: rag, Args: []string{"serve"}, Timeout: 20, Autostart: true}},
 		OnServerSetup: func(id, msg string) { lines <- msg },
 	})
 	if err != nil {
@@ -94,7 +95,7 @@ func docsSetup(t *testing.T, h *Harness) *SetupReport {
 	t.Helper()
 	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
 		for _, st := range h.Servers() {
-			if st.ID == ServerDocs && st.Setup != nil {
+			if st.ID == mcpserver.ServerDocs && st.Setup != nil {
 				return st.Setup
 			}
 		}
@@ -119,7 +120,7 @@ func TestRagSetup_SemanticOffIsSaidOnce(t *testing.T) {
 	if !r.CapabilityOff(CapSemantic) || r.CapabilityOff(CapScans) {
 		t.Errorf("report: %+v", r.Capabilities)
 	}
-	if again := h.noteSetup(ServerDocs, *r); again != "" {
+	if again := h.noteSetup(mcpserver.ServerDocs, *r); again != "" {
 		t.Errorf("said twice: %q", again)
 	}
 }

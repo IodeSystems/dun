@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // --non-interactive: a turn that did work is checked once before it ends; a
@@ -130,7 +131,7 @@ func TestOnIdle_RearmInATurn(t *testing.T) {
 	}}
 	t.Setenv("DUN_HOME", t.TempDir())
 	h, err := Start(context.Background(), Config{
-		Workspace: dir, Servers: []Server{}, Client: r, Exec: &HostShell{Dir: dir},
+		Workspace: dir, Servers: []mcpserver.Server{}, Client: r, Exec: &HostShell{Dir: dir},
 		SessionFile: filepath.Join(dir, "s.jsonl"), NonInteractive: true,
 		PlanNudgeRounds: -1, PlanNudgeFails: -1,
 	})

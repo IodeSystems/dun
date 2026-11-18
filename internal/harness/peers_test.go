@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 type fakePeers struct {
@@ -36,7 +37,7 @@ func peerCall(name, args string) llm.ToolCall {
 func TestPeerTools_OnlyForARootWithALink(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	start := func(p PeerLink) []string {
-		h, err := Start(context.Background(), Config{Workspace: t.TempDir(), Servers: []Server{}, Peers: p})
+		h, err := Start(context.Background(), Config{Workspace: t.TempDir(), Servers: []mcpserver.Server{}, Peers: p})
 		if err != nil {
 			t.Fatal(err)
 		}

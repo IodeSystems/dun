@@ -10,6 +10,7 @@ import (
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
@@ -116,7 +117,7 @@ type slashRoutes struct {
 	reply   func(msg string) // an answer that is not a command's own event
 	// exts are the extensions whose slash commands route (engineExtensions);
 	// nil is the bundled ones.
-	exts []harness.Extension
+	exts []mcpserver.Extension
 }
 
 // routeSlash carries out one slash line ("raglit on", "/remember the tests are
@@ -139,7 +140,7 @@ func routeSlash(line string, r slashRoutes) {
 	}
 	exts := r.exts
 	if exts == nil {
-		exts = harness.BundledExtensions()
+		exts = mcpserver.BundledExtensions()
 	}
 	for _, e := range exts {
 		if e.SlashName() != name {
@@ -163,7 +164,7 @@ func routeSlash(line string, r slashRoutes) {
 			return
 		}
 		// /lsp add|remove: a command line for poly-lsp-mcp, its case kept.
-		if e.ID == harness.ServerCode && (arg(0) == "add" || arg(0) == "remove") {
+		if e.ID == mcpserver.ServerCode && (arg(0) == "add" || arg(0) == "remove") {
 			r.server(e.ID, arg(0)+" "+strings.Join(args[1:], " "))
 			return
 		}
@@ -206,19 +207,19 @@ func routeSlash(line string, r slashRoutes) {
 			}
 			r.control("mcptools", id)
 		case "mode", "via", "move":
-			if _, err := harness.NormalizeVia(arg(2)); len(args) < 3 || len(args) > 4 || (err != nil && arg(2) != "unset") {
+			if _, err := mcpserver.NormalizeVia(arg(2)); len(args) < 3 || len(args) > 4 || (err != nil && arg(2) != "unset") {
 				r.reply("usage: /mcp mode <id> standalone|scripted|unset [--global|--project|--session] (bare: this session; via and move, shell and direct are the same)")
 				return
 			}
 			r.control("mcp", "mode "+strings.Join(lowerAll(args[1:]), " "))
 		case "default":
-			if _, err := harness.NormalizeVia(arg(1)); len(args) != 2 || err != nil {
+			if _, err := mcpserver.NormalizeVia(arg(1)); len(args) != 2 || err != nil {
 				r.reply("usage: /mcp default standalone|scripted — the mode of a server no scope sets one for (every project)")
 				return
 			}
 			r.control("mcp", "default "+arg(1))
 		case "instance":
-			if _, err := harness.NormalizeInstance(arg(2)); len(args) < 3 || len(args) > 4 || (err != nil && arg(2) != "unset") {
+			if _, err := mcpserver.NormalizeInstance(arg(2)); len(args) < 3 || len(args) > 4 || (err != nil && arg(2) != "unset") {
 				r.reply("usage: /mcp instance <id> shared|session|agent|unset [--global|--project|--session] (bare: this session)")
 				return
 			}

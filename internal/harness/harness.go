@@ -22,6 +22,7 @@ import (
 	filetools "github.com/iodesystems/agentkit/files"
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/mounttool"
 	"github.com/iodesystems/dun/internal/oauth"
 	"github.com/iodesystems/dun/internal/procstat"
@@ -40,7 +41,7 @@ type Config struct {
 
 	// Servers are what the config files layer over: nil → DefaultServers(
 	// Workspace, RaglitHome). A child (Parent set) takes them as given.
-	Servers []Server
+	Servers []mcpserver.Server
 	// ConfigDir is where dun.json / dun.local.json are looked for. Empty →
 	// Workspace. Separated because the workspace may be an isolated worktree
 	// while the config lives with the developer's checkout.
@@ -82,7 +83,7 @@ type Config struct {
 	Effort string
 	// Files configures the built-in file tools (files.go); nil = the defaults
 	// (DefaultFileTools: read, edit, write), rooted at Workspace.
-	Files *FilesConfig
+	Files *mcpserver.FilesConfig
 	// Parent, when set, makes this harness a CHILD of that one: it shares the
 	// parent's MCP manager (same worktree root ⇒ same servers, so no second
 	// index), reports to it, and gets the child tool set instead of the root's.
@@ -96,7 +97,7 @@ type Config struct {
 	Worktree *Worktree      // the session worktree
 	// CommitCfg is how /worktree commit writes its message. nil = the
 	// conventional-commits default.
-	CommitCfg   *CommitConfig
+	CommitCfg   *mcpserver.CommitConfig
 	SessionFile string // persist the conversation here (resumable); "" = in-memory only
 	// DockerImage is the image used when /isolate docker is chosen mid-session.
 	// Set from the --docker flag at construction so the runtime toggle has
@@ -108,7 +109,7 @@ type Config struct {
 	DockerNetwork bool
 	// ExtraMounts are the mount specs passed at construction, needed when
 	// reconfiguring DockerExec mid-session for a worktree switch.
-	ExtraMounts []MountSpec
+	ExtraMounts []mcpserver.MountSpec
 	OnToken     func(string)
 	// OnReasoning fires with each delta of the model's reasoning, as it
 	// streams, for the turn's own rounds only (see reasoning.go). nil → the
@@ -429,7 +430,7 @@ type Harness struct {
 	// rebuild, switched off or not, for /mcp's built-in rows (builtins.go).
 	builtinMu   sync.Mutex
 	builtinDefs []llm.ToolDef
-	specs       []Server                 // every configured server, running or not
+	specs       []mcpserver.Server       // every configured server, running or not
 	lastErr     map[string]string        // id → why its last start attempt failed
 	missing     map[string]bool          // id → lastErr is a MissingError
 	lastStart   map[string]time.Duration // id → how long its last start took
@@ -476,13 +477,13 @@ type Harness struct {
 	setupSaid map[string]bool
 	// exts are the loaded extensions and extErrs the manifests that did not
 	// load (extension.go). Fixed at Start.
-	exts    []Extension
-	extErrs []ExtError
+	exts    []mcpserver.Extension
+	extErrs []mcpserver.ExtError
 	hosted  map[string]hostedState // id → how the running shell took a shell-placed server
 	// sessSw is this session's own server switches (mcpscope.go), saved in
 	// the session's .mcp.json sidecar. Guarded by srvMu. reconMu orders the
 	// reloads that apply a switch change.
-	sessSw  map[string]SessionServer
+	sessSw  map[string]mcpserver.SessionServer
 	reconMu sync.Mutex
 	// oauth is each OAuth server's login, kept across restarts of the server
 	// so a cached token and a running login are not lost. Its own lock:
@@ -654,7 +655,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// and the --rag/--lsp flags. A child takes its parent's resolved list
 	// as given: it shares the parent's manager and switches nothing.
 	servers := cfg.Servers
-	var sessSw map[string]SessionServer
+	var sessSw map[string]mcpserver.SessionServer
 	extDir := cfg.ConfigDir
 	if extDir == "" {
 		extDir = cfg.Workspace
@@ -665,7 +666,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	cfg.ConfigDir = extDir
 	// Extensions: the bundled ones and the user's and project's manifests
 	// (extension.go). Their servers join the base the files layer over.
-	exts, extErrs := LoadExtensions(extDir)
+	exts, extErrs := mcpserver.LoadExtensions(extDir)
 	for _, e := range extErrs {
 		log.Printf("dun: extension %v", e)
 	}
@@ -673,12 +674,12 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		dir := extDir
 		base := cfg.Servers
 		if base == nil {
-			base = DefaultServers(cfg.Workspace, cfg.RaglitHome)
+			base = mcpserver.DefaultServers(cfg.Workspace, cfg.RaglitHome)
 		}
-		base = extServers(base, exts)
-		sessSw = LoadSessionServers(cfg.SessionFile)
+		base = mcpserver.ExtServers(base, exts)
+		sessSw = mcpserver.LoadSessionServers(cfg.SessionFile)
 		var err error
-		servers, err = resolveServers(dir, cfg.Workspace, cfg.RaglitHome, base, sessSw, cfg.AutostartOverride)
+		servers, err = mcpserver.Resolve(dir, cfg.Workspace, cfg.RaglitHome, base, sessSw, cfg.AutostartOverride)
 		servers = withoutDirServers(servers, cfg)
 		if err != nil {
 			return nil, err
@@ -763,19 +764,19 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// OnServerStarted reports it. Servers() says it is starting until then.
 	var builtins sync.WaitGroup
 	for _, s := range servers {
-		if !s.Autostart || (!ownsMgr && !own[s.ID]) || s.Via == ViaShell { // the shell starts it
+		if !s.Autostart || (!ownsMgr && !own[s.ID]) || s.Via == mcpserver.ViaShell { // the shell starts it
 			continue
 		}
 		h.markStarting(s.ID)
-		wg := &sync.WaitGroup{}               // an added server's: nobody waits on it
-		if builtinServer(s.ID) || own[s.ID] { // a child's own: its first turn wants them
+		wg := &sync.WaitGroup{}                     // an added server's: nobody waits on it
+		if mcpserver.IsBuiltin(s.ID) || own[s.ID] { // a child's own: its first turn wants them
 			wg = &builtins
 		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			err := h.startServer(ctx, s)
-			var miss *MissingError
+			var miss *mcpserver.MissingError
 			if err != nil && !errors.As(err, &miss) { // not installed: the UI says it, once
 				log.Printf("dun: %s did not start: %v", s.ID, err)
 			}
@@ -1061,7 +1062,7 @@ func (h *Harness) Workspace() string {
 // mounts describing the same set: two loads of the same config can disagree if
 // a file changed underneath, and then a build works in one isolation tier and
 // not the other.
-func (h *Harness) Mounts() []MountSpec {
+func (h *Harness) Mounts() []mcpserver.MountSpec {
 	h.srvMu.Lock()
 	defer h.srvMu.Unlock()
 	return h.cfg.ExtraMounts

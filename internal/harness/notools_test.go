@@ -7,13 +7,14 @@ import (
 	"testing"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // --no-tools: the model is offered no tool, the system prompt says so, no
 // server is resolved, and a stray call is refused.
 func TestNoTools_PlainChat(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	if n := len(withoutDirServers(DefaultServers("/ws", ""), Config{NoTools: true})); n != 0 {
+	if n := len(withoutDirServers(mcpserver.DefaultServers("/ws", ""), Config{NoTools: true})); n != 0 {
 		t.Errorf("servers resolved under NoTools: %d", n)
 	}
 	dir := t.TempDir()

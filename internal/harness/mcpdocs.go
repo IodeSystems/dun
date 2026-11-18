@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/proc"
 )
 
@@ -81,7 +82,7 @@ type mcpDocsSink struct {
 // raglitDocsSink runs the raglit CLI against the docs server's store — an
 // index role's cli fallback (indexSink) — or returns nil when the docs
 // server is not raglit.
-func raglitDocsSink(docs Server, env []string) *mcpDocsSink {
+func raglitDocsSink(docs mcpserver.Server, env []string) *mcpDocsSink {
 	if filepath.Base(docs.Command) != "raglit" {
 		return nil
 	}
@@ -117,7 +118,7 @@ func (h *Harness) SyncMCPDocs(ctx context.Context, id string) (string, error) {
 	h.srvMu.Lock()
 	s, _ := h.spec(id)
 	h.srvMu.Unlock()
-	if s.Via == ViaShell {
+	if s.Via == mcpserver.ViaShell {
 		return "", fmt.Errorf("%s is scripted (hosted in the shell), and dun indexes the docs only of a server it connects to itself — /mcp mode %s standalone to index them", id, id)
 	}
 	if !h.mgr.ServerStarted(id) {
@@ -130,7 +131,7 @@ func (h *Harness) SyncMCPDocs(ctx context.Context, id string) (string, error) {
 	// need not be running.
 	var sink *mcpDocsSink
 	for _, e := range h.extensions() {
-		if e.Subscribes(HookMCPDocs) {
+		if e.Subscribes(mcpserver.HookMCPDocs) {
 			if sink = h.indexSink(e); sink != nil {
 				break
 			}

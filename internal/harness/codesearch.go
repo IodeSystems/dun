@@ -18,6 +18,7 @@ import (
 	"github.com/iodesystems/agentkit/llm"
 
 	"github.com/iodesystems/dun/internal/fsutil"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -110,7 +111,7 @@ func (l *codeLink) reindex(root string) {
 func (l *codeLink) indexOnce(root string) {
 	ctx, cancel := context.WithTimeout(context.Background(), codeIndexTimeout)
 	defer cancel()
-	r, err := l.link.Index(ctx, proto.RagIndex{Project: raglitProject(root), Root: root})
+	r, err := l.link.Index(ctx, proto.RagIndex{Project: mcpserver.RaglitProject(root), Root: root})
 	switch {
 	case errors.Is(err, ErrRagDown):
 		l.down()
@@ -199,7 +200,7 @@ func (l *codeLink) search(ctx context.Context, root, q, sub string, limit int) (
 		}
 		prefix = "file://" + filepath.Clean(sub)
 	}
-	project := raglitProject(root)
+	project := mcpserver.RaglitProject(root)
 	type result struct {
 		index string
 		hits  *proto.RagHits
@@ -456,7 +457,7 @@ func (f *codeFinder) Find(ctx context.Context, texts []string) ([]agent.DocHit, 
 		}
 		return nil, err
 	}
-	project := raglitProject(root)
+	project := mcpserver.RaglitProject(root)
 	out := make([]agent.DocHit, 0, len(hits))
 	for _, c := range hits {
 		m := hitMeta{Matched: c.matched, Terms: c.terms}

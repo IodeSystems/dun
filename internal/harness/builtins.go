@@ -12,6 +12,7 @@ import (
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun/internal/fsutil"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // dun's own tools in /mcp (USER 2026-10-28: "it's odd that we don't see
@@ -139,7 +140,7 @@ func builtinState(files map[string]builtinsFile, group, tool string) (on bool, f
 	on, decided := true, false
 	for _, sc := range switchScopes {
 		if v, ok := pick(files[sc]); ok {
-			words[sc] = onOffWord(v)
+			words[sc] = mcpserver.OnOffWord(v)
 			if !decided {
 				on, from, decided = v, sc, true
 			}
@@ -214,12 +215,12 @@ func (h *Harness) BuiltinGroups() []ServerState {
 			continue // none of its tools in this session (mount without docker)
 		}
 		on, from, w := builtinState(files, g.name, "")
-		global := w[ScopeGlobal]
+		global := w[mcpserver.ScopeGlobal]
 		if global == "" {
 			global = "on"
 		}
 		out = append(out, ServerState{ID: BuiltinPrefix + g.name, Running: on, Auto: on, Tools: n, Hidden: hidden, Cost: cost,
-			Description: g.desc, Proto: "dun", Global: global, Project: w[ScopeProject], Session: w[ScopeSession], From: from})
+			Description: g.desc, Proto: "dun", Global: global, Project: w[mcpserver.ScopeProject], Session: w[mcpserver.ScopeSession], From: from})
 	}
 	return out
 }
@@ -249,8 +250,8 @@ func (h *Harness) builtinTools(group string) ([]ToolInfo, error) {
 		on, from, w := builtinState(files, group, d.Function.Name)
 		schema, _ := json.MarshalIndent(d.Function.Parameters, "", "  ")
 		out = append(out, ToolInfo{Server: BuiltinPrefix + group, Name: d.Function.Name, Description: d.Function.Description,
-			Schema: string(schema), Tokens: h.defTokens(d), Enabled: on, Global: w[ScopeGlobal], Project: w[ScopeProject],
-			Session: w[ScopeSession], From: from})
+			Schema: string(schema), Tokens: h.defTokens(d), Enabled: on, Global: w[mcpserver.ScopeGlobal], Project: w[mcpserver.ScopeProject],
+			Session: w[mcpserver.ScopeSession], From: from})
 	}
 	return out, nil
 }

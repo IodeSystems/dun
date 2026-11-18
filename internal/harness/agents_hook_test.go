@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/iodesystems/dun/internal/project"
 )
 
 // runHook writes the embedded script to a temp file and runs it with the
@@ -243,7 +245,7 @@ func TestAgentsHook_StateLivesOutsideTheRepo(t *testing.T) {
 	if code, out := runHook(t, "read", filepath.Join(dir, "main.go")); code != 0 {
 		t.Fatalf("should be unblocked after read: exit %d, out: %s", code, out)
 	}
-	p := ResolveProject(dir)
+	p := project.Resolve(dir)
 	if p == nil {
 		t.Fatal("the workspace should be registered")
 	}
@@ -251,8 +253,8 @@ func TestAgentsHook_StateLivesOutsideTheRepo(t *testing.T) {
 	if err != nil || !strings.Contains(string(b), "AGENTS.md") {
 		t.Errorf("state should be in %s: %q, %v", p.AgentsReadFile(), b, err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, DunDir)); !os.IsNotExist(err) {
-		t.Errorf("the hook created %s in the repo", DunDir)
+	if _, err := os.Stat(filepath.Join(dir, project.DunDir)); !os.IsNotExist(err) {
+		t.Errorf("the hook created %s in the repo", project.DunDir)
 	}
 	if out, _ := git("", "-C", dir, "status", "--porcelain"); strings.TrimSpace(out) != "" {
 		t.Errorf("the repo must stay clean, got:\n%s", out)

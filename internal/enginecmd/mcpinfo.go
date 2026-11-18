@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 )
@@ -60,7 +61,7 @@ func McpInfo(in McpInfoIn) string {
 	idW := 0
 	for i, st := range in.Servers {
 		idW = max(idW, len(st.ID))
-		if st.ID == harness.ServerShell {
+		if st.ID == mcpserver.ServerShell {
 			shell = &in.Servers[i]
 		}
 	}
@@ -69,15 +70,15 @@ func McpInfo(in McpInfoIn) string {
 	var scripted, hosted []string
 	for _, st := range in.Servers {
 		f := []string{infoState(st, shellUp), infoMode(st.Via)}
-		on := st.Running || (st.Via == harness.ViaShell && st.Auto && shellUp && st.Err == "")
+		on := st.Running || (st.Via == mcpserver.ViaShell && st.Auto && shellUp && st.Err == "")
 		if on && st.Tools > 0 {
 			f = append(f, fact(textfmt.Plural(st.Tools, "tool")))
 		}
 		switch {
 		case !in.Counted || !on:
-		case st.Via == harness.ViaShell && st.Standalone > 0:
+		case st.Via == mcpserver.ViaShell && st.Standalone > 0:
 			f = append(f, fact("0 tokens")+" (standalone "+fact("~"+numfmt.TokN(st.Standalone))+")")
-		case st.Via == harness.ViaShell:
+		case st.Via == mcpserver.ViaShell:
 			f = append(f, fact("0 tokens"))
 		default:
 			f = append(f, fact(est+numfmt.TokN(cost[st.ID])+" tokens"))
@@ -91,7 +92,7 @@ func McpInfo(in McpInfoIn) string {
 			}
 		}
 		rows = append(rows, "  "+textfmt.Pad(st.ID, idW)+"  "+strings.Join(f, " · "))
-		if st.Via == harness.ViaShell {
+		if st.Via == mcpserver.ViaShell {
 			scripted = append(scripted, st.ID)
 			if on {
 				hosted = append(hosted, harness.ShellNamespace(st.ID)) // as hostedNamespaces names them
@@ -114,7 +115,7 @@ func McpInfo(in McpInfoIn) string {
 		rows = append(rows, costRows(in, cost)...)
 	}
 	if shell != nil {
-		rows = append(rows, shellRows(shell, shellUp, in, est, cost[harness.ServerShell], scripted, hosted)...)
+		rows = append(rows, shellRows(shell, shellUp, in, est, cost[mcpserver.ServerShell], scripted, hosted)...)
 	}
 	if hints := scriptHints(in, cost, shellUp, hosted); len(hints) > 0 {
 		rows = append(rows, "to save tokens:")
@@ -166,7 +167,7 @@ func scriptHints(in McpInfoIn, cost map[string]int, shellUp bool, hosted []strin
 	for _, st := range in.Servers {
 		n := cost[st.ID]
 		// ViaDirect: an added server; a built-in has no mode.
-		if st.Via != harness.ViaDirect || !st.Running || n < harness.HeavyServerTokens {
+		if st.Via != mcpserver.ViaDirect || !st.Running || n < harness.HeavyServerTokens {
 			continue
 		}
 		after := append(slices.Clone(hosted), harness.ShellNamespace(st.ID))
@@ -192,9 +193,9 @@ func infoState(st harness.ServerState, shellUp bool) string {
 		return "starting…"
 	case st.Err != "":
 		return fact("did not start:") + " " + textfmt.OneLine(st.Err)
-	case st.Via == harness.ViaShell && st.Auto && !shellUp:
+	case st.Via == mcpserver.ViaShell && st.Auto && !shellUp:
 		return "waits for the shell"
-	case st.Via == harness.ViaShell && st.Auto, st.Via != harness.ViaShell && st.Running:
+	case st.Via == mcpserver.ViaShell && st.Auto, st.Via != mcpserver.ViaShell && st.Running:
 		return "running"
 	}
 	return "off"
@@ -210,7 +211,7 @@ func infoMode(via string) string {
 	if via == "" {
 		return "built-in"
 	}
-	return harness.ModeWord(via)
+	return mcpserver.ModeWord(via)
 }
 
 // McpHelp is /mcp help: the actions, one line each, from the command's own
@@ -309,7 +310,7 @@ func costRows(in McpInfoIn, cost map[string]int) []string {
 	for _, st := range in.Servers {
 		su := u.Servers[st.ID]
 		switch {
-		case st.Via == harness.ViaShell && st.Standalone > 0:
+		case st.Via == mcpserver.ViaShell && st.Standalone > 0:
 			row := "  " + st.ID + ": scripted, saves " + fact("~"+numfmt.TokN(st.Standalone)+" tokens") + " in every request"
 			if su != nil && su.SavedRounds > 0 {
 				row += "; " + fact(textfmt.Plural(su.SavedRounds, "request")) + " would have processed them: " + fact("~"+numfmt.TokN(su.Saved)+" tokens") + spent(su.Saved)
@@ -318,7 +319,7 @@ func costRows(in McpInfoIn, cost map[string]int) []string {
 				row += " · help(\"" + harness.ShellNamespace(st.ID) + "\") " + fact("~"+numfmt.TokN(st.Help)) + " once, when the model asks"
 			}
 			rows = append(rows, row)
-		case st.Via != harness.ViaShell && cost[st.ID] > 0 && su != nil && su.Processed > 0:
+		case st.Via != mcpserver.ViaShell && cost[st.ID] > 0 && su != nil && su.Processed > 0:
 			rows = append(rows, "  "+st.ID+": its "+fact("~"+numfmt.TokN(cost[st.ID]))+" of schemas, processed in "+fact(textfmt.Plural(su.Processed, "request"))+": "+
 				fact("~"+numfmt.TokN(su.Tokens)+" tokens")+spent(su.Tokens))
 		}

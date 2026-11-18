@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 type stubPeers struct{}
@@ -36,7 +37,7 @@ func TestWorker_PromptAndToolSet(t *testing.T) {
 		t.Setenv("DUN_HOME", t.TempDir())
 		dir := t.TempDir()
 		h, err := Start(context.Background(), Config{
-			Workspace: dir, Servers: []Server{}, Client: &scriptRunner{}, Worker: worker,
+			Workspace: dir, Servers: []mcpserver.Server{}, Client: &scriptRunner{}, Worker: worker,
 			Peers: stubPeers{}, Loops: stubPeers{},
 			Ask: func(context.Context, string, []string, bool, []string) (string, error) { return "", nil },
 		})
@@ -74,7 +75,7 @@ func TestChild_PromptAndTools(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	dir := t.TempDir()
 	h, err := Start(context.Background(), Config{
-		Workspace: dir, Servers: []Server{}, Client: &scriptRunner{}, Rag: &fakeRag{},
+		Workspace: dir, Servers: []mcpserver.Server{}, Client: &scriptRunner{}, Rag: &fakeRag{},
 		ClientFor:   func(string, string) (ChildClient, error) { return ChildClient{Runner: &scriptRunner{}}, nil },
 		SessionFile: dir + "/s.jsonl",
 	})

@@ -24,6 +24,7 @@ import (
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/internal/tui"
@@ -270,7 +271,7 @@ func (d *doctor) tools() {
 	_, svcInstalled := dundcli.ServiceFile(dundcli.ServiceUnit)
 	for _, t := range doctorTools {
 		level := t.level
-		p, err := harness.FindCommand(t.name)
+		p, err := mcpserver.FindCommand(t.name)
 		if err != nil {
 			p, err = d.install(t.name)
 		}
@@ -278,7 +279,7 @@ func (d *doctor) tools() {
 			what := "not installed (not on PATH or beside dun)"
 			if t.need != "" {
 				what += ", needed only for " + t.need
-			} else if inst, ok := harness.ToolInstall[t.name]; ok {
+			} else if inst, ok := mcpserver.ToolInstall[t.name]; ok {
 				what += ": " + inst.Lost
 			}
 			d.add(level, "tool", t.name+": "+what, toolFix(t.name, err))
@@ -323,7 +324,7 @@ func (d *doctor) install(name string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("go install %s: %w", mod, err)
 	}
-	p, err := harness.FindCommand(name)
+	p, err := mcpserver.FindCommand(name)
 	if err != nil && dir == "" {
 		return "", fmt.Errorf("installed into go's bin directory (go env GOBIN, else $(go env GOPATH)/bin), which is not on PATH: put it on PATH")
 	}
@@ -337,7 +338,7 @@ var (
 
 // toolFix is the install step for a tool that is not there.
 func toolFix(name string, err error) string {
-	inst, ok := harness.ToolInstall[name]
+	inst, ok := mcpserver.ToolInstall[name]
 	if a, _, pinned := pinnedTool(name); pinned && errors.Is(err, errNotFixed) {
 		return "dun doctor --fix (downloads " + name + " " + a.Version + " from its release; the sha256 is pinned in this build)"
 	}

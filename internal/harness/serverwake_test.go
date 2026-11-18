@@ -5,11 +5,12 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 func wakeHarness(wake bool) *Harness {
 	return &Harness{store: &sessionStore{}, wake: make(chan struct{}, 4),
-		specs: []Server{{ID: "para", Command: "para", Wake: wake}}}
+		specs: []mcpserver.Server{{ID: "para", Command: "para", Wake: wake}}}
 }
 
 func woke(h *Harness) bool {
@@ -71,11 +72,5 @@ func TestServerWake_Limits(t *testing.T) {
 	}
 	if ok, _ := w.allow(now.Add(time.Hour)); !ok {
 		t.Error("a new hour did not reset the count")
-	}
-}
-
-func TestServerWake_SpecMerges(t *testing.T) {
-	if !mergeSpec(ServerSpec{ID: "a", Wake: true}, ServerSpec{ID: "a", Command: "x"}).Wake {
-		t.Error("omitted wake should inherit")
 	}
 }

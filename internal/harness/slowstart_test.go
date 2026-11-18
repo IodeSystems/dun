@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // A server that takes its time to answer (poly-lsp indexing a big repo took
@@ -24,9 +26,9 @@ func TestStart_SlowServerJoinsAfterReady(t *testing.T) {
 	t0 := time.Now()
 	h, err := Start(context.Background(), Config{
 		Workspace: ws, Client: &scriptRunner{}, SessionFile: filepath.Join(ws, "s.jsonl"),
-		Servers: []Server{{ID: ServerCode, Command: lsp, Args: []string{"mcp", "--root", ws}, Timeout: 20, Autostart: true}},
+		Servers: []mcpserver.Server{{ID: mcpserver.ServerCode, Command: lsp, Args: []string{"mcp", "--root", ws}, Timeout: 20, Autostart: true}},
 		OnServerStarted: func(id string, err error) {
-			if id == ServerCode {
+			if id == mcpserver.ServerCode {
 				reported <- err
 			}
 		},
@@ -43,11 +45,11 @@ func TestStart_SlowServerJoinsAfterReady(t *testing.T) {
 	}
 	state := func() ServerState {
 		for _, st := range h.Servers() {
-			if st.ID == ServerCode {
+			if st.ID == mcpserver.ServerCode {
 				return st
 			}
 		}
-		t.Fatalf("no %s in Servers()", ServerCode)
+		t.Fatalf("no %s in Servers()", mcpserver.ServerCode)
 		return ServerState{}
 	}
 	if st := state(); !st.Starting || st.Err != "" {
@@ -57,7 +59,7 @@ func TestStart_SlowServerJoinsAfterReady(t *testing.T) {
 		t.Fatal("the slow server's tools are in before it answered")
 	}
 	// Asked to start while it starts: not a second process.
-	if err := h.StartServer(context.Background(), ServerCode); err != nil {
+	if err := h.StartServer(context.Background(), mcpserver.ServerCode); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.Ask(context.Background(), "hello"); err != nil {
@@ -101,7 +103,7 @@ func TestWaitServers_WaitsForTheStartInFlight(t *testing.T) {
 	t.Cleanup(func() { serverStartGrace = old })
 	h, err := Start(context.Background(), Config{
 		Workspace: ws, Client: &scriptRunner{},
-		Servers: []Server{{ID: ServerCode, Command: lsp, Args: []string{"mcp", "--root", ws}, Timeout: 20, Autostart: true}},
+		Servers: []mcpserver.Server{{ID: mcpserver.ServerCode, Command: lsp, Args: []string{"mcp", "--root", ws}, Timeout: 20, Autostart: true}},
 	})
 	if err != nil {
 		t.Fatal(err)

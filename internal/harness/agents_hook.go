@@ -12,7 +12,7 @@ package harness
 // Session memory: the hook records which AGENTS.md files have been read in
 // this session (by path+mtime) in a state file dun names in $DUN_AGENTS_STATE:
 // the workspace's agents_read in $DUN_HOME/projects/<id>/ (or the workspace's
-// overlay there, for a linked worktree — see project.go). It used to be
+// overlay there, for a linked worktree — see internal/project). It used to be
 // $root/.dun/agents_read, a file in the repo. Once an AGENTS.md has been read,
 // subsequent accesses to files under it proceed without the guard. The state
 // file is per-workspace (not global), so a session in one worktree does not
@@ -34,6 +34,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/iodesystems/dun/internal/project"
 )
 
 // agentsHookScript is the policy executable. It must be bash-compatible and
@@ -164,7 +166,7 @@ func agentsHookEnv(envVar, workspace string) []string {
 // or "" when its project cannot be registered (the hook then falls back to a
 // temp file — the guard still works, its memory just is not per-workspace).
 func agentsStateFile(workspace string) string {
-	p, err := EnsureProject(workspace)
+	p, err := project.Ensure(workspace)
 	if err != nil {
 		return ""
 	}

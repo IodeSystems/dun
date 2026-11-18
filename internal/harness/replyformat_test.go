@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/iodesystems/bubbleteandmd/prompt"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // The answer-formatting section is in a root, interactive session by default;
@@ -26,7 +27,7 @@ func TestFormatPrompt_Modes(t *testing.T) {
 		"switch off":      {Config{NoFormatPrompt: true}, false},
 		"non-interactive": {Config{NonInteractive: true}, false},
 	} {
-		c.cfg.Workspace, c.cfg.Servers = ws, []Server{}
+		c.cfg.Workspace, c.cfg.Servers = ws, []mcpserver.Server{}
 		h, err := Start(context.Background(), c.cfg)
 		if err != nil {
 			t.Fatal(err)

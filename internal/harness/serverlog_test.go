@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 func TestServerLog_CommandLineHidesCredentials(t *testing.T) {
@@ -35,7 +37,7 @@ func TestServerLog_AStartSaysEachStep(t *testing.T) {
 	h, err := Start(context.Background(), Config{
 		Workspace: ws, Client: &scriptRunner{},
 		OnServerActivity: func(string) { heard.Add(1) },
-		Servers:          []Server{{ID: ServerCode, Command: lsp, Args: []string{"mcp", "--root", ws, "--api-key", "sk-1"}, Timeout: 20, Autostart: true}},
+		Servers:          []mcpserver.Server{{ID: mcpserver.ServerCode, Command: lsp, Args: []string{"mcp", "--root", ws, "--api-key", "sk-1"}, Timeout: 20, Autostart: true}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +46,7 @@ func TestServerLog_AStartSaysEachStep(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	h.WaitServers(ctx)
-	st, _ := serverState(h, ServerCode)
+	st, _ := serverState(h, mcpserver.ServerCode)
 	log := logText(st)
 	for _, want := range []string{"running " + lsp + " mcp --root " + ws + " --api-key …", "handshake done", "ready · "} {
 		if !strings.Contains(log, want) {
@@ -64,7 +66,7 @@ func TestServerLog_AStartSaysEachStep(t *testing.T) {
 func TestServerLog_AFailedStartSaysWhy(t *testing.T) {
 	h, err := Start(context.Background(), Config{
 		Workspace: t.TempDir(),
-		Servers: []Server{{ID: ServerDocs, Command: "sh", Timeout: 5, Autostart: true,
+		Servers: []mcpserver.Server{{ID: mcpserver.ServerDocs, Command: "sh", Timeout: 5, Autostart: true,
 			Args: []string{"-c", "echo 'no project name' >&2; exit 1"}}},
 	})
 	if err != nil {
@@ -74,7 +76,7 @@ func TestServerLog_AFailedStartSaysWhy(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	h.WaitServers(ctx)
-	st, _ := serverState(h, ServerDocs)
+	st, _ := serverState(h, mcpserver.ServerDocs)
 	if log := logText(st); !strings.Contains(log, "(timeout 5s)") || !strings.Contains(log, "did not start after") ||
 		!strings.Contains(log, "no project name") {
 		t.Errorf("log:\n%s", log)
@@ -86,7 +88,7 @@ func TestServerLog_AFailedStartSaysWhy(t *testing.T) {
 func TestServerLog_StderrAsItComes(t *testing.T) {
 	h, err := Start(context.Background(), Config{
 		Workspace: t.TempDir(),
-		Servers: []Server{{ID: ServerDocs, Command: "sh", Timeout: 3, Autostart: true,
+		Servers: []mcpserver.Server{{ID: mcpserver.ServerDocs, Command: "sh", Timeout: 3, Autostart: true,
 			Args: []string{"-c", "echo 'warming up' >&2; sleep 2"}}},
 	})
 	if err != nil {
@@ -94,14 +96,14 @@ func TestServerLog_StderrAsItComes(t *testing.T) {
 	}
 	defer h.Close()
 	for deadline := time.Now().Add(1500 * time.Millisecond); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
-		st, _ := serverState(h, ServerDocs)
+		st, _ := serverState(h, mcpserver.ServerDocs)
 		for _, l := range st.Log {
 			if l.Stderr && l.Text == "warming up" {
 				return
 			}
 		}
 	}
-	st, _ := serverState(h, ServerDocs)
+	st, _ := serverState(h, mcpserver.ServerDocs)
 	t.Errorf("no stderr line while it starts:\n%s", logText(st))
 }
 
@@ -115,7 +117,7 @@ func TestServerLog_ASlowStartSaysItIsStillAtIt(t *testing.T) {
 	lsp, _ := fakeBin(t, "poly-lsp-mcp", "poly-lsp", fakeSlowEnv+"=1200")
 	h, err := Start(context.Background(), Config{
 		Workspace: ws, Client: &scriptRunner{},
-		Servers: []Server{{ID: ServerCode, Command: lsp, Args: []string{"mcp", "--root", ws}, Timeout: 20, Autostart: true}},
+		Servers: []mcpserver.Server{{ID: mcpserver.ServerCode, Command: lsp, Args: []string{"mcp", "--root", ws}, Timeout: 20, Autostart: true}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +126,7 @@ func TestServerLog_ASlowStartSaysItIsStillAtIt(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	h.WaitServers(ctx)
-	st, _ := serverState(h, ServerCode)
+	st, _ := serverState(h, mcpserver.ServerCode)
 	if log := logText(st); !strings.Contains(log, "still waiting for") || !strings.Contains(log, "of the 20s timeout") {
 		t.Errorf("log:\n%s", log)
 	}
@@ -144,7 +146,7 @@ func TestServerLog_OffWhileStartingStopsTheStart(t *testing.T) {
 	slow, _ := fakeBin(t, "slow-mcp", "poly-lsp", fakeSlowEnv+"=20000")
 	added := make(chan error, 1)
 	go func() {
-		_, err := h.AddServer(context.Background(), ServerSpec{ID: "slow", Command: slow, Args: []string{"mcp", "--root", ws}, Timeout: 30})
+		_, err := h.AddServer(context.Background(), mcpserver.Spec{ID: "slow", Command: slow, Args: []string{"mcp", "--root", ws}, Timeout: 30})
 		added <- err
 	}()
 	for deadline := time.Now().Add(5 * time.Second); !h.isStarting("slow"); time.Sleep(20 * time.Millisecond) {
@@ -154,7 +156,7 @@ func TestServerLog_OffWhileStartingStopsTheStart(t *testing.T) {
 	}
 	off := false
 	t0 := time.Now()
-	if _, err := h.SetServerOn(context.Background(), "slow", ScopeGlobal, &off); err != nil {
+	if _, err := h.SetServerOn(context.Background(), "slow", mcpserver.ScopeGlobal, &off); err != nil {
 		t.Fatalf("off: %v", err)
 	}
 	if d := time.Since(t0); d > 3*time.Second {

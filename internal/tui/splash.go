@@ -15,6 +15,7 @@ import (
 	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
@@ -419,7 +420,7 @@ func (m tuiModel) builtinToolCount() int {
 		n--
 	}
 	for _, st := range m.servers {
-		if st.Running && st.Via != harness.ViaShell {
+		if st.Running && st.Via != mcpserver.ViaShell {
 			n -= st.Tools
 		}
 	}
@@ -882,9 +883,9 @@ func (m tuiModel) statusDetail(w int) string {
 	for _, st := range sortedServers(m.servers) {
 		state := StDim.Render("off")
 		switch {
-		case st.Via == harness.ViaShell && st.Hosted: // scripted: its tools are in the shell's eval (USER 2026-10-27: was "off")
+		case st.Via == mcpserver.ViaShell && st.Hosted: // scripted: its tools are in the shell's eval (USER 2026-10-27: was "off")
 			state = stOK.Render("scripted in the shell") + StDim.Render(" · "+textfmt.Plural(st.Tools, "tool"))
-		case st.Via == harness.ViaShell && st.Auto:
+		case st.Via == mcpserver.ViaShell && st.Auto:
 			state = StDim.Render("scripted · not hosted (the shell is down, or could not start it)")
 		case st.Starting:
 			state = StDim.Render("starting" + m.startedFor(st.ID))

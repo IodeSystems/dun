@@ -14,6 +14,7 @@ import (
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // Attached indexes (plan item 20): index a directory once, and let many
@@ -58,21 +59,6 @@ func qualifyAttach(own, index string) (string, error) {
 	return index, nil
 }
 
-// unionAttach is the scopes' attachments, each once, in scope order.
-func unionAttach(lists ...[]string) []string {
-	var out []string
-	seen := map[string]bool{}
-	for _, l := range lists {
-		for _, a := range l {
-			if a != "" && !seen[a] {
-				seen[a] = true
-				out = append(out, a)
-			}
-		}
-	}
-	return out
-}
-
 // argValue is the value of --name (or --name=v, -name) in args, or "".
 func argValue(args []string, name string) string {
 	for i, a := range args {
@@ -92,11 +78,11 @@ func argValue(args []string, name string) string {
 
 // ownProject is the project namespace a server's search reads as its own:
 // its --project, else the workspace's corpus name ({{project}}).
-func (h *Harness) ownProject(s Server) string {
+func (h *Harness) ownProject(s mcpserver.Server) string {
 	if p := strings.TrimSpace(argValue(s.Args, "project")); p != "" {
 		return strings.ToLower(p)
 	}
-	return raglitProject(h.cfg.Workspace)
+	return mcpserver.RaglitProject(h.cfg.Workspace)
 }
 
 // AttachName is index as server id stores an attachment: "<own>:index" for a
@@ -110,34 +96,6 @@ func (h *Harness) AttachName(id, index string) string {
 		return name
 	}
 	return index
-}
-
-// effectiveIndexes is the indexes switched on (on) or off (!on): for each
-// index a scope names, the nearest scope decides — session, then project,
-// then global.
-func effectiveIndexes(sc ServerScopes, on bool) []string {
-	layers := []struct{ attach, detach []string }{
-		{sc.AttachSession, sc.DetachSession}, {sc.AttachProject, sc.DetachProject}, {sc.AttachGlobal, sc.DetachGlobal},
-	}
-	var out []string
-	for _, name := range unionAttach(sc.AttachGlobal, sc.AttachProject, sc.AttachSession,
-		sc.DetachGlobal, sc.DetachProject, sc.DetachSession) {
-		for _, l := range layers {
-			if slices.Contains(l.attach, name) {
-				if on {
-					out = append(out, name)
-				}
-				break
-			}
-			if slices.Contains(l.detach, name) {
-				if !on {
-					out = append(out, name)
-				}
-				break
-			}
-		}
-	}
-	return out
 }
 
 // attachSelector is the `index` argument a search with no index of its own
@@ -194,7 +152,7 @@ func (h *Harness) Attachments(id string) ([]Attachment, error) {
 		for _, sc := range []struct {
 			name string
 			list []string
-		}{{ScopeSession, s.Scopes.AttachSession}, {ScopeProject, s.Scopes.AttachProject}, {ScopeGlobal, s.Scopes.AttachGlobal}} {
+		}{{mcpserver.ScopeSession, s.Scopes.AttachSession}, {mcpserver.ScopeProject, s.Scopes.AttachProject}, {mcpserver.ScopeGlobal, s.Scopes.AttachGlobal}} {
 			for _, x := range sc.list {
 				if x == a {
 					at.Scopes = append(at.Scopes, sc.name)
@@ -232,11 +190,11 @@ func (h *Harness) SetIndex(ctx context.Context, id, index, scope string, on *boo
 	}
 	var att, det []string
 	switch scope {
-	case ScopeGlobal:
+	case mcpserver.ScopeGlobal:
 		att, det = s.Scopes.AttachGlobal, s.Scopes.DetachGlobal
-	case ScopeProject:
+	case mcpserver.ScopeProject:
 		att, det = s.Scopes.AttachProject, s.Scopes.DetachProject
-	case ScopeSession:
+	case mcpserver.ScopeSession:
 		att, det = s.Scopes.AttachSession, s.Scopes.DetachSession
 	default:
 		return "", "", false, fmt.Errorf("scope %q: want global, project or session", scope)
@@ -262,9 +220,9 @@ func (h *Harness) SetIndex(ctx context.Context, id, index, scope string, on *boo
 	}
 	set := func(a, d *[]string) { *a, *d = nextAtt, nextDet }
 	path, err := h.writeScope(id, scope,
-		func(sp *ServerSpec) { set(&sp.Attach, &sp.Detach) },
-		func(sp *ServerSpec) { set(&sp.Attach, &sp.Detach) },
-		func(ss *SessionServer) { set(&ss.Attach, &ss.Detach) })
+		func(sp *mcpserver.Spec) { set(&sp.Attach, &sp.Detach) },
+		func(sp *mcpserver.Spec) { set(&sp.Attach, &sp.Detach) },
+		func(ss *mcpserver.SessionServer) { set(&ss.Attach, &ss.Detach) })
 	if err != nil {
 		return name, "", false, err
 	}
@@ -290,7 +248,7 @@ func (h *Harness) WatchDir(ctx context.Context, id, dir, index string) (string, 
 		return "", "", fmt.Errorf("%s is not a directory", dir)
 	}
 	if index == "" {
-		index = normalizeProject(filepath.Base(dir))
+		index = mcpserver.NormalizeProject(filepath.Base(dir))
 	}
 	// raglit's spelling of the name (NormalizeIndexName), so the name
 	// reported is the one to attach.
@@ -309,7 +267,7 @@ func (h *Harness) WatchDir(ctx context.Context, id, dir, index string) (string, 
 
 // attachSelectors are the selectors of the search extensions whose search
 // tool takes an `index`, by extension id.
-func (h *Harness) attachSelectors(exts []Extension, tools []mcpmgr.MCPTool) map[string]string {
+func (h *Harness) attachSelectors(exts []mcpserver.Extension, tools []mcpmgr.MCPTool) map[string]string {
 	out := map[string]string{}
 	h.srvMu.Lock()
 	defer h.srvMu.Unlock()
@@ -329,7 +287,7 @@ func (h *Harness) attachSelectors(exts []Extension, tools []mcpmgr.MCPTool) map[
 
 // attachedTools are the model's names of the search and get tools that take
 // the selector, mapped to it.
-func attachedTools(exts []Extension, tools []mcpmgr.MCPTool, sel map[string]string) map[string]string {
+func attachedTools(exts []mcpserver.Extension, tools []mcpmgr.MCPTool, sel map[string]string) map[string]string {
 	out := map[string]string{}
 	for _, e := range exts {
 		s := sel[e.ID]
@@ -377,7 +335,7 @@ func withAttached(next agent.ToolDispatcher, byTool map[string]string) agent.Too
 
 // describeAttached appends the attached indexes to each search tool's
 // description, so the model knows what an unscoped search reads.
-func describeAttached(defs []llm.ToolDef, exts []Extension, specs []Server, sel map[string]string) {
+func describeAttached(defs []llm.ToolDef, exts []mcpserver.Extension, specs []mcpserver.Server, sel map[string]string) {
 	for _, e := range exts {
 		if sel[e.ID] == "" {
 			continue
@@ -413,7 +371,7 @@ func describeAttached(defs []llm.ToolDef, exts []Extension, specs []Server, sel 
 var ownIdxCache, ownIdxListing sync.Map // project → []string ("project:index"); project → listing now
 
 // ownIndexes is own's indexes, qualified, or nil until they are known.
-func (h *Harness) ownIndexes(e Extension, s Server, own string) []string {
+func (h *Harness) ownIndexes(e mcpserver.Extension, s mcpserver.Server, own string) []string {
 	if v, ok := ownIdxCache.Load(own); ok {
 		return v.([]string)
 	}

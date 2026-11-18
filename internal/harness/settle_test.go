@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/agent"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 const testSettle = 60 * time.Millisecond
@@ -21,7 +22,7 @@ func startSettle(t *testing.T, r *scriptRunner, sessionFile string, mut func(*Co
 	if sessionFile == "" {
 		sessionFile = filepath.Join(dir, "s.jsonl")
 	}
-	cfg := Config{Workspace: dir, Servers: []Server{}, Client: r, SessionFile: sessionFile, SettleDelay: testSettle}
+	cfg := Config{Workspace: dir, Servers: []mcpserver.Server{}, Client: r, SessionFile: sessionFile, SettleDelay: testSettle}
 	if mut != nil {
 		mut(&cfg)
 	}

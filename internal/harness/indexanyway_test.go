@@ -7,6 +7,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/dun/internal/project"
 )
 
 // asker is an AskFunc that records its questions and answers with ans.
@@ -38,7 +41,7 @@ func startNotProject(t *testing.T, ws string, ask AskFunc, env ...string) (*Harn
 	msgs := make(chan string, 8)
 	h, err := Start(context.Background(), Config{
 		Workspace: ws, Client: &scriptRunner{}, SessionFile: filepath.Join(ws, "s.jsonl"), Ask: ask,
-		Servers:       []Server{{ID: ServerCode, Command: lsp, Args: []string{"mcp", "--root", ws}, Timeout: 20, Autostart: true}},
+		Servers:       []mcpserver.Server{{ID: mcpserver.ServerCode, Command: lsp, Args: []string{"mcp", "--root", ws}, Timeout: 20, Autostart: true}},
 		OnServerIndex: func(id, msg string) { msgs <- msg },
 	})
 	if err != nil {
@@ -50,7 +53,7 @@ func startNotProject(t *testing.T, ws string, ask AskFunc, env ...string) (*Harn
 
 // savedLocal is the project's saved server config, as text.
 func savedLocal(ws string) string {
-	b, _ := os.ReadFile(filepath.Join(ResolveProject(ws).WriteDir(), LocalServersFile))
+	b, _ := os.ReadFile(filepath.Join(project.Resolve(ws).WriteDir(), project.LocalServersFile))
 	return string(b)
 }
 
@@ -83,16 +86,16 @@ func TestIndexAnyway_PersonOnly(t *testing.T) {
 		t.Fatalf("%+v", st)
 	}
 	// The same failure again (a manual restart): nothing more is said.
-	h.noteIndex(ServerCode, indexNote{State: IndexFailed, Reason: reasonNotProject, Error: "not a project: x", Repos: []string{"a"}})
+	h.noteIndex(mcpserver.ServerCode, indexNote{State: IndexFailed, Reason: reasonNotProject, Error: "not a project: x", Repos: []string{"a"}})
 	if m := nextMsg(t, msgs); m != "" {
 		t.Errorf("said again: %q", m)
 	}
-	if len(argLines(log)) != 1 || h.IndexAnyway(ServerCode) || strings.Contains(savedLocal(ws), "index_anyway") {
+	if len(argLines(log)) != 1 || h.IndexAnyway(mcpserver.ServerCode) || strings.Contains(savedLocal(ws), "index_anyway") {
 		t.Fatalf("changed: spawns %q, saved %s", argLines(log), savedLocal(ws))
 	}
 
 	// The person's /lsp index-anyway on: saved, restarted with the flag.
-	if _, changed, err := h.SetIndexAnyway(context.Background(), ServerCode, true); err != nil || !changed {
+	if _, changed, err := h.SetIndexAnyway(context.Background(), mcpserver.ServerCode, true); err != nil || !changed {
 		t.Fatalf("on: %v %v", changed, err)
 	}
 	waitIndex(t, h, IndexReady)
@@ -113,8 +116,8 @@ func TestIndexAnyway_PersonOnly(t *testing.T) {
 	if args := argLines(log2); len(args) != 1 || !strings.HasSuffix(args[0], "--index-anyway") {
 		t.Fatalf("later spawn: %q", args)
 	}
-	_, changed, err := h2.SetIndexAnyway(context.Background(), ServerCode, false)
-	if err != nil || !changed || h2.IndexAnyway(ServerCode) {
+	_, changed, err := h2.SetIndexAnyway(context.Background(), mcpserver.ServerCode, false)
+	if err != nil || !changed || h2.IndexAnyway(mcpserver.ServerCode) {
 		t.Fatalf("off: %v %v", changed, err)
 	}
 	if args := argLines(log2); len(args) != 2 || strings.Contains(args[1], "--index-anyway") {
@@ -134,7 +137,7 @@ func TestIndexAnyway_HeadlessNeverSets(t *testing.T) {
 	msgs := make(chan string, 8)
 	h, err := Start(context.Background(), Config{
 		Workspace: ws, Client: &scriptRunner{}, SessionFile: filepath.Join(ws, "s.jsonl"), NonInteractive: true,
-		Servers:       []Server{{ID: ServerCode, Command: lsp, Args: []string{"mcp", "--root", ws}, Timeout: 20, Autostart: true}},
+		Servers:       []mcpserver.Server{{ID: mcpserver.ServerCode, Command: lsp, Args: []string{"mcp", "--root", ws}, Timeout: 20, Autostart: true}},
 		OnServerIndex: func(id, msg string) { msgs <- msg },
 	})
 	if err != nil {
@@ -145,7 +148,7 @@ func TestIndexAnyway_HeadlessNeverSets(t *testing.T) {
 		t.Fatalf("%q", msg)
 	}
 	waitIndex(t, h, IndexFailed)
-	if h.IndexAnyway(ServerCode) || strings.Contains(savedLocal(ws), "index_anyway") {
+	if h.IndexAnyway(mcpserver.ServerCode) || strings.Contains(savedLocal(ws), "index_anyway") {
 		t.Fatalf("set: %s", savedLocal(ws))
 	}
 	for _, l := range argLines(log) {
@@ -167,15 +170,15 @@ func TestIndexAnyway_ProbeGates(t *testing.T) {
 		strings.Contains(msg, "index-anyway") {
 		t.Fatalf("asked %d: %q", a.asked(), msg)
 	}
-	if _, _, err := h.SetIndexAnyway(context.Background(), ServerCode, true); err == nil || !strings.Contains(err.Error(), "takes no --index-anyway") {
+	if _, _, err := h.SetIndexAnyway(context.Background(), mcpserver.ServerCode, true); err == nil || !strings.Contains(err.Error(), "takes no --index-anyway") {
 		t.Fatalf("on for an old build: %v", err)
 	}
-	if h.IndexAnyway(ServerCode) || len(argLines(log)) != 1 {
+	if h.IndexAnyway(mcpserver.ServerCode) || len(argLines(log)) != 1 {
 		t.Fatalf("changed: %q", argLines(log))
 	}
 
 	// A saved yes does not reach a binary that would refuse the flag.
-	if _, err := updateLocalServer(ws, ServerCode, func(s *ServerSpec) { s.IndexAnyway = true }); err != nil {
+	if _, err := mcpserver.UpdateLocalServer(ws, mcpserver.ServerCode, func(s *mcpserver.Spec) { s.IndexAnyway = true }); err != nil {
 		t.Fatal(err)
 	}
 	h2, log2, msgs2 := startNotProject(t, ws, a.ask)

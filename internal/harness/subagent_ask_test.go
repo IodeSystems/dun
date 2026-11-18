@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // A child asks its parent by ENDING its turn with the question (USER
@@ -27,7 +28,7 @@ func startParentOf(t *testing.T, child *scriptRunner) *Harness {
 	t.Setenv("DUN_HOME", t.TempDir())
 	dir := t.TempDir()
 	h, err := Start(context.Background(), Config{
-		Workspace: dir, Servers: []Server{}, Client: &scriptRunner{},
+		Workspace: dir, Servers: []mcpserver.Server{}, Client: &scriptRunner{},
 		ClientFor:   func(string, string) (ChildClient, error) { return ChildClient{Runner: child}, nil },
 		SessionFile: filepath.Join(dir, "s.jsonl"),
 	})

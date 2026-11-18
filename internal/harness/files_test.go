@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/dun/internal/project"
 )
 
 func startFiles(t *testing.T, cfg Config) *Harness {
@@ -50,7 +52,7 @@ func TestFileTools_Config(t *testing.T) {
 	yes, no := true, false
 	cases := []struct {
 		name     string
-		files    *FilesConfig
+		files    *mcpserver.FilesConfig
 		want     []string
 		inSystem []string
 		notSys   []string
@@ -60,21 +62,21 @@ func TestFileTools_Config(t *testing.T) {
 			[]string{"file_edit", "file_read", "file_write"},
 			[]string{"Edit files with file_edit: it says when the text did not match; sed -i does not."},
 			[]string{"file_grep", "file_list", "not cat", "also open", "absolute path under /tmp"}},
-		{"off", &FilesConfig{Tools: []string{}}, nil, nil, []string{"file_read"}},
-		{"read-only", &FilesConfig{ReadOnly: &yes},
+		{"off", &mcpserver.FilesConfig{Tools: []string{}}, nil, nil, []string{"file_read"}},
+		{"read-only", &mcpserver.FilesConfig{ReadOnly: &yes},
 			[]string{"file_read"},
 			nil, []string{"Edit files with", "file_edit"}},
-		{"read-only false is the default", &FilesConfig{ReadOnly: &no},
+		{"read-only false is the default", &mcpserver.FilesConfig{ReadOnly: &no},
 			[]string{"file_edit", "file_read", "file_write"}, nil, nil},
-		{"a config that names grep and list gets them", &FilesConfig{Tools: []string{"read", "edit", "write", "grep", "list"}},
+		{"a config that names grep and list gets them", &mcpserver.FilesConfig{Tools: []string{"read", "edit", "write", "grep", "list"}},
 			[]string{"file_edit", "file_grep", "file_list", "file_read", "file_write"},
 			[]string{"Edit files with file_edit"},
 			[]string{"file_read with grep", "not grep/rg/find"}},
-		{"read-only with grep named", &FilesConfig{Tools: []string{"read", "grep", "edit"}, ReadOnly: &yes},
+		{"read-only with grep named", &mcpserver.FilesConfig{Tools: []string{"read", "grep", "edit"}, ReadOnly: &yes},
 			[]string{"file_grep", "file_read"}, nil, []string{"file_edit"}},
-		{"delete and move opt in", &FilesConfig{Tools: []string{"read", "delete", "move"}},
+		{"delete and move opt in", &mcpserver.FilesConfig{Tools: []string{"read", "delete", "move"}},
 			[]string{"file_delete", "file_move", "file_read"}, nil, []string{"file_grep"}},
-		{"unknown tool turns them off, not the session", &FilesConfig{Tools: []string{"chmod"}}, nil, nil, []string{"file_read"}},
+		{"unknown tool turns them off, not the session", &mcpserver.FilesConfig{Tools: []string{"chmod"}}, nil, nil, []string{"file_read"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -186,12 +188,12 @@ func TestLoadFiles_Layers(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if LoadFiles(dir) != nil {
+	if mcpserver.LoadFiles(dir) != nil {
 		t.Fatal("no section anywhere must be nil (the defaults)")
 	}
-	write(ProjectServersFile, `{"files":{"tools":["read","grep"],"read_only":true,"read_max":1000,"ignore":["gen/"]}}`)
-	write(LocalServersFile, `{"files":{"read_only":false,"ignore":["tmp/"]}}`)
-	c := LoadFiles(dir)
+	write(project.ProjectServersFile, `{"files":{"tools":["read","grep"],"read_only":true,"read_max":1000,"ignore":["gen/"]}}`)
+	write(project.LocalServersFile, `{"files":{"read_only":false,"ignore":["tmp/"]}}`)
+	c := mcpserver.LoadFiles(dir)
 	if c == nil {
 		t.Fatal("nil")
 	}
@@ -208,16 +210,16 @@ func TestLoadFiles_Layers(t *testing.T) {
 		t.Errorf("ignore = %v, want both layers", c.Ignore)
 	}
 
-	write(LocalServersFile, `{"files":{"tools":[]}}`)
-	c = LoadFiles(dir)
+	write(project.LocalServersFile, `{"files":{"tools":[]}}`)
+	c = mcpserver.LoadFiles(dir)
 	if c.Tools == nil || len(c.Tools) != 0 {
 		t.Fatalf("tools: [] must mean off, got %#v", c.Tools)
 	}
-	if _, ok := c.toolsetConfig(dir); ok {
+	if _, ok := filesToolset(c, dir); ok {
 		t.Fatal("tools: [] did not turn the file tools off")
 	}
-	write(LocalServersFile, `{"files":{"tools":null}}`)
-	if c = LoadFiles(dir); !reflect.DeepEqual(c.Tools, []string{"read", "grep"}) {
+	write(project.LocalServersFile, `{"files":{"tools":null}}`)
+	if c = mcpserver.LoadFiles(dir); !reflect.DeepEqual(c.Tools, []string{"read", "grep"}) {
 		t.Fatalf("tools: null must inherit, got %v", c.Tools)
 	}
 }

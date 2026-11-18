@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/iodesystems/dun/internal/fsutil"
+	"github.com/iodesystems/dun/internal/project"
 )
 
 // /worklog: a per-session tree of tasks the person opens and closes, and the
@@ -674,7 +675,7 @@ func (h *Harness) WriteWorklog(ctx context.Context, arg string) (string, error) 
 	} else {
 		dir = filepath.Join(os.TempDir(), "dun-worklog")
 	}
-	path := filepath.Join(dir, fmt.Sprintf("%d-%s.md", t.N, slug(t.Title)))
+	path := filepath.Join(dir, fmt.Sprintf("%d-%s.md", t.N, project.Slug(t.Title)))
 	if err := fsutil.WriteAtomic(path, []byte(text), 0o600); err != nil {
 		return "", err
 	}

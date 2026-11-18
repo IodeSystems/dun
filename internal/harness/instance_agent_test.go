@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // countStarts is how many times the fake server was started.
@@ -29,7 +31,7 @@ func TestInstanceAgent_ChildHasItsOwn(t *testing.T) {
 	ts, inits := countingMCP(t)
 	ctx := context.Background()
 	h, err := Start(ctx, Config{Workspace: t.TempDir(), Client: &scriptRunner{},
-		Servers: []Server{{ID: "ctr", URL: ts.URL, Autostart: true, Instance: InstanceAgent}}})
+		Servers: []mcpserver.Server{{ID: "ctr", URL: ts.URL, Autostart: true, Instance: mcpserver.InstanceAgent}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +73,7 @@ func TestInstanceAgent_ChildThroughTheGateway(t *testing.T) {
 	g := newGateway(t)
 	ctx := context.Background()
 	h, err := Start(ctx, Config{Workspace: t.TempDir(), Client: &scriptRunner{},
-		Servers: []Server{{ID: "ctr", URL: ts.URL, Autostart: true, Instance: InstanceAgent}},
+		Servers: []mcpserver.Server{{ID: "ctr", URL: ts.URL, Autostart: true, Instance: mcpserver.InstanceAgent}},
 		Gateway: gwLink{g: g, c: GatewayClient{Session: "s1", Engine: "e1"}}})
 	if err != nil {
 		t.Fatal(err)
@@ -90,7 +92,7 @@ func TestInstanceAgent_ChildThroughTheGateway(t *testing.T) {
 	if g.Starts() != 1 || grant.Key == "" || g.Clients(grant.Key) != 1 {
 		t.Fatalf("the child's: %d starts, grant %+v", g.Starts(), grant)
 	}
-	if want := (ShareRequest{Spec: ShareSpec{ID: "ctr", URL: ts.URL, Timeout: 90}, Instance: InstanceAgent, Agent: "1"}).Key("s1"); grant.Key != want {
+	if want := (ShareRequest{Spec: ShareSpec{ID: "ctr", URL: ts.URL, Timeout: 90}, Instance: mcpserver.InstanceAgent, Agent: "1"}).Key("s1"); grant.Key != want {
 		t.Errorf("key %s, want the session's and agent 1's %s", grant.Key, want)
 	}
 	sa.quit()
@@ -116,7 +118,7 @@ func TestIsolatedChild_OwnInstanceForItsTree(t *testing.T) {
 	g := newGateway(t)
 	ctx := context.Background()
 	h, err := Start(ctx, Config{Workspace: repo, Client: &scriptRunner{}, Exec: &HostShell{Dir: repo},
-		Servers: []Server{
+		Servers: []mcpserver.Server{
 			{ID: "tree", Command: cmd, Args: []string{"mcp", "--root", "{{workspace}}"}, Autostart: true},
 			{ID: "ctr", URL: ts.URL, Autostart: true},
 		},
@@ -155,15 +157,5 @@ func TestIsolatedChild_OwnInstanceForItsTree(t *testing.T) {
 	}
 	if child.shared["tree"].Key == h.shared["tree"].Key {
 		t.Error("the child's tree server shares the parent's key")
-	}
-}
-
-// poly-lsp is keyed on the workspace, raglit is not.
-func TestWorkspaceKeyed_Builtins(t *testing.T) {
-	if !workspaceKeyed(ServerSpec{ID: ServerCode}) || workspaceKeyed(ServerSpec{ID: ServerDocs}) || workspaceKeyed(ServerSpec{ID: ServerShell}) {
-		t.Error("poly-lsp keyed, raglit and the shell not")
-	}
-	if !workspaceKeyed(ServerSpec{ID: "x", Env: []string{"ROOT={{workspace}}"}}) {
-		t.Error("an env naming the workspace")
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // manyRepos makes n git repositories (a .git directory and two files each)
@@ -197,7 +198,7 @@ func TestCodeGuard_ScopedStart(t *testing.T) {
 func TestCodeGuard_IndexAnywayLifts(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	ws := manyRepos(t, 4)
-	if _, err := updateLocalServer(ws, ServerCode, func(s *ServerSpec) { s.IndexAnyway = true }); err != nil {
+	if _, err := mcpserver.UpdateLocalServer(ws, mcpserver.ServerCode, func(s *mcpserver.Spec) { s.IndexAnyway = true }); err != nil {
 		t.Fatal(err)
 	}
 	h, log := startGuarded(t, ws, fakeAnywayEnv+"=1")

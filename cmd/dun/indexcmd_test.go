@@ -8,6 +8,7 @@ import (
 
 	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/mcptable"
 )
 
@@ -101,7 +102,7 @@ func TestIndexStatus_NotProjectAndAnyway(t *testing.T) {
 	if s := indexStatus(st, "lsp"); !strings.Contains(s, "/lsp index-anyway off undoes it") {
 		t.Errorf("no undo:\n%s", s)
 	}
-	if !enginecmd.ExcludeVerb(harness.ServerCode, "index-anyway") {
+	if !enginecmd.ExcludeVerb(mcpserver.ServerCode, "index-anyway") {
 		t.Error("index-anyway is not routed")
 	}
 }

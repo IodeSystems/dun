@@ -190,7 +190,7 @@ global/{memories,strategies}/
 ```
 
 Each index is its own raglit Home (`raglit.OpenHome`). The project slug is
-the caller's: dun's `raglitProject` (internal/harness/serverdefs.go, package `dun`), which
+the caller's: dun's `RaglitProject` (internal/mcpserver/defs.go), which
 dund cannot import, so dund only checks it (`[a-z0-9._-]`, not `global`).
 An index is made on its first ingest. At start, dund opens the indexes on
 disk, so jobs queued before a restart run. A search or job list of an index

@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // The limit: the flag, else DUN_MAX_TURNS, else 400.
@@ -73,7 +75,7 @@ func TestTurnLimit_WarnsOnceAt80Percent(t *testing.T) {
 func TestTurnLimit_InSystemPrompt(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	ws := t.TempDir()
-	h, err := Start(context.Background(), Config{Workspace: ws, Servers: []Server{}, Exec: &HostShell{Dir: ws}, TurnLimit: 150})
+	h, err := Start(context.Background(), Config{Workspace: ws, Servers: []mcpserver.Server{}, Exec: &HostShell{Dir: ws}, TurnLimit: 150})
 	if err != nil {
 		t.Fatal(err)
 	}

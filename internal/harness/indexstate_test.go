@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/dun/internal/project"
 )
 
 // startIndexed starts a session whose code server is the fake poly-lsp in
@@ -18,7 +21,7 @@ func startIndexed(t *testing.T, ws string, env ...string) (*Harness, string, cha
 	msgs := make(chan string, 8)
 	h, err := Start(context.Background(), Config{
 		Workspace: ws, Client: &scriptRunner{}, SessionFile: filepath.Join(ws, "s.jsonl"),
-		Servers:       []Server{{ID: ServerCode, Command: lsp, Args: []string{"mcp", "--root", ws}, Timeout: 20, Autostart: true}},
+		Servers:       []mcpserver.Server{{ID: mcpserver.ServerCode, Command: lsp, Args: []string{"mcp", "--root", ws}, Timeout: 20, Autostart: true}},
 		OnServerIndex: func(id, msg string) { msgs <- msg },
 	})
 	if err != nil {
@@ -41,7 +44,7 @@ func nextMsg(t *testing.T, msgs chan string) string {
 
 func codeState(h *Harness) ServerState {
 	for _, st := range h.Servers() {
-		if st.ID == ServerCode {
+		if st.ID == mcpserver.ServerCode {
 			return st
 		}
 	}
@@ -101,8 +104,8 @@ func TestIndex_BudgetExcludesAndRetries(t *testing.T) {
 	if len(args) != 2 || strings.Contains(args[0], "--exclude") || !strings.HasSuffix(args[1], "--exclude .claude/worktrees") {
 		t.Fatalf("spawns: %q", args)
 	}
-	p := ResolveProject(ws)
-	b, err := os.ReadFile(filepath.Join(p.WriteDir(), LocalServersFile))
+	p := project.Resolve(ws)
+	b, err := os.ReadFile(filepath.Join(p.WriteDir(), project.LocalServersFile))
 	if err != nil || !strings.Contains(string(b), `"exclude"`) {
 		t.Fatalf("not saved for the project: %s %v", b, err)
 	}
@@ -119,11 +122,11 @@ func TestIndex_BudgetExcludesAndRetries(t *testing.T) {
 	}
 
 	// The undo: include takes it back and restarts without it.
-	path, changed, err := h2.SetIndexExclude(context.Background(), ServerCode, ".claude/worktrees/", false)
+	path, changed, err := h2.SetIndexExclude(context.Background(), mcpserver.ServerCode, ".claude/worktrees/", false)
 	if err != nil || !changed || path == "" {
 		t.Fatalf("include: %q %v %v", path, changed, err)
 	}
-	if ex := h2.IndexExcludes(ServerCode); len(ex) != 0 {
+	if ex := h2.IndexExcludes(mcpserver.ServerCode); len(ex) != 0 {
 		t.Fatalf("still excluded: %v", ex)
 	}
 	if args := argLines(log2); len(args) != 2 || strings.Contains(args[1], "--exclude") {
@@ -158,25 +161,25 @@ func TestIndex_BudgetNeverRaised(t *testing.T) {
 	if args := argLines(log); len(args) != 1 || strings.Contains(args[0], "--index-budget") {
 		t.Fatalf("spawns: %q", args)
 	}
-	if b, err := os.ReadFile(filepath.Join(ResolveProject(ws).WriteDir(), LocalServersFile)); err == nil && strings.Contains(string(b), "index_budget") {
+	if b, err := os.ReadFile(filepath.Join(project.Resolve(ws).WriteDir(), project.LocalServersFile)); err == nil && strings.Contains(string(b), "index_budget") {
 		t.Fatalf("a budget was saved for the project: %s", b)
 	}
 
 	// The person's budget: saved, and the server restarts with it.
-	if _, _, err := h.SetIndexBudget(context.Background(), ServerCode, "soon"); err == nil {
+	if _, _, err := h.SetIndexBudget(context.Background(), mcpserver.ServerCode, "soon"); err == nil {
 		t.Error("a budget that is not one was taken")
 	}
-	if _, changed, err := h.SetIndexBudget(context.Background(), ServerCode, "48000ms"); err != nil || !changed {
+	if _, changed, err := h.SetIndexBudget(context.Background(), mcpserver.ServerCode, "48000ms"); err != nil || !changed {
 		t.Fatalf("budget 48000ms: %v %v", changed, err)
 	}
 	waitIndex(t, h, IndexReady)
 	if args := argLines(log); len(args) != 2 || !strings.HasSuffix(args[1], "--index-budget 48000ms") {
 		t.Fatalf("after /lsp budget: %q", args)
 	}
-	if _, changed, err := h.SetIndexBudget(context.Background(), ServerCode, "default"); err != nil || !changed {
+	if _, changed, err := h.SetIndexBudget(context.Background(), mcpserver.ServerCode, "default"); err != nil || !changed {
 		t.Fatalf("budget default: %v %v", changed, err)
 	}
-	if b := h.IndexBudget(ServerCode); b != "" {
+	if b := h.IndexBudget(mcpserver.ServerCode); b != "" {
 		t.Fatalf("budget still %q", b)
 	}
 }
@@ -209,7 +212,7 @@ func TestIndex_RetryFailsReports(t *testing.T) {
 func TestIndex_InterimLimit(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	ws := t.TempDir()
-	if _, err := updateLocalServer(ws, ServerCode, func(s *ServerSpec) { s.IndexBudget = "48000ms" }); err != nil {
+	if _, err := mcpserver.UpdateLocalServer(ws, mcpserver.ServerCode, func(s *mcpserver.Spec) { s.IndexBudget = "48000ms" }); err != nil {
 		t.Fatal(err)
 	}
 	h, log, msgs := startIndexed(t, ws, fakeIndexEnv+"=limit", fakeIndexOKEnv+"=.claude/worktrees")
@@ -260,13 +263,13 @@ func TestIndex_NestedCheckoutWarning(t *testing.T) {
 func TestIndex_OldBinary(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	ws := t.TempDir()
-	if _, err := updateLocalServer(ws, ServerCode, func(s *ServerSpec) { s.Exclude = []string{"vendor"} }); err != nil {
+	if _, err := mcpserver.UpdateLocalServer(ws, mcpserver.ServerCode, func(s *mcpserver.Spec) { s.Exclude = []string{"vendor"} }); err != nil {
 		t.Fatal(err)
 	}
 	lsp, log := fakeBin(t, "poly-lsp-mcp", "poly-lsp")
 	h, err := Start(context.Background(), Config{
 		Workspace: ws, Client: &scriptRunner{}, SessionFile: filepath.Join(ws, "s.jsonl"),
-		Servers: []Server{{ID: ServerCode, Command: lsp, Args: []string{"mcp", "--root", ws}, Timeout: 20, Autostart: true}},
+		Servers: []mcpserver.Server{{ID: mcpserver.ServerCode, Command: lsp, Args: []string{"mcp", "--root", ws}, Timeout: 20, Autostart: true}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -290,17 +293,17 @@ func TestIndex_OldBinary(t *testing.T) {
 // While it builds, a running server says indexing.
 func TestIndex_BuildingState(t *testing.T) {
 	h := &Harness{}
-	h.markIndexBuilding(ServerCode, true)
+	h.markIndexBuilding(mcpserver.ServerCode, true)
 	var st ServerState
 	h.srvMu.Lock()
-	h.indexOf(ServerCode, &st)
+	h.indexOf(mcpserver.ServerCode, &st)
 	h.srvMu.Unlock()
 	if st.Index != IndexBuilding {
 		t.Fatalf("%+v", st)
 	}
-	h.markIndexBuilding(ServerCode, false)
+	h.markIndexBuilding(mcpserver.ServerCode, false)
 	st = ServerState{}
-	h.indexOf(ServerCode, &st)
+	h.indexOf(mcpserver.ServerCode, &st)
 	if st.Index != "" {
 		t.Fatalf("%+v", st)
 	}

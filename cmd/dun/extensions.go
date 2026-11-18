@@ -10,6 +10,7 @@ import (
 
 	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/tui"
 	"github.com/iodesystems/dun/proto"
 )
@@ -25,7 +26,7 @@ import (
 // offers. A user's or project's that would shadow one of dun's commands, the
 // engine's or the TUI's own, keeps its server and hooks and loses the slash
 // command; refused says which.
-func engineExtensions(all []harness.Extension) (ok []harness.Extension, refused []string) {
+func engineExtensions(all []mcpserver.Extension) (ok []mcpserver.Extension, refused []string) {
 	taken := map[string]bool{}
 	for _, c := range enginecmd.OwnCommands("") {
 		taken[c.Name] = true
@@ -34,7 +35,7 @@ func engineExtensions(all []harness.Extension) (ok []harness.Extension, refused 
 		taken[c.Name] = true
 	}
 	for _, e := range all {
-		if n := e.SlashName(); n != "" && e.Source != harness.ExtBundled && taken[n] {
+		if n := e.SlashName(); n != "" && e.Source != mcpserver.ExtBundled && taken[n] {
 			refused = append(refused, fmt.Sprintf("%s: slash.name: /%s is dun's own command; loaded without a slash command", e.ID, n))
 			e.Slash = nil
 		}
@@ -96,7 +97,7 @@ func extListing(h *harness.Harness) string {
 			b.WriteString("\n    " + e.Description)
 		}
 	}
-	errs := append(h.ExtensionErrors(), harness.RegistryErrors()...)
+	errs := append(h.ExtensionErrors(), mcpserver.RegistryErrors()...)
 	if len(errs) > 0 || len(refused) > 0 {
 		b.WriteString("\nnot loaded:")
 		for _, e := range errs {
@@ -106,7 +107,7 @@ func extListing(h *harness.Harness) string {
 			b.WriteString("\n  " + r)
 		}
 	}
-	fmt.Fprintf(&b, "\nadd one: %s/<id>/%s, or .dun/extensions/<id>/ in a project (examples/extensions in dun's repo)", harness.UserExtensionsDir(), harness.ExtensionFile)
+	fmt.Fprintf(&b, "\nadd one: %s/<id>/%s, or .dun/extensions/<id>/ in a project (examples/extensions in dun's repo)", mcpserver.UserExtensionsDir(), mcpserver.ExtensionFile)
 	return b.String()
 }
 
@@ -114,11 +115,11 @@ func extListing(h *harness.Harness) string {
 func extensionsEvent(h *harness.Harness) *proto.Extensions {
 	exts, refused := engineExtensions(h.Extensions())
 	ev := &proto.Extensions{Items: []proto.ExtItem{}, Errors: refused,
-		AddPath: harness.UserExtensionsDir() + "/<id>/" + harness.ExtensionFile}
+		AddPath: mcpserver.UserExtensionsDir() + "/<id>/" + mcpserver.ExtensionFile}
 	for _, e := range h.ExtensionErrors() {
 		ev.Errors = append(ev.Errors, e.Error())
 	}
-	for _, e := range harness.RegistryErrors() { // an entry that fit and did not load: the built-in one is in use
+	for _, e := range mcpserver.RegistryErrors() { // an entry that fit and did not load: the built-in one is in use
 		ev.Errors = append(ev.Errors, e.Error())
 	}
 	for _, e := range exts {
@@ -175,14 +176,14 @@ func parseWatch(args []string) (dir, index string, err error) {
 // parseAttach reads "<index> [--session|--project|--global]" (bare: the
 // session); no index, or --list, lists.
 func parseAttach(args []string) (index, scope string, list bool, err error) {
-	scope = harness.ScopeSession
+	scope = mcpserver.ScopeSession
 	for _, a := range args {
 		if a == "--list" || a == "-l" {
 			list = true
 			continue
 		}
 		if strings.HasPrefix(a, "-") {
-			s, ok := harness.ParseScope(a)
+			s, ok := mcpserver.ParseScope(a)
 			if !ok {
 				return "", "", false, fmt.Errorf("unknown flag %s", a)
 			}
@@ -272,13 +273,13 @@ func attachListing(h *harness.Harness, id, slash string) string {
 // project's unless named (USER 2026-10-27).
 func workspaceCmd(h *harness.Harness, slash string, args []string) string {
 	usage := "usage: /" + slash + " workspace [on|off] [--session|--project|--global]"
-	scope, set := harness.ScopeProject, ""
+	scope, set := mcpserver.ScopeProject, ""
 	for _, a := range args {
 		switch {
 		case a == "on" || a == "off":
 			set = a
 		case strings.HasPrefix(a, "-"):
-			s, ok := harness.ParseScope(a)
+			s, ok := mcpserver.ParseScope(a)
 			if !ok {
 				return usage + " — unknown flag " + a
 			}

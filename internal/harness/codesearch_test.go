@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -39,7 +40,7 @@ func TestCodeSearch_IndexAtStartAndTurnEnd(t *testing.T) {
 	rag := &fakeRag{}
 	h, ws, _ := codeHarness(t, rag, Config{Client: &visionRunner{vision: true}})
 	waitFor(t, 5*time.Second, func() bool { return len(rag.indexCalls()) == 1 })
-	if q := rag.indexCalls()[0]; q.Root != filepath.Clean(ws) || q.Project != raglitProject(ws) {
+	if q := rag.indexCalls()[0]; q.Root != filepath.Clean(ws) || q.Project != mcpserver.RaglitProject(ws) {
 		t.Fatalf("rag_index %+v, want the workspace %s", q, ws)
 	}
 	if _, err := h.Ask(context.Background(), "hi"); err != nil {

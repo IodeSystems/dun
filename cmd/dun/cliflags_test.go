@@ -14,6 +14,7 @@ import (
 
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // --no-rag / --no-lsp are --rag=false / --lsp=false: the same override, so the
@@ -27,7 +28,7 @@ func TestNoRagNoLsp_AreTheOffSpelling(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := autostartOverrides(rag, lsp)
-	if v, ok := got[harness.ServerDocs]; !ok || v || len(got) != 1 {
+	if v, ok := got[mcpserver.ServerDocs]; !ok || v || len(got) != 1 {
 		t.Errorf("--no-rag: %v", got)
 	}
 	var off tristate

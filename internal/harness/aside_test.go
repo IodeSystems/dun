@@ -12,6 +12,7 @@ import (
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // The load-bearing property: an aside must not make a driver run a turn.
@@ -111,8 +112,8 @@ func TestAside_DoesNotSwallowRealNews(t *testing.T) {
 // The delta is what the tools block cannot say: names that appeared and names
 // that went away, grouped by the server the user turned on or off.
 func TestToolSetDelta(t *testing.T) {
-	code := []mcpmgr.MCPTool{{Name: "node_query", ServerID: ServerCode}}
-	docs := []mcpmgr.MCPTool{{Name: "search", ServerID: ServerDocs}, {Name: "ingest", ServerID: ServerDocs}}
+	code := []mcpmgr.MCPTool{{Name: "node_query", ServerID: mcpserver.ServerCode}}
+	docs := []mcpmgr.MCPTool{{Name: "search", ServerID: mcpserver.ServerDocs}, {Name: "ingest", ServerID: mcpserver.ServerDocs}}
 
 	if got := toolSetDelta(code, code, nil); got != "" {
 		t.Errorf("no change should say nothing, got %q", got)
@@ -139,13 +140,13 @@ func TestStartServer_QueuesAnAsideNotATurn(t *testing.T) {
 	dir := t.TempDir()
 	h, err := Start(context.Background(), Config{
 		Workspace: dir,
-		Servers:   []Server{{ID: ServerShell, Command: "mcpshell", Args: []string{"mcp", "--files-dir", dir}, Timeout: 30}},
+		Servers:   []mcpserver.Server{{ID: mcpserver.ServerShell, Command: "mcpshell", Args: []string{"mcp", "--files-dir", dir}, Timeout: 30}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer h.Close()
-	if err := h.StartServer(context.Background(), ServerShell); err != nil {
+	if err := h.StartServer(context.Background(), mcpserver.ServerShell); err != nil {
 		t.Fatal(err)
 	}
 	if h.Pending() != 0 {

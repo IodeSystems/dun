@@ -13,68 +13,14 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/dun/internal/project"
 )
-
-// The bundled manifests parse, and are what DefaultServers runs.
-func TestBundledExtensions_AreRaglitAndPolyLsp(t *testing.T) {
-	var ids []string
-	for _, e := range BundledExtensions() {
-		ids = append(ids, e.ID+"/"+e.SlashName()+"/"+e.Source)
-	}
-	if strings.Join(ids, " ") != "raglit/rag/bundled poly-lsp/lsp/bundled" {
-		t.Fatalf("bundled: %v", ids)
-	}
-	raglit, _ := bundledExt(ServerDocs)
-	for _, h := range []string{HookTurnBefore, HookWorkspaceOpen, HookMemorySave, HookSkillsChanged, HookRulesChanged, HookMCPDocs} {
-		if !raglit.Subscribes(h) {
-			t.Errorf("raglit does not take %s", h)
-		}
-	}
-	lsp, _ := bundledExt("code") // a pre-rename id still finds it
-	if lsp.HostHooks["POLY_LSP_HOOK"] != HostAgentsGuard {
-		t.Errorf("poly-lsp host hooks: %v", lsp.HostHooks)
-	}
-	ws := t.TempDir()
-	for _, s := range DefaultServers(ws, "") {
-		if strings.Contains(strings.Join(s.Args, " "), "{{") {
-			t.Errorf("%s: placeholder left in %v", s.ID, s.Args)
-		}
-	}
-}
-
-// A manifest error starts with the field it is about.
-func TestParseExtension_ErrorsNameTheField(t *testing.T) {
-	for body, field := range map[string]string{
-		`{"id":"Bad","server":{"command":"x"}}`:                                                             "id:",
-		`{"id":"a","server":{}}`:                                                                            "server:",
-		`{"id":"a","server":{"command":"x","url":"http://y"}}`:                                              "server:",
-		`{"id":"a","server":{"id":"b","command":"x"}}`:                                                      "server.id:",
-		`{"id":"a","server":{"command":"x","via":"sideways"}}`:                                              "server.via:",
-		`{"id":"a","server":{"command":"x"},"slash":{"name":"Hi"}}`:                                         "slash.name:",
-		`{"id":"a","server":{"command":"x"},"slash":{"name":"a","commands":{"on":{"tool":"t"}}}}`:           "slash.commands.on:",
-		`{"id":"a","server":{"command":"x"},"slash":{"name":"a","commands":{"go":{}}}}`:                     "slash.commands.go:",
-		`{"id":"a","server":{"command":"x"},"roles":{"search":{}}}`:                                         "roles.search.tool:",
-		`{"id":"a","server":{"command":"x"},"roles":{"index":{}}}`:                                          "roles.index:",
-		`{"id":"a","server":{"command":"x"},"roles":{"index":{"tool":"i"}}}`:                                "roles.index.forget:",
-		`{"id":"a","server":{"command":"x"},"roles":{"index":{"cli":"other"}}}`:                             "roles.index.cli:",
-		`{"id":"a","server":{"command":"x"},"hooks":["turn.before"]}`:                                       "hooks[0]:",
-		`{"id":"a","server":{"command":"x"},"roles":{"search":{"tool":"s"}},"hooks":["turn.before","x.y"]}`: "hooks[1]:",
-		`{"id":"a","server":{"command":"x"},"hooks":["memory.save"]}`:                                       "hooks[0]:",
-		`{"id":"a","server":{"command":"x"},"host_hooks":{"X":"nope"}}`:                                     "host_hooks.X:",
-		`{"id":"a","server":{"command":"x"},"env":{"1X":"v"}}`:                                              "env.1X:",
-		`{"id":"a","server":{"command":"x"},"skills":"../up"}`:                                              "skills:",
-		`{"id":"a","server":{"command":"x"},"hoks":[]}`:                                                     `unknown field "hoks"`,
-	} {
-		_, err := ParseExtension([]byte(body))
-		if err == nil || !strings.HasPrefix(err.Error(), field) && !strings.Contains(err.Error(), field) {
-			t.Errorf("%s: want %q, got %v", body, field, err)
-		}
-	}
-}
 
 func writeExt(t *testing.T, root, id, body string) string {
 	t.Helper()
-	p := filepath.Join(root, id, ExtensionFile)
+	p := filepath.Join(root, id, mcpserver.ExtensionFile)
 	writeRule(t, p, body)
 	return p
 }
@@ -92,21 +38,21 @@ func TestLoadExtensions_SourcesOverridesAndErrors(t *testing.T) {
 	writeExt(t, user, "twin", `{"id":"twin","server":{"command":"t"},"slash":{"name":"hello"}}`)
 	bad := writeExt(t, user, "broken", `{"id":"broken","server":{}}`)
 	misnamed := writeExt(t, user, "dir", `{"id":"other","server":{"command":"x"}}`)
-	writeExt(t, filepath.Join(proj, DunDir, "extensions"), "hello", `{"id":"hello","description":"the project's","server":{"command":"hello-mcp"},"skills":"skills"}`)
+	writeExt(t, filepath.Join(proj, project.DunDir, "extensions"), "hello", `{"id":"hello","description":"the project's","server":{"command":"hello-mcp"},"skills":"skills"}`)
 
-	exts, errs := LoadExtensions(proj)
-	by := map[string]Extension{}
+	exts, errs := mcpserver.LoadExtensions(proj)
+	by := map[string]mcpserver.Extension{}
 	for _, e := range exts {
 		by[e.ID] = e
 	}
-	if by["hello"].Source != ExtProject || by["hello"].Description != "the project's" {
+	if by["hello"].Source != mcpserver.ExtProject || by["hello"].Description != "the project's" {
 		t.Errorf("the project's hello should replace the user's: %+v", by["hello"])
 	}
-	if by[ServerDocs].Source != ExtBundled {
+	if by[mcpserver.ServerDocs].Source != mcpserver.ExtBundled {
 		t.Error("the bundled ones load too")
 	}
-	if want := filepath.Join(proj, DunDir, "extensions", "hello", "skills"); by["hello"].skillsDir() != want {
-		t.Errorf("skills dir %q", by["hello"].skillsDir())
+	if want := filepath.Join(proj, project.DunDir, "extensions", "hello", "skills"); by["hello"].SkillsDir() != want {
+		t.Errorf("skills dir %q", by["hello"].SkillsDir())
 	}
 	var msgs []string
 	for _, e := range errs {
@@ -122,7 +68,7 @@ func TestLoadExtensions_SourcesOverridesAndErrors(t *testing.T) {
 	if by["twin"].SlashName() != "hello" {
 		t.Errorf("twin: %+v", by["twin"].Slash)
 	}
-	servers := extServers([]Server{{ID: "shell"}}, exts)
+	servers := mcpserver.ExtServers([]mcpserver.Server{{ID: "shell"}}, exts)
 	var ids []string
 	for _, s := range servers {
 		ids = append(ids, s.ID)
@@ -239,13 +185,13 @@ func TestSurfacer_IndexMeaningPerServerStart(t *testing.T) {
 		{"index":"main","doc_id":"` + ws + `/weak.go","title":"weak.go","score":0.03,"similarity":0.5,"matched_terms":["deploy","gate","check"],"query_terms":3}]}`
 	indexes := `{"indexes":[{"name":"plain","meaning":false},{"name":"main","meaning":true}]}`
 	ts := fakeSearchMCP(t, hits, indexes, &lists, &mu)
-	h, err := Start(context.Background(), Config{Workspace: ws, Servers: []Server{{ID: ServerDocs, URL: ts.URL, Timeout: 10}}})
+	h, err := Start(context.Background(), Config{Workspace: ws, Servers: []mcpserver.Server{{ID: mcpserver.ServerDocs, URL: ts.URL, Timeout: 10}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer h.Close()
 	ctx := context.Background()
-	if err := h.StartServer(ctx, ServerDocs); err != nil {
+	if err := h.StartServer(ctx, mcpserver.ServerDocs); err != nil {
 		t.Fatal(err)
 	}
 	got := surfaceOnce(t, h, "what does the deploy gate check")
@@ -257,10 +203,10 @@ func TestSurfacer_IndexMeaningPerServerStart(t *testing.T) {
 	if count() != 1 {
 		t.Errorf("the list is read once per server start: %d reads", count())
 	}
-	if err := h.StopServer(ServerDocs); err != nil {
+	if err := h.StopServer(mcpserver.ServerDocs); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.StartServer(ctx, ServerDocs); err != nil {
+	if err := h.StartServer(ctx, mcpserver.ServerDocs); err != nil {
 		t.Fatal(err)
 	}
 	surfaceOnce(t, h, "the deploy gate after a restart")
@@ -276,16 +222,16 @@ func TestIndexSink_MCPWhenTheToolTakesPathsElseTheCLI(t *testing.T) {
 	var calls []string
 	var mu sync.Mutex
 	ts := fakeIndexMCP(t, &calls, &mu)
-	h, err := Start(context.Background(), Config{Workspace: t.TempDir(), Servers: []Server{{ID: ServerDocs, URL: ts.URL, Timeout: 10}}})
+	h, err := Start(context.Background(), Config{Workspace: t.TempDir(), Servers: []mcpserver.Server{{ID: mcpserver.ServerDocs, URL: ts.URL, Timeout: 10}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer h.Close()
-	raglit, _ := h.extension(ServerDocs)
+	raglit, _ := h.extension(mcpserver.ServerDocs)
 	if h.indexSink(raglit) != nil {
 		t.Error("not running, and not the raglit binary: no sink")
 	}
-	if err := h.StartServer(context.Background(), ServerDocs); err != nil {
+	if err := h.StartServer(context.Background(), mcpserver.ServerDocs); err != nil {
 		t.Fatal(err)
 	}
 	sink := h.indexSink(raglit)
@@ -306,11 +252,11 @@ func TestIndexSink_MCPWhenTheToolTakesPathsElseTheCLI(t *testing.T) {
 	}
 
 	// raglit's real ingest takes a url: the CLI, by the command's name.
-	cli := Server{ID: ServerDocs, Command: filepath.Join(t.TempDir(), "raglit"), Args: []string{"serve", "--project", "p"}}
+	cli := mcpserver.Server{ID: mcpserver.ServerDocs, Command: filepath.Join(t.TempDir(), "raglit"), Args: []string{"serve", "--project", "p"}}
 	h.srvMu.Lock()
-	h.specs = []Server{cli}
+	h.specs = []mcpserver.Server{cli}
 	h.srvMu.Unlock()
-	h.mgr.StopServer(ServerDocs)
+	h.mgr.StopServer(mcpserver.ServerDocs)
 	if h.indexSink(raglit) == nil {
 		t.Error("the raglit binary is the CLI fallback")
 	}
@@ -323,7 +269,7 @@ func TestIndexSink_MCPWhenTheToolTakesPathsElseTheCLI(t *testing.T) {
 // $DUN_HOME/extensions, as a user would.
 func installHello(t *testing.T, home string) {
 	t.Helper()
-	for _, f := range []string{ExtensionFile, "server.py"} {
+	for _, f := range []string{mcpserver.ExtensionFile, "server.py"} {
 		b, err := os.ReadFile(filepath.Join("testdata", "extensions", "hello", f))
 		if err != nil {
 			t.Fatal(err)
@@ -341,7 +287,7 @@ func TestUserExtension_SlashCommandAndTurnBeforeAside(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("DUN_HOME", home)
 	installHello(t, home)
-	h, err := Start(context.Background(), Config{Workspace: t.TempDir(), Servers: []Server{}})
+	h, err := Start(context.Background(), Config{Workspace: t.TempDir(), Servers: []mcpserver.Server{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -368,7 +314,7 @@ func TestUserExtension_SlashCommandAndTurnBeforeAside(t *testing.T) {
 	if !strings.Contains(aside, "Zebra deploys need the --frostbite flag") || !strings.Contains(aside, "hello://zebra-fact") {
 		t.Errorf("the hit should surface as an aside: %q", aside)
 	}
-	if st, _ := serverState(h, "hello"); st.Slash != "hello" || st.Via != ViaDirect {
+	if st, _ := serverState(h, "hello"); st.Slash != "hello" || st.Via != mcpserver.ViaDirect {
 		t.Errorf("state: %+v", st)
 	}
 }

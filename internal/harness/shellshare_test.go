@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/oauth"
 	"github.com/iodesystems/dun/internal/oauth/oauthtest"
 )
@@ -21,15 +22,15 @@ func TestShellConfig_SharedHostedIsTheGateway(t *testing.T) {
 	ts, _ := countingMCP(t)
 	w := oauthtest.NewWorld(t)
 	g := newGateway(t)
-	shell := Server{ID: ServerShell, Command: "mcpshell", Args: []string{"mcp"}}
+	shell := mcpserver.Server{ID: mcpserver.ServerShell, Command: "mcpshell", Args: []string{"mcp"}}
 	h := gatewayHarness(t, g, "s1", nil,
 		shell,
-		Server{ID: "ctr", URL: ts.URL, Via: ViaShell, Autostart: true, Instance: InstanceShared},
-		Server{ID: "own", URL: ts.URL + "/own", Via: ViaShell, Autostart: true, Instance: InstanceSession,
+		mcpserver.Server{ID: "ctr", URL: ts.URL, Via: mcpserver.ViaShell, Autostart: true, Instance: mcpserver.InstanceShared},
+		mcpserver.Server{ID: "own", URL: ts.URL + "/own", Via: mcpserver.ViaShell, Autostart: true, Instance: mcpserver.InstanceSession,
 			OAuth: &oauth.Spec{ClientID: w.ClientID}})
 	h.cfg.ConfigDir = h.cfg.Workspace
 	ctx := context.Background()
-	h.shareHosted(ctx, ServerShell, &startPhase{})
+	h.shareHosted(ctx, mcpserver.ServerShell, &startPhase{})
 	read := func() map[string]mcpshellServer {
 		t.Helper()
 		args := h.shellArgs(shell)
@@ -60,7 +61,7 @@ func TestShellConfig_SharedHostedIsTheGateway(t *testing.T) {
 	if g.Clients(first.Key) != 1 {
 		t.Fatalf("clients: %d", g.Clients(first.Key))
 	}
-	h.shareHosted(ctx, ServerShell, &startPhase{}) // the shell restarts
+	h.shareHosted(ctx, mcpserver.ServerShell, &startPhase{}) // the shell restarts
 	if next := h.shellShares["ctr"]; next.Bearer == first.Bearer || g.Clients(first.Key) != 1 {
 		t.Errorf("restart: the old bearer kept (%v) or not given back (%d clients)", next.Bearer == first.Bearer, g.Clients(first.Key))
 	}
@@ -74,16 +75,16 @@ func TestShell_SharedHostedLive(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	ts, inits := countingMCP(t)
 	g := newGateway(t)
-	shell := Server{ID: ServerShell, Command: "mcpshell", Args: []string{"mcp"}, Autostart: true}
-	h := gatewayHarness(t, g, "s1", nil, shell, Server{ID: "ctr", URL: ts.URL, Via: ViaShell, Autostart: true, Instance: InstanceShared})
+	shell := mcpserver.Server{ID: mcpserver.ServerShell, Command: "mcpshell", Args: []string{"mcp"}, Autostart: true}
+	h := gatewayHarness(t, g, "s1", nil, shell, mcpserver.Server{ID: "ctr", URL: ts.URL, Via: mcpserver.ViaShell, Autostart: true, Instance: mcpserver.InstanceShared})
 	h.cfg.ConfigDir = h.cfg.Workspace
 	ctx := context.Background()
 	if err := h.startServer(ctx, shell); err != nil {
 		t.Fatal(err)
 	}
-	out, err := h.mgr.CallTool(ctx, ServerShell, "eval", map[string]any{"code": `ctr.echo({x: "through"})`})
+	out, err := h.mgr.CallTool(ctx, mcpserver.ServerShell, "eval", map[string]any{"code": `ctr.echo({x: "through"})`})
 	if err != nil || !strings.Contains(out, "echo through") {
-		t.Fatalf("eval: %q %v\n%s", out, err, h.mgr.ServerStderr(ServerShell))
+		t.Fatalf("eval: %q %v\n%s", out, err, h.mgr.ServerStderr(mcpserver.ServerShell))
 	}
 	if inits.Load() != 1 || g.Starts() != 1 {
 		t.Errorf("handshakes %d, starts %d", inits.Load(), g.Starts())

@@ -1,6 +1,10 @@
 package harness
 
-import "cmp"
+import (
+	"cmp"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
+)
 
 // Child-LSP flags for poly-lsp-mcp (2026-11-10).
 //
@@ -18,7 +22,7 @@ const lspSafeRoots = "single"
 
 // lspSafeArgs are the lifecycle flags s gets, each to a build that takes it
 // (sup).
-func lspSafeArgs(s Server, sup IndexSupport) []string {
+func lspSafeArgs(s mcpserver.Server, sup IndexSupport) []string {
 	if !sup.Roots {
 		return nil
 	}

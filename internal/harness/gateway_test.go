@@ -14,6 +14,7 @@ import (
 
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/oauth"
 	"github.com/iodesystems/dun/internal/oauth/oauthtest"
 )
@@ -83,7 +84,7 @@ func newGateway(t *testing.T) *Gateway {
 }
 
 // gatewayHarness is an engine under dund: its shared servers go through g.
-func gatewayHarness(t *testing.T, g *Gateway, session string, login func(id, url string), specs ...Server) *Harness {
+func gatewayHarness(t *testing.T, g *Gateway, session string, login func(id, url string), specs ...mcpserver.Server) *Harness {
 	h := newServerHarness(t, specs...)
 	h.cfg.Gateway = gwLink{g: g, c: GatewayClient{Session: session, Engine: h, Login: login,
 		Notify: func(key, method string, params map[string]any) { h.GatewayNotify(key, method, params) }}}
@@ -100,7 +101,7 @@ func TestGateway_TwoSessionsOneUpstream(t *testing.T) {
 	h1 := gatewayHarness(t, g, "s1", nil)
 	h2 := gatewayHarness(t, g, "s2", nil)
 	for _, h := range []*Harness{h1, h2} {
-		if _, err := h.AddServer(ctx, ServerSpec{ID: "ctr", URL: ts.URL}); err != nil {
+		if _, err := h.AddServer(ctx, mcpserver.Spec{ID: "ctr", URL: ts.URL}); err != nil {
 			t.Fatal(err)
 		}
 		if out, err := h.mgr.CallTool(ctx, "ctr", "echo", map[string]any{"x": "hi"}); err != nil || out != "echo hi" {
@@ -122,7 +123,7 @@ func TestGateway_TwoSessionsOneUpstream(t *testing.T) {
 		t.Errorf("tool error: %v", err)
 	}
 	// session: this engine's own connection, a handshake of its own.
-	if _, err := h2.SetServerInstance(ctx, "ctr", ScopeSession, InstanceSession); err != nil {
+	if _, err := h2.SetServerInstance(ctx, "ctr", mcpserver.ScopeSession, mcpserver.InstanceSession); err != nil {
 		t.Fatal(err)
 	}
 	if n := inits.Load(); n != 2 || !h2.mgr.ServerStarted("ctr") {
@@ -145,7 +146,7 @@ func TestGateway_ReleaseAndGrace(t *testing.T) {
 	g := newGateway(t)
 	ctx := context.Background()
 	h1 := gatewayHarness(t, g, "s1", nil)
-	if _, err := h1.AddServer(ctx, ServerSpec{ID: "ctr", URL: ts.URL}); err != nil {
+	if _, err := h1.AddServer(ctx, mcpserver.Spec{ID: "ctr", URL: ts.URL}); err != nil {
 		t.Fatal(err)
 	}
 	key := h1.shared["ctr"].Key
@@ -180,7 +181,7 @@ func TestGateway_RegainAfterDrop(t *testing.T) {
 	g := newGateway(t)
 	ctx := context.Background()
 	h := gatewayHarness(t, g, "s1", nil)
-	if _, err := h.AddServer(ctx, ServerSpec{ID: "ctr", URL: ts.URL}); err != nil {
+	if _, err := h.AddServer(ctx, mcpserver.Spec{ID: "ctr", URL: ts.URL}); err != nil {
 		t.Fatal(err)
 	}
 	g.mu.Lock()
@@ -214,7 +215,7 @@ func TestGateway_NotificationFanOut(t *testing.T) {
 			mu.Lock()
 			got[engine+" "+method]++
 			mu.Unlock()
-		}}, ShareRequest{Spec: ShareSpec{ID: "ctr", URL: ts.URL}, Instance: InstanceShared})
+		}}, ShareRequest{Spec: ShareSpec{ID: "ctr", URL: ts.URL}, Instance: mcpserver.InstanceShared})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -245,16 +246,16 @@ func TestGateway_NotificationFanOut(t *testing.T) {
 // upstream.
 func TestShareRequest_Key(t *testing.T) {
 	sp := ShareSpec{ID: "x", Command: "/bin/x", Args: []string{"--root", "/a"}}
-	shared := ShareRequest{Spec: sp, Instance: InstanceShared}
+	shared := ShareRequest{Spec: sp, Instance: mcpserver.InstanceShared}
 	if shared.Key("s1") != shared.Key("s2") {
 		t.Error("shared: one key for every session")
 	}
-	other := ShareRequest{Spec: ShareSpec{ID: "x", Command: "/bin/x", Args: []string{"--root", "/b"}}, Instance: InstanceShared}
+	other := ShareRequest{Spec: ShareSpec{ID: "x", Command: "/bin/x", Args: []string{"--root", "/b"}}, Instance: mcpserver.InstanceShared}
 	if other.Key("s1") == shared.Key("s1") {
 		t.Error("another workspace's args: another key")
 	}
-	a0 := ShareRequest{Spec: sp, Instance: InstanceAgent}
-	a1 := ShareRequest{Spec: sp, Instance: InstanceAgent, Agent: "1"}
+	a0 := ShareRequest{Spec: sp, Instance: mcpserver.InstanceAgent}
+	a1 := ShareRequest{Spec: sp, Instance: mcpserver.InstanceAgent, Agent: "1"}
 	if a0.Key("s1") == a1.Key("s1") || a0.Key("s1") == a0.Key("s2") || a0.Key("s1") == shared.Key("s1") {
 		t.Error("agent: a key per session and agent")
 	}
@@ -279,7 +280,7 @@ func TestGateway_OAuthLogsInOnce(t *testing.T) {
 			br.Notify(id, url)
 		}
 	}
-	spec := ServerSpec{ID: "snow", URL: w.MCPURL(), OAuth: &oauth.Spec{ClientID: w.ClientID, RedirectPort: oauthtest.FreePort(t)}}
+	spec := mcpserver.Spec{ID: "snow", URL: w.MCPURL(), OAuth: &oauth.Spec{ClientID: w.ClientID, RedirectPort: oauthtest.FreePort(t)}}
 	ctx := context.Background()
 	for _, s := range []string{"s1", "s2"} {
 		h := gatewayHarness(t, g, s, login(s))

@@ -16,6 +16,7 @@ import (
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/spendmeter"
 )
 
@@ -37,7 +38,7 @@ func spendKeyFile() string { return filepath.Join(dunconfig.DunHome(), "oauth", 
 
 // antPath is Anthropic's ant, "" when there is none. Apache Ant has the same name.
 func antPath(ctx context.Context) string {
-	p, err := harness.FindCommand("ant")
+	p, err := mcpserver.FindCommand("ant")
 	if err != nil || !anthropicadmin.IsAnthropicAnt(ctx, p) {
 		return ""
 	}

@@ -8,9 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/proc"
 )
 
@@ -49,119 +49,6 @@ import (
 // The answer is each step's reply (a tool's text, JSON indented; the CLI's
 // output), the step named when more than one ran.
 
-var (
-	placeholder = regexp.MustCompile(`\{\{[a-z_]+\}\}`)
-	flagPattern = regexp.MustCompile(`^--[a-z][a-z0-9-]*$`)
-)
-
-// cmdPlaceholders are the placeholders a command may use.
-var cmdPlaceholders = map[string]bool{"{{arg}}": true, "{{paths}}": true, "{{path}}": true,
-	"{{index}}": true, "{{project}}": true, "{{workspace}}": true}
-
-// steps is c's steps: the inline one, or Steps.
-func (c ExtSlashCmd) steps() []ExtStep {
-	if len(c.Steps) > 0 {
-		return c.Steps
-	}
-	return []ExtStep{c.ExtStep}
-}
-
-// empty reports whether s names nothing to do.
-func (s ExtStep) empty() bool {
-	return s.Tool == "" && s.CLI == nil && s.Args == nil && s.If == "" && s.Unless == "" && s.With == ""
-}
-
-// strings are every string the step expands: its args' (nested too) and its
-// argv.
-func (s ExtStep) strings() []string {
-	var out []string
-	var walk func(v any)
-	walk = func(v any) {
-		switch v := v.(type) {
-		case string:
-			out = append(out, v)
-		case []any:
-			for _, x := range v {
-				walk(x)
-			}
-		case map[string]any:
-			for _, x := range v {
-				walk(x)
-			}
-		}
-	}
-	walk(s.Args)
-	return append(out, s.CLI...)
-}
-
-// uses reports whether one of the step's strings holds p.
-func (s ExtStep) uses(p string) bool {
-	for _, v := range s.strings() {
-		if strings.Contains(v, p) {
-			return true
-		}
-	}
-	return false
-}
-
-// takesInput reports whether the step needs text after the command.
-func (s ExtStep) takesInput() bool {
-	return s.uses("{{arg}}") || s.uses("{{path}}") || s.uses("{{paths}}")
-}
-
-// validate checks one command; the error starts with the field's tail
-// (".tool: …", ".steps[1].if: …") for the caller to prefix.
-func (c ExtSlashCmd) validate(index *IndexRole) error {
-	inline := !c.ExtStep.empty()
-	if inline == (len(c.Steps) > 0) {
-		return fmt.Errorf(": has a tool, a cli or steps (one of them)")
-	}
-	for i, s := range c.steps() {
-		at := ""
-		if !inline {
-			at = fmt.Sprintf(".steps[%d]", i)
-		}
-		if err := s.validate(index); err != nil {
-			return fmt.Errorf("%s%w", at, err)
-		}
-	}
-	return nil
-}
-
-func (s ExtStep) validate(index *IndexRole) error {
-	switch {
-	case (s.Tool == "") == (s.CLI == nil):
-		return fmt.Errorf(".tool: a step has a tool or a cli, not both and not neither")
-	case s.CLI != nil && len(s.CLI) == 0:
-		return fmt.Errorf(".cli: empty")
-	case s.CLI != nil && (index == nil || index.CLI == ""):
-		return fmt.Errorf(".cli: needs roles.index.cli, the binary it runs")
-	case s.CLI != nil && s.Args != nil:
-		return fmt.Errorf(".args: a cli step's arguments are its argv")
-	case s.If != "" && s.If != "file" && s.If != "dir":
-		return fmt.Errorf(".if: %q — want file or dir", s.If)
-	case s.If != "" && !s.uses("{{path}}") && !s.uses("{{paths}}"):
-		return fmt.Errorf(".if: the step uses no {{path}} or {{paths}}")
-	case s.Unless != "" && !flagPattern.MatchString(s.Unless):
-		return fmt.Errorf(".unless: %q — want a flag, --name", s.Unless)
-	case s.With != "" && !flagPattern.MatchString(s.With):
-		return fmt.Errorf(".with: %q — want a flag, --name", s.With)
-	case s.uses("{{path}}") && s.uses("{{paths}}"):
-		return fmt.Errorf(": {{path}} and {{paths}} in one step")
-	}
-	for _, v := range s.strings() {
-		for _, p := range placeholder.FindAllString(v, -1) {
-			if !cmdPlaceholders[p] {
-				return fmt.Errorf(": unknown placeholder %s", p)
-			}
-		}
-		if strings.Contains(v, "{{paths}}") && v != "{{paths}}" {
-			return fmt.Errorf(": {{paths}} is a whole value, not part of %q", v)
-		}
-	}
-	return nil
-}
-
 // cmdInput is what the text after a command expands to.
 type cmdInput struct {
 	arg                       string
@@ -172,13 +59,13 @@ type cmdInput struct {
 
 // parseCmdInput splits text (shell quoting), takes out the flags the steps
 // skip on, and makes each remaining word a path.
-func parseCmdInput(c ExtSlashCmd, text, workspace string) (cmdInput, error) {
+func parseCmdInput(c mcpserver.ExtSlashCmd, text, workspace string) (cmdInput, error) {
 	words, err := SplitShell(text)
 	if err != nil {
 		return cmdInput{}, err
 	}
 	known := map[string]bool{}
-	for _, s := range c.steps() {
+	for _, s := range c.AllSteps() {
 		if s.Unless != "" {
 			known[s.Unless] = true
 		}
@@ -308,14 +195,14 @@ func (h *Harness) RunExtCommand(ctx context.Context, id, command, text string) (
 	}
 	in.index = strings.TrimSpace(argValue(s.Args, "index"))
 	if in.index == "" {
-		in.index = raglitIndex(h.cfg.Workspace)
+		in.index = mcpserver.RaglitIndex(h.cfg.Workspace)
 	}
 	in.project = h.ownProject(s)
 
-	steps := c.steps()
+	steps := c.AllSteps()
 	needsInput, byKind := false, false
 	for _, st := range steps {
-		needsInput = needsInput || st.takesInput()
+		needsInput = needsInput || st.TakesInput()
 		byKind = byKind || st.If != ""
 	}
 	if needsInput && in.arg == "" {
@@ -333,7 +220,7 @@ func (h *Harness) RunExtCommand(ctx context.Context, id, command, text string) (
 	// What runs: each step not skipped by a flag, with the paths it takes
 	// (by kind, when it says); a step for a kind none of the paths is, not.
 	type run struct {
-		step  ExtStep
+		step  mcpserver.ExtStep
 		paths []string
 	}
 	var runs []run
@@ -355,7 +242,7 @@ func (h *Harness) RunExtCommand(ctx context.Context, id, command, text string) (
 				continue
 			}
 		}
-		if st.uses("{{path}}") || st.uses("{{paths}}") {
+		if st.Uses("{{path}}") || st.Uses("{{paths}}") {
 			for _, p := range paths {
 				taken[p] = true
 			}
@@ -390,7 +277,7 @@ func (h *Harness) RunExtCommand(ctx context.Context, id, command, text string) (
 	for _, rn := range runs {
 		st, paths := rn.step, rn.paths
 		each := []string{""}
-		if st.uses("{{path}}") {
+		if st.Uses("{{path}}") {
 			each = paths
 		}
 		for _, p := range each {
@@ -438,7 +325,7 @@ func indentJSON(s string) string {
 // runIndexCLI runs e's index CLI (roles.index.cli) — the binary server s
 // runs — with argv and the store flags of s's serve args, detached; the
 // answer is its output.
-func (h *Harness) runIndexCLI(ctx context.Context, e Extension, s Server, argv []string) (string, error) {
+func (h *Harness) runIndexCLI(ctx context.Context, e mcpserver.Extension, s mcpserver.Server, argv []string) (string, error) {
 	if e.Roles.Index == nil || e.Roles.Index.CLI == "" {
 		return "", fmt.Errorf("%s has no index CLI", e.ID)
 	}

@@ -8,6 +8,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/dun/internal/project"
 )
 
 func TestQualifyAttach(t *testing.T) {
@@ -31,7 +34,7 @@ func TestQualifyAttach(t *testing.T) {
 }
 
 func TestUnionAttachAndSelector(t *testing.T) {
-	u := unionAttach([]string{"a:x", "b:y"}, nil, []string{"b:y", "own:z", "c:w"})
+	u := mcpserver.UnionAttach([]string{"a:x", "b:y"}, nil, []string{"b:y", "own:z", "c:w"})
 	if !slices.Equal(u, []string{"a:x", "b:y", "own:z", "c:w"}) {
 		t.Errorf("union: %v", u)
 	}
@@ -63,65 +66,12 @@ func TestUnionAttachAndSelector(t *testing.T) {
 	}
 }
 
-// The nearest scope that names an index decides it.
-func TestEffectiveIndexes_NearestScopeDecides(t *testing.T) {
-	sc := ServerScopes{
-		AttachGlobal: []string{"a:x", "own:m"}, DetachSession: []string{"a:x"},
-		DetachProject: []string{"own:m"}, AttachSession: []string{"own:m", "b:y"},
-	}
-	if on := effectiveIndexes(sc, true); !slices.Equal(on, []string{"own:m", "b:y"}) {
-		t.Errorf("on: %v", on)
-	}
-	if off := effectiveIndexes(sc, false); !slices.Equal(off, []string{"a:x"}) {
-		t.Errorf("off: %v", off)
-	}
-}
-
 func TestArgValue(t *testing.T) {
 	args := []string{"serve", "--project", "p1", "--index=i", "-home", "/h"}
 	for name, want := range map[string]string{"project": "p1", "index": "i", "home": "/h", "daemon": ""} {
 		if got := argValue(args, name); got != want {
 			t.Errorf("%s: %q, want %q", name, got, want)
 		}
-	}
-}
-
-// Attachments at each scope add up; each is listed with where it is set.
-// The session's survive a resume (the .mcp.json sidecar).
-func TestResolve_AttachIsTheUnionOfTheScopes(t *testing.T) {
-	t.Setenv("DUN_HOME", t.TempDir())
-	dir := t.TempDir()
-	if _, err := UpsertUserServer(ServerDocs, func(s *ServerSpec) { s.Attach = []string{"g:one", "both:two"} }); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := updateLocalServer(dir, ServerDocs, func(s *ServerSpec) { s.Attach = []string{"both:two", "p:three"} }); err != nil {
-		t.Fatal(err)
-	}
-	sessFile := filepath.Join(t.TempDir(), "s.jsonl")
-	if _, err := saveSessionServers(sessFile, map[string]SessionServer{ServerDocs: {Attach: []string{"s:four"}}}); err != nil {
-		t.Fatal(err)
-	}
-	sess := LoadSessionServers(sessFile)
-	if !slices.Equal(sess[ServerDocs].Attach, []string{"s:four"}) {
-		t.Fatalf("an attach-only session entry is kept: %+v", sess)
-	}
-	got, err := resolveServers(dir, dir, "", DefaultServers(dir, ""), sess, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := byID(got)[ServerDocs]
-	if !slices.Equal(s.Attach, []string{"g:one", "both:two", "p:three", "s:four"}) {
-		t.Errorf("union: %v", s.Attach)
-	}
-	if !slices.Equal(s.Scopes.AttachProject, []string{"both:two", "p:three"}) || !slices.Equal(s.Scopes.AttachSession, []string{"s:four"}) {
-		t.Errorf("scopes: %+v", s.Scopes)
-	}
-	// A server another workspace defines, attached here only, is not one.
-	if _, err := UpsertUserServer("elsewhere", func(s *ServerSpec) { s.Attach = []string{"x:y"} }); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := resolveServers(dir, dir, "", DefaultServers(dir, ""), nil, nil); err != nil {
-		t.Errorf("an attach-only entry is switches only: %v", err)
 	}
 }
 
@@ -134,16 +84,16 @@ func TestAttachIndex_SearchGetAndSurfacing(t *testing.T) {
 	var mu sync.Mutex
 	ts := fakeIndexMCP(t, &calls, &mu)
 	ws := t.TempDir()
-	h, err := Start(context.Background(), Config{Workspace: ws, Servers: []Server{{ID: ServerDocs, URL: ts.URL, Timeout: 10}}})
+	h, err := Start(context.Background(), Config{Workspace: ws, Servers: []mcpserver.Server{{ID: mcpserver.ServerDocs, URL: ts.URL, Timeout: 10}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer h.Close()
 	ctx := context.Background()
-	if err := h.StartServer(ctx, ServerDocs); err != nil {
+	if err := h.StartServer(ctx, mcpserver.ServerDocs); err != nil {
 		t.Fatal(err)
 	}
-	own := raglitProject(ws)
+	own := mcpserver.RaglitProject(ws)
 	n := 0
 	q := func() string { n++; return strings.Repeat("q", n) } // the loop guard refuses repeats
 	last := func(tool string) string {
@@ -172,7 +122,7 @@ func TestAttachIndex_SearchGetAndSurfacing(t *testing.T) {
 	}
 
 	// A bare name is this project's: no selector, nothing changes.
-	name, _, changed, err := h.AttachIndex(ctx, ServerDocs, "notes", ScopeSession, true)
+	name, _, changed, err := h.AttachIndex(ctx, mcpserver.ServerDocs, "notes", mcpserver.ScopeSession, true)
 	if err != nil || !changed || name != own+":notes" {
 		t.Fatalf("attach notes: %q %v %v", name, changed, err)
 	}
@@ -181,7 +131,7 @@ func TestAttachIndex_SearchGetAndSurfacing(t *testing.T) {
 		t.Errorf("an own index is read already: %s", c)
 	}
 
-	if _, _, _, err := h.AttachIndex(ctx, ServerDocs, "Other:Handbook", ScopeSession, true); err != nil {
+	if _, _, _, err := h.AttachIndex(ctx, mcpserver.ServerDocs, "Other:Handbook", mcpserver.ScopeSession, true); err != nil {
 		t.Fatal(err)
 	}
 	sel := own + ":*,other:handbook"
@@ -204,7 +154,7 @@ func TestAttachIndex_SearchGetAndSurfacing(t *testing.T) {
 	if c := last("search"); !strings.Contains(c, `"index":"`+sel+`"`) {
 		t.Errorf("proactive search: %s", c)
 	}
-	if _, ok := docsBodyFetcher(h.mgr, ServerDocs, "get_document", sel)(ctx, "/b.md", 10); ok {
+	if _, ok := docsBodyFetcher(h.mgr, mcpserver.ServerDocs, "get_document", sel)(ctx, "/b.md", 10); ok {
 		t.Error("the fake has no text")
 	}
 	if c := last("get_document"); !strings.Contains(c, `"path":"/b.md"`) || !strings.Contains(c, `"index":"`+sel+`"`) {
@@ -212,23 +162,23 @@ func TestAttachIndex_SearchGetAndSurfacing(t *testing.T) {
 	}
 
 	// Listed with its scope; the same attachment again changes nothing.
-	at, _ := h.Attachments(ServerDocs)
-	if len(at) != 2 || at[1].Index != "other:handbook" || !slices.Equal(at[1].Scopes, []string{ScopeSession}) {
+	at, _ := h.Attachments(mcpserver.ServerDocs)
+	if len(at) != 2 || at[1].Index != "other:handbook" || !slices.Equal(at[1].Scopes, []string{mcpserver.ScopeSession}) {
 		t.Errorf("listing: %+v", at)
 	}
-	if _, _, changed, _ := h.AttachIndex(ctx, ServerDocs, "other:handbook", ScopeSession, true); changed {
+	if _, _, changed, _ := h.AttachIndex(ctx, mcpserver.ServerDocs, "other:handbook", mcpserver.ScopeSession, true); changed {
 		t.Error("attached twice")
 	}
 	// Project scope adds a second place it is set; unsetting the session's
 	// leaves the project's to decide (the nearest scope that says decides).
-	_, path, changed, err := h.AttachIndex(ctx, ServerDocs, "other:handbook", ScopeProject, true)
+	_, path, changed, err := h.AttachIndex(ctx, mcpserver.ServerDocs, "other:handbook", mcpserver.ScopeProject, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !changed || filepath.Base(path) != LocalServersFile {
+	if !changed || filepath.Base(path) != project.LocalServersFile {
 		t.Errorf("project attach: %v %q", changed, path)
 	}
-	if _, _, changed, _ := h.SetIndex(ctx, ServerDocs, "other:handbook", ScopeSession, nil); !changed {
+	if _, _, changed, _ := h.SetIndex(ctx, mcpserver.ServerDocs, "other:handbook", mcpserver.ScopeSession, nil); !changed {
 		t.Error("unset session")
 	}
 	callTool(t, h, "docs_search", map[string]any{"query": q()})
@@ -236,17 +186,17 @@ func TestAttachIndex_SearchGetAndSurfacing(t *testing.T) {
 		t.Errorf("still attached at project: %s", c)
 	}
 	// Off at the session wins over on at the project.
-	if _, _, changed, _ := h.AttachIndex(ctx, ServerDocs, "other:handbook", ScopeSession, false); !changed {
+	if _, _, changed, _ := h.AttachIndex(ctx, mcpserver.ServerDocs, "other:handbook", mcpserver.ScopeSession, false); !changed {
 		t.Error("off at session")
 	}
 	callTool(t, h, "docs_search", map[string]any{"query": q()})
 	if c := last("search"); strings.Contains(c, `"index"`) {
 		t.Errorf("off at the session: %s", c)
 	}
-	if _, _, changed, _ := h.SetIndex(ctx, ServerDocs, "other:handbook", ScopeSession, nil); !changed {
+	if _, _, changed, _ := h.SetIndex(ctx, mcpserver.ServerDocs, "other:handbook", mcpserver.ScopeSession, nil); !changed {
 		t.Error("unset session again")
 	}
-	if _, _, changed, _ := h.SetIndex(ctx, ServerDocs, "other:handbook", ScopeProject, nil); !changed {
+	if _, _, changed, _ := h.SetIndex(ctx, mcpserver.ServerDocs, "other:handbook", mcpserver.ScopeProject, nil); !changed {
 		t.Error("unset project")
 	}
 	callTool(t, h, "docs_search", map[string]any{"query": q()})
@@ -256,7 +206,7 @@ func TestAttachIndex_SearchGetAndSurfacing(t *testing.T) {
 	if strings.Contains(searchDesc(), "Attached") {
 		t.Errorf("description after detach: %q", searchDesc())
 	}
-	if _, _, _, err := h.AttachIndex(ctx, ShellNamespace("x"), "a", ScopeSession, true); err == nil {
+	if _, _, _, err := h.AttachIndex(ctx, ShellNamespace("x"), "a", mcpserver.ScopeSession, true); err == nil {
 		t.Error("no search role: refused")
 	}
 }
@@ -275,13 +225,13 @@ func TestWatchDir_RunsTheIndexCLI(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(ws, "My Notes"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	h, err := Start(context.Background(), Config{Workspace: ws, Servers: []Server{{ID: ServerDocs,
+	h, err := Start(context.Background(), Config{Workspace: ws, Servers: []mcpserver.Server{{ID: mcpserver.ServerDocs,
 		Command: filepath.Join(bin, "raglit"), Args: []string{"serve", "--project", "p", "--index", "w", "--daemon", "http://x"}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer h.Close()
-	idx, out, err := h.WatchDir(context.Background(), ServerDocs, "My Notes", "")
+	idx, out, err := h.WatchDir(context.Background(), mcpserver.ServerDocs, "My Notes", "")
 	if err != nil || idx != "my-notes" || out != "watching" {
 		t.Fatalf("watch: %q %q %v", idx, out, err)
 	}
@@ -290,11 +240,11 @@ func TestWatchDir_RunsTheIndexCLI(t *testing.T) {
 	if strings.TrimSpace(string(b)) != want {
 		t.Errorf("argv: %q, want %q", strings.TrimSpace(string(b)), want)
 	}
-	if _, _, err := h.WatchDir(context.Background(), ServerDocs, "nope", "x"); err == nil {
+	if _, _, err := h.WatchDir(context.Background(), mcpserver.ServerDocs, "nope", "x"); err == nil {
 		t.Error("a missing directory is refused")
 	}
 	// A name is spelled as raglit stores it, so the one reported attaches.
-	if idx, _, err := h.WatchDir(context.Background(), ServerDocs, "My Notes", "Hand.Book"); err != nil || idx != "handbook" {
+	if idx, _, err := h.WatchDir(context.Background(), mcpserver.ServerDocs, "My Notes", "Hand.Book"); err != nil || idx != "handbook" {
 		t.Errorf("name: %q %v", idx, err)
 	}
 }
@@ -317,16 +267,16 @@ func TestSetIndex_OwnIndexOffNarrowsTheSearch(t *testing.T) {
 	if err := os.Mkdir(ws, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	h, err := Start(context.Background(), Config{Workspace: ws, Servers: []Server{{ID: ServerDocs, URL: ts.URL, Timeout: 10}}})
+	h, err := Start(context.Background(), Config{Workspace: ws, Servers: []mcpserver.Server{{ID: mcpserver.ServerDocs, URL: ts.URL, Timeout: 10}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer h.Close()
 	ctx := context.Background()
-	if err := h.StartServer(ctx, ServerDocs); err != nil {
+	if err := h.StartServer(ctx, mcpserver.ServerDocs); err != nil {
 		t.Fatal(err)
 	}
-	own := raglitProject(ws)
+	own := mcpserver.RaglitProject(ws)
 	old := listIndexes
 	listIndexes = func(context.Context, string, string, []string) ([]raglitIndexRow, error) {
 		return []raglitIndexRow{{Project: own, Index: "main"}, {Project: own, Index: "memory"}, {Project: "x", Index: "y"}}, nil
@@ -334,7 +284,7 @@ func TestSetIndex_OwnIndexOffNarrowsTheSearch(t *testing.T) {
 	t.Cleanup(func() { listIndexes = old; ownIdxCache.Delete(own) })
 	noteOwnIndexes(own, []raglitIndexRow{{Project: own, Index: "main"}, {Project: own, Index: "memory"}})
 
-	if _, _, changed, err := h.SetIndex(ctx, ServerDocs, "memory", ScopeSession, ptr(false)); err != nil || !changed {
+	if _, _, changed, err := h.SetIndex(ctx, mcpserver.ServerDocs, "memory", mcpserver.ScopeSession, ptr(false)); err != nil || !changed {
 		t.Fatalf("off: %v %v", changed, err)
 	}
 	callTool(t, h, "docs_search", map[string]any{"query": "zzz"})

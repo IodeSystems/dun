@@ -30,7 +30,9 @@ import (
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/openurl"
+	"github.com/iodesystems/dun/internal/project"
 	"github.com/iodesystems/dun/internal/psview"
 	"github.com/iodesystems/dun/internal/spendmeter"
 	"github.com/iodesystems/dun/internal/textfmt"
@@ -502,14 +504,14 @@ func main() {
 	// still reads the repo's own config, it only cannot save anything.
 	if *noDir {
 		// not a project: nothing to register
-	} else if _, err := harness.EnsureProject(absWS); err != nil {
+	} else if _, err := project.Ensure(absWS); err != nil {
 		fmt.Fprintf(os.Stderr, "dun: %v\n", err)
 	}
 
 	// Resolve extra mounts: local paths that must be accessible from both
 	// the worktree (symlink) and the Docker container (volume mount).
 	// Loaded from dun.json / dun.local.json and auto-discovered from go.mod.
-	mounts := harness.LoadMounts(absWS, absWS)
+	mounts := mcpserver.LoadMounts(absWS, absWS)
 
 	// Isolation tier 1: a git worktree (with --worktree). The agent's file
 	// changes land here on a fresh branch, not on the checked-out branch.
@@ -686,7 +688,7 @@ func main() {
 		Effort:          mainEffort,
 		Exec:            backend,
 		Worktree:        wt,
-		CommitCfg:       harness.LoadCommit(absWS),
+		CommitCfg:       mcpserver.LoadCommit(absWS),
 		Files:           filesConfig(absWS, *noDir),
 		NoDir:           *noDir,
 		NoTools:         *noTools,
@@ -769,7 +771,7 @@ func main() {
 				return
 			}
 			msg := id + ": " + runningSummary(h, id)
-			var miss *harness.MissingError
+			var miss *mcpserver.MissingError
 			switch {
 			case errors.As(err, &miss): // a setup step, said quietly
 				msg = id + " off: " + textfmt.OneLine(err.Error())
@@ -1138,11 +1140,11 @@ func fatal(err error) {
 
 // filesConfig is the workspace's file-tool settings; none for a --no-dir
 // session, which has no project files (dun/nodir.go).
-func filesConfig(ws string, noDir bool) *harness.FilesConfig {
+func filesConfig(ws string, noDir bool) *mcpserver.FilesConfig {
 	if noDir {
-		return &harness.FilesConfig{Tools: []string{}}
+		return &mcpserver.FilesConfig{Tools: []string{}}
 	}
-	return harness.LoadFiles(ws)
+	return mcpserver.LoadFiles(ws)
 }
 
 // intFlagOff is an int flag for a Config field where 0 means "unset" and a

@@ -1,12 +1,16 @@
-package harness
+package mcpserver
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/iodesystems/dun/internal/oauth"
+	"github.com/iodesystems/dun/internal/project"
 )
 
 func writeJSON(t *testing.T, dir, name, body string) {
@@ -32,7 +36,7 @@ func TestLoadServers_DefaultsWithNoFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(got) != 3 {
-		t.Fatalf("want the 3 built-ins, got %d: %v", len(got), ServerIDs(got))
+		t.Fatalf("want the 3 built-ins, got %d: %v", len(got), IDs(got))
 	}
 	m := byID(got)
 	if m["poly-lsp"].Command != "poly-lsp-mcp" {
@@ -52,7 +56,7 @@ func TestLoadServers_DefaultsWithNoFiles(t *testing.T) {
 // is how a config silently forks from the defaults it copied.
 func TestLoadServers_OverrideByIDKeepsSiblings(t *testing.T) {
 	dir := t.TempDir()
-	writeJSON(t, dir, LocalServersFile, `{"servers":[{"id":"code","command":"/opt/bin/poly-lsp-mcp"}]}`)
+	writeJSON(t, dir, project.LocalServersFile, `{"servers":[{"id":"code","command":"/opt/bin/poly-lsp-mcp"}]}`)
 	got, err := LoadServers(dir, "/ws", "/rag")
 	if err != nil {
 		t.Fatal(err)
@@ -66,21 +70,21 @@ func TestLoadServers_OverrideByIDKeepsSiblings(t *testing.T) {
 		t.Error("omitted args should INHERIT, not clear")
 	}
 	if len(got) != 3 {
-		t.Errorf("siblings must survive an override: %v", ServerIDs(got))
+		t.Errorf("siblings must survive an override: %v", IDs(got))
 	}
 }
 
 // A project adding a fourth server is the motivating case.
 func TestLoadServers_AddsProjectServer(t *testing.T) {
 	dir := t.TempDir()
-	writeJSON(t, dir, ProjectServersFile,
+	writeJSON(t, dir, project.ProjectServersFile,
 		`{"servers":[{"id":"db","command":"db-mcp","args":["stdio","--root","{{workspace}}"],"env":["DSN=x"]}]}`)
 	got, err := LoadServers(dir, "/ws", "/rag")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 4 {
-		t.Fatalf("want 4, got %v", ServerIDs(got))
+		t.Fatalf("want 4, got %v", IDs(got))
 	}
 	db := byID(got)["db"]
 	if db.Args[2] != "/ws" {
@@ -94,8 +98,8 @@ func TestLoadServers_AddsProjectServer(t *testing.T) {
 // local layers OVER project — machine facts win over project defaults.
 func TestLoadServers_LocalBeatsProject(t *testing.T) {
 	dir := t.TempDir()
-	writeJSON(t, dir, ProjectServersFile, `{"servers":[{"id":"db","command":"db-mcp","args":["stdio"]}]}`)
-	writeJSON(t, dir, LocalServersFile, `{"servers":[{"id":"db","command":"/home/me/bin/db-mcp"}]}`)
+	writeJSON(t, dir, project.ProjectServersFile, `{"servers":[{"id":"db","command":"db-mcp","args":["stdio"]}]}`)
+	writeJSON(t, dir, project.LocalServersFile, `{"servers":[{"id":"db","command":"/home/me/bin/db-mcp"}]}`)
 	got, err := LoadServers(dir, "/ws", "/rag")
 	if err != nil {
 		t.Fatal(err)
@@ -112,13 +116,13 @@ func TestLoadServers_LocalBeatsProject(t *testing.T) {
 // Dropping a built-in should be one line, not a transcription of the rest.
 func TestLoadServers_Disable(t *testing.T) {
 	dir := t.TempDir()
-	writeJSON(t, dir, ProjectServersFile, `{"servers":[{"id":"docs","disabled":true}]}`)
+	writeJSON(t, dir, project.ProjectServersFile, `{"servers":[{"id":"docs","disabled":true}]}`)
 	got, err := LoadServers(dir, "/ws", "/rag")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 2 {
-		t.Fatalf("docs should be gone: %v", ServerIDs(got))
+		t.Fatalf("docs should be gone: %v", IDs(got))
 	}
 	for _, s := range got {
 		if s.ID == "raglit" {
@@ -131,14 +135,14 @@ func TestLoadServers_Disable(t *testing.T) {
 // re-enabling means removing the entry that disabled it.
 func TestLoadServers_LocalCannotUndisable(t *testing.T) {
 	dir := t.TempDir()
-	writeJSON(t, dir, ProjectServersFile, `{"servers":[{"id":"docs","disabled":true}]}`)
-	writeJSON(t, dir, LocalServersFile, `{"servers":[{"id":"docs","disabled":false}]}`)
+	writeJSON(t, dir, project.ProjectServersFile, `{"servers":[{"id":"docs","disabled":true}]}`)
+	writeJSON(t, dir, project.LocalServersFile, `{"servers":[{"id":"docs","disabled":false}]}`)
 	got, err := LoadServers(dir, "/ws", "/rag")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(byID(got)) != 2 {
-		t.Errorf("disabled must stay disabled: %v", ServerIDs(got))
+		t.Errorf("disabled must stay disabled: %v", IDs(got))
 	}
 }
 
@@ -146,12 +150,12 @@ func TestLoadServers_LocalCannotUndisable(t *testing.T) {
 // unattributed JSON error sends the reader to the wrong file.
 func TestLoadServers_ParseErrorNamesTheFile(t *testing.T) {
 	dir := t.TempDir()
-	writeJSON(t, dir, LocalServersFile, `{"servers":[{"id":`)
+	writeJSON(t, dir, project.LocalServersFile, `{"servers":[{"id":`)
 	_, err := LoadServers(dir, "/ws", "/rag")
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	if !strings.Contains(err.Error(), LocalServersFile) {
+	if !strings.Contains(err.Error(), project.LocalServersFile) {
 		t.Errorf("error should name the offending file: %v", err)
 	}
 }
@@ -160,7 +164,7 @@ func TestLoadServers_ParseErrorNamesTheFile(t *testing.T) {
 // than failing obscurely at exec.
 func TestLoadServers_RejectsCommandlessServer(t *testing.T) {
 	dir := t.TempDir()
-	writeJSON(t, dir, ProjectServersFile, `{"servers":[{"id":"ghost"}]}`)
+	writeJSON(t, dir, project.ProjectServersFile, `{"servers":[{"id":"ghost"}]}`)
 	if _, err := LoadServers(dir, "/ws", "/rag"); err == nil {
 		t.Error("a server with no command should be rejected")
 	}
@@ -186,11 +190,11 @@ func TestLoadServers_OnlyShellAutostartsByDefault(t *testing.T) {
 // the same file at the workspace root (the pre-.dun layout, still honored).
 func TestLoadServers_DunDirLocalWinsOverRoot(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, DunDir), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, project.DunDir), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	writeJSON(t, dir, LocalServersFile, `{"servers":[{"id":"docs","autostart":true}]}`)
-	writeJSON(t, filepath.Join(dir, DunDir), LocalServersFile, `{"servers":[{"id":"docs","autostart":false}]}`)
+	writeJSON(t, dir, project.LocalServersFile, `{"servers":[{"id":"docs","autostart":true}]}`)
+	writeJSON(t, filepath.Join(dir, project.DunDir), project.LocalServersFile, `{"servers":[{"id":"docs","autostart":false}]}`)
 	got, err := LoadServers(dir, "/ws", "/rag")
 	if err != nil {
 		t.Fatal(err)
@@ -202,7 +206,25 @@ func TestLoadServers_DunDirLocalWinsOverRoot(t *testing.T) {
 
 // setAutostart writes dir's project switch for id, as /mcp on --project does.
 func setAutostart(dir, id string, on bool) (string, error) {
-	return updateLocalServer(dir, id, func(s *ServerSpec) { s.Autostart = &on })
+	return UpdateLocalServer(dir, id, func(s *Spec) { s.Autostart = &on })
+}
+
+// gitRepo is a repo with one commit.
+func gitRepo(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	for _, args := range [][]string{{"init", "-q"}, {"config", "user.email", "t@t"}, {"config", "user.name", "t"}} {
+		if out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	os.WriteFile(filepath.Join(repo, "a.txt"), []byte("hello\n"), 0o644)
+	for _, args := range [][]string{{"add", "."}, {"commit", "-qm", "init"}} {
+		if out, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	return repo
 }
 
 // Turning autostart back OFF must be expressible, not require deleting the
@@ -214,7 +236,7 @@ func TestSetAutostart_RoundTripBothWays(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if p := ResolveProject(dir); p == nil || filepath.Dir(path) != p.StateDir {
+		if p := project.Resolve(dir); p == nil || filepath.Dir(path) != p.StateDir {
 			t.Errorf("wrote outside the project state dir: %s", path)
 		}
 		got, err := LoadServers(dir, "/ws", "/rag")
@@ -226,7 +248,7 @@ func TestSetAutostart_RoundTripBothWays(t *testing.T) {
 		}
 	}
 	// One entry, not one per call.
-	f, err := readServersFile(filepath.Join(ResolveProject(dir).StateDir, LocalServersFile))
+	f, err := ReadConfig(filepath.Join(project.Resolve(dir).StateDir, project.LocalServersFile))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,14 +263,14 @@ func TestSetAutostart_RoundTripBothWays(t *testing.T) {
 // touched to carry dun's files.
 func TestSetAutostart_WritesProjectDirNotRepo(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	repo := pruneRepo(t)
+	repo := gitRepo(t)
 	path, err := setAutostart(repo, "raglit", true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := ResolveProject(repo)
-	if p == nil || path != filepath.Join(p.StateDir, LocalServersFile) {
-		t.Fatalf("wrote %s, want the project's %s", path, LocalServersFile)
+	p := project.Resolve(repo)
+	if p == nil || path != filepath.Join(p.StateDir, project.LocalServersFile) {
+		t.Fatalf("wrote %s, want the project's %s", path, project.LocalServersFile)
 	}
 	st, err := os.Stat(path)
 	if err != nil {
@@ -257,10 +279,10 @@ func TestSetAutostart_WritesProjectDirNotRepo(t *testing.T) {
 	if st.Mode().Perm() != 0o600 {
 		t.Errorf("want 0600, got %v", st.Mode().Perm())
 	}
-	if _, err := os.Stat(filepath.Join(repo, DunDir)); !os.IsNotExist(err) {
-		t.Errorf("a project switch created %s in the repo", DunDir)
+	if _, err := os.Stat(filepath.Join(repo, project.DunDir)); !os.IsNotExist(err) {
+		t.Errorf("a project switch created %s in the repo", project.DunDir)
 	}
-	if out, _ := git("", "-C", repo, "status", "--porcelain"); strings.TrimSpace(out) != "" {
+	if out, _ := exec.Command("git", "-C", repo, "status", "--porcelain").Output(); strings.TrimSpace(string(out)) != "" {
 		t.Errorf("the repo must stay clean, got:\n%s", out)
 	}
 }
@@ -328,8 +350,8 @@ func TestLoadMounts_NoConfigNoGoMod(t *testing.T) {
 // LoadMounts: config mounts merge by name across layers.
 func TestLoadMounts_MergeByName(t *testing.T) {
 	dir := t.TempDir()
-	writeJSON(t, dir, ProjectServersFile, `{"mounts":[{"source":"../shared","name":"shared"}]}`)
-	writeJSON(t, dir, LocalServersFile, `{"mounts":[{"source":"/opt/shared","name":"shared"}]}`)
+	writeJSON(t, dir, project.ProjectServersFile, `{"mounts":[{"source":"../shared","name":"shared"}]}`)
+	writeJSON(t, dir, project.LocalServersFile, `{"mounts":[{"source":"/opt/shared","name":"shared"}]}`)
 	mounts := LoadMounts(dir, dir)
 	if len(mounts) != 1 {
 		t.Fatalf("want 1 mount, got %d", len(mounts))
@@ -345,7 +367,7 @@ func TestLoadMounts_MergeByName(t *testing.T) {
 // LoadMounts: relative sources are resolved against repoRoot.
 func TestLoadMounts_RelativeSourceResolved(t *testing.T) {
 	dir := t.TempDir()
-	writeJSON(t, dir, ProjectServersFile, `{"mounts":[{"source":"../agentkit","name":"agentkit"}]}`)
+	writeJSON(t, dir, project.ProjectServersFile, `{"mounts":[{"source":"../agentkit","name":"agentkit"}]}`)
 	mounts := LoadMounts(dir, dir)
 	if len(mounts) != 1 {
 		t.Fatalf("want 1 mount, got %d", len(mounts))
@@ -363,7 +385,7 @@ func TestLoadMounts_AutoAndConfig(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(gomod), 0644); err != nil {
 		t.Fatal(err)
 	}
-	writeJSON(t, dir, ProjectServersFile, `{"mounts":[{"source":"../tools","name":"tools"}]}`)
+	writeJSON(t, dir, project.ProjectServersFile, `{"mounts":[{"source":"../tools","name":"tools"}]}`)
 	mounts := LoadMounts(dir, dir)
 	if len(mounts) != 2 {
 		t.Fatalf("want 2 mounts, got %d", len(mounts))
@@ -388,11 +410,11 @@ func TestRaglitProject_NamespacesByCheckoutNotBySession(t *testing.T) {
 	}
 
 	// No .raglit → the directory name, normalized the way raglit itself would.
-	if got := raglitProject(repo); got != "my-project-v2" {
+	if got := RaglitProject(repo); got != "my-project-v2" {
 		t.Fatalf("project = %q, want my-project-v2", got)
 	}
 	// Stable across sessions: that is the whole point.
-	if raglitProject(repo) != raglitProject(repo+"/") {
+	if RaglitProject(repo) != RaglitProject(repo+"/") {
 		t.Error("a trailing separator must not change the index a session lands on")
 	}
 
@@ -405,7 +427,7 @@ func TestRaglitProject_NamespacesByCheckoutNotBySession(t *testing.T) {
 		[]byte(`{"project":"Declared Name"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := raglitProject(repo); got != "declared-name" {
+	if got := RaglitProject(repo); got != "declared-name" {
 		t.Fatalf("a declared project must win, got %q", got)
 	}
 
@@ -455,79 +477,22 @@ func TestRaglitCorpusIsTheRepo_IndexIsDirAndBranch(t *testing.T) {
 	run(repo, "worktree", "add", "-q", wt, "-b", "feat/x")
 
 	// Same corpus from both, because it is the same repository.
-	if p1, p2 := raglitProject(repo), raglitProject(wt); p1 != p2 {
+	if p1, p2 := RaglitProject(repo), RaglitProject(wt); p1 != p2 {
 		t.Fatalf("a worktree must share its repo's corpus: %q vs %q", p1, p2)
 	}
-	if got := raglitProject(wt); got != "myrepo" {
+	if got := RaglitProject(wt); got != "myrepo" {
 		t.Errorf("corpus should be the repo name, got %q", got)
 	}
 	// Different indexes, because they are different working trees on different
 	// branches — a search must not return a sibling worktree's files.
-	if i1, i2 := raglitIndex(repo), raglitIndex(wt); i1 == i2 {
+	if i1, i2 := RaglitIndex(repo), RaglitIndex(wt); i1 == i2 {
 		t.Fatalf("two worktrees must not share one index: both %q", i1)
 	}
-	if got := raglitIndex(wt); got != "wt-feature-feat-x" {
+	if got := RaglitIndex(wt); got != "wt-feature-feat-x" {
 		t.Errorf("index should be dir+branch, got %q", got)
 	}
-	if got := raglitIndex(repo); got != "myrepo-main" {
+	if got := RaglitIndex(repo); got != "myrepo-main" {
 		t.Errorf("index should be dir+branch, got %q", got)
-	}
-}
-
-// dun handed raglit the workspace's top-level entries, which meant handing over
-// build output: a 27 MB `dun` executable and a 25 MB `dun.test`, both gitignored,
-// both sent to a pipeline that extracts, segments and embeds.
-func TestIngestTargets_SendsWhatGitWouldShowYou(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
-	}
-	dir := t.TempDir()
-	run := func(args ...string) {
-		t.Helper()
-		c := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		c.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
-			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
-		if out, err := c.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v: %s", args, err, out)
-		}
-	}
-	run("init", "-q")
-	write := func(name, body string) {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write(".gitignore", "/binary\n*.test\n")
-	write("main.go", "package main\n")
-	write("README.md", "# hi\n")
-	write("binary", "\x7fELF\x02\x01\x01\x00 not really but ignored\n")
-	write("thing.test", "also ignored\n")
-	write("untracked.md", "untracked but not ignored\n")
-	run("add", "main.go", "README.md", ".gitignore")
-
-	got := map[string]bool{}
-	for _, p := range ingestTargets(dir) {
-		got[filepath.Base(p)] = true
-	}
-	for _, want := range []string{"main.go", "README.md", "untracked.md"} {
-		if !got[want] {
-			t.Errorf("%s should be ingested", want)
-		}
-	}
-	for _, never := range []string{"binary", "thing.test"} {
-		if got[never] {
-			t.Errorf("%s is gitignored build output and must NOT be sent to the indexer", never)
-		}
-	}
-
-	// Not a git repo → the old top-level behaviour, minus .git and .dun.
-	plain := t.TempDir()
-	os.WriteFile(filepath.Join(plain, "a.md"), []byte("x"), 0o644)
-	os.MkdirAll(filepath.Join(plain, ".dun"), 0o755)
-	for _, p := range ingestTargets(plain) {
-		if filepath.Base(p) == ".dun" {
-			t.Error("dun's own state directory must never be indexed")
-		}
 	}
 }
 
@@ -538,12 +503,12 @@ func TestLegacyServerIDs_ReadAsTheNewOnes(t *testing.T) {
 	dir := t.TempDir()
 
 	// dun.json, mcp.json: a definition and a switch under the old ids.
-	writeJSON(t, dir, ProjectServersFile, `{"servers":[{"id":"docs","autostart":true},{"id":"code","command":"/opt/bin/lsp"}]}`)
+	writeJSON(t, dir, project.ProjectServersFile, `{"servers":[{"id":"docs","autostart":true},{"id":"code","command":"/opt/bin/lsp"}]}`)
 	got, err := LoadServers(dir, "/ws", "/rag")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ids := ServerIDs(got); slices.Contains(ids, "docs") || slices.Contains(ids, "code") {
+	if ids := IDs(got); slices.Contains(ids, "docs") || slices.Contains(ids, "code") {
 		t.Errorf("an old id must not survive as a second server: %v", ids)
 	}
 	m := byID(got)
@@ -555,7 +520,7 @@ func TestLegacyServerIDs_ReadAsTheNewOnes(t *testing.T) {
 	}
 
 	// Project state (what /rag auto wrote): old id off, then new id on, wins.
-	writeJSON(t, dir, LocalServersFile, `{"servers":[{"id":"docs","autostart":false}]}`)
+	writeJSON(t, dir, project.LocalServersFile, `{"servers":[{"id":"docs","autostart":false}]}`)
 	got, _ = LoadServers(dir, "/ws", "/rag")
 	if byID(got)["raglit"].Autostart {
 		t.Error("project state docs=false must read as raglit=false")
@@ -567,7 +532,7 @@ func TestLegacyServerIDs_ReadAsTheNewOnes(t *testing.T) {
 	if !byID(got)["raglit"].Autostart {
 		t.Error("a new write under the new id must be read")
 	}
-	f, err := readServersFile(filepath.Join(ResolveProject(dir).StateDir, LocalServersFile))
+	f, err := ReadConfig(filepath.Join(project.Resolve(dir).StateDir, project.LocalServersFile))
 	if err != nil || f == nil {
 		t.Fatal(err)
 	}
@@ -580,14 +545,271 @@ func TestLegacyServerIDs_ReadAsTheNewOnes(t *testing.T) {
 	// The session sidecar. A current key beats an old one in the same file.
 	sess := filepath.Join(t.TempDir(), "s.jsonl")
 	on, off := true, false
-	if _, err := saveSessionServers(sess, map[string]SessionServer{"docs": {On: &off}, "code": {On: &on}, "raglit": {On: &on}}); err != nil {
+	if _, err := SaveSessionServers(sess, map[string]SessionServer{"docs": {On: &off}, "code": {On: &on}, "raglit": {On: &on}}); err != nil {
 		t.Fatal(err)
 	}
 	sw := LoadSessionServers(sess)
 	if len(sw) != 2 || sw["poly-lsp"].On == nil || !*sw["poly-lsp"].On || sw["raglit"].On == nil || !*sw["raglit"].On {
 		t.Errorf("sidecar: %+v", sw)
 	}
-	if !builtinServer("docs") || !builtinServer("code") || !builtinServer("raglit") || !builtinServer("poly-lsp") {
+	if !IsBuiltin("docs") || !IsBuiltin("code") || !IsBuiltin("raglit") || !IsBuiltin("poly-lsp") {
 		t.Error("old and new ids both name the built-ins")
+	}
+}
+
+// An older dun's .dun/dun.local.json and agents_read are COPIED in on first
+// sight — the original stays — and an import never overwrites state that is
+// already there.
+func TestProject_ImportsLegacyState(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	repo := gitRepo(t)
+	legacy := filepath.Join(repo, project.DunDir)
+	if err := os.MkdirAll(legacy, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeJSON(t, legacy, project.LocalServersFile, `{"servers":[{"id":"docs","autostart":true}]}`)
+	writeJSON(t, legacy, "agents_read", "/x/AGENTS.md 1\n")
+
+	p, err := project.Ensure(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{project.LocalServersFile, "agents_read"} { // project.legacyState
+		b, err := os.ReadFile(filepath.Join(p.StateDir, name))
+		if err != nil {
+			t.Fatalf("%s was not imported: %v", name, err)
+		}
+		orig, err := os.ReadFile(filepath.Join(legacy, name))
+		if err != nil {
+			t.Fatalf("the repo's %s must not be removed: %v", name, err)
+		}
+		if string(b) != string(orig) {
+			t.Errorf("%s imported as %q, want %q", name, b, orig)
+		}
+	}
+	got, _ := LoadServers(repo, "/ws", "/rag")
+	if !byID(got)["raglit"].Autostart {
+		t.Error("the imported setting must take effect")
+	}
+	// Turned off after the move: that is the state now, and a second sight
+	// must not import the repo's stale copy over it.
+	if _, err := setAutostart(repo, "raglit", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := project.Ensure(repo); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = LoadServers(repo, "/ws", "/rag")
+	if byID(got)["raglit"].Autostart {
+		t.Error("the project's own state must win over the repo's old copy")
+	}
+}
+
+// The go.mod replace shapes: the block form is read, "../x/sub" needs x beside
+// the worktree (not sub), a target inside the repo needs nothing.
+func TestDiscoverGoModReplaces_Shapes(t *testing.T) {
+	dir := t.TempDir()
+	gomod := "module example.com/app\n\ngo 1.22\n\n" +
+		"replace example.com/a => ../a // a comment\n" +
+		"replace (\n" +
+		"\texample.com/b v1.0.0 => ../mono/b\n" +
+		"\texample.com/c => ./internal/c\n" +
+		"\texample.com/d => ../../d\n" +
+		"\texample.com/e => example.com/e2 v1.0.0\n" +
+		"\texample.com/f => ../mono/f\n" +
+		")\n"
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(gomod), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, m := range discoverGoModReplaces(dir, dir) {
+		if _, dup := got[m.Name]; dup {
+			t.Errorf("mount %q listed twice", m.Name)
+		}
+		got[m.Name] = m.Source
+	}
+	want := map[string]string{"a": "../a", "mono": "../mono", "d": "../../d"}
+	if len(got) != len(want) {
+		t.Fatalf("mounts = %v, want %v", got, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("mount %q = %q, want %q", k, got[k], v)
+		}
+	}
+}
+
+func TestServerWake_SpecMerges(t *testing.T) {
+	if !mergeSpec(Spec{ID: "a", Wake: true}, Spec{ID: "a", Command: "x"}).Wake {
+		t.Error("omitted wake should inherit")
+	}
+}
+
+func TestMergeSpec_ShellReplaced(t *testing.T) {
+	low := Spec{ID: "x", Shell: &ShellOptions{Unchecked: []string{"a"}}}
+	if got := mergeSpec(low, Spec{ID: "x"}); got.Shell == nil || !slices.Equal(got.Shell.Unchecked, []string{"a"}) {
+		t.Errorf("a layer without a shell block keeps the lower one: %+v", got.Shell)
+	}
+	if got := mergeSpec(low, Spec{ID: "x", Shell: &ShellOptions{Unchecked: []string{"*"}}}); !slices.Equal(got.Shell.Unchecked, []string{"*"}) {
+		t.Errorf("a later shell block replaces: %+v", got.Shell)
+	}
+}
+
+// Re-adding a server replaces its definition but keeps the mode and instance
+// it had: they are switches, and the add form does not ask for them.
+func TestPutUserServer_KeepsModeAndInstance(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	if _, err := PutUserServer(Spec{ID: "corp", Command: "corp-mcp", Via: ViaShell, Instance: InstanceSession}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PutUserServer(Spec{ID: "corp", Command: "corp-mcp2"}); err != nil {
+		t.Fatal(err)
+	}
+	f, _ := ReadConfig(UserServersFile())
+	if len(f.Servers) != 1 || f.Servers[0].Command != "corp-mcp2" || f.Servers[0].Via != ViaShell || f.Servers[0].Instance != InstanceSession {
+		t.Errorf("re-add: %+v", f.Servers)
+	}
+	// A value the new spec names wins.
+	if _, err := PutUserServer(Spec{ID: "corp", Command: "corp-mcp2", Via: ViaDirect, Instance: InstanceShared}); err != nil {
+		t.Fatal(err)
+	}
+	f, _ = ReadConfig(UserServersFile())
+	if f.Servers[0].Via != ViaDirect || f.Servers[0].Instance != InstanceShared {
+		t.Errorf("explicit: %+v", f.Servers)
+	}
+}
+
+// The empty list survives a write; nil stays absent.
+func TestServerSpec_EmptyDisableIsWritten(t *testing.T) {
+	b, _ := json.Marshal(Spec{ID: "x", Disable: []string{}})
+	if !strings.Contains(string(b), `"disable":[]`) {
+		t.Errorf("%s", b)
+	}
+	b, _ = json.Marshal(Spec{ID: "x"})
+	if strings.Contains(string(b), "disable") {
+		t.Errorf("%s", b)
+	}
+}
+
+// The user list is the lowest file layer; a remote server's bearer becomes
+// an Authorization header, read from the environment when it says $NAME.
+func TestLoadServers_UserListAndBearer(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	t.Setenv("CORP_TOKEN", "s3cret")
+	if _, err := PutUserServer(Spec{ID: "corp", URL: "https://corp/mcp", Bearer: "$CORP_TOKEN"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PutUserServer(Spec{ID: "gone", URL: "https://x/mcp"}); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := os.Stat(UserServersFile()); st.Mode().Perm() != 0o600 {
+		t.Errorf("the user list holds tokens: perms %v", st.Mode().Perm())
+	}
+	dir := t.TempDir()
+	writeJSON(t, dir, project.ProjectServersFile, `{"servers":[{"id":"gone","disabled":true}]}`)
+	got, err := LoadServers(dir, "/ws", "/rag")
+	if err != nil {
+		t.Fatal(err)
+	}
+	corp, ok := byID(got)["corp"]
+	if !ok || corp.URL != "https://corp/mcp" || corp.Headers["Authorization"] != "Bearer s3cret" {
+		t.Fatalf("corp = %+v", corp)
+	}
+	if _, ok := byID(got)["gone"]; ok {
+		t.Error("a project file must be able to disable a user server")
+	}
+	if ok, _ := RemoveUserServer("corp"); !ok {
+		t.Error("remove")
+	}
+}
+
+// The oauth block round-trips through mcp.json, merges field by field across
+// layers, and is refused where it cannot work.
+func TestOAuthSpec_ConfigRoundTripAndMerge(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	in := Spec{ID: "snow", URL: "https://acct.snowflakecomputing.com/api/v2/databases/d/schemas/s/mcp-servers/m",
+		OAuth: &oauth.Spec{ClientID: "c1", ClientSecret: "$SNOW_SECRET", Scopes: []string{"session:role:ANALYST"},
+			Resource: "none", Send: oauth.SendAccessToken, RedirectPort: 4000, AuthParams: map[string]string{"prompt": "consent"}}}
+	if _, err := PutUserServer(in); err != nil {
+		t.Fatal(err)
+	}
+	f, err := ReadConfig(UserServersFile())
+	if err != nil || len(f.Servers) != 1 {
+		t.Fatal(f, err)
+	}
+	b1, _ := json.Marshal(in)
+	b2, _ := json.Marshal(f.Servers[0])
+	if string(b1) != string(b2) {
+		t.Errorf("round trip:\n%s\n%s", b1, b2)
+	}
+	if !strings.Contains(string(b2), `"client_secret":"$SNOW_SECRET"`) {
+		t.Errorf("the secret reference must be kept as written: %s", b2)
+	}
+	dir := t.TempDir()
+	writeJSON(t, dir, project.ProjectServersFile, `{"servers":[{"id":"snow","oauth":{"issuer":"https://idp.example","scopes":["a","b"]}}]}`)
+	got, err := LoadServers(dir, "/ws", "/rag")
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := byID(got)["snow"].OAuth
+	if o == nil || o.ClientID != "c1" || o.Issuer != "https://idp.example" || !slices.Equal(o.Scopes, []string{"a", "b"}) || o.RedirectPort != 4000 {
+		t.Errorf("merged %+v", o)
+	}
+	for _, c := range []struct {
+		s    Spec
+		via  string
+		want string
+	}{
+		{Spec{ID: "x", Command: "x", OAuth: &oauth.Spec{ClientID: "c"}}, "", "remote server"},
+		{Spec{ID: "x", URL: "https://x", Bearer: "t", OAuth: &oauth.Spec{ClientID: "c"}}, "", "both bearer and oauth"},
+		{Spec{ID: "x", URL: "https://x", OAuth: &oauth.Spec{ClientID: "c", Send: "jwt"}}, "", "send"},
+	} {
+		if err := CheckOAuth(c.s, c.via); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%+v: %v, want %q", c.s, err, c.want)
+		}
+	}
+}
+
+// Setting an OAuth server scripted is allowed now.
+func TestOAuth_ScriptedIsAllowed(t *testing.T) {
+	if err := CheckOAuth(Spec{ID: "x", URL: "https://x/mcp", OAuth: &oauth.Spec{ClientID: "c"}}, ViaShell); err != nil {
+		t.Errorf("checkOAuth: %v", err)
+	}
+}
+
+// Via survives the user file and the layered load; "direct" reads as the
+// default; anything else, and a built-in in the shell, is refused by name.
+func TestServerSpec_ViaRoundTrip(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	if _, err := PutUserServer(Spec{ID: "corp", Command: "corp-mcp", Via: ViaShell}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PutUserServer(Spec{ID: "db", Command: "db-mcp", Via: ViaDirect}); err != nil {
+		t.Fatal(err)
+	}
+	f, _ := ReadConfig(UserServersFile())
+	if f.Servers[0].Via != ViaShell {
+		t.Errorf("file: %+v", f.Servers)
+	}
+	dir := t.TempDir()
+	got, err := LoadServers(dir, "/ws", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if byID(got)["corp"].Via != ViaShell || byID(got)["db"].Via != "" {
+		t.Errorf("corp %+v db %+v", byID(got)["corp"], byID(got)["db"])
+	}
+	// A project file can move it back with an explicit "direct".
+	writeJSON(t, dir, project.ProjectServersFile, `{"servers":[{"id":"corp","via":"direct"}]}`)
+	if got, _ := LoadServers(dir, "/ws", ""); byID(got)["corp"].Via != "" {
+		t.Errorf("direct over shell: %+v", byID(got)["corp"])
+	}
+	writeJSON(t, dir, project.ProjectServersFile, `{"servers":[{"id":"corp","via":"sideways"}]}`)
+	if _, err := LoadServers(dir, "/ws", ""); err == nil || !strings.Contains(err.Error(), "sideways") {
+		t.Errorf("bad via: %v", err)
+	}
+	writeJSON(t, dir, project.ProjectServersFile, `{"servers":[{"id":"code","via":"shell"}]}`)
+	if _, err := LoadServers(dir, "/ws", ""); err == nil || !strings.Contains(err.Error(), "built in") {
+		t.Errorf("a built-in in the shell: %v", err)
 	}
 }

@@ -10,7 +10,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/numfmt"
+	"github.com/iodesystems/dun/internal/project"
 )
 
 // The rules files: the user's ~/AGENTS.md, ~/CLAUDE.md and
@@ -107,7 +109,7 @@ func (h *Harness) rulesSwitchKind() switchKind {
 			if mode == RulesSummary {
 				return h.ensureRulesSummary(context.Background(), h.loadRules())
 			}
-			if mode == RulesIndex && !h.hookStarted(HookRulesChanged) {
+			if mode == RulesIndex && !h.hookStarted(mcpserver.HookRulesChanged) {
 				return fmt.Errorf("index mode needs raglit's index: /rag on first")
 			}
 			return nil
@@ -117,7 +119,7 @@ func (h *Harness) rulesSwitchKind() switchKind {
 		// what that changes; the same thing twice was the warning (USER
 		// 2026-10-25).
 		status: func(string) []string {
-			if h.hookStarted(HookRulesChanged) {
+			if h.hookStarted(mcpserver.HookRulesChanged) {
 				return []string{"docs index (raglit): on · files switched off are still found by relevance"}
 			}
 			return []string{"docs index (raglit): off · /rag on to search files switched off, and for mode index"}
@@ -224,7 +226,7 @@ func (h *Harness) listsPath(keys []string, real string) bool {
 // addKeyIs says key names the file whose real path is real.
 func (h *Harness) addKeyIs(key, real string) bool {
 	a, _, err := h.rulesAddPath(key)
-	return err == nil && realPath(a) == real
+	return err == nil && project.RealPath(a) == real
 }
 
 // AddRule makes p a root file at scope and returns what to say. A file
@@ -237,16 +239,16 @@ func (h *Harness) AddRule(p, scope string) (string, error) {
 	if h.switchFile(rulesKind, scope) == "" {
 		return "", fmt.Errorf("there is no %s scope here", scope)
 	}
-	if scope != ScopeSession {
+	if scope != mcpserver.ScopeSession {
 		// Read from other workspaces: relative would name a different file in each.
 		key = abs
 	}
 	set := h.loadRules()
-	real := realPath(abs)
+	real := project.RealPath(abs)
 	for _, d := range append(slices.Clone(set.Roots), set.Imports...) {
 		// A global add is read in every project: only the user files (and
 		// what they import) are in every project's block too.
-		if realPath(d.Path) != real || d.Added != "" || scope == ScopeGlobal && !d.User {
+		if project.RealPath(d.Path) != real || d.Added != "" || scope == mcpserver.ScopeGlobal && !d.User {
 			continue
 		}
 		how := "a root file"
@@ -290,7 +292,7 @@ func (h *Harness) RemoveRule(p, scope string) (string, error) {
 	if h.switchFile(rulesKind, scope) == "" {
 		return "", fmt.Errorf("there is no %s scope here", scope)
 	}
-	real, had := realPath(abs), false
+	real, had := project.RealPath(abs), false
 	if err := h.editSwitchFile(rulesKind, scope, func(f *SwitchFile) {
 		had = h.listsPath(f.Add, real)
 		f.Add = slices.DeleteFunc(f.Add, func(k string) bool { return h.addKeyIs(k, real) })

@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/mounttool"
+	"github.com/iodesystems/dun/internal/project"
 )
 
 // SetExec swaps the exec backend at runtime (e.g. host ↔ Docker) and rebuilds
@@ -79,7 +81,7 @@ func (h *Harness) addMountLocked(resolved, name, repoRoot string) error {
 		}
 	}
 
-	spec := MountSpec{Source: resolved, Name: name}
+	spec := mcpserver.MountSpec{Source: resolved, Name: name}
 	h.cfg.ExtraMounts = append(h.cfg.ExtraMounts, spec)
 
 	// Reconfigure the exec backend with the new mount.
@@ -93,8 +95,8 @@ func (h *Harness) addMountLocked(resolved, name, repoRoot string) error {
 	// wherever the user keeps the repo; an old-layout worktree's parent is
 	// <repo>/.dun/worktrees/. dun writes in neither.
 	if wt := h.cfg.Worktree; wt != nil && wt.IsRepo() && wt.Branch != "" {
-		if p := ResolveProject(repoRoot); p != nil && filepath.Dir(wt.Path) == p.WorktreesDir() {
-			if err := linkMount(p.WorktreesDir(), MountSpec{Source: resolved, Name: name}); err != nil {
+		if p := project.Resolve(repoRoot); p != nil && filepath.Dir(wt.Path) == p.WorktreesDir() {
+			if err := linkMount(p.WorktreesDir(), mcpserver.MountSpec{Source: resolved, Name: name}); err != nil {
 				return err
 			}
 		}

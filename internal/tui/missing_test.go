@@ -9,6 +9,7 @@ import (
 
 	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // mcpshell not installed (a binary-only install) is a setup step, not a
@@ -23,9 +24,9 @@ func TestSplash_MissingShellIsQuiet(t *testing.T) {
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = nm.(tuiModel)
 	m = m.feed(evMsg{"type": "session", "id": "s1"})
-	err := (&harness.MissingError{Command: "mcpshell"}).Error()
+	err := (&mcpserver.MissingError{Command: "mcpshell"}).Error()
 	m = m.feed(evMsg{"type": "ready", "tools": []any{"read"},
-		"hint":    enginecmd.ServerHint([]harness.ServerState{{ID: harness.ServerShell, Err: err, Missing: true}}),
+		"hint":    enginecmd.ServerHint([]harness.ServerState{{ID: mcpserver.ServerShell, Err: err, Missing: true}}),
 		"servers": []any{map[string]any{"id": "shell", "err": err, "missing": true}}})
 	m = m.feed(evMsg{"type": "settings", "model": "", "url": ""})
 	s := stripANSI(convoText(m))

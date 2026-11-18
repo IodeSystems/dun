@@ -1,15 +1,19 @@
 package harness
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
+)
 
 // A --no-dir session keeps the shell and servers that need no directory,
 // and raglit, and leaves out poly-lsp and any server that names the workspace.
 func TestNoDir_ServersThatNeedADirectoryAreLeftOut(t *testing.T) {
 	ws := "/home/u/.dun/nodir"
-	servers := []Server{
-		{ID: ServerShell, Command: "mcpshell", Args: []string{"mcp", "--files-dir", ws}},
-		{ID: ServerCode, Command: "poly-lsp-mcp"},
-		{ID: ServerDocs, Command: "raglit"},
+	servers := []mcpserver.Server{
+		{ID: mcpserver.ServerShell, Command: "mcpshell", Args: []string{"mcp", "--files-dir", ws}},
+		{ID: mcpserver.ServerCode, Command: "poly-lsp-mcp"},
+		{ID: mcpserver.ServerDocs, Command: "raglit"},
 		{ID: "playwright", Command: "npx", Args: []string{"@playwright/mcp@latest"}},
 		{ID: "repo-notes", Command: "notes", Args: []string{"--root", ws}},
 		{ID: "remote", URL: "https://mcp.example/v1"},
@@ -20,7 +24,7 @@ func TestNoDir_ServersThatNeedADirectoryAreLeftOut(t *testing.T) {
 		ids[s.ID] = true
 	}
 	// raglit stays, for other indexes, without the workspace (ragworkspace.go).
-	if !ids[ServerShell] || !ids["playwright"] || !ids["remote"] || !ids[ServerDocs] || ids[ServerCode] || ids["repo-notes"] {
+	if !ids[mcpserver.ServerShell] || !ids["playwright"] || !ids["remote"] || !ids[mcpserver.ServerDocs] || ids[mcpserver.ServerCode] || ids["repo-notes"] {
 		t.Errorf("kept %v", ids)
 	}
 	if n := len(withoutDirServers(servers, Config{Workspace: ws})); n != len(servers) {

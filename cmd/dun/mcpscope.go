@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/mcptable"
 	"github.com/iodesystems/dun/internal/textfmt"
 )
@@ -28,7 +29,7 @@ import (
 func scopeArg(flags []string, def string) (string, error) {
 	scope := ""
 	for _, f := range flags {
-		s, ok := harness.ParseScope(f)
+		s, ok := mcpserver.ParseScope(f)
 		if !ok || !strings.HasPrefix(f, "-") {
 			return "", fmt.Errorf("%q: want --global, --project or --session", f)
 		}
@@ -46,7 +47,7 @@ func scopeArg(flags []string, def string) (string, error) {
 // runSwitchCmd sets one server's on/off switch: verb on, off or unset.
 func runSwitchCmd(ctx context.Context, h *harness.Harness, alias, verb string, flags []string) string {
 	id, label := alias, alias
-	def := harness.ScopeSession
+	def := mcpserver.ScopeSession
 	if verb == "unset" {
 		def = ""
 	}
@@ -60,7 +61,7 @@ func runSwitchCmd(ctx context.Context, h *harness.Harness, alias, verb string, f
 		b := verb == "on"
 		on = &b
 	case "unset":
-		if scope == "" || scope == harness.ScopeGlobal {
+		if scope == "" || scope == mcpserver.ScopeGlobal {
 			return "usage: /mcp unset <id> --project|--session (the global switch is on or off)"
 		}
 	default:
@@ -87,7 +88,7 @@ func runSwitchCmd(ctx context.Context, h *harness.Harness, alias, verb string, f
 	if st.From != scope && st.From != "" {
 		msg += "\nthe " + fromWord(st.From) + " switch decides here"
 	}
-	if verb == "unset" && scope == harness.ScopeProject && st.Project != "" {
+	if verb == "unset" && scope == mcpserver.ScopeProject && st.Project != "" {
 		msg += "\nthe repo's dun.json sets it for this project — that is the project value while the project's state is unset"
 	}
 	return msg + ingestLine(h, id)
@@ -100,16 +101,16 @@ func runViaCmd(ctx context.Context, h *harness.Harness, f []string) string {
 		return usage
 	}
 	id, via := f[0], strings.ToLower(f[1])
-	scope, err := scopeArg(f[2:], harness.ScopeSession)
+	scope, err := scopeArg(f[2:], mcpserver.ScopeSession)
 	if err != nil {
 		return "mcp mode: " + err.Error()
 	}
 	if via == "unset" {
 		via = ""
-	} else if v, err := harness.NormalizeVia(via); err != nil {
+	} else if v, err := mcpserver.NormalizeVia(via); err != nil {
 		return usage
 	} else {
-		via = map[string]string{"": harness.ViaDirect, harness.ViaShell: harness.ViaShell}[v]
+		via = map[string]string{"": mcpserver.ViaDirect, mcpserver.ViaShell: mcpserver.ViaShell}[v]
 	}
 	restarted, err := h.MoveServer(ctx, id, scope, via)
 	if err != nil {
@@ -118,14 +119,14 @@ func runViaCmd(ctx context.Context, h *harness.Harness, f []string) string {
 	st, _ := stateOf(h, id)
 	word := "unset"
 	if via != "" {
-		word = harness.ModeWord(via)
+		word = mcpserver.ModeWord(via)
 	}
 	msg := id + ": mode " + scope + " " + word + " → " + mcptable.ViaCell(st) + " · " + mcptable.ServerDetail(st)
 	if restarted {
 		msg += " · shell restarted"
 	}
-	if st.Via == harness.ViaShell {
-		if sh, _ := stateOf(h, harness.ServerShell); !sh.Running && st.Auto {
+	if st.Via == mcpserver.ViaShell {
+		if sh, _ := stateOf(h, mcpserver.ServerShell); !sh.Running && st.Auto {
 			msg += "\nthe shell is not running — it hosts " + id + " when it starts (/mcp on shell)"
 		}
 		msg += "\n" + shellPlacementNote
@@ -138,19 +139,19 @@ func runViaCmd(ctx context.Context, h *harness.Harness, f []string) string {
 // standalone, a built-in always is.
 func runDefaultViaCmd(ctx context.Context, h *harness.Harness, arg string) string {
 	const usage = "usage: /mcp default standalone|scripted"
-	via, err := harness.NormalizeVia(arg)
+	via, err := mcpserver.NormalizeVia(arg)
 	if err != nil || strings.TrimSpace(arg) == "" {
 		return usage
 	}
 	if via == "" {
-		via = harness.ViaDirect
+		via = mcpserver.ViaDirect
 	}
 	path, err := h.SetDefaultMode(ctx, via)
 	if path == "" && err != nil {
 		return "mcp default: " + textfmt.OneLine(err.Error())
 	}
-	msg := "default mode: " + harness.ModeWord(via) + " (saved to " + path + ") — for a server no scope sets a mode for; /mcp mode <id> overrides it (unset follows it); other running sessions pick it up when they are next idle"
-	if via == harness.ViaShell {
+	msg := "default mode: " + mcpserver.ModeWord(via) + " (saved to " + path + ") — for a server no scope sets a mode for; /mcp mode <id> overrides it (unset follows it); other running sessions pick it up when they are next idle"
+	if via == mcpserver.ViaShell {
 		msg += "; a server with instance agent, and the built-ins, stay standalone"
 	}
 	if err != nil {
@@ -167,16 +168,16 @@ func runInstanceCmd(ctx context.Context, h *harness.Harness, f []string) string 
 		return usage
 	}
 	id, inst := f[0], strings.ToLower(f[1])
-	scope, err := scopeArg(f[2:], harness.ScopeSession)
+	scope, err := scopeArg(f[2:], mcpserver.ScopeSession)
 	if err != nil {
 		return "mcp instance: " + err.Error()
 	}
 	if inst == "unset" {
 		inst = ""
-	} else if v, err := harness.NormalizeInstance(inst); err != nil {
+	} else if v, err := mcpserver.NormalizeInstance(inst); err != nil {
 		return usage
 	} else if v == "" {
-		inst = harness.InstanceShared
+		inst = mcpserver.InstanceShared
 	}
 	if _, err := h.SetServerInstance(ctx, id, scope, inst); err != nil {
 		return "mcp instance: " + err.Error()
@@ -195,7 +196,7 @@ func runInstanceCmd(ctx context.Context, h *harness.Harness, f []string) string 
 
 // toolSwitchLine sets one tool's switch and says what happened.
 func toolSwitchLine(h *harness.Harness, id, tool, verb string, flags []string) string {
-	scope, err := scopeArg(flags, harness.ScopeSession)
+	scope, err := scopeArg(flags, mcpserver.ScopeSession)
 	if err != nil {
 		return id + ": " + err.Error()
 	}

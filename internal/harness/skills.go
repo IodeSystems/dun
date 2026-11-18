@@ -18,6 +18,8 @@ import (
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/dun/internal/project"
 )
 
 // Skills — instructions for one kind of task, loaded when the task comes up.
@@ -80,7 +82,7 @@ func skillDirs(projectDir string) []struct{ dir, source string } {
 	if projectDir != "" {
 		out = append(out,
 			struct{ dir, source string }{filepath.Join(projectDir, ".claude", "skills"), "project"},
-			struct{ dir, source string }{filepath.Join(projectDir, DunDir, "skills"), "project"})
+			struct{ dir, source string }{filepath.Join(projectDir, project.DunDir, "skills"), "project"})
 	}
 	return out
 }
@@ -336,7 +338,7 @@ func (h *Harness) skillRoots() (user, project []struct{ dir, source string }) {
 	// Extensions' skills directories, above the user's own.
 	var exts []struct{ dir, source string }
 	for _, e := range h.extensions() {
-		if d := e.skillsDir(); d != "" {
+		if d := e.SkillsDir(); d != "" {
 			exts = append(exts, struct{ dir, source string }{d, "extension " + e.ID})
 		}
 	}
@@ -829,7 +831,7 @@ func (h *Harness) skillAllowed(name string) bool {
 // skillsSearchable reports whether skills reach the proactive search: an
 // extension that takes the skills index is running.
 func (h *Harness) skillsSearchable() bool {
-	_, ok := hookExt(h.extensions(), HookSkillsChanged, h.mgr.GetTools())
+	_, ok := hookExt(h.extensions(), mcpserver.HookSkillsChanged, h.mgr.GetTools())
 	return ok
 }
 

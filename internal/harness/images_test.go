@@ -16,6 +16,7 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // writePNG writes a w×h PNG; noisy fills it with random pixels so it does
@@ -227,7 +228,7 @@ func imageHarness(t *testing.T, runner agent.LLMRunner, v VisionConfig) (*Harnes
 		v.StateFile = filepath.Join(dir, "vision.json")
 	}
 	v.Key = "http://llm test-model"
-	h, err := Start(context.Background(), Config{Workspace: dir, Servers: []Server{}, Client: runner,
+	h, err := Start(context.Background(), Config{Workspace: dir, Servers: []mcpserver.Server{}, Client: runner,
 		SessionFile: filepath.Join(dir, "s.jsonl"), Vision: v})
 	if err != nil {
 		t.Fatal(err)

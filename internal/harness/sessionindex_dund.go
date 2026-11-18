@@ -38,6 +38,7 @@ import (
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -84,7 +85,7 @@ func (h *Harness) sessionIndex() *dundSessionIndex {
 			return
 		}
 		dir := foldsDir(r.cfg.SessionFile)
-		r.sessIdx = &dundSessionIndex{link: r.cfg.Rag, project: raglitProject(r.cfg.Workspace),
+		r.sessIdx = &dundSessionIndex{link: r.cfg.Rag, project: mcpserver.RaglitProject(r.cfg.Workspace),
 			session: r.raglitSession(), dir: dir, logs: filepath.Dir(dir), notice: r.cfg.OnNotify}
 	})
 	return r.sessIdx
@@ -345,7 +346,7 @@ func ForgetSessionFolds(link RagLink, root, id string) error {
 		}
 		return nil
 	}
-	project := raglitProject(root)
+	project := mcpserver.RaglitProject(root)
 	err := errors.New("no dund link (DUN_MEMORY=0)")
 	if link != nil {
 		_, err = link.Sync(ctx, proto.RagSync{Project: project, Index: sessionsIndex, Gone: paths})

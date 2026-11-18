@@ -376,3 +376,6 @@ func LoadSessionMeta(root, id string) SessionMeta {
 	}
 	return meta
 }
+
+// DunHome is $DUN_HOME, else ~/.dun.
+func DunHome() string { return filepath.Dir(SessionsDir()) }

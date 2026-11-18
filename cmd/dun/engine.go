@@ -16,6 +16,7 @@ import (
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
@@ -612,7 +613,7 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 	if peers != nil {
 		// A global server change made here reaches the owner's other
 		// sessions (proto.ServersChanged); not waited for.
-		harness.OnUserServersWritten = func() {
+		mcpserver.OnUserServersWritten = func() {
 			go func() { _, _ = peers.call(context.Background(), proto.PeerRequest{Op: "servers"}) }()
 		}
 	}

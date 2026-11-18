@@ -11,6 +11,7 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // roundFn is one round of a scripted model: it writes chunks to out and
@@ -80,7 +81,7 @@ func startScripted(t *testing.T, r *scriptRunner) *Harness {
 	t.Helper()
 	dir := t.TempDir()
 	h, err := Start(context.Background(), Config{
-		Workspace: dir, Servers: []Server{}, Client: r,
+		Workspace: dir, Servers: []mcpserver.Server{}, Client: r,
 		SessionFile: filepath.Join(dir, "s.jsonl"),
 	})
 	if err != nil {

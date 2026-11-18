@@ -16,6 +16,7 @@ import (
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/taskgraph"
 	"github.com/iodesystems/dun/internal/fsutil"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/textfmt"
 )
 
@@ -424,7 +425,7 @@ func changesWorkspace(name, server string) bool {
 	if server == "" {
 		return false
 	}
-	if server == ServerShell {
+	if server == mcpserver.ServerShell {
 		return true
 	}
 	bare := name

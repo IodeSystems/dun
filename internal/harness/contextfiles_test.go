@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/iodesystems/agentkit/agent"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // A context file switched off leaves the block, which names it; it goes into
@@ -20,7 +21,7 @@ func TestContextFiles_Switches(t *testing.T) {
 	h := rulesHarness(t, ws)
 	h.cfg.SessionFile = filepath.Join(t.TempDir(), "s.jsonl")
 	off := false
-	if _, err := h.setSwitch(h.rulesSwitchKind(), "big.md", ScopeProject, &off); err != nil {
+	if _, err := h.setSwitch(h.rulesSwitchKind(), "big.md", mcpserver.ScopeProject, &off); err != nil {
 		t.Fatal(err)
 	}
 	block, mode, set := h.rulesBlock(false)
@@ -38,10 +39,10 @@ func TestContextFiles_Switches(t *testing.T) {
 	r := &cannedRephraseRunner{reply: "SHORT"}
 	h.Session = &agent.Session{SessionID: "dun", Store: h.store, Runner: r}
 	on := true
-	if _, err := h.setSwitch(h.rulesSwitchKind(), "big.md", ScopeSession, &on); err != nil {
+	if _, err := h.setSwitch(h.rulesSwitchKind(), "big.md", mcpserver.ScopeSession, &on); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.setSwitchMode(h.rulesSwitchKind(), RulesSummary, ScopeSession); err != nil || r.called != 1 {
+	if _, err := h.setSwitchMode(h.rulesSwitchKind(), RulesSummary, mcpserver.ScopeSession); err != nil || r.called != 1 {
 		t.Fatalf("summary mode: %v (calls %d)", err, r.called)
 	}
 	if block, mode, _ := h.rulesBlock(false); mode != RulesSummary || !strings.Contains(block, "SHORT") {
@@ -105,7 +106,7 @@ func TestRules_ModeIsTheSwitchesProjectMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	v, _ := h.SwitchView(rulesKind)
-	if v.Mode != RulesFull || v.ModeFrom != ScopeProject || v.Slash != "rules" {
+	if v.Mode != RulesFull || v.ModeFrom != mcpserver.ScopeProject || v.Slash != "rules" {
 		t.Errorf("view: mode %q from %q, slash %q", v.Mode, v.ModeFrom, v.Slash)
 	}
 	if st := h.readRulesState(); st.Mode != "" {

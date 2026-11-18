@@ -16,6 +16,7 @@ import (
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/mcpmgr"
 
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/numfmt"
 )
 
@@ -72,7 +73,7 @@ func rootArg(args []string) int {
 // on the guard's repository or the placeholder, and the excludes that apply
 // there. A root that is not too big, a spec with no --root, and a project
 // whose person set index-anyway are not guarded.
-func (h *Harness) guardCodeRoot(s Server, args, excludes []string) ([]string, []string) {
+func (h *Harness) guardCodeRoot(s mcpserver.Server, args, excludes []string) ([]string, []string) {
 	i := rootArg(args)
 	if i < 0 {
 		return args, excludes

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // Per-tool cost and on/off.
@@ -56,7 +57,7 @@ func (h *Harness) ServerTools(id string) ([]ToolInfo, error) {
 	switch {
 	case !ok:
 		return nil, fmt.Errorf("no server %q", id)
-	case s.Via == ViaShell:
+	case s.Via == mcpserver.ViaShell:
 		return nil, fmt.Errorf("%s is scripted: the shell lists its tools itself, help(%q) in eval — /mcp mode %s standalone to manage them here",
 			id, ShellNamespace(id), id)
 	case !h.mgr.ServerStarted(id):
@@ -68,8 +69,8 @@ func (h *Harness) ServerTools(id string) ([]ToolInfo, error) {
 			continue
 		}
 		schema, _ := json.MarshalIndent(t.InputSchema, "", "  ")
-		on, from, by := s.toolState(t.Name)
-		g, p, ss := s.toolScopes(t.Name)
+		on, from, by := s.ToolState(t.Name)
+		g, p, ss := s.ToolScopes(t.Name)
 		out = append(out, ToolInfo{Server: id, Name: t.Name, Description: t.Description, Schema: string(schema),
 			Tokens: h.toolTokens(t), Enabled: on, HiddenBy: by, Global: g, Project: p, Session: ss, From: from})
 	}

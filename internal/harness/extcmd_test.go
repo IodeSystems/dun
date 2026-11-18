@@ -9,59 +9,14 @@ import (
 	"slices"
 	"strings"
 	"testing"
-)
 
-// A slash command's error names the field: the command, the step, what is
-// wrong with it.
-func TestExtSlashCmd_ErrorsNameTheField(t *testing.T) {
-	cli := `"roles":{"index":{"cli":"raglit"}},`
-	for cmd, field := range map[string]string{
-		`{"help":"h"}`:                                         "slash.commands.c: has a tool, a cli or steps",
-		`{"tool":"t","steps":[{"tool":"u"}]}`:                  "slash.commands.c: has a tool, a cli or steps",
-		`{"tool":"t","cli":["x"]}`:                             "slash.commands.c.tool:",
-		`{"steps":[{"tool":"t"},{"args":{}}]}`:                 "slash.commands.c.steps[1].tool:",
-		`{"cli":[]}`:                                           "slash.commands.c.cli: empty",
-		`{"cli":["x"],"args":{"a":"b"}}`:                       "slash.commands.c.args:",
-		`{"tool":"t","if":"link","args":{"p":"{{path}}"}}`:     "slash.commands.c.if:",
-		`{"tool":"t","if":"file"}`:                             "slash.commands.c.if: the step uses no",
-		`{"tool":"t","unless":"keep"}`:                         "slash.commands.c.unless:",
-		`{"tool":"t","with":"yes"}`:                            "slash.commands.c.with:",
-		`{"tool":"t","args":{"a":"{{path}}","b":"{{paths}}"}}`: "slash.commands.c: {{path}} and {{paths}}",
-		`{"tool":"t","args":{"a":"{{nope}}"}}`:                 "slash.commands.c: unknown placeholder {{nope}}",
-		`{"tool":"t","args":{"a":["x {{paths}}"]}}`:            "slash.commands.c: {{paths}} is a whole value",
-	} {
-		body := `{"id":"a","server":{"command":"raglit"},` + cli + `"slash":{"name":"a","commands":{"c":` + cmd + `}}}`
-		if _, err := ParseExtension([]byte(body)); err == nil || !strings.HasPrefix(err.Error(), field) {
-			t.Errorf("%s: want %q, got %v", cmd, field, err)
-		}
-	}
-	// A cli step needs the role that names the binary.
-	if _, err := ParseExtension([]byte(`{"id":"a","server":{"command":"x"},"slash":{"name":"a","commands":{"c":{"cli":["x"]}}}}`)); err == nil ||
-		!strings.Contains(err.Error(), "needs roles.index.cli") {
-		t.Errorf("cli without roles.index.cli: %v", err)
-	}
-	ok := `{"id":"a","server":{"command":"raglit"},` + cli + `"slash":{"name":"a","commands":{
-		"put":{"help":"h","steps":[{"if":"dir","cli":["watch","{{path}}","--index","{{index}}"]},
-			{"if":"file","tool":"ingest","args":{"index":"{{index}}","paths":"{{paths}}"}}]},
-		"drop":{"steps":[{"tool":"m","args":{"pattern":"{{arg}}"}},{"tool":"m","args":{"confirm":true},"unless":"--keep"}]},
-		"show":{"tool":"m","args":{"action":"status","project":"{{project}}","in":"{{workspace}}"}}}}}`
-	e, err := ParseExtension([]byte(ok))
-	if err != nil {
-		t.Fatal(err)
-	}
-	put := e.Slash.Commands["put"]
-	if put.Help != "h" || len(put.steps()) != 2 || put.steps()[0].If != "dir" || put.steps()[1].Tool != "ingest" {
-		t.Errorf("put: %+v", put)
-	}
-	if s := e.Slash.Commands["show"].steps(); len(s) != 1 || s[0].Tool != "m" {
-		t.Errorf("an inline step is the one step: %+v", s)
-	}
-}
+	"github.com/iodesystems/dun/internal/mcpserver"
+)
 
 // The text after a command: shell quoting, the steps' flags taken out, each
 // word a path against the workspace; placeholders filled in.
 func TestParseCmdInput_Placeholders(t *testing.T) {
-	c := ExtSlashCmd{Steps: []ExtStep{{Tool: "t"}, {Tool: "t", Unless: "--keep"}}}
+	c := mcpserver.ExtSlashCmd{Steps: []mcpserver.ExtStep{{Tool: "t"}, {Tool: "t", Unless: "--keep"}}}
 	in, err := parseCmdInput(c, `'**/My *.LOG' --keep`, "/ws")
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +71,7 @@ func installProxy(t *testing.T, commands string) (*Harness, string, string) {
 		"roles":{"index":{"cli":"raglit"}},
 		"slash":{"name":"proxy","commands":`+commands+`}}`)
 	ws := t.TempDir()
-	h, err := Start(context.Background(), Config{Workspace: ws, Servers: []Server{}})
+	h, err := Start(context.Background(), Config{Workspace: ws, Servers: []mcpserver.Server{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,14 +188,14 @@ func TestRaglitCommands(t *testing.T) {
 	ws := t.TempDir()
 	h, logPath, _ := startFakeRaglit(t, ws, true)
 	ctx := context.Background()
-	idx, proj := raglitIndex(ws), raglitProject(ws)
+	idx, proj := mcpserver.RaglitIndex(ws), mcpserver.RaglitProject(ws)
 	if err := os.MkdirAll(filepath.Join(ws, "Hand Book"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	writeRule(t, filepath.Join(ws, "Notes.md"), "x")
 	run := func(cmd, text string) string {
 		t.Helper()
-		out, err := h.RunExtCommand(ctx, ServerDocs, cmd, text)
+		out, err := h.RunExtCommand(ctx, mcpserver.ServerDocs, cmd, text)
 		if err != nil {
 			t.Fatalf("/rag %s %s: %q %v", cmd, text, out, err)
 		}
@@ -293,7 +248,7 @@ func TestRaglitCommands(t *testing.T) {
 	if !strings.Contains(out, `"action": "status"`) {
 		t.Errorf("excludes shows the reply: %s", out)
 	}
-	if _, err := h.RunExtCommand(ctx, ServerDocs, "exclude", "--keep"); err == nil {
+	if _, err := h.RunExtCommand(ctx, mcpserver.ServerDocs, "exclude", "--keep"); err == nil {
 		t.Error("exclude needs a GLOB")
 	}
 }

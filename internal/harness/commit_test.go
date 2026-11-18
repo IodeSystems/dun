@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // gitRepo builds a repo with one commit, and returns a pass-through worktree
@@ -113,19 +115,19 @@ func clip(s string) string {
 // The default is conventional commits; a format names a built-in; an
 // instruction replaces both, because it is the more specific statement.
 func TestCommitConfig_Rules(t *testing.T) {
-	if !strings.Contains((*CommitConfig)(nil).rules(), "Conventional Commits") {
+	if !strings.Contains(commitRules(nil), "Conventional Commits") {
 		t.Error("no config at all must still produce the suggested default")
 	}
-	if !strings.Contains((&CommitConfig{}).rules(), "Conventional Commits") {
+	if !strings.Contains(commitRules(&mcpserver.CommitConfig{}), "Conventional Commits") {
 		t.Error("an empty commit section is the default, not an empty prompt")
 	}
-	plain := (&CommitConfig{Format: "plain"}).rules()
+	plain := commitRules(&mcpserver.CommitConfig{Format: "plain"})
 	if strings.Contains(plain, "Conventional Commits") || !strings.Contains(plain, "no type/scope prefix") {
 		t.Errorf("plain should drop the type/scope form: %q", plain)
 	}
-	custom := &CommitConfig{Format: "conventional", Instruction: "All caps. No body."}
-	if custom.rules() != "All caps. No body." {
-		t.Errorf("a free-text instruction must win over a named format: %q", custom.rules())
+	custom := &mcpserver.CommitConfig{Format: "conventional", Instruction: "All caps. No body."}
+	if commitRules(custom) != "All caps. No body." {
+		t.Errorf("a free-text instruction must win over a named format: %q", commitRules(custom))
 	}
 }
 

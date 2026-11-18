@@ -5,539 +5,35 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
-	"sync"
 
-	"github.com/iodesystems/dun/internal/fsutil"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
-// Three scopes of server switches.
-//
-// Every server has three switches for whether it is on, three for where it
-// runs (direct or in the shell), and three per tool:
-//
-//	global   $DUN_HOME/mcp.json — every workspace. On or off; a built-in's
-//	         default (shell on, code and docs off) is its global value.
-//	project  the project's machine state, $DUN_HOME/projects/<id>/dun.local.json
-//	         (or the worktree's overlay). Unset, on or off.
-//	session  this session's .mcp.json sidecar, beside its .jsonl, so it holds
-//	         across a resume and a dund restart. Unset, on or off.
-//
-// The value used is the session's if set, else the project's, else the
-// global one. A repo's committed dun.json is not a fourth scope: what it says
-// is the project value until the project's state says otherwise (it is a
-// lower layer of the same merge).
-//
-// This is the old layering with a session layer on top: mcp.json was
-// already below the project files, and the project files already replaced
-// what mcp.json said. So existing files keep their meaning and nothing is
-// migrated. One difference: a project deny-list ("disable") still sets
-// every tool at project scope, as it used to, but a single tool switched at
-// project or session scope ("tools": {"name": false}) overrides it.
-//
-// A running session follows a global or project change at its next turn
-// (followServers): it re-reads the files, and starts, stops or re-hosts what
-// changed. A server whose resolved value did not change is left alone, so a
-// server that failed to start is not retried every turn.
-
-// Scope names, as typed (--global) and as shown.
-const (
-	ScopeGlobal  = "global"
-	ScopeProject = "project"
-	ScopeSession = "session"
-	// scopeFlag is a --rag/--lsp flag: this run only, under the session.
-	scopeFlag = "flag"
-)
-
-// ParseScope reads "global", "--global", "-g" and the like.
-func ParseScope(s string) (string, bool) {
-	switch strings.TrimLeft(strings.ToLower(strings.TrimSpace(s)), "-") {
-	case "global", "g":
-		return ScopeGlobal, true
-	case "project", "p":
-		return ScopeProject, true
-	case "session", "s":
-		return ScopeSession, true
-	}
-	return "", false
-}
-
-// ViaFrom values beside the scope names: no scope set a mode, and the global
-// default (LoadDefaultVia) is scripted. The second is that default overruled:
-// the server's instance is agent, which a scripted server cannot be.
-const (
-	ViaFromDefault      = "default"
-	ViaFromDefaultAgent = "default, instance agent"
-)
-
-// ServerScopes is one server's switches at each scope, and which one
-// decided. nil and "" are unset.
-type ServerScopes struct {
-	Global, Project, Session *bool
-	OnFrom                   string // the scope that decided Autostart
-	ViaGlobal, ViaProject    string // "", ViaDirect, ViaShell
-	ViaSession               string
-	ViaFrom                  string // the scope that decided Via, or ViaFromDefault*; "" for a built-in
-	// The instance switch at each scope ("", InstanceShared, InstanceSession,
-	// InstanceAgent) and the scope that decided Server.Instance; "" for a
-	// built-in, whose instance is fixed (builtinInstances).
-	InstanceGlobal, InstanceProject, InstanceSession string
-	InstanceFrom                                     string
-	// Indexes switched on (attached) and off (detached) at each scope
-	// (attach.go); Server.Attach and Server.Detach are the result.
-	AttachGlobal, AttachProject, AttachSession []string
-	DetachGlobal, DetachProject, DetachSession []string
-}
-
-// GlobalOn is the global switch as shown: unset is off, except for a server
-// placed in the shell, which the shell always hosted.
-func (s ServerScopes) GlobalOn(via string) bool {
-	if s.Global != nil {
-		return *s.Global
-	}
-	return via == ViaShell
-}
-
-// SessionServer is one server's switches in a session's sidecar.
-type SessionServer struct {
-	On  *bool  `json:"on,omitempty"`
-	Via string `json:"via,omitempty"`
-	// Instance is ServerSpec.Instance at this scope.
-	Instance string          `json:"instance,omitempty"`
-	Tools    map[string]bool `json:"tools,omitempty"`
-	Attach   []string        `json:"attach,omitempty"`
-	Detach   []string        `json:"detach,omitempty"`
-}
-
-func (s SessionServer) empty() bool {
-	return s.On == nil && s.Via == "" && s.Instance == "" && len(s.Tools) == 0 && len(s.Attach) == 0 && len(s.Detach) == 0
-}
-
-// SessionServersFile is the session's switch sidecar, "" for an in-memory
-// session (mirrors StateFile).
-func SessionServersFile(sessionFile string) string {
-	if sessionFile == "" {
-		return ""
-	}
-	return strings.TrimSuffix(sessionFile, ".jsonl") + ".mcp.json"
-}
-
-type sessionServersFile struct {
-	Servers map[string]SessionServer `json:"servers"`
-}
-
-// LoadSessionServers reads a session's switches. Missing or unreadable is
-// none: a bad sidecar must not be why a resume fails.
-func LoadSessionServers(sessionFile string) map[string]SessionServer {
-	out := map[string]SessionServer{}
-	p := SessionServersFile(sessionFile)
-	if p == "" {
-		return out
-	}
-	b, err := os.ReadFile(p)
-	if err != nil {
-		return out
-	}
-	var f sessionServersFile
-	if json.Unmarshal(b, &f) != nil {
-		log.Printf("dun: %s is not readable; this session's server switches start unset", p)
-		return out
-	}
-	for id, s := range f.Servers {
-		if _, current := f.Servers[canonicalServerID(id)]; s.empty() || (id != canonicalServerID(id) && current) {
-			continue // a pre-rename key loses to the current one
-		}
-		out[canonicalServerID(id)] = s
-	}
-	return out
-}
-
-func saveSessionServers(sessionFile string, sw map[string]SessionServer) (string, error) {
-	p := SessionServersFile(sessionFile)
-	if p == "" {
-		return "", nil
-	}
-	b, err := json.MarshalIndent(sessionServersFile{Servers: sw}, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-		return "", err
-	}
-	return p, fsutil.WriteAtomic(p, append(b, '\n'), 0o600)
-}
-
-// catalogEntry is one server across the layers: def is every layer merged
-// (what the server IS), global and project the switch values of those
-// layers alone.
-type catalogEntry struct {
-	def, global, project ServerSpec
-}
-
-// specOf is a Go-level Server as a global-layer spec.
-func specOf(s Server) ServerSpec {
-	auto := s.Autostart
-	return ServerSpec{ID: s.ID, Command: s.Command, Args: s.Args, URL: s.URL, Headers: s.Headers, Bearer: s.Bearer,
-		Env: s.Env, Timeout: s.Timeout, Autostart: &auto, Disable: s.Disable, Via: s.Via, Instance: s.Instance, Shell: s.Shell, OAuth: s.OAuth}
-}
-
-// loadCatalog merges base (the built-ins, or a caller's Go-level servers),
-// $DUN_HOME/mcp.json and dir's project files, keeping the global and project
-// switches apart.
-func loadCatalog(dir string, base []Server) ([]catalogEntry, error) {
-	idx := map[string]int{}
-	var out []catalogEntry
-	put := func(spec ServerSpec, project bool) {
-		i, ok := idx[spec.ID]
-		if !ok {
-			i = len(out)
-			idx[spec.ID] = i
-			out = append(out, catalogEntry{def: ServerSpec{ID: spec.ID}, global: ServerSpec{ID: spec.ID}, project: ServerSpec{ID: spec.ID}})
-		}
-		e := &out[i]
-		e.def = mergeSpec(e.def, spec)
-		if project {
-			e.project = mergeSpec(e.project, spec)
-		} else {
-			e.global = mergeSpec(e.global, spec)
-		}
-	}
-	for _, s := range base {
-		put(specOf(s), false)
-	}
-	paths := []string{UserServersFile()}
-	if dir != "" { // no project: a relative path would read the process's cwd
-		paths = append(paths, serverConfigPaths(dir)...)
-	}
-	for n, path := range paths {
-		f, err := readServersFile(path)
-		if err != nil {
-			return nil, err
-		}
-		if f == nil {
-			continue
-		}
-		for _, spec := range f.Servers {
-			if spec.ID == "" {
-				return nil, fmt.Errorf("dun: %s: a server entry has no id", path)
-			}
-			put(spec, n > 0)
-		}
-	}
-	return out, nil
-}
-
-// switchesOnly reports a spec that sets switches and nothing else: an entry
-// a scope wrote for a server some other workspace defines. A bare id is not
-// one — that is a server someone forgot to define.
-func switchesOnly(s ServerSpec) bool {
-	return s.Command == "" && s.URL == "" && s.Args == nil && s.Env == nil && s.Headers == nil &&
-		s.Bearer == "" && s.OAuth == nil && s.Timeout == 0 &&
-		(s.Wake || s.Autostart != nil || s.Via != "" || s.Instance != "" || s.Disable != nil || s.Tools != nil || s.Attach != nil || s.Detach != nil || s.Exclude != nil || s.IndexBudget != "" || s.IndexAnyway ||
-			s.LSPRoots != "")
-}
-
-// resolve turns a catalog entry and this session's switches into the Server
-// it runs as. ok=false: the server is not in this workspace (disabled, or
-// only switches name it).
-func (e catalogEntry) resolve(sess SessionServer, flag *bool, workspace, raglitHome, defVia string) (Server, bool, error) {
-	s := e.def
-	if s.Disabled {
-		return Server{}, false, nil
-	}
-	if s.Command == "" && s.URL == "" {
-		if switchesOnly(s) {
-			return Server{}, false, nil
-		}
-		return Server{}, false, fmt.Errorf("dun: server %q has no command or url (declare one, or remove the entry)", s.ID)
-	}
-	sc := ServerScopes{Global: e.global.Autostart, Project: e.project.Autostart, Session: sess.On,
-		AttachGlobal: e.global.Attach, AttachProject: e.project.Attach, AttachSession: sess.Attach,
-		DetachGlobal: e.global.Detach, DetachProject: e.project.Detach, DetachSession: sess.Detach}
-	var err error
-	for _, v := range []struct {
-		in  string
-		out *string
-	}{{e.global.Via, &sc.ViaGlobal}, {e.project.Via, &sc.ViaProject}, {sess.Via, &sc.ViaSession}} {
-		if v.in == "" {
-			continue
-		}
-		if *v.out, err = NormalizeVia(v.in); err != nil {
-			return Server{}, false, fmt.Errorf("dun: server %q: %w", s.ID, err)
-		}
-		if *v.out == "" {
-			*v.out = ViaDirect
-		}
-	}
-	via := ViaDirect
-	switch {
-	case sc.ViaSession != "":
-		via, sc.ViaFrom = sc.ViaSession, ScopeSession
-	case sc.ViaProject != "":
-		via, sc.ViaFrom = sc.ViaProject, ScopeProject
-	case sc.ViaGlobal != "":
-		via, sc.ViaFrom = sc.ViaGlobal, ScopeGlobal
-	case defVia == ViaShell && !builtinServer(s.ID):
-		// The global default places it. A server whose instance is agent
-		// cannot be scripted (a sub-agent has no shell of its own): it stays
-		// standalone, and the cell says why.
-		via, sc.ViaFrom = ViaShell, ViaFromDefault
-		if agentInstance(e.global.Instance, e.project.Instance, sess.Instance) {
-			via, sc.ViaFrom = ViaDirect, ViaFromDefaultAgent
-		}
-	default:
-		sc.ViaFrom = ScopeGlobal
-	}
-	if builtinServer(s.ID) {
-		sc.ViaFrom = ""
-		if via == ViaShell {
-			return Server{}, false, fmt.Errorf("dun: server %q is built in and cannot be scripted (remove its \"via\")", s.ID)
-		}
-	}
-	if via == ViaDirect {
-		via = ""
-	}
-	instance, err := resolveInstance(s.ID, &sc, e.global.Instance, e.project.Instance, sess.Instance, via)
-	if err != nil {
-		return Server{}, false, err
-	}
-	if err := checkOAuth(s, via); err != nil {
-		return Server{}, false, fmt.Errorf("dun: server %q: %w", s.ID, err)
-	}
-	var on bool
-	switch {
-	case sess.On != nil:
-		on, sc.OnFrom = *sess.On, ScopeSession
-	case flag != nil:
-		on, sc.OnFrom = *flag, scopeFlag
-	case e.project.Autostart != nil:
-		on, sc.OnFrom = *e.project.Autostart, ScopeProject
-	default:
-		on, sc.OnFrom = sc.GlobalOn(via), ScopeGlobal
-	}
-	return Server{
-		ID:             s.ID,
-		URL:            s.URL,
-		Headers:        requestHeaders(s),
-		Command:        s.Command,
-		Args:           expandPlaceholders(s.Args, workspace, raglitHome),
-		Env:            envRefs(expandPlaceholders(s.Env, workspace, raglitHome)),
-		Timeout:        s.Timeout,
-		Autostart:      on,
-		Disable:        e.global.Disable,
-		ProjectDisable: e.project.Disable,
-		ProjectTools:   e.project.Tools,
-		SessionTools:   sess.Tools,
-		Via:            via,
-		Instance:       instance,
-		PerWorkspace:   workspaceKeyed(s),
-		Shell:          s.Shell,
-		Bearer:         s.Bearer,
-		OAuth:          s.OAuth,
-		Scopes:         sc,
-		Attach:         effectiveIndexes(sc, true),
-		Detach:         effectiveIndexes(sc, false),
-		Exclude:        s.Exclude,
-		IndexBudget:    s.IndexBudget,
-		IndexAnyway:    s.IndexAnyway,
-		LSPRoots:       s.LSPRoots,
-		Wake:           s.Wake,
-	}, true, nil
-}
-
-var warned sync.Map
-
-// warnOnce logs msg the first time only: the servers resolve every turn.
-func warnOnce(msg string) {
-	if _, seen := warned.LoadOrStore(msg, true); !seen {
-		log.Printf("%s — using standalone until it is fixed (/mcp default standalone|scripted)", msg)
-	}
-}
-
-// agentInstance reports whether the nearest scope that sets an instance says
-// agent. An unreadable value is left to resolveInstance to refuse.
-func agentInstance(global, project, session string) bool {
-	for _, v := range []string{session, project, global} {
-		if v == "" {
-			continue
-		}
-		inst, err := NormalizeInstance(v)
-		return err == nil && inst == InstanceAgent
-	}
-	return false
-}
-
-// workspaceKeyed reports whether s's args or env name {{workspace}}: as
-// written, or in its bundled manifest (whose base is expanded before the
-// layers see it).
-func workspaceKeyed(s ServerSpec) bool {
-	raw := slices.Concat(s.Args, s.Env)
-	if e, ok := bundledExt(s.ID); ok {
-		es := e.server()
-		raw = slices.Concat(raw, es.Args, es.Env)
-	}
-	return slices.ContainsFunc(raw, func(a string) bool { return strings.Contains(a, "{{workspace}}") })
-}
-
-// resolveInstance is the nearest scope's instance switch, recorded in sc:
-// shared when none sets it; a built-in's fixed one, which no scope may set.
-// A scripted server set to agent runs as session: it runs in the session's
-// shell, and a child has no shell of its own (the setters refuse that pair;
-// a hand-edited file may still hold it).
-func resolveInstance(id string, sc *ServerScopes, global, project, session, via string) (string, error) {
-	var err error
-	for _, v := range []struct {
-		in  string
-		out *string
-	}{{global, &sc.InstanceGlobal}, {project, &sc.InstanceProject}, {session, &sc.InstanceSession}} {
-		if v.in == "" {
-			continue
-		}
-		if *v.out, err = NormalizeInstance(v.in); err != nil {
-			return "", fmt.Errorf("dun: server %q: %w", id, err)
-		}
-		if *v.out == "" {
-			*v.out = InstanceShared
-		}
-	}
-	if fixed, _, ok := BuiltinInstance(id); ok {
-		if sc.InstanceGlobal != "" || sc.InstanceProject != "" || sc.InstanceSession != "" {
-			return "", fmt.Errorf("dun: server %q is built in and its instance is fixed (%s; remove its \"instance\")", id, fixed)
-		}
-		return fixed, nil
-	}
-	inst := InstanceShared
-	switch {
-	case sc.InstanceSession != "":
-		inst, sc.InstanceFrom = sc.InstanceSession, ScopeSession
-	case sc.InstanceProject != "":
-		inst, sc.InstanceFrom = sc.InstanceProject, ScopeProject
-	case sc.InstanceGlobal != "":
-		inst, sc.InstanceFrom = sc.InstanceGlobal, ScopeGlobal
-	default:
-		sc.InstanceFrom = ScopeGlobal
-	}
-	if inst == InstanceAgent && via == ViaShell {
-		inst = InstanceSession
-	}
-	return inst, nil
-}
-
-// envRefs reads each "KEY=$NAME" or "KEY=${NAME}" from dun's environment
-// when the server starts, as Bearer is, so mcp.json can name a secret
-// without holding it. Only a value that is wholly one reference: "a$b" stays
-// as written.
-func envRefs(env []string) []string {
-	if env == nil {
-		return nil
-	}
-	out := make([]string, len(env))
-	for i, kv := range env {
-		k, v, ok := strings.Cut(kv, "=")
-		if m := envRef.FindStringSubmatch(v); ok && m != nil {
-			v = os.Getenv(m[1] + m[2])
-		}
-		out[i] = k + "=" + v
-		if !ok {
-			out[i] = kv
-		}
-	}
-	return out
-}
-
-// resolveServers is the server list for a workspace, with a session's
-// switches and this run's flags on top.
-func resolveServers(dir, workspace, raglitHome string, base []Server, sess map[string]SessionServer, flags map[string]bool) ([]Server, error) {
-	cat, err := loadCatalog(dir, base)
-	if err != nil {
-		return nil, err
-	}
-	defVia, err := LoadDefaultVia()
-	if err != nil { // a bad value must not take every server down with it
-		warnOnce(err.Error())
-		defVia = ViaDirect
-	}
-	out := make([]Server, 0, len(cat))
-	for _, e := range cat {
-		var flag *bool
-		if v, ok := flags[e.def.ID]; ok {
-			flag = &v
-		}
-		s, ok, err := e.resolve(sess[e.def.ID], flag, workspace, raglitHome, defVia)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			out = append(out, s)
-		}
-	}
-	return out, nil
-}
-
-// toolState is whether a tool is on, the scope that decided, and the
-// deny-list entry hiding it when a pattern did: a single-tool switch at
-// session, then project scope; then a project deny-list, which sets every
-// tool; then the global one.
-func (s Server) toolState(name string) (on bool, from, by string) {
-	if v, ok := s.SessionTools[name]; ok {
-		return v, ScopeSession, ""
-	}
-	if v, ok := s.ProjectTools[name]; ok {
-		return v, ScopeProject, ""
-	}
-	if s.ProjectDisable != nil {
-		by = hiddenBy(name, s.ProjectDisable)
-		return by == "", ScopeProject, by
-	}
-	by = hiddenBy(name, s.Disable)
-	return by == "", ScopeGlobal, by
-}
-
-// toolScopes is a tool's switch at each scope: "on", "off" or "" (unset).
-// Global is never unset.
-func (s Server) toolScopes(name string) (global, project, session string) {
-	global = onOffWord(hiddenBy(name, s.Disable) == "")
-	if v, ok := s.ProjectTools[name]; ok {
-		project = onOffWord(v)
-	} else if s.ProjectDisable != nil {
-		project = onOffWord(hiddenBy(name, s.ProjectDisable) == "")
-	}
-	if v, ok := s.SessionTools[name]; ok {
-		session = onOffWord(v)
-	}
-	return
-}
-
-func onOffWord(b bool) string {
-	if b {
-		return "on"
-	}
-	return "off"
-}
+// A session's side of the three switch scopes (internal/mcpserver/scope.go):
+// setting a switch, and following a global or project change at a turn.
 
 // baseServers is what the files layer over: the caller's Go-level servers,
 // or the built-ins.
-func (h *Harness) baseServers() []Server {
+func (h *Harness) baseServers() []mcpserver.Server {
 	base := h.cfg.Servers
 	if base == nil {
-		base = DefaultServers(h.cfg.Workspace, h.cfg.RaglitHome)
+		base = mcpserver.DefaultServers(h.cfg.Workspace, h.cfg.RaglitHome)
 	}
-	return extServers(base, h.exts)
+	return mcpserver.ExtServers(base, h.exts)
 }
 
 // resolveSpecs re-reads every layer.
-func (h *Harness) resolveSpecs() ([]Server, error) {
+func (h *Harness) resolveSpecs() ([]mcpserver.Server, error) {
 	h.srvMu.Lock()
-	sess := make(map[string]SessionServer, len(h.sessSw))
+	sess := make(map[string]mcpserver.SessionServer, len(h.sessSw))
 	for id, s := range h.sessSw {
 		sess[id] = s
 	}
 	h.srvMu.Unlock()
-	servers, err := resolveServers(h.configDir(), h.cfg.Workspace, h.cfg.RaglitHome, h.baseServers(), sess, h.cfg.AutostartOverride)
+	servers, err := mcpserver.Resolve(h.configDir(), h.cfg.Workspace, h.cfg.RaglitHome, h.baseServers(), sess, h.cfg.AutostartOverride)
 	return withoutDirServers(servers, h.cfg), err
 }
 
@@ -605,7 +101,7 @@ func (h *Harness) reloadServers(ctx context.Context, wait bool, restart map[stri
 // while starting), restarts the shell when what it hosts changed, and says
 // which servers to start, marked starting. changed is false when the set is
 // what it was and nothing is to restart: there is nothing to rebuild.
-func (h *Harness) reconcileServers(ctx context.Context, restart map[string]bool) (changed bool, starts []Server, shellErr, err error) {
+func (h *Harness) reconcileServers(ctx context.Context, restart map[string]bool) (changed bool, starts []mcpserver.Server, shellErr, err error) {
 	h.reconMu.Lock()
 	defer h.reconMu.Unlock()
 	next, err := h.resolveSpecs()
@@ -619,19 +115,19 @@ func (h *Harness) reconcileServers(ctx context.Context, restart map[string]bool)
 	if reflect.DeepEqual(prev, next) && len(restart) == 0 {
 		return false, nil, nil, nil
 	}
-	old := map[string]Server{}
+	old := map[string]mcpserver.Server{}
 	for _, s := range prev {
 		old[s.ID] = s
 	}
-	now := map[string]Server{}
+	now := map[string]mcpserver.Server{}
 	for _, s := range next {
 		now[s.ID] = s
 	}
-	direct := func(s Server, ok bool) bool { return ok && s.Autostart && s.Via != ViaShell }
-	hostedKey := func(list []Server) string {
+	direct := func(s mcpserver.Server, ok bool) bool { return ok && s.Autostart && s.Via != mcpserver.ViaShell }
+	hostedKey := func(list []mcpserver.Server) string {
 		var b strings.Builder
 		for _, s := range list {
-			if s.Via == ViaShell && s.Autostart {
+			if s.Via == mcpserver.ViaShell && s.Autostart {
 				j, _ := json.Marshal(s)
 				b.Write(j)
 				if restart[s.ID] {
@@ -655,7 +151,7 @@ func (h *Harness) reconcileServers(ctx context.Context, restart map[string]bool)
 		}
 	}
 	var firstErr error
-	if hostedKey(prev) != hostedKey(next) || restart[ServerShell] {
+	if hostedKey(prev) != hostedKey(next) || restart[mcpserver.ServerShell] {
 		if _, err := h.restartShell(ctx); err != nil {
 			firstErr = fmt.Errorf("the shell did not come back: %w", err)
 		}
@@ -672,47 +168,47 @@ func (h *Harness) reconcileServers(ctx context.Context, restart map[string]bool)
 }
 
 // knownServer finds id among the resolved servers.
-func (h *Harness) knownServer(id string) (Server, error) {
+func (h *Harness) knownServer(id string) (mcpserver.Server, error) {
 	h.srvMu.Lock()
 	s, ok := h.spec(id)
-	ids := ServerIDs(h.specs)
+	ids := mcpserver.IDs(h.specs)
 	h.srvMu.Unlock()
 	if !ok {
-		return Server{}, fmt.Errorf("no server %q (have %s)", id, strings.Join(ids, ", "))
+		return mcpserver.Server{}, fmt.Errorf("no server %q (have %s)", id, strings.Join(ids, ", "))
 	}
 	return s, nil
 }
 
 // editSession changes this session's switches for id and saves them. It
 // returns the sidecar written, "" for an in-memory session.
-func (h *Harness) editSession(id string, edit func(*SessionServer)) (string, error) {
+func (h *Harness) editSession(id string, edit func(*mcpserver.SessionServer)) (string, error) {
 	h.srvMu.Lock()
 	if h.sessSw == nil {
-		h.sessSw = map[string]SessionServer{}
+		h.sessSw = map[string]mcpserver.SessionServer{}
 	}
 	s := h.sessSw[id]
 	edit(&s)
-	if s.empty() {
+	if s.Empty() {
 		delete(h.sessSw, id)
 	} else {
 		h.sessSw[id] = s
 	}
-	cp := make(map[string]SessionServer, len(h.sessSw))
+	cp := make(map[string]mcpserver.SessionServer, len(h.sessSw))
 	for k, v := range h.sessSw {
 		cp[k] = v
 	}
 	h.srvMu.Unlock()
-	return saveSessionServers(h.cfg.SessionFile, cp)
+	return mcpserver.SaveSessionServers(h.cfg.SessionFile, cp)
 }
 
 // writeScope applies edit to id's entry at scope and returns the file written.
-func (h *Harness) writeScope(id, scope string, global, project func(*ServerSpec), session func(*SessionServer)) (string, error) {
+func (h *Harness) writeScope(id, scope string, global, project func(*mcpserver.Spec), session func(*mcpserver.SessionServer)) (string, error) {
 	switch scope {
-	case ScopeGlobal:
-		return UpsertUserServer(id, global)
-	case ScopeProject:
-		return updateLocalServer(h.configDir(), id, project)
-	case ScopeSession:
+	case mcpserver.ScopeGlobal:
+		return mcpserver.UpsertUserServer(id, global)
+	case mcpserver.ScopeProject:
+		return mcpserver.UpdateLocalServer(h.configDir(), id, project)
+	case mcpserver.ScopeSession:
 		return h.editSession(id, session)
 	}
 	return "", fmt.Errorf("scope %q: want global, project or session", scope)
@@ -723,7 +219,7 @@ func (h *Harness) writeScope(id, scope string, global, project func(*ServerSpec)
 // (and is waited for) or stops. It returns the file written.
 func (h *Harness) SetServerOn(ctx context.Context, id, scope string, on *bool) (string, error) {
 	if g, ok := builtinID(id); ok { // a group of dun's own tools (builtins.go)
-		if on == nil && scope == ScopeGlobal {
+		if on == nil && scope == mcpserver.ScopeGlobal {
 			return "", fmt.Errorf("the global switch is on or off — it has no unset")
 		}
 		return h.setBuiltin(g, "", scope, on)
@@ -731,13 +227,13 @@ func (h *Harness) SetServerOn(ctx context.Context, id, scope string, on *bool) (
 	if _, err := h.knownServer(id); err != nil {
 		return "", err
 	}
-	if on == nil && scope == ScopeGlobal {
+	if on == nil && scope == mcpserver.ScopeGlobal {
 		return "", fmt.Errorf("the global switch is on or off — it has no unset")
 	}
 	path, err := h.writeScope(id, scope,
-		func(s *ServerSpec) { s.Autostart = on },
-		func(s *ServerSpec) { s.Autostart = on },
-		func(s *SessionServer) { s.On = on })
+		func(s *mcpserver.Spec) { s.Autostart = on },
+		func(s *mcpserver.Spec) { s.Autostart = on },
+		func(s *mcpserver.SessionServer) { s.On = on })
 	if err != nil {
 		return "", err
 	}
@@ -746,7 +242,7 @@ func (h *Harness) SetServerOn(ctx context.Context, id, scope string, on *bool) (
 	}
 	// Asked for by name: a server that is on but not up (it failed before)
 	// is tried again.
-	if s, err := h.knownServer(id); err == nil && s.Autostart && s.Via != ViaShell && !h.mgr.ServerStarted(id) && !h.isStarting(id) {
+	if s, err := h.knownServer(id); err == nil && s.Autostart && s.Via != mcpserver.ViaShell && !h.mgr.ServerStarted(id) && !h.isStarting(id) {
 		return path, h.startServer(ctx, s)
 	}
 	return path, nil
@@ -761,24 +257,24 @@ func (h *Harness) SetServerVia(ctx context.Context, id, scope, via string) (stri
 	if _, err := h.knownServer(id); err != nil {
 		return "", err
 	}
-	if builtinServer(id) {
+	if mcpserver.IsBuiltin(id) {
 		return "", fmt.Errorf("%q is a built-in server: it is always standalone", id)
 	}
 	switch via {
 	case "": // unset: the next scope down, at global the default mode
-	case ViaDirect, ViaShell:
+	case mcpserver.ViaDirect, mcpserver.ViaShell:
 	default:
 		return "", fmt.Errorf("mode %q: want standalone or scripted", via)
 	}
-	if s, _ := h.knownServer(id); via == ViaShell && s.Instance == InstanceAgent {
+	if s, _ := h.knownServer(id); via == mcpserver.ViaShell && s.Instance == mcpserver.InstanceAgent {
 		return "", fmt.Errorf("%s has instance agent: a scripted server runs in the session's shell, which a sub-agent shares — set its instance to session or shared first", id)
 	}
 	// Global standalone is stored as "direct", not as absence: with a
 	// scripted default (SetDefaultVia) absence means scripted.
 	path, err := h.writeScope(id, scope,
-		func(s *ServerSpec) { s.Via = via },
-		func(s *ServerSpec) { s.Via = via },
-		func(s *SessionServer) { s.Via = via })
+		func(s *mcpserver.Spec) { s.Via = via },
+		func(s *mcpserver.Spec) { s.Via = via },
+		func(s *mcpserver.SessionServer) { s.Via = via })
 	if err != nil {
 		return "", err
 	}
@@ -788,7 +284,7 @@ func (h *Harness) SetServerVia(ctx context.Context, id, scope, via string) (stri
 // SetDefaultMode sets the mode of a server no scope sets one for: ViaShell or
 // ViaDirect. It returns the file written (mcp.json, every workspace).
 func (h *Harness) SetDefaultMode(ctx context.Context, via string) (string, error) {
-	path, err := SetDefaultVia(via)
+	path, err := mcpserver.SetDefaultVia(via)
 	if err != nil {
 		return "", err
 	}
@@ -802,7 +298,7 @@ func (h *Harness) SetServerInstance(ctx context.Context, id, scope, instance str
 	if _, ok := builtinID(id); ok {
 		return "", fmt.Errorf("%s is dun's own: it has no instance", id)
 	}
-	if fixed, why, ok := BuiltinInstance(id); ok {
+	if fixed, why, ok := mcpserver.BuiltinInstance(id); ok {
 		return "", fmt.Errorf("%q is a built-in server: its instance is fixed, %s (%s)", id, fixed, why)
 	}
 	s, err := h.knownServer(id)
@@ -811,27 +307,27 @@ func (h *Harness) SetServerInstance(ctx context.Context, id, scope, instance str
 	}
 	switch instance {
 	case "":
-		if scope == ScopeGlobal {
+		if scope == mcpserver.ScopeGlobal {
 			return "", fmt.Errorf("the global instance is shared, session or agent — it has no unset")
 		}
-	case InstanceShared, InstanceSession:
-	case InstanceAgent:
+	case mcpserver.InstanceShared, mcpserver.InstanceSession:
+	case mcpserver.InstanceAgent:
 		// Scripted by the default alone gives way: the server stays
 		// standalone (ViaFromDefaultAgent). A mode set at a scope refuses.
-		if s.Via == ViaShell && s.Scopes.ViaFrom != ViaFromDefault {
+		if s.Via == mcpserver.ViaShell && s.Scopes.ViaFrom != mcpserver.ViaFromDefault {
 			return "", fmt.Errorf("%s is scripted: it runs in the session's shell, which a sub-agent shares — agent is for a standalone server", id)
 		}
 	default:
-		return "", fmt.Errorf("instance %q: want %s, %s or %s", instance, InstanceShared, InstanceSession, InstanceAgent)
+		return "", fmt.Errorf("instance %q: want %s, %s or %s", instance, mcpserver.InstanceShared, mcpserver.InstanceSession, mcpserver.InstanceAgent)
 	}
 	stored := instance
-	if scope == ScopeGlobal && instance == InstanceShared {
+	if scope == mcpserver.ScopeGlobal && instance == mcpserver.InstanceShared {
 		stored = "" // the global layer's shared is its absence
 	}
 	path, err := h.writeScope(id, scope,
-		func(s *ServerSpec) { s.Instance = stored },
-		func(s *ServerSpec) { s.Instance = stored },
-		func(s *SessionServer) { s.Instance = stored })
+		func(s *mcpserver.Spec) { s.Instance = stored },
+		func(s *mcpserver.Spec) { s.Instance = stored },
+		func(s *mcpserver.SessionServer) { s.Instance = stored })
 	if err != nil {
 		return "", err
 	}
@@ -854,9 +350,9 @@ func (h *Harness) SetToolOn(id, tool, scope string, on *bool) (string, bool, err
 		}
 		want := ""
 		if on != nil {
-			want = onOffWord(*on)
+			want = mcpserver.OnOffWord(*on)
 		}
-		cur := map[string]string{ScopeGlobal: tools[i].Global, ScopeProject: tools[i].Project, ScopeSession: tools[i].Session}[scope]
+		cur := map[string]string{mcpserver.ScopeGlobal: tools[i].Global, mcpserver.ScopeProject: tools[i].Project, mcpserver.ScopeSession: tools[i].Session}[scope]
 		if cur == want {
 			return "", false, nil
 		}
@@ -880,14 +376,14 @@ func (h *Harness) SetToolOn(id, tool, scope string, on *bool) (string, bool, err
 		return "", false, fmt.Errorf("%s has no tool %q", id, tool)
 	}
 	s, _ := h.knownServer(id)
-	g, p, ss := s.toolScopes(tool)
+	g, p, ss := s.ToolScopes(tool)
 	want := ""
 	if on != nil {
-		want = onOffWord(*on)
+		want = mcpserver.OnOffWord(*on)
 	}
 	var path string
 	switch scope {
-	case ScopeGlobal:
+	case mcpserver.ScopeGlobal:
 		if on == nil {
 			return "", false, fmt.Errorf("the global switch is on or off — it has no unset")
 		}
@@ -901,19 +397,19 @@ func (h *Harness) SetToolOn(id, tool, scope string, on *bool) (string, bool, err
 					next = append(next, pat)
 				}
 			}
-			if by := hiddenBy(tool, next); by != "" {
-				return "", false, fmt.Errorf("%s is hidden by the pattern %q — narrow or remove it in the server's \"disable\" in %s", tool, by, UserServersFile())
+			if by := mcpserver.HiddenBy(tool, next); by != "" {
+				return "", false, fmt.Errorf("%s is hidden by the pattern %q — narrow or remove it in the server's \"disable\" in %s", tool, by, mcpserver.UserServersFile())
 			}
 		} else {
 			next = append(append(next, s.Disable...), tool)
 		}
-		path, err = UpsertUserServer(id, func(sp *ServerSpec) { sp.Disable = next })
-	case ScopeProject, ScopeSession:
+		path, err = mcpserver.UpsertUserServer(id, func(sp *mcpserver.Spec) { sp.Disable = next })
+	case mcpserver.ScopeProject, mcpserver.ScopeSession:
 		cur := p
-		if scope == ScopeSession {
+		if scope == mcpserver.ScopeSession {
 			cur = ss
 		}
-		if _, set := s.ProjectTools[tool]; scope == ScopeProject && !set && s.ProjectDisable != nil && on == nil {
+		if _, set := s.ProjectTools[tool]; scope == mcpserver.ScopeProject && !set && s.ProjectDisable != nil && on == nil {
 			return "", false, fmt.Errorf("%s is set by the project's \"disable\" list, which unset does not edit", tool)
 		}
 		if cur == want {
@@ -935,8 +431,8 @@ func (h *Harness) SetToolOn(id, tool, scope string, on *bool) (string, bool, err
 			return out
 		}
 		path, err = h.writeScope(id, scope, nil,
-			func(sp *ServerSpec) { sp.Tools = edit(sp.Tools) },
-			func(sp *SessionServer) { sp.Tools = edit(sp.Tools) })
+			func(sp *mcpserver.Spec) { sp.Tools = edit(sp.Tools) },
+			func(sp *mcpserver.SessionServer) { sp.Tools = edit(sp.Tools) })
 	default:
 		return "", false, fmt.Errorf("scope %q: want global, project or session", scope)
 	}

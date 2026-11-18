@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/update"
 )
 
@@ -98,7 +99,7 @@ func (h *Harness) restartExited(ctx context.Context, id string, callErr error) s
 	s, known := o.spec(id)
 	_, shared := o.shared[id]
 	o.srvMu.Unlock()
-	if !known || shared || s.URL != "" || s.Via == ViaShell || s.Command == "" {
+	if !known || shared || s.URL != "" || s.Via == mcpserver.ViaShell || s.Command == "" {
 		return ""
 	}
 	r := &o.restarts
@@ -153,7 +154,7 @@ func (h *Harness) restartExited(ctx context.Context, id string, callErr error) s
 	log.Printf("dun: %s exited during a call; restarting it (restart %d of %d in %s)", id, n, restartLimit, restartWindow)
 	mgr.StopServer(id)
 	state := "Its state from earlier calls is gone."
-	if canonicalServerID(id) == ServerShell {
+	if mcpserver.CanonicalID(id) == mcpserver.ServerShell {
 		state = "Its state from earlier calls is gone (session variables, loaded toolkits)."
 	}
 	var msg string
@@ -197,7 +198,7 @@ func stderrTail(mgr *mcpmgr.Manager, id string) string {
 // serverBinary is the path and version of the binary server id runs: the
 // version it gave in the handshake, else its build info's.
 func serverBinary(mgr *mcpmgr.Manager, id, command string) (path, version string) {
-	path, err := FindCommand(command)
+	path, err := mcpserver.FindCommand(command)
 	if err != nil {
 		path = command
 	}

@@ -10,6 +10,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/dun/internal/project"
 )
 
 // Worktree lifecycle — what happens to a session's tree after the session.
@@ -152,18 +155,18 @@ func ScanWorktrees(repoRoot string) []WorktreeInfo {
 // pruned. The legacy dir is checked for the repo's main worktree too, since
 // repoRoot may be a linked worktree of it.
 func sessionWorktreeDirs(repoRoot string) []string {
-	source, top := projectRoots(repoRoot)
-	dirs := []string{filepath.Join(repoRoot, DunDir, "worktrees"), filepath.Join(top, DunDir, "worktrees")}
+	source, top := project.Roots(repoRoot)
+	dirs := []string{filepath.Join(repoRoot, project.DunDir, "worktrees"), filepath.Join(top, project.DunDir, "worktrees")}
 	if source != top {
-		dirs = append(dirs, filepath.Join(source, DunDir, "worktrees"))
+		dirs = append(dirs, filepath.Join(source, project.DunDir, "worktrees"))
 	}
-	if p := ResolveProject(repoRoot); p != nil {
+	if p := project.Resolve(repoRoot); p != nil {
 		dirs = append(dirs, p.WorktreesDir())
 	}
 	var out []string
 	for _, d := range dirs {
 		out = append(out, d+string(os.PathSeparator))
-		if r := realPath(d); r != d {
+		if r := project.RealPath(d); r != d {
 			out = append(out, r+string(os.PathSeparator))
 		}
 	}
@@ -175,7 +178,7 @@ func sessionWorktreeDirs(repoRoot string) []string {
 // may hold /var/… where the dir was resolved to /private/var/….
 func underAny(path string, dirs []string) bool {
 	candidates := []string{path}
-	if r := realPath(path); r != path {
+	if r := project.RealPath(path); r != path {
 		candidates = append(candidates, r)
 	}
 	for _, c := range candidates {
@@ -349,16 +352,16 @@ func RemoveWorktree(repoRoot, path, branch string) error {
 	return nil
 }
 
-// overlayFor is the state overlay dun keeps for worktree path (see project.go),
+// overlayFor is the state overlay dun keeps for worktree path (see internal/project),
 // or "" when its project is unknown. Only the state dun wrote for that one
 // directory is in it — the AGENTS.md guard's memory, a /rag auto made there —
 // and the directory is about to stop existing.
 func overlayFor(repoRoot, path string) string {
-	p := ResolveProject(repoRoot)
+	p := project.Resolve(repoRoot)
 	if p == nil {
 		return ""
 	}
-	return overlayDir(p.StateDir, realPath(path))
+	return project.OverlayFor(p.StateDir, project.RealPath(path))
 }
 
 func dropOverlay(dir string) {
@@ -388,7 +391,7 @@ func dropIndexFor(repoRoot, path, branch string) {
 	if name == "" {
 		return
 	}
-	cmd := exec.Command("raglit", "drop-index", "--project", raglitProject(repoRoot), "--index", name)
+	cmd := exec.Command("raglit", "drop-index", "--project", mcpserver.RaglitProject(repoRoot), "--index", name)
 	cmd.Env = append(os.Environ(), RaglitTokenEnv()...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -404,9 +407,9 @@ func indexNameFor(path, branch string) string {
 		return ""
 	}
 	if branch != "" {
-		return normalizeProject(dir + "-" + branch)
+		return mcpserver.NormalizeProject(dir + "-" + branch)
 	}
-	return normalizeProject(dir)
+	return mcpserver.NormalizeProject(dir)
 }
 
 // keepSessions is how many sessions survive a prune. Enough to find the one you

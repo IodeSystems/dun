@@ -10,26 +10,27 @@ import (
 
 	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/mcptable"
 )
 
 func tableStates() []harness.ServerState {
 	return []harness.ServerState{
-		{ID: "playwright", Proto: "stdio", Auto: true, Via: harness.ViaShell, ViaFrom: harness.ScopeGlobal, ViaGlobal: harness.ViaShell,
-			Global: "on", From: harness.ScopeGlobal, Instance: harness.InstanceShared, InstanceFrom: harness.ScopeGlobal},
-		{ID: "figma", Proto: "http", Auto: true, Running: true, Tools: 3, Via: harness.ViaDirect, ViaFrom: harness.ScopeSession,
-			ViaSession: harness.ViaDirect, Global: "off", Project: "on", From: harness.ScopeProject,
-			Instance: harness.InstanceAgent, InstanceSession: harness.InstanceAgent, InstanceFrom: harness.ScopeSession},
-		{ID: harness.ServerShell, Proto: "stdio", Global: "on", Session: "off", From: harness.ScopeSession, Instance: harness.InstanceSession},
+		{ID: "playwright", Proto: "stdio", Auto: true, Via: mcpserver.ViaShell, ViaFrom: mcpserver.ScopeGlobal, ViaGlobal: mcpserver.ViaShell,
+			Global: "on", From: mcpserver.ScopeGlobal, Instance: mcpserver.InstanceShared, InstanceFrom: mcpserver.ScopeGlobal},
+		{ID: "figma", Proto: "http", Auto: true, Running: true, Tools: 3, Via: mcpserver.ViaDirect, ViaFrom: mcpserver.ScopeSession,
+			ViaSession: mcpserver.ViaDirect, Global: "off", Project: "on", From: mcpserver.ScopeProject,
+			Instance: mcpserver.InstanceAgent, InstanceSession: mcpserver.InstanceAgent, InstanceFrom: mcpserver.ScopeSession},
+		{ID: mcpserver.ServerShell, Proto: "stdio", Global: "on", Session: "off", From: mcpserver.ScopeSession, Instance: mcpserver.InstanceSession},
 		// Mode set at global and overridden by the project; instance set at global.
-		{ID: "acme", Proto: "http", Auto: true, Via: harness.ViaDirect, ViaFrom: harness.ScopeProject, ViaGlobal: harness.ViaShell, ViaProject: harness.ViaDirect,
-			Global: "on", From: harness.ScopeGlobal, Instance: harness.InstanceSession, InstanceGlobal: harness.InstanceSession, InstanceFrom: harness.ScopeGlobal},
+		{ID: "acme", Proto: "http", Auto: true, Via: mcpserver.ViaDirect, ViaFrom: mcpserver.ScopeProject, ViaGlobal: mcpserver.ViaShell, ViaProject: mcpserver.ViaDirect,
+			Global: "on", From: mcpserver.ScopeGlobal, Instance: mcpserver.InstanceSession, InstanceGlobal: mcpserver.InstanceSession, InstanceFrom: mcpserver.ScopeGlobal},
 		// Nothing sets a mode: the scripted global default decides.
-		{ID: "dflt", Proto: "http", Auto: true, Via: harness.ViaShell, ViaFrom: harness.ViaFromDefault,
-			Global: "on", From: harness.ScopeGlobal, Instance: harness.InstanceShared, InstanceFrom: harness.ScopeGlobal},
+		{ID: "dflt", Proto: "http", Auto: true, Via: mcpserver.ViaShell, ViaFrom: mcpserver.ViaFromDefault,
+			Global: "on", From: mcpserver.ScopeGlobal, Instance: mcpserver.InstanceShared, InstanceFrom: mcpserver.ScopeGlobal},
 		// The default is scripted, but its instance is agent: standalone, and why.
-		{ID: "dagent", Proto: "http", Auto: true, Via: harness.ViaDirect, ViaFrom: harness.ViaFromDefaultAgent,
-			Global: "on", From: harness.ScopeGlobal, Instance: harness.InstanceAgent, InstanceGlobal: harness.InstanceAgent, InstanceFrom: harness.ScopeGlobal},
+		{ID: "dagent", Proto: "http", Auto: true, Via: mcpserver.ViaDirect, ViaFrom: mcpserver.ViaFromDefaultAgent,
+			Global: "on", From: mcpserver.ScopeGlobal, Instance: mcpserver.InstanceAgent, InstanceGlobal: mcpserver.InstanceAgent, InstanceFrom: mcpserver.ScopeGlobal},
 	}
 }
 
@@ -284,7 +285,7 @@ func TestPalette_MCPScopeCompletion(t *testing.T) {
 // A server's detail says what it is and what it says about itself, whether
 // it is on and which switch decided, in words, and how to list its tools.
 func TestServerBody_InWords(t *testing.T) {
-	st := harness.ServerState{ID: "poly-lsp", Auto: false, Global: "off", From: harness.ScopeGlobal,
+	st := harness.ServerState{ID: "poly-lsp", Auto: false, Global: "off", From: mcpserver.ScopeGlobal,
 		Description: "semantic code navigation and edits (poly-lsp-mcp)"}
 	b := serverBody(st, "stopped")
 	for _, want := range []string{"semantic code navigation and edits (poly-lsp-mcp)",
@@ -293,8 +294,8 @@ func TestServerBody_InWords(t *testing.T) {
 			t.Errorf("lacks %q:\n%s", want, b)
 		}
 	}
-	st = harness.ServerState{ID: "vay", Auto: true, Running: true, Global: "off", Session: "on", From: harness.ScopeSession,
-		Via: harness.ViaShell, ViaFrom: harness.ScopeProject, Tools: 112, Standalone: 38000,
+	st = harness.ServerState{ID: "vay", Auto: true, Running: true, Global: "off", Session: "on", From: mcpserver.ScopeSession,
+		Via: mcpserver.ViaShell, ViaFrom: mcpserver.ScopeProject, Tools: 112, Standalone: 38000,
 		Title: "Vay Platform", Version: "2.3.1", Instructions: "Use vay to query orders.\nPrefer batch calls."}
 	b = serverBody(st, "")
 	for _, want := range []string{"Vay Platform", "version 2.3.1", "it says: Use vay to query orders.\n  Prefer batch calls.",

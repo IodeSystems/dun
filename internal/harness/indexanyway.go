@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // A root that is not a project (plan item 50).
@@ -54,7 +56,7 @@ func (h *Harness) notProjectLine(id string, n indexNote) string {
 	hint := notProjectHint(n)
 	slash := h.slashFor(id)
 	sup := IndexSupport{}
-	if command, err := FindCommand(s.Command); err == nil {
+	if command, err := mcpserver.FindCommand(s.Command); err == nil {
 		sup, _, _ = IndexProtocol(command)
 	}
 	if !sup.Anyway || s.IndexAnyway {
@@ -135,7 +137,7 @@ func (h *Harness) SetIndexAnyway(ctx context.Context, id string, on bool) (strin
 		return "", false, nil
 	}
 	if on {
-		command, err := FindCommand(s.Command)
+		command, err := mcpserver.FindCommand(s.Command)
 		if err != nil {
 			return "", false, err
 		}
@@ -145,6 +147,6 @@ func (h *Harness) SetIndexAnyway(ctx context.Context, id string, on bool) (strin
 			return "", false, fmt.Errorf("%s is an older build: it takes no --index-anyway; update it, or start dun in a repository", command)
 		}
 	}
-	p, err := h.editIndexSpec(ctx, id, true, func(s *ServerSpec) { s.IndexAnyway = on })
+	p, err := h.editIndexSpec(ctx, id, true, func(s *mcpserver.Spec) { s.IndexAnyway = on })
 	return p, err == nil, err
 }

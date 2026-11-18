@@ -1,4 +1,4 @@
-package harness
+package mcpserver
 
 // Known MCP servers /mcp add offers to fill in. Suggestions only: nothing
 // here is added until the person submits the form.
