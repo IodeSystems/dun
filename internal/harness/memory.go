@@ -19,6 +19,8 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/dun/internal/project"
 )
 
 // Memory — notes a later session on this project needs and cannot get from the
@@ -435,7 +437,7 @@ func (m *memoryStore) noteName(a memoryArgs) string {
 	}
 	sum := sha256.Sum256([]byte(a.Content + "\x00" + a.Question))
 	return fmt.Sprintf("%s-%s-%s.md", m.now().Format("2006-01-02"),
-		normalizeProject(strings.Join(words, "-")), hex.EncodeToString(sum[:3]))
+		mcpserver.NormalizeProject(strings.Join(words, "-")), hex.EncodeToString(sum[:3]))
 }
 
 // find returns the one note whose text contains phrase, or the one a path
@@ -510,7 +512,7 @@ func scanNote(content, question string) error {
 // global ones, indexed into dund's memories indexes through link. A nil link
 // keeps the files and indexes nothing.
 func memoryFor(link *memLink, workspace string) *memoryStore {
-	m := &memoryStore{dir: memoryDir(raglitProject(workspace)), global: memoryDir(globalMemoryDir), now: time.Now,
+	m := &memoryStore{dir: memoryDir(mcpserver.RaglitProject(workspace)), global: memoryDir(globalMemoryDir), now: time.Now,
 		index: memoryIndex, kinds: []string{kindMemory}, groups: [2]string{groupMemory, groupMemoryGlobal}}
 	if link == nil {
 		return m
@@ -609,7 +611,7 @@ func (h *Harness) memoryCall(m *memoryStore, rawArgs string) string {
 	if err := json.Unmarshal([]byte(rawArgs), &a); err != nil {
 		return "memory: arguments are not valid JSON: " + err.Error()
 	}
-	meta := noteMeta{Commit: gitLine(h.cfg.Workspace, "rev-parse", "--short", "HEAD")}
+	meta := noteMeta{Commit: project.GitLine(h.cfg.Workspace, "rev-parse", "--short", "HEAD")}
 	if h.cfg.SessionFile != "" {
 		meta.Session = strings.TrimSuffix(filepath.Base(h.cfg.SessionFile), ".jsonl")
 	}

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 )
@@ -53,7 +54,7 @@ func ViaCell(st harness.ServerState) string {
 	if st.Via == "" {
 		return "standalone (built-in)"
 	}
-	return harness.ModeWord(st.Via) + " (" + st.ViaFrom + ")"
+	return mcpserver.ModeWord(st.Via) + " (" + st.ViaFrom + ")"
 }
 
 // InstanceCell is "shared (global)": how many connections, and which switch
@@ -64,7 +65,7 @@ func InstanceCell(st harness.ServerState) string {
 	}
 	inst := st.Instance
 	if inst == "" {
-		inst = harness.InstanceShared
+		inst = mcpserver.InstanceShared
 	}
 	if st.InstanceFrom == "" {
 		return inst + " (built-in)"
@@ -156,9 +157,9 @@ func ToolCost(st harness.ServerState) string {
 func ServerDetail(st harness.ServerState) string {
 	var s string
 	switch {
-	case st.Via == harness.ViaShell && st.Auto:
+	case st.Via == mcpserver.ViaShell && st.Auto:
 		s = HostedSummary(st)
-	case st.Via == harness.ViaShell:
+	case st.Via == mcpserver.ViaShell:
 		s = "not hosted"
 	case st.Starting:
 		s = harness.ServerRunWord(st)

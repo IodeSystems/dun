@@ -1,6 +1,10 @@
 package harness
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
+)
 
 // /rag workspace off|on (USER 2026-10-27): raglit for other indexes
 // (attached ones, memory, skills) without reading this workspace into an
@@ -42,9 +46,9 @@ func (h *Harness) SetWorkspaceIndexed(on bool, scope string) (string, error) {
 		return "", err
 	}
 	now, from := h.WorkspaceIndexed()
-	msg := fmt.Sprintf("workspace indexing %s for %s", onOffWord(on), scopeWords(scope))
+	msg := fmt.Sprintf("workspace indexing %s for %s", mcpserver.OnOffWord(on), scopeWords(scope))
 	if now != on {
-		msg += fmt.Sprintf(" — but %s still says %s", from, onOffWord(now))
+		msg += fmt.Sprintf(" — but %s still says %s", from, mcpserver.OnOffWord(now))
 	}
 	if h.DundReadsWorkspace() {
 		msg += " — no effect now: dund reads this workspace (always), and raglit does not"

@@ -13,6 +13,8 @@ import (
 	"testing"
 
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/dun/internal/project"
 )
 
 // fakeMCPTools is a Streamable HTTP MCP server serving the named tools.
@@ -60,7 +62,7 @@ func modelTools(h *Harness) []string {
 func TestFilterTools_Globs(t *testing.T) {
 	tools := []mcpmgr.MCPTool{{Name: "tts_say", ServerID: "el"}, {Name: "tts_list", ServerID: "el"},
 		{Name: "voices", ServerID: "el"}, {Name: "[odd", ServerID: "el"}, {Name: "tts_say", ServerID: "other"}}
-	got := filterTools(tools, []Server{{ID: "el", Disable: []string{"tts_*", "[odd"}}})
+	got := filterTools(tools, []mcpserver.Server{{ID: "el", Disable: []string{"tts_*", "[odd"}}})
 	var names []string
 	for _, t := range got {
 		names = append(names, t.ServerID+"/"+t.Name)
@@ -78,7 +80,7 @@ func TestSetToolOn_GlobalWritesDisableAndRebuilds(t *testing.T) {
 	ts := fakeMCPTools(t, "tts_say", "tts_list", "voices")
 	h := newServerHarness(t)
 	ctx := context.Background()
-	if _, err := h.AddServer(ctx, ServerSpec{ID: "el", URL: ts.URL}); err != nil {
+	if _, err := h.AddServer(ctx, mcpserver.Spec{ID: "el", URL: ts.URL}); err != nil {
 		t.Fatal(err)
 	}
 	st := h.Servers()[0]
@@ -88,11 +90,11 @@ func TestSetToolOn_GlobalWritesDisableAndRebuilds(t *testing.T) {
 	full := st.Cost
 
 	off, on := false, true
-	path, _, err := h.SetToolOn("el", "tts_list", ScopeGlobal, &off)
-	if err != nil || path != UserServersFile() {
+	path, _, err := h.SetToolOn("el", "tts_list", mcpserver.ScopeGlobal, &off)
+	if err != nil || path != mcpserver.UserServersFile() {
 		t.Fatalf("off: %q %v", path, err)
 	}
-	if f, _ := readServersFile(UserServersFile()); !slices.Equal(f.Servers[0].Disable, []string{"tts_list"}) {
+	if f, _ := mcpserver.ReadConfig(mcpserver.UserServersFile()); !slices.Equal(f.Servers[0].Disable, []string{"tts_list"}) {
 		t.Errorf("saved %+v", f.Servers[0])
 	}
 	if slices.Contains(modelTools(h), "el__tts_list") || !slices.Contains(modelTools(h), "el__tts_say") {
@@ -109,35 +111,35 @@ func TestSetToolOn_GlobalWritesDisableAndRebuilds(t *testing.T) {
 		t.Fatalf("the hidden tool must still be listed: %+v", tools)
 	}
 
-	if _, _, err := h.SetToolOn("el", "tts_list", ScopeGlobal, &on); err != nil {
+	if _, _, err := h.SetToolOn("el", "tts_list", mcpserver.ScopeGlobal, &on); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Contains(modelTools(h), "el__tts_list") {
 		t.Errorf("back on: %v", modelTools(h))
 	}
 	// Emptied, the list is written as [] — it must still override.
-	if f, _ := readServersFile(UserServersFile()); f.Servers[0].Disable == nil || len(f.Servers[0].Disable) != 0 {
+	if f, _ := mcpserver.ReadConfig(mcpserver.UserServersFile()); f.Servers[0].Disable == nil || len(f.Servers[0].Disable) != 0 {
 		t.Errorf("saved %#v", f.Servers[0].Disable)
 	}
-	if p, changed, err := h.SetToolOn("el", "voices", ScopeGlobal, &on); p != "" || changed || err != nil {
+	if p, changed, err := h.SetToolOn("el", "voices", mcpserver.ScopeGlobal, &on); p != "" || changed || err != nil {
 		t.Errorf("already on: %q %v", p, err)
 	}
 
 	// A glob hides more than one; turning one back on cannot shrink it.
-	if _, err := UpsertUserServer("el", func(s *ServerSpec) { s.Disable = []string{"tts_*"} }); err != nil {
+	if _, err := mcpserver.UpsertUserServer("el", func(s *mcpserver.Spec) { s.Disable = []string{"tts_*"} }); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.reloadServers(ctx, true, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := h.SetToolOn("el", "tts_say", ScopeGlobal, &on); err == nil || !strings.Contains(err.Error(), `"tts_*"`) {
+	if _, _, err := h.SetToolOn("el", "tts_say", mcpserver.ScopeGlobal, &on); err == nil || !strings.Contains(err.Error(), `"tts_*"`) {
 		t.Errorf("glob: %v", err)
 	}
 	// A session switch turns it on over the glob, for this session only.
-	if _, _, err := h.SetToolOn("el", "tts_say", ScopeSession, &on); err != nil || !slices.Contains(modelTools(h), "el__tts_say") {
+	if _, _, err := h.SetToolOn("el", "tts_say", mcpserver.ScopeSession, &on); err != nil || !slices.Contains(modelTools(h), "el__tts_say") {
 		t.Errorf("session over glob: %v %v", err, modelTools(h))
 	}
-	if _, _, err := h.SetToolOn("el", "nope", ScopeGlobal, &off); err == nil {
+	if _, _, err := h.SetToolOn("el", "nope", mcpserver.ScopeGlobal, &off); err == nil {
 		t.Error("an unknown tool must be refused")
 	}
 }
@@ -148,33 +150,21 @@ func TestSetToolOn_ProjectGoesToStateDir(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("DUN_HOME", home)
 	ts := fakeMCPTools(t, "a", "b")
-	h := newServerHarness(t, Server{ID: "proj", URL: ts.URL})
-	writeJSON(t, h.cfg.Workspace, ProjectServersFile, `{"servers":[{"id":"proj","url":"`+ts.URL+`"}]}`)
+	h := newServerHarness(t, mcpserver.Server{ID: "proj", URL: ts.URL})
+	writeJSON(t, h.cfg.Workspace, project.ProjectServersFile, `{"servers":[{"id":"proj","url":"`+ts.URL+`"}]}`)
 	if err := h.StartServer(context.Background(), "proj"); err != nil {
 		t.Fatal(err)
 	}
 	off := false
-	path, _, err := h.SetToolOn("proj", "a", ScopeProject, &off)
-	if err != nil || !strings.HasPrefix(path, home) || filepath.Base(path) != LocalServersFile {
+	path, _, err := h.SetToolOn("proj", "a", mcpserver.ScopeProject, &off)
+	if err != nil || !strings.HasPrefix(path, home) || filepath.Base(path) != project.LocalServersFile {
 		t.Fatalf("%q %v", path, err)
 	}
-	got, err := LoadServers(h.cfg.Workspace, h.cfg.Workspace, "")
+	got, err := mcpserver.LoadServers(h.cfg.Workspace, h.cfg.Workspace, "")
 	if p := byID(got)["proj"]; err != nil || p.ProjectTools["a"] != false || len(p.ProjectTools) != 1 {
 		t.Errorf("reload: %+v %v", p, err)
 	}
 	if slices.Contains(modelTools(h), "proj__a") || !slices.Contains(modelTools(h), "proj__b") {
 		t.Errorf("model tools %v", modelTools(h))
-	}
-}
-
-// The empty list survives a write; nil stays absent.
-func TestServerSpec_EmptyDisableIsWritten(t *testing.T) {
-	b, _ := json.Marshal(ServerSpec{ID: "x", Disable: []string{}})
-	if !strings.Contains(string(b), `"disable":[]`) {
-		t.Errorf("%s", b)
-	}
-	b, _ = json.Marshal(ServerSpec{ID: "x"})
-	if strings.Contains(string(b), "disable") {
-		t.Errorf("%s", b)
 	}
 }

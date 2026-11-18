@@ -8,8 +8,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-
-	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 func TestMCPFormSpec_URLOrCommand(t *testing.T) {
@@ -58,7 +57,7 @@ func TestMCPForm_EnterOnServerAdds(t *testing.T) {
 	if got["id"] != "mcp" || !strings.HasPrefix(got["action"], "add ") {
 		t.Fatalf("sent %v", got)
 	}
-	var spec harness.ServerSpec
+	var spec mcpserver.Spec
 	if err := json.Unmarshal([]byte(strings.TrimPrefix(got["action"], "add ")), &spec); err != nil || spec.Via != "" || spec.Command != "corp-mcp" {
 		t.Errorf("spec %+v %v", spec, err)
 	}
@@ -101,7 +100,7 @@ func TestMCPForm_OAuthRows(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
 		t.Fatalf("sent %q: %v", buf.String(), err)
 	}
-	var spec harness.ServerSpec
+	var spec mcpserver.Spec
 	if err := json.Unmarshal([]byte(strings.TrimPrefix(got["action"], "add ")), &spec); err != nil || spec.OAuth == nil ||
 		spec.OAuth.ClientID != "c1" || spec.OAuth.Send != "id_token" || strings.Join(spec.OAuth.Scopes, " ") != "openid email" {
 		t.Errorf("spec %+v %+v %v", spec, spec.OAuth, err)
@@ -221,7 +220,7 @@ func TestMCPForm_CommandRowsAndEnv(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
 		t.Fatalf("sent %q: %v", buf.String(), err)
 	}
-	var spec harness.ServerSpec
+	var spec mcpserver.Spec
 	if err := json.Unmarshal([]byte(strings.TrimPrefix(got["action"], "add ")), &spec); err != nil ||
 		!slices.Equal(spec.Env, []string{"TOKEN=s3cret", "DSN=$DB_DSN"}) || spec.Command != "db-mcp" {
 		t.Errorf("spec %+v %v", spec, err)

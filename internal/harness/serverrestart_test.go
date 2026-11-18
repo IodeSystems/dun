@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // exiterHarness is a session running the fake "exiter" as server ex.
@@ -15,7 +16,7 @@ func exiterHarness(t *testing.T, instance string) (*Harness, string) {
 	cmd, logPath := fakeBin(t, "exiter", "exiter")
 	ctx := context.Background()
 	h, err := Start(ctx, Config{Workspace: t.TempDir(), Client: &scriptRunner{},
-		Servers: []Server{{ID: "ex", Command: cmd, Autostart: true, Instance: instance}}})
+		Servers: []mcpserver.Server{{ID: "ex", Command: cmd, Autostart: true, Instance: instance}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +89,7 @@ func TestRestart_ExitedServer(t *testing.T) {
 // A child's call to its parent's server restarts it in the parent; a
 // child's own instance restarts in the child.
 func TestRestart_ChildCall(t *testing.T) {
-	for _, inst := range []string{"", InstanceAgent} {
+	for _, inst := range []string{"", mcpserver.InstanceAgent} {
 		t.Run("instance="+inst, func(t *testing.T) {
 			h, logPath := exiterHarness(t, inst)
 			sa, err := h.spawnAgent(context.Background(), "look", "", "", "", "")
@@ -101,7 +102,7 @@ func TestRestart_ChildCall(t *testing.T) {
 			if child.ownMgr != nil {
 				caller = childCaller{child}
 			}
-			if inst == InstanceAgent && !child.own["ex"] {
+			if inst == mcpserver.InstanceAgent && !child.own["ex"] {
 				t.Fatal("the child has no instance of its own")
 			}
 			before := countStarts(logPath)

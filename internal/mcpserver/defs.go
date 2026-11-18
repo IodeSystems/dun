@@ -1,13 +1,15 @@
-package harness
+package mcpserver
 
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
+	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/iodesystems/dun/internal/oauth"
+	"github.com/iodesystems/dun/internal/project"
 )
 
 // Server is one MCP tool server dun spawns.
@@ -37,20 +39,20 @@ type Server struct {
 	ProjectTools   map[string]bool
 	SessionTools   map[string]bool
 	// Via is "" (dun connects to it) or ViaShell (mcpshell hosts it and dun
-	// does not start it). See ServerSpec.Via.
+	// does not start it). See Spec.Via.
 	Via string
 	// Instance is how many connections it gets, resolved: InstanceShared,
 	// InstanceSession or InstanceAgent; a built-in's fixed one
-	// (builtinInstances). See ServerSpec.Instance.
+	// (builtinInstances). See Spec.Instance.
 	Instance string
 	// PerWorkspace: its args or env name {{workspace}}, so a child isolated
 	// in a tree of its own gets an instance of its own for that tree
-	// (servers_share.go childOwn).
+	// (harness/servers_share.go childOwn).
 	PerWorkspace bool
-	// Scopes is where Autostart, Via and Instance came from (mcpscope.go).
-	Scopes ServerScopes
+	// Scopes is where Autostart, Via and Instance came from (scope.go).
+	Scopes Scopes
 	// Shell is mcpshell's settings when it hosts the server
-	// (ServerSpec.Shell).
+	// (Spec.Shell).
 	Shell *ShellOptions
 	// Bearer is the token as configured, "$NAME" unexpanded, so a
 	// shell-hosted server can read the variable when it connects instead of
@@ -60,22 +62,22 @@ type Server struct {
 	// (internal/oauth/mcpoauth.go) instead of a fixed Bearer.
 	OAuth *oauth.Spec
 	// Attach and Detach are the indexes switched on and off, the nearest
-	// scope deciding each (attach.go).
+	// scope deciding each (harness/attach.go).
 	Attach, Detach []string
-	// Exclude is the directories left out of its index (ServerSpec.Exclude),
-	// IndexBudget its index startup budget (ServerSpec.IndexBudget).
+	// Exclude is the directories left out of its index (Spec.Exclude),
+	// IndexBudget its index startup budget (Spec.IndexBudget).
 	Exclude     []string
 	IndexBudget string
-	// IndexAnyway indexes a root that is not a project (ServerSpec.IndexAnyway).
+	// IndexAnyway indexes a root that is not a project (Spec.IndexAnyway).
 	IndexAnyway bool
-	// LSPRoots overrides lspSafeArgs (ServerSpec.LSPRoots); empty keeps
+	// LSPRoots overrides lspSafeArgs (Spec.LSPRoots); empty keeps
 	// dun's default.
 	LSPRoots string
-	// Wake: its messages may start a turn on an idle session (ServerSpec.Wake).
+	// Wake: its messages may start a turn on an idle session (Spec.Wake).
 	Wake bool
 }
 
-// raglitProject is the CORPUS: the repository, shared by every worktree of it.
+// RaglitProject is the CORPUS: the repository, shared by every worktree of it.
 //
 // It must resolve to the main repo even when the session runs in a worktree, or
 // each worktree gets its own corpus and re-embeds everything the others already
@@ -86,33 +88,33 @@ type Server struct {
 // A checkout that has been `raglit init`ed carries its own project name; that is
 // the human's declared name and it wins, because splitting one repo across two
 // corpora is the failure this exists to avoid.
-func raglitProject(workspace string) string {
+func RaglitProject(workspace string) string {
 	root := repoIdentity(workspace)
 	if name := raglitConfigProject(root); name != "" {
 		return name
 	}
-	return normalizeProject(filepath.Base(strings.TrimRight(root, string(os.PathSeparator))))
+	return NormalizeProject(filepath.Base(strings.TrimRight(root, string(os.PathSeparator))))
 }
 
-// raglitIndex is the MEMBERSHIP set: this directory on this branch.
+// RaglitIndex is the MEMBERSHIP set: this directory on this branch.
 //
 // Two worktrees of one repo on two branches get two indexes, so a search returns
 // the files of the branch being worked on rather than a sibling's — dun's plan
 // records the day a workspace-root ingest indexed 16 worktree copies and every
 // search came back entirely stale duplicates. The corpus is what stops that
 // isolation costing 16x the embeddings.
-func raglitIndex(workspace string) string {
+func RaglitIndex(workspace string) string {
 	dir := filepath.Base(strings.TrimRight(workspace, string(os.PathSeparator)))
-	if b := gitLine(workspace, "rev-parse", "--abbrev-ref", "HEAD"); b != "" && b != "HEAD" {
-		return normalizeProject(dir + "-" + b)
+	if b := project.GitLine(workspace, "rev-parse", "--abbrev-ref", "HEAD"); b != "" && b != "HEAD" {
+		return NormalizeProject(dir + "-" + b)
 	}
-	return normalizeProject(dir)
+	return NormalizeProject(dir)
 }
 
 // repoIdentity is the main checkout of whatever repo workspace belongs to, or
 // workspace itself when it is not a repo at all.
 func repoIdentity(workspace string) string {
-	common := gitLine(workspace, "rev-parse", "--git-common-dir")
+	common := project.GitLine(workspace, "rev-parse", "--git-common-dir")
 	if common == "" {
 		return workspace
 	}
@@ -123,15 +125,6 @@ func repoIdentity(workspace string) string {
 		return abs
 	}
 	return workspace
-}
-
-// gitLine runs a git command in dir and returns its single-line output, or "".
-func gitLine(dir string, args ...string) string {
-	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
 }
 
 // raglitConfigProject reads the project name a `raglit init` wrote next to this
@@ -148,13 +141,13 @@ func raglitConfigProject(workspace string) string {
 	if json.Unmarshal(data, &cfg) != nil {
 		return ""
 	}
-	return normalizeProject(cfg.Project)
+	return NormalizeProject(cfg.Project)
 }
 
-// normalizeProject mirrors raglit's own index-name rule ([a-z0-9_-], empty →
+// NormalizeProject mirrors raglit's own index-name rule ([a-z0-9_-], empty →
 // "default"), so dun cannot hand it a name it will reject or sanitize
 // differently.
-func normalizeProject(name string) string {
+func NormalizeProject(name string) string {
 	name = strings.ToLower(strings.TrimSpace(name))
 	var b strings.Builder
 	for _, r := range name {
@@ -177,7 +170,7 @@ func normalizeProject(name string) string {
 // Only shell autostarts. The other two are opt-in because each costs real
 // startup time and neither is universally wanted: poly-lsp-mcp indexes the
 // repo, and raglit is an add-on for indexes beyond the project's own (dund
-// indexes this project's code and docs in every session, codesearch.go).
+// indexes this project's code and docs in every session, harness/codesearch.go).
 // A session that is going to run a couple of shell commands should not pay for
 // either, and — more to the point — a machine missing one of those binaries
 // should still get a working dun. Persist a preference with /rag auto or
@@ -220,7 +213,7 @@ func bundledServer(e Extension, workspace, raglitHome string) Server {
 // Server ids dun knows by name. The id of poly-lsp-mcp and of raglit is the
 // name of the thing and of its command: /lsp, /rag. Their tools are
 // still unprefixed (see modelToolName). Config written before the rename says
-// "code" and "docs"; canonicalServerID reads those as the new ids.
+// "code" and "docs"; CanonicalID reads those as the new ids.
 const (
 	ServerCode  = "poly-lsp" // poly-lsp-mcp — /lsp
 	ServerShell = "shell"    // mcpshell
@@ -228,12 +221,12 @@ const (
 )
 
 // builtinInstance is a built-in server's fixed instance and why it is
-// fixed: the instance switch (ServerSpec.Instance) is refused for these, and
+// fixed: the instance switch (Spec.Instance) is refused for these, and
 // the /mcp table shows this value, marked built-in.
 type builtinInstance struct{ instance, why string }
 
 // builtinInstances are the built-in servers' fixed instances, the one place
-// they are declared (mcpscope.go resolve and SetServerInstance read it).
+// they are declared (scope.go resolve and harness SetServerInstance read it).
 var builtinInstances = map[string]builtinInstance{
 	// mcpshell holds the session's eval state (session variables, its
 	// hosted servers) and the engine starts one per session.
@@ -250,7 +243,7 @@ var builtinInstances = map[string]builtinInstance{
 // BuiltinInstance is id's fixed instance and why, ok=false for a server
 // that is not built in.
 func BuiltinInstance(id string) (instance, why string, ok bool) {
-	b, ok := builtinInstances[canonicalServerID(id)]
+	b, ok := builtinInstances[CanonicalID(id)]
 	return b.instance, b.why, ok
 }
 
@@ -258,10 +251,36 @@ func BuiltinInstance(id string) (instance, why string, ok bool) {
 // named for what they are. Files and sidecars may still hold them.
 var legacyServerIDs = map[string]string{"code": ServerCode, "docs": ServerDocs}
 
-// canonicalServerID is id with a pre-rename id read as its current one.
-func canonicalServerID(id string) string {
+// CanonicalID is id with a pre-rename id read as its current one.
+func CanonicalID(id string) string {
 	if n, ok := legacyServerIDs[id]; ok {
 		return n
 	}
 	return id
 }
+
+// HiddenBy is the first Disable entry that hides name, or "". A malformed
+// glob still matches its own exact text.
+func HiddenBy(name string, disable []string) string {
+	for _, p := range disable {
+		if ok, err := path.Match(p, name); ok || (err != nil && p == name) {
+			return p
+		}
+	}
+	return ""
+}
+
+// IsBuiltin reports whether id is one of dun's own three servers: the
+// shell and the bundled extensions.
+func IsBuiltin(id string) bool {
+	if CanonicalID(id) == ServerShell {
+		return true
+	}
+	_, ok := bundledExt(id)
+	return ok
+}
+
+// IDPattern is what /mcp add accepts as an id: it becomes the tool
+// namespace ("<id>__<tool>") and a raglit index name, so it is kept to
+// characters both allow.
+var IDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)

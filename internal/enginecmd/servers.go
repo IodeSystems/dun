@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/mcptable"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
@@ -18,7 +19,7 @@ func SlashOf(st harness.ServerState) string {
 	if st.Slash != "" {
 		return st.Slash
 	}
-	for _, e := range harness.BundledExtensions() {
+	for _, e := range mcpserver.BundledExtensions() {
 		if e.ID == st.ID {
 			return e.SlashName()
 		}
@@ -55,7 +56,7 @@ func ServerHint(states []harness.ServerState) string {
 			}
 			continue
 		}
-		if st.Via == harness.ViaShell {
+		if st.Via == mcpserver.ViaShell {
 			if st.Err != "" {
 				lines = append(lines, fmt.Sprintf("%s (scripted) did not connect: %s", st.ID, textfmt.OneLine(st.Err)))
 			}

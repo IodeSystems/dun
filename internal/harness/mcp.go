@@ -11,6 +11,7 @@ import (
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // The MCP bridge — the whole "give the agent these tools" story is two small
@@ -96,10 +97,10 @@ const (
 // is dund's, over this project's code and docs, in every session (USER
 // 2026-11-17: "dund default, raglit add-on").
 func modelToolName(t mcpmgr.MCPTool) string {
-	if t.ServerID == ServerDocs && t.Name == raglitSearchTool {
+	if t.ServerID == mcpserver.ServerDocs && t.Name == raglitSearchTool {
 		return docsSearchName
 	}
-	if t.ServerID == "" || builtinServer(t.ServerID) {
+	if t.ServerID == "" || mcpserver.IsBuiltin(t.ServerID) {
 		return t.Name
 	}
 	name := t.ServerID + "__" + t.Name

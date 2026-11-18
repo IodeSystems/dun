@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -39,7 +40,7 @@ type raglitIndexRow struct {
 
 // listIndexes runs the search extension's index CLI for every index.
 var listIndexes = func(ctx context.Context, cli, dir string, env []string) ([]raglitIndexRow, error) {
-	p, err := FindCommand(cli)
+	p, err := mcpserver.FindCommand(cli)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +80,7 @@ func (h *Harness) indexesView() SwitchView {
 	// dund's project index first (USER 2026-11-17: "dund default, raglit
 	// add-on"): always on, so it has no switches; raglit is the add-on below.
 	v.Items = append(v.Items, h.projectIndexRow())
-	s, err := h.knownServer(ServerDocs)
+	s, err := h.knownServer(mcpserver.ServerDocs)
 	if err != nil {
 		v.Note = err.Error()
 		return v
@@ -87,9 +88,9 @@ func (h *Harness) indexesView() SwitchView {
 	own := h.ownProject(s)
 	// The provider first (USER 2026-10-28): raglit itself, its switch the
 	// same as /mcp's, the indexes under it.
-	provider := SwitchState{SwitchItem: SwitchItem{Name: ServerDocs, Description: h.describe(ServerDocs)},
+	provider := SwitchState{SwitchItem: SwitchItem{Name: mcpserver.ServerDocs, Description: h.describe(mcpserver.ServerDocs)},
 		On: s.Autostart, From: s.Scopes.OnFrom,
-		Global: onOffWord(s.Scopes.GlobalOn(s.Via)), Project: tri(s.Scopes.Project), Session: tri(s.Scopes.Session)}
+		Global: mcpserver.OnOffWord(s.Scopes.GlobalOn(s.Via)), Project: tri(s.Scopes.Project), Session: tri(s.Scopes.Session)}
 	v.Items = append(v.Items, provider)
 	pi := len(v.Items) - 1
 	scopes := map[string]map[string]string{}
@@ -102,18 +103,18 @@ func (h *Harness) indexesView() SwitchView {
 		}
 	}
 	sc := s.Scopes
-	mark(sc.AttachGlobal, ScopeGlobal, "on")
-	mark(sc.DetachGlobal, ScopeGlobal, "off")
-	mark(sc.AttachProject, ScopeProject, "on")
-	mark(sc.DetachProject, ScopeProject, "off")
-	mark(sc.AttachSession, ScopeSession, "on")
-	mark(sc.DetachSession, ScopeSession, "off")
+	mark(sc.AttachGlobal, mcpserver.ScopeGlobal, "on")
+	mark(sc.DetachGlobal, mcpserver.ScopeGlobal, "off")
+	mark(sc.AttachProject, mcpserver.ScopeProject, "on")
+	mark(sc.DetachProject, mcpserver.ScopeProject, "off")
+	mark(sc.AttachSession, mcpserver.ScopeSession, "on")
+	mark(sc.DetachSession, mcpserver.ScopeSession, "off")
 	seen := map[string]bool{}
 	add := func(it SwitchItem) {
 		seen[it.Name] = true
 		m := scopes[it.Name]
-		it.Parent = ServerDocs
-		st := SwitchState{SwitchItem: it, Global: m[ScopeGlobal], Project: m[ScopeProject], Session: m[ScopeSession]}
+		it.Parent = mcpserver.ServerDocs
+		st := SwitchState{SwitchItem: it, Global: m[mcpserver.ScopeGlobal], Project: m[mcpserver.ScopeProject], Session: m[mcpserver.ScopeSession]}
 		p, _, _ := strings.Cut(it.Name, ":")
 		st.On = p == own // unset everywhere: this project's own are on
 		for _, scope := range switchScopes {
@@ -125,7 +126,7 @@ func (h *Harness) indexesView() SwitchView {
 		v.Items = append(v.Items, st)
 	}
 	cli := "raglit"
-	if e, ok := h.extension(ServerDocs); ok && e.Roles.Index != nil && e.Roles.Index.CLI != "" {
+	if e, ok := h.extension(mcpserver.ServerDocs); ok && e.Roles.Index != nil && e.Roles.Index.CLI != "" {
 		cli = e.Roles.Index.CLI
 	}
 	rows, err := listIndexes(context.Background(), cli, h.cfg.Workspace, h.raglitEnv())
@@ -172,7 +173,7 @@ func (h *Harness) indexesView() SwitchView {
 	}
 	state := ServerStateWord(ServerState{Auto: s.Autostart})
 	for _, st := range h.Servers() {
-		if st.ID == ServerDocs {
+		if st.ID == mcpserver.ServerDocs {
 			state = ServerStateWord(st)
 		}
 	}
@@ -220,7 +221,7 @@ func (h *Harness) projectIndexRow() SwitchState {
 func (h *Harness) ragUp() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	_, err := h.cfg.Rag.Search(ctx, proto.RagSearch{Project: raglitProject(h.cfg.Workspace), Index: memoryIndex,
+	_, err := h.cfg.Rag.Search(ctx, proto.RagSearch{Project: mcpserver.RaglitProject(h.cfg.Workspace), Index: memoryIndex,
 		Query: "dun", Limit: 1, Mode: "fts"})
 	return !errors.Is(err, ErrRagDown) && ctx.Err() == nil
 }
@@ -230,10 +231,10 @@ func (h *Harness) setIndexAttach(name, scope string, on *bool) (string, error) {
 	if name == projectIndexName {
 		return "", errors.New("the project index (dund) is always on: it has no switch (DUN_MEMORY=0 runs a session without it)")
 	}
-	if name == ServerDocs { // the provider row: /mcp's switch on raglit
-		return h.SetServerOn(context.Background(), ServerDocs, scope, on)
+	if name == mcpserver.ServerDocs { // the provider row: /mcp's switch on raglit
+		return h.SetServerOn(context.Background(), mcpserver.ServerDocs, scope, on)
 	}
-	got, _, changed, err := h.SetIndex(context.Background(), ServerDocs, name, scope, on)
+	got, _, changed, err := h.SetIndex(context.Background(), mcpserver.ServerDocs, name, scope, on)
 	if err != nil {
 		return "", err
 	}

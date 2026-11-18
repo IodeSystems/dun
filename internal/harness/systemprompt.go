@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // SessionStats returns the session-level counters for /context display.
@@ -170,14 +171,14 @@ func systemBuild(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree, files s
 		b.WriteString(systemThinking)
 	}
 	var fam strings.Builder
-	if have[ServerCode] {
+	if have[mcpserver.ServerCode] {
 		fam.WriteString(systemCode)
 	}
-	if have[ServerShell] {
+	if have[mcpserver.ServerShell] {
 		fam.WriteString(systemShell)
 		fam.WriteString(HostedLine(hosted))
 	}
-	if have[ServerDocs] {
+	if have[mcpserver.ServerDocs] {
 		fam.WriteString(systemDocs)
 	}
 	if fam.Len() > 0 {
@@ -187,10 +188,10 @@ func systemBuild(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree, files s
 	if exec != nil {
 		b.WriteString(systemExecCap)
 	}
-	if have[ServerDocs] {
+	if have[mcpserver.ServerDocs] {
 		b.WriteString(systemDocsNote)
 	}
-	if have[ServerCode] {
+	if have[mcpserver.ServerCode] {
 		b.WriteString(systemWorkCode)
 	} else {
 		b.WriteString(systemWork)

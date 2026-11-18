@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // A child may run on another logged-in provider than its parent (USER
@@ -22,7 +23,7 @@ func startParentOn(t *testing.T, kid *scriptRunner, asked *[]askedFor) *Harness 
 	t.Setenv("DUN_HOME", t.TempDir())
 	dir := t.TempDir()
 	h, err := Start(context.Background(), Config{
-		Workspace: dir, Servers: []Server{}, Client: &scriptRunner{},
+		Workspace: dir, Servers: []mcpserver.Server{}, Client: &scriptRunner{},
 		Endpoint: Endpoint{URL: "http://claude.test/v1", Model: "big"},
 		ClientFor: func(provider, model string) (ChildClient, error) {
 			*asked = append(*asked, askedFor{provider, model})

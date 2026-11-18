@@ -1,4 +1,6 @@
-package harness
+// Package project is where dun keeps what it knows about a directory: the
+// project registry and each project's state directory under $DUN_HOME.
+package project
 
 import (
 	"crypto/rand"
@@ -9,10 +11,12 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
 
+	"github.com/iodesystems/dun/internal/dunhome"
 	"github.com/iodesystems/dun/internal/fsutil"
 )
 
@@ -43,6 +47,18 @@ import (
 // A repo's committed dun.json, .dun/dun.json and .dun/skills/ are still READ;
 // see serverConfigPaths for the order.
 
+// Files dun reads in a repo and in a project's state directory; see
+// internal/mcpserver/config.go for the layers.
+const (
+	// ProjectServersFile is committed and describes the project.
+	ProjectServersFile = "dun.json"
+	// LocalServersFile is machine state: never committed, written 0600.
+	LocalServersFile = "dun.local.json"
+	// DunDir is the directory in a repo where a project MAY commit dun.json
+	// and skills/. dun reads it and never creates it.
+	DunDir = ".dun"
+)
+
 // Project is the state location for one directory.
 type Project struct {
 	ID     string
@@ -72,35 +88,35 @@ func (p *Project) AgentsReadFile() string { return filepath.Join(p.WriteDir(), a
 
 const agentsReadName = "agents_read"
 
-// DunHome is $DUN_HOME, else ~/.dun.
-func DunHome() string { return filepath.Dir(SessionsDir()) }
+func projectsRoot() string { return filepath.Join(dunHome(), "projects") }
 
-func projectsRoot() string { return filepath.Join(DunHome(), "projects") }
+func registryFile() string { return filepath.Join(dunHome(), "projects.json") }
 
-func registryFile() string { return filepath.Join(DunHome(), "projects.json") }
+// dunHome is $DUN_HOME, else ~/.dun (harness.DunHome).
+func dunHome() string { return filepath.Clean(dunhome.Dir()) }
 
 // registry is the on-disk shape of projects.json.
 type registry struct {
 	Projects map[string]string `json:"projects"` // absolute source dir → id
 }
 
-// projectRoots finds what dir belongs to: source is the directory the id is
+// Roots finds what dir belongs to: source is the directory the id is
 // registered for, top is dir's own root. A linked worktree has top != source.
-func projectRoots(dir string) (source, top string) {
-	abs := realPath(dir)
-	t := gitLine(abs, "rev-parse", "--show-toplevel")
+func Roots(dir string) (source, top string) {
+	abs := RealPath(dir)
+	t := GitLine(abs, "rev-parse", "--show-toplevel")
 	if t == "" {
 		return abs, abs // not a repo: the directory is the project
 	}
-	top = realPath(t)
-	common := gitLine(top, "rev-parse", "--git-common-dir")
+	top = RealPath(t)
+	common := GitLine(top, "rev-parse", "--git-common-dir")
 	if common == "" {
 		return top, top
 	}
 	if !filepath.IsAbs(common) {
 		common = filepath.Join(top, common)
 	}
-	common = realPath(common)
+	common = RealPath(common)
 	// <main>/.git is the ordinary case. Anything else (a bare repo, a
 	// submodule's .git/modules/x) has no main worktree to name, so the
 	// toplevel stands for itself.
@@ -110,10 +126,10 @@ func projectRoots(dir string) (source, top string) {
 	return filepath.Dir(common), top
 }
 
-// realPath is the absolute, symlink-resolved form of p, or the absolute form
+// RealPath is the absolute, symlink-resolved form of p, or the absolute form
 // when it cannot be resolved. One directory must have one key: on macOS the
 // temp dir is reached both as /var/… and /private/var/….
-func realPath(p string) string {
+func RealPath(p string) string {
 	abs, err := filepath.Abs(p)
 	if err != nil {
 		abs = p
@@ -124,24 +140,26 @@ func realPath(p string) string {
 	return filepath.Clean(abs)
 }
 
-func overlayDir(stateDir, top string) string {
+// OverlayFor is the state directory of top, a linked worktree of the
+// project whose state is stateDir.
+func OverlayFor(stateDir, top string) string {
 	sum := sha256.Sum256([]byte(top))
-	return filepath.Join(stateDir, "overlays", slug(filepath.Base(top))+"-"+hex.EncodeToString(sum[:4]))
+	return filepath.Join(stateDir, "overlays", Slug(filepath.Base(top))+"-"+hex.EncodeToString(sum[:4]))
 }
 
 func newProject(id, source, top string) *Project {
 	p := &Project{ID: id, Source: source, Dir: top, StateDir: filepath.Join(projectsRoot(), id)}
 	if top != source {
-		p.OverlayDir = overlayDir(p.StateDir, top)
+		p.OverlayDir = OverlayFor(p.StateDir, top)
 	}
 	return p
 }
 
-// ResolveProject is the project dir belongs to, or nil when dun has never seen
+// Resolve is the project dir belongs to, or nil when dun has never seen
 // it. It creates nothing: reading config must not be what registers a
 // directory.
-func ResolveProject(dir string) *Project {
-	source, top := projectRoots(dir)
+func Resolve(dir string) *Project {
+	source, top := Roots(dir)
 	reg, err := readRegistry()
 	if err != nil {
 		return nil
@@ -153,11 +171,11 @@ func ResolveProject(dir string) *Project {
 	return newProject(id, source, top)
 }
 
-// EnsureProject is ResolveProject that registers dir on first sight: it mints
+// Ensure is Resolve that registers dir on first sight: it mints
 // the id, creates the state directory (and dir's overlay, when dir is a
 // linked worktree), and imports state an older dun left in the repo.
-func EnsureProject(dir string) (*Project, error) {
-	source, top := projectRoots(dir)
+func Ensure(dir string) (*Project, error) {
+	source, top := Roots(dir)
 	id, minted, err := registerProject(source)
 	if err != nil {
 		return nil, err
@@ -186,8 +204,8 @@ func EnsureProject(dir string) (*Project, error) {
 // registry missing the other's entry, and a lost entry is a project whose
 // worktrees and settings are silently orphaned on the next start.
 func registerProject(source string) (id string, minted bool, err error) {
-	if err := os.MkdirAll(DunHome(), 0o700); err != nil {
-		return "", false, fmt.Errorf("dun: create %s: %w", DunHome(), err)
+	if err := os.MkdirAll(dunHome(), 0o700); err != nil {
+		return "", false, fmt.Errorf("dun: create %s: %w", dunHome(), err)
 	}
 	unlock, err := lockFile(registryFile() + ".lock")
 	if err != nil {
@@ -202,7 +220,7 @@ func registerProject(source string) (id string, minted bool, err error) {
 		return id, false, nil
 	}
 	for range 10 {
-		cand := slug(filepath.Base(source)) + "-" + randomHex(3)
+		cand := Slug(filepath.Base(source)) + "-" + randomHex(3)
 		if _, err := os.Stat(filepath.Join(projectsRoot(), cand)); os.IsNotExist(err) && !idTaken(reg, cand) {
 			id = cand
 			break
@@ -276,9 +294,9 @@ func randomHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
-// slug is name reduced to what reads well in a path: lower-case letters,
+// Slug is name reduced to what reads well in a path: lower-case letters,
 // digits, '-', '_' and '.', at most 32 characters.
-func slug(name string) string {
+func Slug(name string) string {
 	var b strings.Builder
 	dash := false
 	for _, r := range strings.ToLower(name) {
@@ -338,4 +356,13 @@ func copyFile(from, to string, perm os.FileMode) error {
 		return err
 	}
 	return fsutil.WriteAtomic(to, data, perm)
+}
+
+// GitLine runs a git command in dir and returns its single-line output, or "".
+func GitLine(dir string, args ...string) string {
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }

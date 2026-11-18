@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // startSetup starts a session whose code server is the fake poly-lsp
@@ -19,7 +21,7 @@ func startSetup(t *testing.T, mode string) (*Harness, chan string) {
 	lines := make(chan string, 8)
 	h, err := Start(context.Background(), Config{
 		Workspace: ws, Client: &scriptRunner{}, SessionFile: filepath.Join(ws, "s.jsonl"),
-		Servers:       []Server{{ID: ServerCode, Command: lsp, Args: []string{"mcp", "--root", ws}, Timeout: 20, Autostart: true}},
+		Servers:       []mcpserver.Server{{ID: mcpserver.ServerCode, Command: lsp, Args: []string{"mcp", "--root", ws}, Timeout: 20, Autostart: true}},
 		OnServerSetup: func(id, msg string) { lines <- msg },
 	})
 	if err != nil {
@@ -84,7 +86,7 @@ func TestSetup_MissingServerInAHeavyLanguageIsSaid(t *testing.T) {
 		t.Fatal("no line")
 	}
 	// A second report in the same session is kept, and not said again.
-	if l := h.noteSetup(ServerCode, *rep); l != "" {
+	if l := h.noteSetup(mcpserver.ServerCode, *rep); l != "" {
 		t.Errorf("said twice: %q", l)
 	}
 	noLine(t, lines)
@@ -116,7 +118,7 @@ func TestSetup_OlderServerChangesNothing(t *testing.T) {
 	lines := make(chan string, 1)
 	h, err := Start(context.Background(), Config{
 		Workspace: ws, Client: &scriptRunner{}, SessionFile: filepath.Join(ws, "s.jsonl"),
-		Servers:       []Server{{ID: ServerCode, Command: lsp, Args: []string{"mcp", "--root", ws}, Timeout: 20, Autostart: true}},
+		Servers:       []mcpserver.Server{{ID: mcpserver.ServerCode, Command: lsp, Args: []string{"mcp", "--root", ws}, Timeout: 20, Autostart: true}},
 		OnServerSetup: func(id, msg string) { lines <- msg },
 	})
 	if err != nil {

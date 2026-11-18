@@ -13,7 +13,7 @@ import (
 
 	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/internal/dunconfig"
-	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/internal/update"
 	"github.com/iodesystems/dun/release"
@@ -47,7 +47,7 @@ var pinnedTool = func(name string) (update.Artifact, update.File, bool) {
 	a, f, ok := m.File(name, plat)
 	// A newer pin in the registry (signed by the same key) wins, when it has
 	// this platform's file: a tool's point release without a dun release.
-	if t, rok := harness.RegistryTool(name); rok {
+	if t, rok := mcpserver.RegistryTool(name); rok {
 		if rf, fok := t.Files[plat]; fok && (!ok || semver.Compare(t.Recommended, a.Version) > 0) {
 			return update.Artifact{Version: t.Recommended, Files: t.Files}, rf, true
 		}

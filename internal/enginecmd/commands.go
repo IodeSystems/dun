@@ -12,6 +12,7 @@ import (
 
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
@@ -26,9 +27,9 @@ func choices(pairs ...string) []proto.CommandChoice {
 
 // CommandList builds the list from the state it shows: the extensions'
 // slash commands (the bundled ones when exts is empty), after dun's own.
-func CommandList(servers []harness.ServerState, iso string, exts ...harness.Extension) *proto.Commands {
+func CommandList(servers []harness.ServerState, iso string, exts ...mcpserver.Extension) *proto.Commands {
 	if len(exts) == 0 {
-		exts = harness.BundledExtensions()
+		exts = mcpserver.BundledExtensions()
 	}
 	serverState := func(alias string) (string, string) {
 		var st harness.ServerState
@@ -66,7 +67,7 @@ var srvActions = []string{"on", "on for this session (--project, --global for wi
 
 // extCommand is an extension's slash command: the server switch's actions,
 // then the extension's own commands.
-func extCommand(e harness.Extension, state, detail string) proto.CommandSpec {
+func extCommand(e mcpserver.Extension, state, detail string) proto.CommandSpec {
 	pairs := append([]string{}, srvActions...)
 	usage := "on|off|unset|restart|auto|manual"
 	own := ExtOwnCommands(e)
@@ -89,7 +90,7 @@ func extCommand(e harness.Extension, state, detail string) proto.CommandSpec {
 
 // ExtOwnCommands are e's commands beside the server switch, as name, help
 // pairs: the manifest's (by name), then the index commands its roles give it.
-func ExtOwnCommands(e harness.Extension) []string {
+func ExtOwnCommands(e mcpserver.Extension) []string {
 	var pairs []string
 	names := make([]string, 0, len(e.Slash.Commands))
 	for n := range e.Slash.Commands {
@@ -110,7 +111,7 @@ func ExtOwnCommands(e harness.Extension) []string {
 	if _, own := e.Slash.Commands["exclude"]; !own && ExcludeVerb(e.ID, "exclude") {
 		pairs = append(pairs, excludeHelp...)
 	}
-	if _, own := e.Slash.Commands["setup"]; !own && e.ID == harness.ServerDocs {
+	if _, own := e.Slash.Commands["setup"]; !own && e.ID == mcpserver.ServerDocs {
 		pairs = append(pairs, ragSetupHelp...)
 	}
 	if _, own := e.Slash.Commands["attach"]; !own && ExtIndexVerb(e, "attach") {
@@ -272,14 +273,14 @@ var EngineHarness atomic.Value
 // e's roles give it (dun/attach.go): watch with an index CLI, attach and
 // detach with a search role. An extension's own command of the same name
 // wins (routeSlash asks it first).
-func ExtIndexVerb(e harness.Extension, verb string) bool {
+func ExtIndexVerb(e mcpserver.Extension, verb string) bool {
 	switch verb {
 	case "watch":
 		return e.Roles.Index != nil && e.Roles.Index.CLI != ""
 	case "attach", "detach":
 		return e.Roles.Search != nil
 	case "workspace": // whether the workspace is read into an index (dun/ragworkspace.go)
-		return e.Roles.Search != nil && e.Subscribes(harness.HookWorkspaceOpen)
+		return e.Roles.Search != nil && e.Subscribes(mcpserver.HookWorkspaceOpen)
 	}
 	return false
 }
@@ -287,7 +288,7 @@ func ExtIndexVerb(e harness.Extension, verb string) bool {
 // ExcludeVerb reports whether /<slash> <verb> is an exclude command: the
 // code server's, whose index takes --exclude.
 func ExcludeVerb(id, verb string) bool {
-	return id == harness.ServerCode && (verb == "exclude" || verb == "include" || verb == "budget" || verb == "index-anyway")
+	return id == mcpserver.ServerCode && (verb == "exclude" || verb == "include" || verb == "budget" || verb == "index-anyway")
 }
 
 // excludeHelp is exclude's and include's lines in the palette and in bare
@@ -308,8 +309,8 @@ var isolateChoices = choices(
 
 // PresetIDs lists the presets for a hint.
 func PresetIDs() string {
-	ids := make([]string, len(harness.Presets()))
-	for i, p := range harness.Presets() {
+	ids := make([]string, len(mcpserver.Presets()))
+	for i, p := range mcpserver.Presets() {
 		ids[i] = p.ID
 	}
 	return strings.Join(ids, ", ")

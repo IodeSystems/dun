@@ -4,17 +4,19 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // Describing a tool family whose tools are absent is worse than saying nothing:
 // the model plans around node_query, calls it, and gets "unknown tool".
 func TestSystemFor_OnlyDescribesRunningFamilies(t *testing.T) {
-	shellOnly := systemFor([]mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}, HostExec{Dir: "/tmp"}, nil, "", false)
+	shellOnly := systemFor([]mcpmgr.MCPTool{{Name: "eval", ServerID: mcpserver.ServerShell}}, HostExec{Dir: "/tmp"}, nil, "", false)
 	if strings.Contains(shellOnly, "node_query") {
 		t.Error("described code tools with no code server running")
 	}
@@ -40,9 +42,9 @@ func TestSystemFor_OnlyDescribesRunningFamilies(t *testing.T) {
 	}
 
 	all := systemFor([]mcpmgr.MCPTool{
-		{Name: "node_query", ServerID: ServerCode},
-		{Name: "eval", ServerID: ServerShell},
-		{Name: "search", ServerID: ServerDocs},
+		{Name: "node_query", ServerID: mcpserver.ServerCode},
+		{Name: "eval", ServerID: mcpserver.ServerShell},
+		{Name: "search", ServerID: mcpserver.ServerDocs},
 	}, DockerExec{Dir: "/work", Image: "golang:1.23"}, &Worktree{Path: "/tmp/wt", Branch: "feat"}, "", false)
 	for _, want := range []string{"node_query", "mcpshell", "raglit", "[docs] notes"} {
 		if !strings.Contains(all, want) {
@@ -59,7 +61,7 @@ func TestSystemFor_OnlyDescribesRunningFamilies(t *testing.T) {
 
 	// No backend, no exec tool — so describing one invites a call to something
 	// that is not there. Same rule as the MCP families.
-	none := systemFor([]mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}, nil, nil, "", false)
+	none := systemFor([]mcpmgr.MCPTool{{Name: "eval", ServerID: mcpserver.ServerShell}}, nil, nil, "", false)
 	if strings.Contains(none, "clipped") {
 		t.Errorf("described exec with no backend configured:\n%s", none)
 	}
@@ -72,8 +74,8 @@ func TestStart_FailingAutostartIsNotFatal(t *testing.T) {
 	dir := t.TempDir()
 	h, err := Start(context.Background(), Config{
 		Workspace: dir,
-		Servers: []Server{{
-			ID: ServerDocs, Command: "sh", Timeout: 5, Autostart: true,
+		Servers: []mcpserver.Server{{
+			ID: mcpserver.ServerDocs, Command: "sh", Timeout: 5, Autostart: true,
 			Args: []string{"-c", "echo 'no project name' >&2; exit 1"},
 		}},
 		SessionFile: "",
@@ -86,7 +88,7 @@ func TestStart_FailingAutostartIsNotFatal(t *testing.T) {
 	// machine can spend longer spawning sh. Wait for the start to settle.
 	h.WaitServers(context.Background())
 
-	st, ok := serverState(h, ServerDocs)
+	st, ok := serverState(h, mcpserver.ServerDocs)
 	if !ok {
 		t.Fatal("docs missing from Servers()")
 	}
@@ -106,21 +108,21 @@ func TestStartServer_FailureLeavesSessionUsable(t *testing.T) {
 	dir := t.TempDir()
 	h, err := Start(context.Background(), Config{
 		Workspace: dir,
-		Servers: []Server{{
-			ID: ServerDocs, Command: "definitely-not-a-real-binary-xyz", Timeout: 5,
+		Servers: []mcpserver.Server{{
+			ID: mcpserver.ServerDocs, Command: "definitely-not-a-real-binary-xyz", Timeout: 5,
 		}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer h.Close()
-	if err := h.StartServer(context.Background(), ServerDocs); err == nil {
+	if err := h.StartServer(context.Background(), mcpserver.ServerDocs); err == nil {
 		t.Fatal("expected an error for a missing binary")
 	}
 	if h.Session == nil || h.Session.Dispatch == nil {
 		t.Fatal("session was left unusable by a failed start")
 	}
-	if st, _ := serverState(h, ServerDocs); st.Err == "" || !st.Missing {
+	if st, _ := serverState(h, mcpserver.ServerDocs); st.Err == "" || !st.Missing {
 		t.Errorf("a command that is not installed was not recorded as missing for the UI: %+v", st)
 	}
 }
@@ -135,7 +137,7 @@ func TestStartStopServer_RebuildsToolSet(t *testing.T) {
 	dir := t.TempDir()
 	h, err := Start(context.Background(), Config{
 		Workspace: dir,
-		Servers:   []Server{{ID: ServerShell, Command: "mcpshell", Args: []string{"mcp", "--files-dir", dir}, Timeout: 30}},
+		Servers:   []mcpserver.Server{{ID: mcpserver.ServerShell, Command: "mcpshell", Args: []string{"mcp", "--files-dir", dir}, Timeout: 30}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -147,7 +149,7 @@ func TestStartStopServer_RebuildsToolSet(t *testing.T) {
 	if n := serverToolNames(h); len(n) != 0 {
 		t.Fatalf("nothing autostarted, so there should be no server tools: %v", n)
 	}
-	if err := h.StartServer(context.Background(), ServerShell); err != nil {
+	if err := h.StartServer(context.Background(), mcpserver.ServerShell); err != nil {
 		t.Fatal(err)
 	}
 	if len(serverToolNames(h)) == 0 {
@@ -156,7 +158,7 @@ func TestStartStopServer_RebuildsToolSet(t *testing.T) {
 	if !strings.Contains(h.Session.System, "mcpshell") {
 		t.Error("system prompt did not pick up the new family")
 	}
-	if err := h.StopServer(ServerShell); err != nil {
+	if err := h.StopServer(mcpserver.ServerShell); err != nil {
 		t.Fatal(err)
 	}
 	if n := serverToolNames(h); len(n) != 0 {
@@ -353,11 +355,11 @@ func serverToolNames(h *Harness) []string {
 
 func TestFilterTools_NoFilter(t *testing.T) {
 	tools := []mcpmgr.MCPTool{
-		{Name: "search", ServerID: ServerDocs},
-		{Name: "ingest", ServerID: ServerDocs},
-		{Name: "node_query", ServerID: ServerCode},
+		{Name: "search", ServerID: mcpserver.ServerDocs},
+		{Name: "ingest", ServerID: mcpserver.ServerDocs},
+		{Name: "node_query", ServerID: mcpserver.ServerCode},
 	}
-	specs := []Server{{ID: ServerDocs}, {ID: ServerCode}}
+	specs := []mcpserver.Server{{ID: mcpserver.ServerDocs}, {ID: mcpserver.ServerCode}}
 	got := filterTools(tools, specs)
 	if len(got) != 3 {
 		t.Fatalf("got %d tools, want 3", len(got))
@@ -366,14 +368,14 @@ func TestFilterTools_NoFilter(t *testing.T) {
 
 func TestFilterTools_DenyList(t *testing.T) {
 	tools := []mcpmgr.MCPTool{
-		{Name: "search", ServerID: ServerDocs},
-		{Name: "ingest", ServerID: ServerDocs},
-		{Name: "ocr", ServerID: ServerDocs},
-		{Name: "node_query", ServerID: ServerCode},
+		{Name: "search", ServerID: mcpserver.ServerDocs},
+		{Name: "ingest", ServerID: mcpserver.ServerDocs},
+		{Name: "ocr", ServerID: mcpserver.ServerDocs},
+		{Name: "node_query", ServerID: mcpserver.ServerCode},
 	}
-	specs := []Server{
-		{ID: ServerDocs, Disable: []string{"ingest", "ocr", "search_figures"}},
-		{ID: ServerCode},
+	specs := []mcpserver.Server{
+		{ID: mcpserver.ServerDocs, Disable: []string{"ingest", "ocr", "search_figures"}},
+		{ID: mcpserver.ServerCode},
 	}
 	got := filterTools(tools, specs)
 	names := make([]string, len(got))
@@ -391,9 +393,9 @@ func TestFilterTools_DenyList(t *testing.T) {
 
 func TestFilterTools_EmptyDenyPassesAll(t *testing.T) {
 	tools := []mcpmgr.MCPTool{
-		{Name: "search", ServerID: ServerDocs},
+		{Name: "search", ServerID: mcpserver.ServerDocs},
 	}
-	specs := []Server{{ID: ServerDocs, Disable: []string{}}}
+	specs := []mcpserver.Server{{ID: mcpserver.ServerDocs, Disable: []string{}}}
 	got := filterTools(tools, specs)
 	// Empty Disable list = no filter → pass everything through
 	if len(got) != 1 {
@@ -410,7 +412,7 @@ func TestStart_AddedServerStartsInTheBackground(t *testing.T) {
 	t0 := time.Now()
 	h, err := Start(context.Background(), Config{
 		Workspace: dir,
-		Servers: []Server{{
+		Servers: []mcpserver.Server{{
 			ID: "slow", Command: "sh", Timeout: 2, Autostart: true,
 			Args: []string{"-c", "sleep 30"}, // never speaks MCP
 		}},
@@ -434,5 +436,62 @@ func TestStart_AddedServerStartsInTheBackground(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("no report for the background server")
+	}
+}
+
+// dun handed raglit the workspace's top-level entries, which meant handing over
+// build output: a 27 MB `dun` executable and a 25 MB `dun.test`, both gitignored,
+// both sent to a pipeline that extracts, segments and embeds.
+func TestIngestTargets_SendsWhatGitWouldShowYou(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		c := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		c.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	run("init", "-q")
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(".gitignore", "/binary\n*.test\n")
+	write("main.go", "package main\n")
+	write("README.md", "# hi\n")
+	write("binary", "\x7fELF\x02\x01\x01\x00 not really but ignored\n")
+	write("thing.test", "also ignored\n")
+	write("untracked.md", "untracked but not ignored\n")
+	run("add", "main.go", "README.md", ".gitignore")
+
+	got := map[string]bool{}
+	for _, p := range ingestTargets(dir) {
+		got[filepath.Base(p)] = true
+	}
+	for _, want := range []string{"main.go", "README.md", "untracked.md"} {
+		if !got[want] {
+			t.Errorf("%s should be ingested", want)
+		}
+	}
+	for _, never := range []string{"binary", "thing.test"} {
+		if got[never] {
+			t.Errorf("%s is gitignored build output and must NOT be sent to the indexer", never)
+		}
+	}
+
+	// Not a git repo → the old top-level behaviour, minus .git and .dun.
+	plain := t.TempDir()
+	os.WriteFile(filepath.Join(plain, "a.md"), []byte("x"), 0o644)
+	os.MkdirAll(filepath.Join(plain, ".dun"), 0o755)
+	for _, p := range ingestTargets(plain) {
+		if filepath.Base(p) == ".dun" {
+			t.Error("dun's own state directory must never be indexed")
+		}
 	}
 }

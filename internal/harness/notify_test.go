@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/iodesystems/agentkit/agent"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // The notification surface: onNotify fires for KindNotification appends (the
@@ -29,7 +30,7 @@ func TestMemStore_OnNotifyFiresForNotifications(t *testing.T) {
 
 // No search tool, no proactive search.
 func TestDocsFinder_NilWithoutSearch(t *testing.T) {
-	if newSurfacer(nil, searchExts(BundledExtensions(), nil), nil) != nil {
+	if newSurfacer(nil, searchExts(mcpserver.BundledExtensions(), nil), nil) != nil {
 		t.Fatal("no tools → no finder")
 	}
 }

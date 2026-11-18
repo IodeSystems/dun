@@ -1,4 +1,10 @@
-package harness
+// Package mcpserver is what an MCP server is to dun before it runs: the
+// layered config files (dun.json, dun.local.json, $DUN_HOME/mcp.json) and
+// their other sections, the built-in servers, the three switch scopes and
+// how they resolve to a Server, extension manifests and the registry's
+// overlay of them, and where a server's command is found. Starting,
+// sharing and stopping servers is the session's, in internal/harness.
+package mcpserver
 
 import (
 	"encoding/json"
@@ -8,8 +14,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/iodesystems/dun/internal/dunhome"
 	"github.com/iodesystems/dun/internal/fsutil"
 	"github.com/iodesystems/dun/internal/oauth"
+	"github.com/iodesystems/dun/internal/project"
 )
 
 // Declarative MCP server configuration.
@@ -39,52 +47,46 @@ import (
 //	  <  the repo's files  <  the project's state dir  <  the directory's overlay
 //
 // mcp.json is the GLOBAL scope and the rest the PROJECT scope of a server's
-// switches; a session's own switches sit on top (mcpscope.go).
+// switches; a session's own switches sit on top (scope.go).
 //
 // Servers merge BY ID rather than replacing the list wholesale. Overriding one
 // binary's path should not require restating the other two — that is how a
 // config drifts out of sync with the defaults it silently forked.
 //
-// dun never writes into a repo (see project.go). A repo's own files are READ —
+// dun never writes into a repo (see internal/project). A repo's own files are READ —
 // in its root and in a .dun/ beside it, .dun/ winning — because a project may
 // commit them on purpose. A dun.local.json there is the older layout, from
 // before dun kept machine state in $DUN_HOME, and is still read. Everything dun
 // writes (see SetServerOn) goes to $DUN_HOME/projects/<id>/.
-const (
-	// ProjectServersFile is committed and describes the project.
-	ProjectServersFile = "dun.json"
-	// LocalServersFile is machine state: never committed, written 0600.
-	LocalServersFile = "dun.local.json"
-	// DunDir is the directory in a repo where a project MAY commit dun.json
-	// and skills/. dun reads it and never creates it.
-	DunDir = ".dun"
-)
+//
+// The file names (project.ProjectServersFile, project.LocalServersFile,
+// project.DunDir) are in internal/project, which owns the state directories.
 
 // serverConfigPaths lists the layered config files, LOWEST precedence first.
 // A missing file is skipped. It registers nothing: a directory dun has never
 // seen has no project state to read.
 func serverConfigPaths(dir string) []string {
 	paths := []string{
-		filepath.Join(dir, ProjectServersFile),
-		filepath.Join(dir, DunDir, ProjectServersFile),
-		filepath.Join(dir, LocalServersFile),
-		filepath.Join(dir, DunDir, LocalServersFile),
+		filepath.Join(dir, project.ProjectServersFile),
+		filepath.Join(dir, project.DunDir, project.ProjectServersFile),
+		filepath.Join(dir, project.LocalServersFile),
+		filepath.Join(dir, project.DunDir, project.LocalServersFile),
 	}
-	if p := ResolveProject(dir); p != nil {
+	if p := project.Resolve(dir); p != nil {
 		paths = append(paths,
-			filepath.Join(p.StateDir, ProjectServersFile),
-			filepath.Join(p.StateDir, LocalServersFile))
+			filepath.Join(p.StateDir, project.ProjectServersFile),
+			filepath.Join(p.StateDir, project.LocalServersFile))
 		if p.OverlayDir != "" {
 			paths = append(paths,
-				filepath.Join(p.OverlayDir, ProjectServersFile),
-				filepath.Join(p.OverlayDir, LocalServersFile))
+				filepath.Join(p.OverlayDir, project.ProjectServersFile),
+				filepath.Join(p.OverlayDir, project.LocalServersFile))
 		}
 	}
 	return paths
 }
 
-// ServerSpec is one MCP server as declared in a config file.
-type ServerSpec struct {
+// Spec is one MCP server as declared in a config file.
+type Spec struct {
 	// ID is the merge key and the tool namespace. Reusing a built-in id
 	// ("poly-lsp", "shell", "raglit") overrides that server rather than adding one.
 	ID      string   `json:"id"`
@@ -123,7 +125,7 @@ type ServerSpec struct {
 	Disable []string `json:"disable,omitempty"`
 	// Tools turns single tools on (true) or off (false) by exact name, over
 	// any deny-list. Written at project scope (dun.local.json in the
-	// project's state); see mcpscope.go.
+	// project's state); see scope.go.
 	Tools map[string]bool `json:"tools,omitempty"`
 	// Via is where the server runs: "" or "direct" — dun connects to it and
 	// every tool's schema rides every request — or "shell": mcpshell hosts it
@@ -144,24 +146,24 @@ type ServerSpec struct {
 	OAuth *oauth.Spec `json:"oauth,omitempty"`
 	// Attach names indexes the server's search role reads ("project:index")
 	// and Detach ones it does not, at this scope; the nearest scope that
-	// names an index decides it (attach.go).
+	// names an index decides it (harness/attach.go).
 	Attach []string `json:"attach,omitempty"`
 	Detach []string `json:"detach,omitempty"`
 	// Exclude is directories, relative to the workspace, left out of the
 	// server's index: passed as --exclude to a poly-lsp-mcp that takes it
-	// (indexstate.go). Written at project scope by /lsp exclude and by
+	// (harness/indexstate.go). Written at project scope by /lsp exclude and by
 	// dun itself when an index does not fit its startup budget.
 	Exclude []string `json:"exclude,omitempty"`
 	// IndexBudget is the server's index startup budget, as poly-lsp-mcp's
 	// --index-budget takes it ("48000ms", "20000ops", "0" unbounded); ""
 	// is its default. Written at project scope by /lsp budget, by the
-	// person only: dun never raises it on its own (indexstate.go).
+	// person only: dun never raises it on its own (harness/indexstate.go).
 	IndexBudget string `json:"index_budget,omitempty"`
 	// IndexAnyway lets the server index a root that is not a project (the
 	// home directory, /, a directory of clones): passed as --index-anyway to
 	// a poly-lsp-mcp that takes it, and it lifts dun's root guard
-	// (rootguard.go). Written at project scope only when the person runs
-	// /lsp index-anyway on (indexanyway.go): no tool and no answer to a
+	// (harness/rootguard.go). Written at project scope only when the person runs
+	// /lsp index-anyway on (harness/indexanyway.go): no tool and no answer to a
 	// question sets it.
 	IndexAnyway bool `json:"index_anyway,omitempty"`
 	// LSPRoots replaces dun's safe default for a poly-lsp-mcp's child LSPs
@@ -170,7 +172,7 @@ type ServerSpec struct {
 	// lsp_max_rss_mb and lsp_idle_stop keys are ignored on load.
 	LSPRoots string `json:"lsp_roots,omitempty"`
 	// Wake lets the server's messages start a turn on an idle session
-	// (serverwake.go). Each wake is a turn someone pays for, so it is off
+	// (harness/serverwake.go). Each wake is a turn someone pays for, so it is off
 	// unless set here.
 	Wake bool `json:"wake,omitempty"`
 }
@@ -227,8 +229,8 @@ func mergeOAuth(prev, next *oauth.Spec) *oauth.Spec {
 	return &out
 }
 
-// checkOAuth reports what makes a server's oauth block unusable.
-func checkOAuth(s ServerSpec, via string) error {
+// CheckOAuth reports what makes a server's oauth block unusable.
+func CheckOAuth(s Spec, via string) error {
 	o := s.OAuth
 	if o == nil {
 		return nil
@@ -249,8 +251,8 @@ func checkOAuth(s ServerSpec, via string) error {
 // MarshalJSON writes an empty, non-nil Disable as "disable": [] — omitempty
 // would drop it, and then turning the last hidden tool back on would let a
 // lower layer's list (the docs server's built-in one) hide them again.
-func (s ServerSpec) MarshalJSON() ([]byte, error) {
-	type plain ServerSpec
+func (s Spec) MarshalJSON() ([]byte, error) {
+	type plain Spec
 	b, err := json.Marshal(plain(s))
 	if err != nil || s.Disable == nil || len(s.Disable) > 0 {
 		return b, err
@@ -258,7 +260,7 @@ func (s ServerSpec) MarshalJSON() ([]byte, error) {
 	return append(b[:len(b)-1], `,"disable":[]}`...), nil
 }
 
-// Placements a ServerSpec.Via may name. "" means ViaDirect.
+// Placements a Spec.Via may name. "" means ViaDirect.
 const (
 	ViaDirect = "direct"
 	ViaShell  = "shell"
@@ -293,7 +295,7 @@ func NormalizeVia(via string) (string, error) {
 	return "", fmt.Errorf("mode %q: want %s or %s", via, ModeStandalone, ModeScripted)
 }
 
-// Instances a ServerSpec.Instance may name (docs/mcp-and-tools.md, "One
+// Instances a Spec.Instance may name (docs/mcp-and-tools.md, "One
 // connection per server"). "" means InstanceShared. InstanceWorkspace is no
 // switch value: it is poly-lsp's fixed one (builtinInstances).
 const (
@@ -330,9 +332,9 @@ type MountSpec struct {
 	Name string `json:"name"`
 }
 
-// ServersFile is the on-disk shape of dun.json / dun.local.json.
-type ServersFile struct {
-	Servers []ServerSpec `json:"servers,omitempty"`
+// ConfigFile is the on-disk shape of dun.json / dun.local.json.
+type ConfigFile struct {
+	Servers []Spec `json:"servers,omitempty"`
 	// Mounts declares extra local paths that must be accessible from the
 	// worktree (symlink) and Docker container (volume mount). Merged by name
 	// across layers — a local file can override a source path without
@@ -341,10 +343,10 @@ type ServersFile struct {
 	// Commit is how `/worktree commit` writes its message. Merged field by
 	// field.
 	Commit *CommitConfig `json:"commit,omitempty"`
-	// Files configures the built-in file tools (files.go). Merged field by
+	// Files configures the built-in file tools (harness/files.go). Merged field by
 	// field; ignore patterns accumulate across layers.
 	Files *FilesConfig `json:"files,omitempty"`
-	// Rag is what dund's code and docs indexes are given (rag_ingest.go). Limits merge field
+	// Rag is what dund's code and docs indexes are given (harness/rag_ingest.go). Limits merge field
 	// by field; include and exclude accumulate across layers.
 	Rag *RagConfig `json:"rag,omitempty"`
 	// DefaultVia is the mode of a server no scope sets one for: "" or
@@ -357,7 +359,7 @@ type ServersFile struct {
 // scope: ViaShell or ViaDirect. Unset is ViaDirect.
 func LoadDefaultVia() (string, error) {
 	path := UserServersFile()
-	f, err := readServersFile(path)
+	f, err := ReadConfig(path)
 	if err != nil || f == nil || f.DefaultVia == "" {
 		return ViaDirect, err
 	}
@@ -379,12 +381,12 @@ func SetDefaultVia(via string) (string, error) {
 		return "", fmt.Errorf("default mode %q: want %s or %s", via, ModeStandalone, ModeScripted)
 	}
 	path := UserServersFile()
-	f, err := readServersFile(path)
+	f, err := ReadConfig(path)
 	if err != nil {
 		return "", err
 	}
 	if f == nil {
-		f = &ServersFile{}
+		f = &ConfigFile{}
 	}
 	f.DefaultVia = via
 	return path, writeUserServers(path, f)
@@ -396,7 +398,7 @@ func SetDefaultVia(via string) (string, error) {
 func LoadCommit(dir string) *CommitConfig {
 	var out *CommitConfig
 	for _, path := range append([]string{UserServersFile()}, serverConfigPaths(dir)...) {
-		f, err := readServersFile(path)
+		f, err := ReadConfig(path)
 		if err != nil || f == nil || f.Commit == nil {
 			continue
 		}
@@ -416,13 +418,13 @@ func LoadCommit(dir string) *CommitConfig {
 }
 
 // LoadServers resolves the effective server list for a workspace, with no
-// session switches (see mcpscope.go for the scopes).
+// session switches (see scope.go for the scopes).
 //
 // dir is where the project files are looked for (the repo being worked in).
 // Both files are optional and a missing one is not an error — the built-in trio
 // is a working default and most projects will never need to override it.
 func LoadServers(dir, workspace, raglitHome string) ([]Server, error) {
-	return resolveServers(dir, workspace, raglitHome, DefaultServers(workspace, raglitHome), nil, nil)
+	return Resolve(dir, workspace, raglitHome, DefaultServers(workspace, raglitHome), nil, nil)
 }
 
 // LoadMounts resolves the effective mount list for a workspace.
@@ -445,7 +447,7 @@ func LoadMounts(dir, repoRoot string) []MountSpec {
 	}
 
 	for _, path := range append([]string{UserServersFile()}, serverConfigPaths(dir)...) {
-		f, err := readServersFile(path)
+		f, err := ReadConfig(path)
 		if err != nil || f == nil {
 			continue
 		}
@@ -567,7 +569,7 @@ func replaceMount(target string) (MountSpec, bool) {
 // mergeSpec layers next over prev field by field. An omitted field INHERITS
 // rather than clearing, so a local file can override just a command path and
 // keep the args it does not care about.
-func mergeSpec(prev, next ServerSpec) ServerSpec {
+func mergeSpec(prev, next Spec) Spec {
 	out := prev
 	out.ID = next.ID
 	if next.Command != "" {
@@ -653,7 +655,7 @@ func mergeSpec(prev, next ServerSpec) ServerSpec {
 
 // requestHeaders resolves a remote server's headers: Headers, plus
 // Authorization from Bearer with any $NAME read from the environment.
-func requestHeaders(s ServerSpec) map[string]string {
+func requestHeaders(s Spec) map[string]string {
 	if s.URL == "" || (s.Bearer == "" && len(s.Headers) == 0) {
 		return nil
 	}
@@ -672,24 +674,24 @@ func requestHeaders(s ServerSpec) map[string]string {
 // — a project's dun.json may still override or disable one by id. 0600,
 // because a bearer token lives in it.
 func UserServersFile() string {
-	return filepath.Join(filepath.Dir(SessionsDir()), "mcp.json")
+	return filepath.Join(dunHomeDir(), "mcp.json")
 }
 
 // PutUserServer adds spec to the user server list, replacing one of the same
 // id. A mode or instance spec leaves empty is kept from the entry it replaces:
 // they are switches, not part of the definition. It returns the file written.
-func PutUserServer(spec ServerSpec) (string, error) {
-	spec, err := keepSwitches(spec)
+func PutUserServer(spec Spec) (string, error) {
+	spec, err := KeepSwitches(spec)
 	if err != nil {
 		return "", err
 	}
 	path := UserServersFile()
-	f, err := readServersFile(path)
+	f, err := ReadConfig(path)
 	if err != nil {
 		return "", err
 	}
 	if f == nil {
-		f = &ServersFile{}
+		f = &ConfigFile{}
 	}
 	replaced := false
 	for i := range f.Servers {
@@ -703,10 +705,10 @@ func PutUserServer(spec ServerSpec) (string, error) {
 	return path, writeUserServers(path, f)
 }
 
-// keepSwitches fills in the mode and instance spec leaves empty from the
+// KeepSwitches fills in the mode and instance spec leaves empty from the
 // user-list entry of the same id, as PutUserServer will store it.
-func keepSwitches(spec ServerSpec) (ServerSpec, error) {
-	f, err := readServersFile(UserServersFile())
+func KeepSwitches(spec Spec) (Spec, error) {
+	f, err := ReadConfig(UserServersFile())
 	if err != nil || f == nil {
 		return spec, err
 	}
@@ -728,7 +730,7 @@ func keepSwitches(spec ServerSpec) (ServerSpec, error) {
 // it was there.
 func RemoveUserServer(id string) (bool, error) {
 	path := UserServersFile()
-	f, err := readServersFile(path)
+	f, err := ReadConfig(path)
 	if err != nil || f == nil {
 		return false, err
 	}
@@ -748,14 +750,14 @@ func RemoveUserServer(id string) (bool, error) {
 // UpsertUserServer edits id's entry in the user server list, adding one that
 // holds only the edit when there is none (a global switch for a built-in, or
 // for a server a repo defines). It returns the file written.
-func UpsertUserServer(id string, edit func(*ServerSpec)) (string, error) {
+func UpsertUserServer(id string, edit func(*Spec)) (string, error) {
 	path := UserServersFile()
-	f, err := readServersFile(path)
+	f, err := ReadConfig(path)
 	if err != nil {
 		return "", err
 	}
 	if f == nil {
-		f = &ServersFile{}
+		f = &ConfigFile{}
 	}
 	found := false
 	for i := range f.Servers {
@@ -765,7 +767,7 @@ func UpsertUserServer(id string, edit func(*ServerSpec)) (string, error) {
 		}
 	}
 	if !found {
-		s := ServerSpec{ID: id}
+		s := Spec{ID: id}
 		edit(&s)
 		f.Servers = append(f.Servers, s)
 	}
@@ -777,7 +779,7 @@ func UpsertUserServer(id string, edit func(*ServerSpec)) (string, error) {
 // (proto.ServersChanged); nothing else needs it.
 var OnUserServersWritten func()
 
-func writeUserServers(path string, f *ServersFile) error {
+func writeUserServers(path string, f *ConfigFile) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
@@ -799,7 +801,7 @@ func writeUserServers(path string, f *ServersFile) error {
 // {{workspace}} is the same token llm-bench's toolsets already use, so anyone
 // who has written one of those configs will recognise it. {{project}} and
 // {{index}} are raglit's corpus and membership names for the workspace
-// (raglitProject, raglitIndex); they ask git, so only when used.
+// (RaglitProject, RaglitIndex); they ask git, so only when used.
 func expandPlaceholders(in []string, workspace, raglitHome string) []string {
 	if in == nil {
 		return nil
@@ -809,17 +811,18 @@ func expandPlaceholders(in []string, workspace, raglitHome string) []string {
 		s = strings.ReplaceAll(s, "{{workspace}}", workspace)
 		s = strings.ReplaceAll(s, "{{raglit_home}}", raglitHome)
 		if strings.Contains(s, "{{project}}") {
-			s = strings.ReplaceAll(s, "{{project}}", raglitProject(workspace))
+			s = strings.ReplaceAll(s, "{{project}}", RaglitProject(workspace))
 		}
 		if strings.Contains(s, "{{index}}") {
-			s = strings.ReplaceAll(s, "{{index}}", raglitIndex(workspace))
+			s = strings.ReplaceAll(s, "{{index}}", RaglitIndex(workspace))
 		}
 		out[i] = s
 	}
 	return out
 }
 
-func readServersFile(path string) (*ServersFile, error) {
+// ReadConfig reads one config file; a missing one is nil, no error.
+func ReadConfig(path string) (*ConfigFile, error) {
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -827,32 +830,32 @@ func readServersFile(path string) (*ServersFile, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dun: read %s: %w", path, err)
 	}
-	var f ServersFile
+	var f ConfigFile
 	if err := json.Unmarshal(b, &f); err != nil {
 		// Name the file. A JSON error with no filename in a two-file layered
 		// config sends the reader to the wrong one.
 		return nil, fmt.Errorf("dun: parse %s: %w", path, err)
 	}
 	for i := range f.Servers {
-		f.Servers[i].ID = canonicalServerID(f.Servers[i].ID)
+		f.Servers[i].ID = CanonicalID(f.Servers[i].ID)
 	}
 	return &f, nil
 }
 
-// updateLocalServer edits (or adds) id's entry in dir's machine-state
+// UpdateLocalServer edits (or adds) id's entry in dir's machine-state
 // dun.local.json and returns the file written.
-func updateLocalServer(dir, id string, edit func(*ServerSpec)) (string, error) {
-	p, err := EnsureProject(dir)
+func UpdateLocalServer(dir, id string, edit func(*Spec)) (string, error) {
+	p, err := project.Ensure(dir)
 	if err != nil {
 		return "", err
 	}
-	path := filepath.Join(p.WriteDir(), LocalServersFile)
-	f, err := readServersFile(path)
+	path := filepath.Join(p.WriteDir(), project.LocalServersFile)
+	f, err := ReadConfig(path)
 	if err != nil {
 		return "", err
 	}
 	if f == nil {
-		f = &ServersFile{}
+		f = &ConfigFile{}
 	}
 	found := false
 	for i := range f.Servers {
@@ -863,7 +866,7 @@ func updateLocalServer(dir, id string, edit func(*ServerSpec)) (string, error) {
 		}
 	}
 	if !found {
-		s := ServerSpec{ID: id}
+		s := Spec{ID: id}
 		edit(&s)
 		f.Servers = append(f.Servers, s)
 	}
@@ -886,11 +889,11 @@ func updateLocalServer(dir, id string, edit func(*ServerSpec)) (string, error) {
 	return path, nil
 }
 
-// removeLocalServer deletes id's entry (switches and tool switches) from
+// RemoveLocalServer deletes id's entry (switches and tool switches) from
 // dir's project state file, and from the linked-worktree overlay's when dir
 // has one. It returns the files it changed. No project, or no entry, is none.
-func removeLocalServer(dir, id string) ([]string, error) {
-	p := ResolveProject(dir)
+func RemoveLocalServer(dir, id string) ([]string, error) {
+	p := project.Resolve(dir)
 	if p == nil {
 		return nil, nil
 	}
@@ -900,8 +903,8 @@ func removeLocalServer(dir, id string) ([]string, error) {
 	}
 	var changed []string
 	for _, d := range dirs {
-		path := filepath.Join(d, LocalServersFile)
-		f, err := readServersFile(path)
+		path := filepath.Join(d, project.LocalServersFile)
+		f, err := ReadConfig(path)
 		if err != nil {
 			return changed, err
 		}
@@ -935,8 +938,8 @@ func strconvQuote(s string) string {
 	return string(b)
 }
 
-// ServerIDs lists the resolved ids, for logs and diagnostics.
-func ServerIDs(servers []Server) []string {
+// IDs lists the resolved ids, for logs and diagnostics.
+func IDs(servers []Server) []string {
 	ids := make([]string, 0, len(servers))
 	for _, s := range servers {
 		ids = append(ids, s.ID)
@@ -944,3 +947,6 @@ func ServerIDs(servers []Server) []string {
 	sort.Strings(ids)
 	return ids
 }
+
+// dunHomeDir is $DUN_HOME, else ~/.dun (harness.DunHome).
+func dunHomeDir() string { return filepath.Clean(dunhome.Dir()) }

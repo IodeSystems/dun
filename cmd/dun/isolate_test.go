@@ -11,13 +11,14 @@ import (
 	"testing"
 
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/proto"
 )
 
 // isoHarness is a session on dir: no tools, no servers.
 func isoHarness(t *testing.T, dir string) *harness.Harness {
 	t.Helper()
-	h, err := harness.Start(context.Background(), harness.Config{Workspace: dir, NoTools: true, Servers: []harness.Server{},
+	h, err := harness.Start(context.Background(), harness.Config{Workspace: dir, NoTools: true, Servers: []mcpserver.Server{},
 		SessionFile: filepath.Join(t.TempDir(), "s.jsonl")})
 	if err != nil {
 		t.Fatal(err)

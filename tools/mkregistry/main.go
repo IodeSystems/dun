@@ -25,7 +25,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 
-	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/registry"
 	"github.com/iodesystems/dun/internal/update"
 )
@@ -102,7 +102,7 @@ func build(src, root string, published time.Time) ([]byte, error) {
 				}
 				e.Manifest = m
 			}
-			ext, err := harness.ParseExtension(e.Manifest)
+			ext, err := mcpserver.ParseExtension(e.Manifest)
 			if err != nil {
 				return fmt.Errorf("%s: the manifest does not load: %w", p, err)
 			}

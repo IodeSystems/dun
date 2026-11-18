@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // dun --no-dir (USER 2026-10-27): a session attached to no directory, to
@@ -23,14 +25,14 @@ func NoDirWorkspace() (string, error) {
 // needsDir reports whether s needs a project directory: poly-lsp and raglit
 // (they index one), or a server whose command, arguments or environment
 // name the workspace.
-func needsDir(s Server, workspace string) bool {
-	if s.ID == ServerCode {
+func needsDir(s mcpserver.Server, workspace string) bool {
+	if s.ID == mcpserver.ServerCode {
 		return true
 	}
-	if s.ID == ServerDocs {
+	if s.ID == mcpserver.ServerDocs {
 		return false // other indexes, memory and skills; the workspace is not read (ragworkspace.go)
 	}
-	if s.ID == ServerShell {
+	if s.ID == mcpserver.ServerShell {
 		return false // its --files-dir is the session's directory, which it has
 	}
 	for _, part := range append(append([]string{s.Command}, s.Args...), s.Env...) {
@@ -43,7 +45,7 @@ func needsDir(s Server, workspace string) bool {
 
 // withoutDirServers is servers less those that need a directory, for a
 // --no-dir session; servers as they are otherwise.
-func withoutDirServers(servers []Server, cfg Config) []Server {
+func withoutDirServers(servers []mcpserver.Server, cfg Config) []mcpserver.Server {
 	if cfg.NoTools {
 		return nil // --no-tools: no server starts (see also noToolsSystem)
 	}

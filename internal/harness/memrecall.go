@@ -15,6 +15,7 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -470,7 +471,7 @@ func (h *Harness) newStoreLink(parent func(*Harness) *memLink, store func(*memLi
 			return l
 		}
 	}
-	l := newMemLink(h.cfg.Rag, raglitProject(h.cfg.Workspace), notice)
+	l := newMemLink(h.cfg.Rag, mcpserver.RaglitProject(h.cfg.Workspace), notice)
 	// The first contact: files written while no dund was there get
 	// indexed now, or the session learns it is degraded.
 	go l.saw(store(l, h.cfg.Workspace), nil)

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // nudgeRunner is a scripted model that records each request's tool_choice
@@ -148,7 +149,7 @@ func startStall(t *testing.T, r *nudgeRunner, rounds, fails, stall int) *Harness
 	t.Setenv("DUN_PLAN_STALL_ROUNDS", "")
 	dir := t.TempDir()
 	h, err := Start(context.Background(), Config{
-		Workspace: dir, Servers: []Server{}, Client: r, Exec: &HostShell{Dir: dir},
+		Workspace: dir, Servers: []mcpserver.Server{}, Client: r, Exec: &HostShell{Dir: dir},
 		SessionFile:     filepath.Join(dir, "s.jsonl"),
 		PlanNudgeRounds: rounds, PlanNudgeFails: fails, PlanStallRounds: stall,
 	})

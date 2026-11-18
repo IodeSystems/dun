@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/agent"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // pruneRepo is a repo with a worktree per named branch, so a test can say what
@@ -284,7 +285,7 @@ func TestIndexNameFor_SurvivesTheTreeItNames(t *testing.T) {
 	}
 	// It must agree with what the docs server was actually started with, or the
 	// drop names an index nobody created and the real one leaks.
-	if live := raglitIndex("/repo/wt"); live != indexNameFor("/repo/wt", "") {
+	if live := mcpserver.RaglitIndex("/repo/wt"); live != indexNameFor("/repo/wt", "") {
 		t.Errorf("detached-HEAD naming disagrees: %q vs %q", live, indexNameFor("/repo/wt", ""))
 	}
 	// Nothing sane to name → say nothing rather than delete something else.

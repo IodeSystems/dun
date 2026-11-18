@@ -14,6 +14,7 @@ import (
 
 	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/oauth"
 )
 
@@ -102,7 +103,7 @@ func (m *tuiModel) openMCPForm(preset ...string) tea.Cmd {
 
 // fillPreset fills the id and server rows from a preset.
 func (m *tuiModel) fillPreset(id string) bool {
-	p, ok := harness.Preset(id)
+	p, ok := mcpserver.Preset(id)
 	if !ok {
 		return false
 	}
@@ -210,7 +211,7 @@ func mcpIDClean(s string) string {
 // A preset's name that is also a command here is not guessed at: it is said.
 func (m *tuiModel) mcpResolve() string {
 	v := strings.TrimSpace(m.mcpFields[mcpServer].Value())
-	if _, ok := harness.Preset(v); ok {
+	if _, ok := mcpserver.Preset(v); ok {
 		if _, err := mcpLookPath(v); err == nil {
 			return v + " is a preset and a command here — /mcp add " + v + " for the preset, or the command's full path"
 		}
@@ -229,7 +230,7 @@ func (m *tuiModel) mcpFollowName() {
 		return
 	}
 	m.mcpAuto = mcpNameFrom(m.mcpFields[mcpServer].Value())
-	for _, p := range harness.Presets() {
+	for _, p := range mcpserver.Presets() {
 		target := p.URL
 		if target == "" {
 			target = shellJoin(append([]string{p.Command}, p.Args...))
@@ -448,8 +449,8 @@ func mcpIDOK(id string) bool {
 
 // mcpFormSpec turns the form into a server spec: an http(s) address is a
 // remote server, anything else a command line split with shell quoting.
-func mcpFormSpec(id, target, bearer string) (harness.ServerSpec, error) {
-	spec := harness.ServerSpec{ID: strings.TrimSpace(id), Bearer: strings.TrimSpace(bearer)}
+func mcpFormSpec(id, target, bearer string) (mcpserver.Spec, error) {
+	spec := mcpserver.Spec{ID: strings.TrimSpace(id), Bearer: strings.TrimSpace(bearer)}
 	target = strings.TrimSpace(target)
 	if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") {
 		spec.URL = target
@@ -554,7 +555,7 @@ func (m tuiModel) mcpFormPanel() string {
 	if m.mcpErr != "" {
 		rows = append(rows, "  "+StErr.Render(m.mcpErr))
 	}
-	notes := []string{"saved to " + tildePath(harness.UserServersFile()) + " for every project", "starts now"}
+	notes := []string{"saved to " + tildePath(mcpserver.UserServersFile()) + " for every project", "starts now"}
 	if id := strings.TrimSpace(m.mcpFields[mcpID].Value()); id != "" && slices.Contains(m.serverIDs, id) {
 		notes[1] += " · replaces the " + id + " there now"
 	}

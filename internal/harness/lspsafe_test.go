@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/dun/internal/project"
 )
 
 // A build whose `mcp --help` lists the lifecycle flags gets --lsp-roots
@@ -25,7 +28,7 @@ func TestLSPSafe_Defaults(t *testing.T) {
 	if strings.Contains(args[0], "--index-anyway") {
 		t.Fatalf("--index-anyway passed unasked: %q", args[0])
 	}
-	if b, err := os.ReadFile(filepath.Join(ResolveProject(ws).WriteDir(), LocalServersFile)); err == nil && strings.Contains(string(b), "lsp_") {
+	if b, err := os.ReadFile(filepath.Join(project.Resolve(ws).WriteDir(), project.LocalServersFile)); err == nil && strings.Contains(string(b), "lsp_") {
 		t.Fatalf("dun wrote an override: %s", b)
 	}
 }
@@ -36,12 +39,12 @@ func TestLSPSafe_Defaults(t *testing.T) {
 func TestLSPSafe_Overrides(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	ws := t.TempDir()
-	if _, err := updateLocalServer(ws, ServerCode, func(s *ServerSpec) {
+	if _, err := mcpserver.UpdateLocalServer(ws, mcpserver.ServerCode, func(s *mcpserver.Spec) {
 		s.LSPRoots = "auto"
 	}); err != nil {
 		t.Fatal(err)
 	}
-	p := filepath.Join(ResolveProject(ws).WriteDir(), LocalServersFile)
+	p := filepath.Join(project.Resolve(ws).WriteDir(), project.LocalServersFile)
 	b, err := os.ReadFile(p)
 	if err != nil {
 		t.Fatal(err)

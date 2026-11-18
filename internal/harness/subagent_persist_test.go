@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // Persist carries the sub-agents: a persisted root's resume restarts the
@@ -54,7 +55,7 @@ func startWith(t *testing.T, ws, sessionFile string, runners map[string]*scriptR
 	t.Helper()
 	var mu sync.Mutex
 	h, err := Start(context.Background(), Config{
-		Workspace: ws, Servers: []Server{}, Client: &scriptRunner{}, Exec: &HostShell{Dir: ws},
+		Workspace: ws, Servers: []mcpserver.Server{}, Client: &scriptRunner{}, Exec: &HostShell{Dir: ws},
 		ClientFor: func(_, model string) (ChildClient, error) {
 			mu.Lock()
 			defer mu.Unlock()
@@ -177,7 +178,7 @@ func TestSubAgent_WatchStreamsEntries(t *testing.T) {
 	var mu sync.Mutex
 	var live []HistoryItem
 	h, err := Start(context.Background(), Config{
-		Workspace: ws, Servers: []Server{}, Client: &scriptRunner{},
+		Workspace: ws, Servers: []mcpserver.Server{}, Client: &scriptRunner{},
 		ClientFor:   func(string, string) (ChildClient, error) { return ChildClient{Runner: kid}, nil },
 		SessionFile: filepath.Join(ws, "s.jsonl"),
 		OnAgentEntry: func(id int, items []HistoryItem) {

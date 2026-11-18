@@ -15,7 +15,9 @@ import (
 	"time"
 
 	"github.com/iodesystems/dun/internal/fsutil"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/oauth"
+	"github.com/iodesystems/dun/internal/project"
 )
 
 // Shell-placed MCP servers.
@@ -73,10 +75,6 @@ type mcpshellServer struct {
 	Unchecked  []string            `json:"unchecked,omitempty"`
 }
 
-// envRef matches a bearer that is only a variable reference: "$NAME" or
-// "${NAME}".
-var envRef = regexp.MustCompile(`^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$`)
-
 // validGlobs drops the globs path.Match rejects: mcpshell exits on one, which
 // would take the shell and every hosted server down with it.
 func validGlobs(id string, globs []string) []string {
@@ -101,7 +99,7 @@ func validGlobs(id string, globs []string) []string {
 // auth_cmd is oauthCmd's: `dun oauth token`, which asks dund for the token
 // (internal/oauth/oauthbroker.go); mcpshell runs it at first use, before a JWT expires, and
 // after a 401.
-func mcpshellConfig(hosted []Server, oauthCmd func(Server) string) ([]byte, error) {
+func mcpshellConfig(hosted []mcpserver.Server, oauthCmd func(mcpserver.Server) string) ([]byte, error) {
 	out := map[string]mcpshellServer{}
 	for _, s := range hosted {
 		ns := ShellNamespace(s.ID)
@@ -118,7 +116,7 @@ func mcpshellConfig(hosted []Server, oauthCmd func(Server) string) ([]byte, erro
 			if s.OAuth != nil && oauthCmd != nil {
 				delete(headers, "Authorization")
 				e.AuthCmd = oauthCmd(s)
-			} else if m := envRef.FindStringSubmatch(s.Bearer); m != nil {
+			} else if m := mcpserver.EnvRef.FindStringSubmatch(s.Bearer); m != nil {
 				name := m[1] + m[2]
 				delete(headers, "Authorization")
 				if os.Getenv(name) != "" { // unset: no Authorization, as direct
@@ -156,10 +154,10 @@ func mcpshellConfig(hosted []Server, oauthCmd func(Server) string) ([]byte, erro
 }
 
 // hostedSpecs lists the shell-placed servers that are on. Caller holds srvMu.
-func (h *Harness) hostedSpecs() []Server {
-	var out []Server
+func (h *Harness) hostedSpecs() []mcpserver.Server {
+	var out []mcpserver.Server
 	for _, s := range h.specs {
-		if s.Via == ViaShell && s.Autostart {
+		if s.Via == mcpserver.ViaShell && s.Autostart {
 			out = append(out, s)
 		}
 	}
@@ -169,7 +167,7 @@ func (h *Harness) hostedSpecs() []Server {
 // shellArgs is the shell's argv: its configured args, plus --mcp <file> when
 // any server is placed in it, and always a file toolkit. A shell that is not
 // mcpshell is left alone.
-func (h *Harness) shellArgs(s Server) []string {
+func (h *Harness) shellArgs(s mcpserver.Server) []string {
 	args := h.shellArgsHosted(s)
 	if filepath.Base(s.Command) == "mcpshell" {
 		args = withFilesDir(args, h.cfg.Workspace)
@@ -183,7 +181,7 @@ const overflowEnv = "MCPSHELL_TMP_OVERFLOW_DIR"
 
 // shellEnv adds MCPSHELL_TMP_OVERFLOW_DIR to an mcpshell shell's env, unless
 // the config already sets it. A shell that is not mcpshell is left alone.
-func (h *Harness) shellEnv(s Server, env []string) []string {
+func (h *Harness) shellEnv(s mcpserver.Server, env []string) []string {
 	if filepath.Base(s.Command) != "mcpshell" {
 		return env
 	}
@@ -221,14 +219,14 @@ func withFilesDir(args []string, root string) []string {
 	return append(append([]string{}, args...), "--files-dir", root)
 }
 
-func (h *Harness) shellArgsHosted(s Server) []string {
+func (h *Harness) shellArgsHosted(s mcpserver.Server) []string {
 	h.srvMu.Lock()
 	hosted := h.hostedSpecs()
 	h.srvMu.Unlock()
 	if len(hosted) == 0 || filepath.Base(s.Command) != "mcpshell" {
 		// No stale copy of a token outlives its server. Resolve, not
 		// Ensure: a shell start must not register a project.
-		if p := ResolveProject(h.configDir()); p != nil {
+		if p := project.Resolve(h.configDir()); p != nil {
 			_ = os.Remove(filepath.Join(p.WriteDir(), shellMCPFile))
 		}
 		if len(hosted) > 0 {
@@ -244,7 +242,7 @@ func (h *Harness) shellArgsHosted(s Server) []string {
 	h.srvMu.Lock()
 	for i, s := range hosted {
 		if g, ok := h.shellShares[s.ID]; ok { // dund's endpoint, with this shell's bearer
-			hosted[i] = Server{ID: s.ID, URL: g.URL, Headers: map[string]string{"Authorization": "Bearer " + g.Bearer}, Shell: s.Shell}
+			hosted[i] = mcpserver.Server{ID: s.ID, URL: g.URL, Headers: map[string]string{"Authorization": "Bearer " + g.Bearer}, Shell: s.Shell}
 		}
 	}
 	h.srvMu.Unlock()
@@ -265,7 +263,7 @@ func (h *Harness) shellArgsHosted(s Server) []string {
 // shellMCPPath is where the generated file goes: the project's state dir,
 // never the repo. "" when there is none.
 func (h *Harness) shellMCPPath() string {
-	p, err := EnsureProject(h.configDir())
+	p, err := project.Ensure(h.configDir())
 	if err != nil {
 		return ""
 	}
@@ -302,7 +300,7 @@ var (
 
 // parseHosted reads the shell's stderr for each hosted server's fate. A
 // server with no line (the tail is bounded) is absent from the result.
-func parseHosted(stderr string, hosted []Server) map[string]hostedState {
+func parseHosted(stderr string, hosted []mcpserver.Server) map[string]hostedState {
 	byNS := map[string]string{}
 	for _, s := range hosted {
 		byNS[ShellNamespace(s.ID)] = s.ID
@@ -345,7 +343,7 @@ func (h *Harness) readHosted() {
 	}
 	tail := ""
 	for deadline := time.Now().Add(time.Second); ; {
-		tail = h.mgr.ServerStderr(ServerShell)
+		tail = h.mgr.ServerStderr(mcpserver.ServerShell)
 		if strings.Contains(tail, "serving on stdio") || time.Now().After(deadline) {
 			break
 		}
@@ -369,7 +367,7 @@ func (h *Harness) readHosted() {
 // shell: every hosted server that did not visibly fail. Empty when the shell
 // is down.
 func (h *Harness) hostedNamespaces() []string {
-	if !h.mgr.ServerStarted(ServerShell) {
+	if !h.mgr.ServerStarted(mcpserver.ServerShell) {
 		return nil
 	}
 	h.srvMu.Lock()
@@ -388,12 +386,12 @@ func (h *Harness) hostedNamespaces() []string {
 // stopped shell is left stopped: it reads the set when it next starts.
 func (h *Harness) restartShell(ctx context.Context) (bool, error) {
 	h.srvMu.Lock()
-	sh, ok := h.spec(ServerShell)
+	sh, ok := h.spec(mcpserver.ServerShell)
 	h.srvMu.Unlock()
-	if !ok || !h.mgr.ServerStarted(ServerShell) {
+	if !ok || !h.mgr.ServerStarted(mcpserver.ServerShell) {
 		return false, nil
 	}
-	h.mgr.StopServer(ServerShell)
+	h.mgr.StopServer(mcpserver.ServerShell)
 	return true, h.startServer(ctx, sh)
 }
 
@@ -403,13 +401,13 @@ func (h *Harness) MoveServer(ctx context.Context, id, scope, via string) (bool, 
 	hosted := func() string {
 		h.srvMu.Lock()
 		defer h.srvMu.Unlock()
-		return strings.Join(ServerIDs(h.hostedSpecs()), ",")
+		return strings.Join(mcpserver.IDs(h.hostedSpecs()), ",")
 	}
 	before := hosted()
 	if _, err := h.SetServerVia(ctx, id, scope, via); err != nil {
 		return false, err
 	}
-	return h.mgr.ServerStarted(ServerShell) && hosted() != before, nil
+	return h.mgr.ServerStarted(mcpserver.ServerShell) && hosted() != before, nil
 }
 
 // bytesToTokens is n bytes of JSON or text in tokens, at the session's
@@ -424,7 +422,7 @@ func (h *Harness) bytesToTokens(n int) int {
 
 // oauthAuthCmd is a hosted OAuth server's auth_cmd: this binary's `oauth
 // token`, with the server's spec and the session a login is shown in.
-func (h *Harness) oauthAuthCmd(s Server) string {
+func (h *Harness) oauthAuthCmd(s mcpserver.Server) string {
 	exe, err := os.Executable()
 	if err != nil {
 		exe = "dun"

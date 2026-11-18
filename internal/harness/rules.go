@@ -21,7 +21,9 @@ import (
 
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun/internal/fsutil"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/numfmt"
+	"github.com/iodesystems/dun/internal/project"
 )
 
 // The rules: the user's files (~/AGENTS.md or ~/agents.md, ~/CLAUDE.md,
@@ -180,11 +182,11 @@ func loadRulesAdded(workspace string, user bool, adds []rulesAdd) rulesSet {
 	// same file as an earlier one, or has the same bytes, goes in once.
 	var kept []*root
 	for _, r := range roots {
-		l.seen[realPath(r.path)] = true
-		l.shown[realPath(r.path)] = l.rootName(r.path, r.user)
+		l.seen[project.RealPath(r.path)] = true
+		l.shown[project.RealPath(r.path)] = l.rootName(r.path, r.user)
 		dup := false
 		for _, k := range kept {
-			if realPath(k.path) == realPath(r.path) || string(k.data) == string(r.data) {
+			if project.RealPath(k.path) == project.RealPath(r.path) || string(k.data) == string(r.data) {
 				k.also = l.rootName(r.path, r.user)
 				dup = true
 				break
@@ -219,10 +221,10 @@ func loadRulesAdded(workspace string, user bool, adds []rulesAdd) rulesSet {
 			set.Roots[i].Includes = l.imports(set.Roots[i], 1)
 		}
 		for _, a := range adds {
-			if (a.Scope == ScopeGlobal) != g.user || a.Scope == ScopeGlobal && !user {
+			if (a.Scope == mcpserver.ScopeGlobal) != g.user || a.Scope == mcpserver.ScopeGlobal && !user {
 				continue // DUN_USER_RULES=0 leaves the global adds out with the user files
 			}
-			real := realPath(a.Path)
+			real := project.RealPath(a.Path)
 			if l.seen[real] {
 				continue // already in the block
 			}
@@ -276,7 +278,7 @@ var rulesRoots = [][]string{{"AGENTS.md", "agents.md"}, {"CLAUDE.md"}}
 // workspace is the home directory, its AGENTS.md and CLAUDE.md are the
 // project's, so they are not read twice.
 func userRulesRoots(workspace, home string) [][]string {
-	if realPath(workspace) == realPath(home) {
+	if project.RealPath(workspace) == project.RealPath(home) {
 		return [][]string{{filepath.Join(".claude", "CLAUDE.md")}}
 	}
 	return append(slices.Clone(rulesRoots), []string{filepath.Join(".claude", "CLAUDE.md")})
@@ -317,7 +319,7 @@ func rulesSearch(workspace string, user bool) []string {
 		out = append(out, "user rules: no home directory")
 	default:
 		out = append(out, "user rules, read in every project, before the project's:")
-		if realPath(workspace) == realPath(home) {
+		if project.RealPath(workspace) == project.RealPath(home) {
 			out = append(out, "  (the workspace is the home directory: its AGENTS.md and CLAUDE.md are read once, as the project's)")
 		}
 		look(home, "~/", userRulesRoots(workspace, home))
@@ -355,7 +357,7 @@ func (l *rulesLoader) imports(d rulesDoc, depth int) []string {
 	mine := map[string]bool{} // what this file brought in
 	for _, raw := range importPaths(d.Text) {
 		p := l.resolve(raw, filepath.Dir(d.Path))
-		real := realPath(p)
+		real := project.RealPath(p)
 		if l.seen[real] {
 			// Already in the block: a repeat, or a cycle.
 			if n := firstNonEmptyStr(l.shown[real], l.name(p)); !mine[real] && !slices.Contains(dups, n) {
@@ -741,7 +743,7 @@ type rulesSummary struct {
 // rulesStatePath is the state file of the project the session is in, or ""
 // when there is no project dir.
 func (h *Harness) rulesStatePath() string {
-	p, err := EnsureProject(h.configDir())
+	p, err := project.Ensure(h.configDir())
 	if err != nil {
 		return ""
 	}
@@ -949,7 +951,7 @@ func (h *Harness) RulesStatus() string {
 	h.rulesMu.Lock()
 	st := h.readRulesState()
 	h.rulesMu.Unlock()
-	docsOn := h.hookStarted(HookRulesChanged)
+	docsOn := h.hookStarted(mcpserver.HookRulesChanged)
 	st.Mode = h.contextFileMode(st.Mode)
 	mode := effectiveMode(st, set, docsOn)
 	saved := firstNonEmptyStr(st.Mode, RulesFull)
@@ -1055,7 +1057,7 @@ func (h *Harness) SetRulesMode(ctx context.Context, mode string) (string, error)
 		if len(set.Imports) == 0 {
 			return "", fmt.Errorf("the root rules import no files: there is nothing to index")
 		}
-		if !h.hookStarted(HookRulesChanged) {
+		if !h.hookStarted(mcpserver.HookRulesChanged) {
 			return "", fmt.Errorf("index mode needs raglit's index: /rag on first")
 		}
 	case RulesSummary:
@@ -1068,7 +1070,7 @@ func (h *Harness) SetRulesMode(ctx context.Context, mode string) (string, error)
 	// The project's mode is the rules switches' (contextfiles.go): saved at
 	// project scope, and the mode rules.json held before is cleared, so a
 	// mode has one home per scope.
-	if _, err := h.setSwitchMode(h.rulesSwitchKind(), mode, ScopeProject); err != nil {
+	if _, err := h.setSwitchMode(h.rulesSwitchKind(), mode, mcpserver.ScopeProject); err != nil {
 		return "", err
 	}
 	if err := h.updateRulesState(func(s *rulesState) { s.Mode = "" }); err != nil {

@@ -647,7 +647,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   file cannot resurrect a server the project turned off. A parse error names
   its file. A commandless server is rejected at load.
 - **MCP switches resolve session, then project, then global**
-  (`internal/harness/mcpscope.go`): on/off, mode (standalone, or scripted = hosted in mcpshell
+  (`internal/mcpserver/scope.go`, `internal/harness/mcpscope.go`): on/off, mode (standalone, or scripted = hosted in mcpshell
   and called through `eval`), and per-tool switches. Stored mode values stay
   `direct`/`shell` because an older dun rejects any other `via` and would fail
   to load `mcp.json`. A global standalone is stored as `direct`, never as
@@ -659,7 +659,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   read from config files and the session sidecar (`canonicalServerID`); new
   writes use new ids. Model-facing tool names, raglit index names and the
   `"rag"` config key were left unchanged on purpose.
-- **Extensions are manifests (`internal/harness/extension.go`).** An extension is an MCP server
+- **Extensions are manifests (`internal/mcpserver/extension.go`).** An extension is an MCP server
   plus `extension.json`: its server spec, slash commands, roles (`search`,
   `index`), hooks. Special cases (proactive search, memory, skill and rules
   indexes, the AGENTS.md guard) are lookups by role, not by server id. Bundled
@@ -667,7 +667,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   `ingest`/`forget` tools when the server has them, else a CLI fallback; when
   raglit adds both, dun switches with no code change. A slash name taken by an
   earlier extension or by dun itself is dropped from the later one.
-- **mcpshell is looked for on PATH, then beside dun's executable** (`internal/harness/missing.go`);
+- **mcpshell is looked for on PATH, then beside dun's executable** (`internal/mcpserver/missing.go`);
   absent, dun runs with one tool less and says how to install it (`dun doctor
   --fix`). Installation by `go install` was chosen over bundling because it
   builds from source and is checked by sum.golang.org. (Release tarballs have

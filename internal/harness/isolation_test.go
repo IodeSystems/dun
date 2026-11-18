@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 func gitrun(t *testing.T, dir string, args ...string) {
@@ -67,7 +68,7 @@ func TestWorktree_SymlinksItsMounts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wt, isRepo, err := NewWorktree(repo, []MountSpec{{Source: dep, Name: "dep"}})
+	wt, isRepo, err := NewWorktree(repo, []mcpserver.MountSpec{{Source: dep, Name: "dep"}})
 	if err != nil || !isRepo {
 		t.Fatalf("NewWorktree: isRepo=%v err=%v", isRepo, err)
 	}
@@ -87,7 +88,7 @@ func TestWorktree_SymlinksItsMounts(t *testing.T) {
 // It used to pass nil, so a worktree made at runtime got no symlinks at all
 // while one made at startup did.
 func TestHarnessMounts_AreTheSessionsOwn(t *testing.T) {
-	want := []MountSpec{{Source: "/opt/agentkit", Name: "agentkit"}}
+	want := []mcpserver.MountSpec{{Source: "/opt/agentkit", Name: "agentkit"}}
 	h := &Harness{cfg: Config{ExtraMounts: want}}
 	got := h.Mounts()
 	if len(got) != 1 || got[0] != want[0] {

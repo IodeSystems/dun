@@ -23,6 +23,7 @@ import (
 
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/textfmt"
 )
 
@@ -57,7 +58,7 @@ var ragSetupOrder = []string{"embed", "identity", "vision", "segment", "audio"}
 var ragRoleKind = map[string]string{"embed": "embeddings", "identity": "", "vision": "images", "segment": "", "audio": "speech"}
 
 // RaglitBin finds the raglit the engine runs. A variable for tests.
-var RaglitBin = func() (string, error) { return harness.FindCommand("raglit") }
+var RaglitBin = func() (string, error) { return mcpserver.FindCommand("raglit") }
 
 // raglitRoot is where the shared daemon keeps its config.json, as raglit
 // resolves it (raglit.DefaultRoot).

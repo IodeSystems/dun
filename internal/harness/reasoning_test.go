@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // thinkRunner streams a fixed round: some reasoning, then the reply, then
@@ -98,7 +99,7 @@ func TestHarness_StreamsAndReplaysReasoning(t *testing.T) {
 	var live strings.Builder
 	h, err := Start(context.Background(), Config{
 		Workspace:   dir,
-		Servers:     []Server{},
+		Servers:     []mcpserver.Server{},
 		Client:      runner,
 		SessionFile: filepath.Join(dir, "s.jsonl"),
 		OnReasoning: func(s string) { mu.Lock(); live.WriteString(s); mu.Unlock() },

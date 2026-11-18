@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // userHome points userHomeDir at a new temp dir for the test and returns it.
@@ -193,7 +195,7 @@ func TestUserRules_Children(t *testing.T) {
 	writeRule(t, filepath.Join(home, "CLAUDE.md"), "u-claude")
 	writeRule(t, filepath.Join(ws, "AGENTS.md"), "p-agents")
 	for _, off := range []bool{false, true} {
-		parent, err := Start(context.Background(), Config{Workspace: ws, Servers: []Server{}, NoUserRules: off})
+		parent, err := Start(context.Background(), Config{Workspace: ws, Servers: []mcpserver.Server{}, NoUserRules: off})
 		if err != nil {
 			t.Fatal(err)
 		}

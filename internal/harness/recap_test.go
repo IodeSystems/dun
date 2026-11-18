@@ -14,6 +14,7 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // convo builds a conversation: a user message, then churn, then the live recap
@@ -606,7 +607,7 @@ func TestCappedReporter_ShowsTheHumanWhatTheModelSaw(t *testing.T) {
 // listed, and a call to it (an old transcript's habit) says where things are.
 func TestReadSaved_Retired(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	h, err := Start(context.Background(), Config{Workspace: t.TempDir(), Servers: []Server{}})
+	h, err := Start(context.Background(), Config{Workspace: t.TempDir(), Servers: []mcpserver.Server{}})
 	if err != nil {
 		t.Fatal(err)
 	}

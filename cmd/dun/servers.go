@@ -11,6 +11,7 @@ import (
 
 	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/mcptable"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
@@ -28,9 +29,9 @@ import (
 // flagOf is the --rag / --lsp flag that starts a server for one run.
 func flagOf(id string) string {
 	switch id {
-	case harness.ServerDocs:
+	case mcpserver.ServerDocs:
 		return "rag"
-	case harness.ServerCode:
+	case mcpserver.ServerCode:
 		return "lsp"
 	}
 	return id
@@ -68,10 +69,10 @@ func (t *tristate) IsBoolFlag() bool { return true }
 func autostartOverrides(rag, lsp tristate) map[string]bool {
 	out := map[string]bool{}
 	if rag.set {
-		out[harness.ServerDocs] = rag.val
+		out[mcpserver.ServerDocs] = rag.val
 	}
 	if lsp.set {
-		out[harness.ServerCode] = lsp.val
+		out[mcpserver.ServerCode] = lsp.val
 	}
 	if len(out) == 0 {
 		return nil
@@ -108,7 +109,7 @@ func runServerCmd(ctx context.Context, h *harness.Harness, alias, action string)
 	if verb, dir, _ := strings.Cut(strings.TrimSpace(action), " "); enginecmd.ExcludeVerb(alias, verb) {
 		return runExcludeCmd(ctx, h, alias, verb, dir)
 	}
-	if f := strings.Fields(action); alias == harness.ServerCode && lspLanguageCmd(f) {
+	if f := strings.Fields(action); alias == mcpserver.ServerCode && lspLanguageCmd(f) {
 		msg, err := switchOp(h, "lsp", f)
 		if err != nil {
 			return "lsp: " + err.Error()
@@ -121,7 +122,7 @@ func runServerCmd(ctx context.Context, h *harness.Harness, alias, action string)
 	id, label := alias, alias // addressed by its id
 	// The TUI opens /rag setup itself (ragsetup.go); another client
 	// reaches here.
-	if action == "setup" && alias == harness.ServerDocs {
+	if action == "setup" && alias == mcpserver.ServerDocs {
 		return label + ": setup is a form in dun's terminal UI — /" + alias + " setup there"
 	}
 	switch action {
@@ -225,7 +226,7 @@ func runMCPCmd(ctx context.Context, h *harness.Harness, action string) string {
 	verb, arg, _ := strings.Cut(action, " ")
 	switch verb {
 	case "add":
-		var spec harness.ServerSpec
+		var spec mcpserver.Spec
 		if err := json.Unmarshal([]byte(arg), &spec); err != nil {
 			return "mcp add: " + err.Error()
 		}
@@ -244,7 +245,7 @@ func runMCPCmd(ctx context.Context, h *harness.Harness, action string) string {
 		if elapsed := time.Since(t0); elapsed > time.Second {
 			msg += fmt.Sprintf(" · %s", elapsed.Round(time.Second))
 		}
-		if st, _ := stateOf(h, spec.ID); st.Via == harness.ViaShell {
+		if st, _ := stateOf(h, spec.ID); st.Via == mcpserver.ViaShell {
 			return msg + "\n" + shellPlacementNote
 		}
 		// No docs to index is nothing to say here (/mcp refresh still says it).
@@ -286,7 +287,7 @@ func runMCPCmd(ctx context.Context, h *harness.Harness, action string) string {
 		if err != nil {
 			return "mcp remove: " + err.Error()
 		}
-		msg := arg + ": stopped and removed from " + harness.UserServersFile()
+		msg := arg + ": stopped and removed from " + mcpserver.UserServersFile()
 		if len(cleared) > 0 {
 			msg += "\ncleared its switches in " + strings.Join(cleared, ", ")
 		}
@@ -344,11 +345,11 @@ func toolCostListing(states []harness.ServerState) string {
 
 // heavyHint names the two ways to make a heavy server cheaper.
 func heavyHint(st harness.ServerState) string {
-	if st.Cost < harness.HeavyServerTokens || st.Via == harness.ViaShell {
+	if st.Cost < harness.HeavyServerTokens || st.Via == mcpserver.ViaShell {
 		return ""
 	}
 	hint := "heavy: /mcp tools " + st.ID + " to hide some"
-	if st.Via == harness.ViaDirect {
+	if st.Via == mcpserver.ViaDirect {
 		hint += ", or /mcp mode " + st.ID + " scripted"
 	}
 	return hint
@@ -450,7 +451,7 @@ func serverListing(states []harness.ServerState) string {
 	b.WriteString("\n" + mcptable.ServerTable(states, mcptable.PlainKey))
 	total, direct := 0, 0
 	for _, st := range states {
-		if st.Running && st.Via != harness.ViaShell {
+		if st.Running && st.Via != mcpserver.ViaShell {
 			total += st.Cost
 			direct++
 		}
@@ -534,7 +535,7 @@ func ingestLine(h *harness.Harness, id string) string {
 
 func runningSummary(h *harness.Harness, id string) string {
 	st, ok := stateOf(h, id)
-	if ok && st.Via == harness.ViaShell {
+	if ok && st.Via == mcpserver.ViaShell {
 		return mcptable.HostedSummary(st)
 	}
 	if ok && st.Starting {

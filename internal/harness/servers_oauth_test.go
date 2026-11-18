@@ -15,6 +15,7 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/oauth"
 	"github.com/iodesystems/dun/internal/oauth/oauthtest"
 )
@@ -33,7 +34,7 @@ func TestOAuth_DiscoveryLoginThroughTheHarness(t *testing.T) {
 	h.cfg.OnLogin = b.Notify
 	port := oauthtest.FreePort(t)
 
-	spec := ServerSpec{ID: "snow", URL: w.MCPURL(), OAuth: &oauth.Spec{ClientID: w.ClientID, RedirectPort: port}}
+	spec := mcpserver.Spec{ID: "snow", URL: w.MCPURL(), OAuth: &oauth.Spec{ClientID: w.ClientID, RedirectPort: port}}
 	if _, err := h.AddServer(context.Background(), spec); err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +84,7 @@ func TestOAuth_DiscoveryLoginThroughTheHarness(t *testing.T) {
 		t.Errorf("listing auth: %q", auth)
 	}
 	// Saved as configured: the oauth block, no token.
-	if f, _ := readServersFile(UserServersFile()); f == nil || f.Servers[0].OAuth == nil || f.Servers[0].OAuth.ClientID != w.ClientID {
+	if f, _ := mcpserver.ReadConfig(mcpserver.UserServersFile()); f == nil || f.Servers[0].OAuth == nil || f.Servers[0].OAuth.ClientID != w.ClientID {
 		t.Errorf("saved %+v", f)
 	}
 
@@ -117,56 +118,9 @@ func TestStartServer_GateExplained(t *testing.T) {
 	h.mgr, h.lastErr, h.lastStart = mcpmgr.NewManager(), map[string]string{}, map[string]time.Duration{}
 	defer h.mgr.Close()
 	h.Session = &agent.Session{}
-	_, err := h.AddServer(context.Background(), ServerSpec{ID: "gated", URL: ts.URL + "/mcp", Timeout: 5})
+	_, err := h.AddServer(context.Background(), mcpserver.Spec{ID: "gated", URL: ts.URL + "/mcp", Timeout: 5})
 	if err == nil || !strings.Contains(err.Error(), "gated is behind a login gate") || !strings.Contains(err.Error(), "Cloudflare Access") {
 		t.Errorf("got %v", err)
-	}
-}
-
-// The oauth block round-trips through mcp.json, merges field by field across
-// layers, and is refused where it cannot work.
-func TestOAuthSpec_ConfigRoundTripAndMerge(t *testing.T) {
-	t.Setenv("DUN_HOME", t.TempDir())
-	in := ServerSpec{ID: "snow", URL: "https://acct.snowflakecomputing.com/api/v2/databases/d/schemas/s/mcp-servers/m",
-		OAuth: &oauth.Spec{ClientID: "c1", ClientSecret: "$SNOW_SECRET", Scopes: []string{"session:role:ANALYST"},
-			Resource: "none", Send: oauth.SendAccessToken, RedirectPort: 4000, AuthParams: map[string]string{"prompt": "consent"}}}
-	if _, err := PutUserServer(in); err != nil {
-		t.Fatal(err)
-	}
-	f, err := readServersFile(UserServersFile())
-	if err != nil || len(f.Servers) != 1 {
-		t.Fatal(f, err)
-	}
-	b1, _ := json.Marshal(in)
-	b2, _ := json.Marshal(f.Servers[0])
-	if string(b1) != string(b2) {
-		t.Errorf("round trip:\n%s\n%s", b1, b2)
-	}
-	if !strings.Contains(string(b2), `"client_secret":"$SNOW_SECRET"`) {
-		t.Errorf("the secret reference must be kept as written: %s", b2)
-	}
-	dir := t.TempDir()
-	writeJSON(t, dir, ProjectServersFile, `{"servers":[{"id":"snow","oauth":{"issuer":"https://idp.example","scopes":["a","b"]}}]}`)
-	got, err := LoadServers(dir, "/ws", "/rag")
-	if err != nil {
-		t.Fatal(err)
-	}
-	o := byID(got)["snow"].OAuth
-	if o == nil || o.ClientID != "c1" || o.Issuer != "https://idp.example" || !slices.Equal(o.Scopes, []string{"a", "b"}) || o.RedirectPort != 4000 {
-		t.Errorf("merged %+v", o)
-	}
-	for _, c := range []struct {
-		s    ServerSpec
-		via  string
-		want string
-	}{
-		{ServerSpec{ID: "x", Command: "x", OAuth: &oauth.Spec{ClientID: "c"}}, "", "remote server"},
-		{ServerSpec{ID: "x", URL: "https://x", Bearer: "t", OAuth: &oauth.Spec{ClientID: "c"}}, "", "both bearer and oauth"},
-		{ServerSpec{ID: "x", URL: "https://x", OAuth: &oauth.Spec{ClientID: "c", Send: "jwt"}}, "", "send"},
-	} {
-		if err := checkOAuth(c.s, c.via); err == nil || !strings.Contains(err.Error(), c.want) {
-			t.Errorf("%+v: %v, want %q", c.s, err, c.want)
-		}
 	}
 }
 
@@ -191,7 +145,7 @@ func TestOAuthBroker_EnginesShareOneLogin(t *testing.T) {
 	w := oauthtest.NewWorld(t)
 	br := &oauthtest.Browser{}
 	b := oauth.NewBroker(nil)
-	spec := ServerSpec{ID: "snow", URL: w.MCPURL(), OAuth: &oauth.Spec{ClientID: w.ClientID, RedirectPort: oauthtest.FreePort(t)}}
+	spec := mcpserver.Spec{ID: "snow", URL: w.MCPURL(), OAuth: &oauth.Spec{ClientID: w.ClientID, RedirectPort: oauthtest.FreePort(t)}}
 
 	h1 := brokerHarness(t, b, br)
 	if _, err := h1.AddServer(context.Background(), spec); err != nil {
@@ -214,7 +168,7 @@ func TestOAuthBroker_EnginesShareOneLogin(t *testing.T) {
 	w.Mu.Lock()
 	w.Valid = map[string]bool{}
 	w.Mu.Unlock()
-	src := h1.oauthFor(Server{ID: "snow", URL: w.MCPURL(), OAuth: spec.OAuth})
+	src := h1.oauthFor(mcpserver.Server{ID: "snow", URL: w.MCPURL(), OAuth: spec.OAuth})
 	if err := src.OnUnauthorized(context.Background(), ""); err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +178,7 @@ func TestOAuthBroker_EnginesShareOneLogin(t *testing.T) {
 	// The second engine still sends the old token until the server
 	// refuses it too; then it gets the broker's new one, with no second
 	// refresh.
-	src2 := h2.oauthFor(Server{ID: "snow", URL: w.MCPURL(), OAuth: spec.OAuth})
+	src2 := h2.oauthFor(mcpserver.Server{ID: "snow", URL: w.MCPURL(), OAuth: spec.OAuth})
 	if err := src2.OnUnauthorized(context.Background(), ""); err != nil {
 		t.Fatal(err)
 	}
@@ -244,10 +198,10 @@ func TestOAuthBroker_EnginesShareOneLogin(t *testing.T) {
 // A scripted OAuth server's auth_cmd is `dun oauth token` with its spec,
 // which decodes back; no bearer goes into the file.
 func TestShellConfig_OAuthAuthCmd(t *testing.T) {
-	s := Server{ID: "eleven", URL: "https://api.example/mcp", Via: ViaShell,
+	s := mcpserver.Server{ID: "eleven", URL: "https://api.example/mcp", Via: mcpserver.ViaShell,
 		Headers: map[string]string{"Authorization": "Bearer stale", "X-A": "1"},
 		OAuth:   &oauth.Spec{ClientID: "https://dun.example/client.json", ClientSecret: "$ELEVEN_SECRET"}}
-	b, err := mcpshellConfig([]Server{s}, func(s Server) string {
+	b, err := mcpshellConfig([]mcpserver.Server{s}, func(s mcpserver.Server) string {
 		return "'/bin/dun' oauth token --spec " + oauth.EncodeAuthSpec(oauth.AuthSpec{ID: s.ID, URL: s.URL, OAuth: *s.OAuth})
 	})
 	if err != nil {
@@ -276,22 +230,15 @@ func TestShellConfig_OAuthAuthCmd(t *testing.T) {
 	}
 }
 
-// Setting an OAuth server scripted is allowed now.
-func TestOAuth_ScriptedIsAllowed(t *testing.T) {
-	if err := checkOAuth(ServerSpec{ID: "x", URL: "https://x/mcp", OAuth: &oauth.Spec{ClientID: "c"}}, ViaShell); err != nil {
-		t.Errorf("checkOAuth: %v", err)
-	}
-}
-
 // Adding a server that answers with an OAuth challenge gives it an oauth
 // block; dun then picks the client.
 func TestAddServer_DetectsOAuth(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	w := oauthtest.NewWorld(t)
-	if !wantsOAuth(context.Background(), ServerSpec{ID: "snow", URL: w.MCPURL()}) {
+	if !wantsOAuth(context.Background(), mcpserver.Spec{ID: "snow", URL: w.MCPURL()}) {
 		t.Error("the challenge was not seen")
 	}
-	if wantsOAuth(context.Background(), ServerSpec{ID: "snow", URL: w.MCPURL(), Bearer: "x"}) {
+	if wantsOAuth(context.Background(), mcpserver.Spec{ID: "snow", URL: w.MCPURL(), Bearer: "x"}) {
 		t.Error("a server with a bearer is not an oauth one")
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -100,7 +101,7 @@ func TestLearn_EpisodeBecomesOneCandidate(t *testing.T) {
 	}
 	// Recall leaves it out; the dedup search sees it.
 	f.mu.Lock()
-	f.hits = map[string][]proto.RagHit{raglitProject(h.cfg.Workspace): {{Path: "file://" + p, Text: "x", Score: 1, Matched: 1, Terms: 1}}}
+	f.hits = map[string][]proto.RagHit{mcpserver.RaglitProject(h.cfg.Workspace): {{Path: "file://" + p, Text: "x", Score: 1, Matched: 1, Terms: 1}}}
 	f.mu.Unlock()
 	if hits, _ := (&memFinder{l: h.stratLink(), m: s}).Find(context.Background(), []string{"build tool"}); len(hits) != 0 {
 		t.Errorf("recall surfaced a candidate: %+v", hits)
@@ -233,7 +234,7 @@ func TestLearn_AcceptAndReject(t *testing.T) {
 	}
 	f.mu.Lock()
 	tags := f.tags[len(f.tags)-1].Tags
-	f.hits = map[string][]proto.RagHit{raglitProject(h.cfg.Workspace): {{Path: "file://" + p, Text: "x", Score: 1, Matched: 1, Terms: 1}}}
+	f.hits = map[string][]proto.RagHit{mcpserver.RaglitProject(h.cfg.Workspace): {{Path: "file://" + p, Text: "x", Score: 1, Matched: 1, Terms: 1}}}
 	f.mu.Unlock()
 	if slices.Contains(tags, candidateTag) {
 		t.Errorf("retag: %v", tags)

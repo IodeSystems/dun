@@ -13,6 +13,7 @@ import (
 
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -64,7 +65,7 @@ func TestEngineInterrupt(t *testing.T) {
 	evR, evW := io.Pipe()
 	em := &emitter{w: evW}
 	h, err := harness.Start(ctx, harness.Config{
-		Workspace: home, Servers: []harness.Server{}, Client: r,
+		Workspace: home, Servers: []mcpserver.Server{}, Client: r,
 		SessionFile: filepath.Join(home, "s.jsonl"),
 		OnToken:     func(s string) { em.emit(&proto.Token{Text: s}) },
 		OnReasoning: func(s string) { em.emit(&proto.Reasoning{Text: s}) },

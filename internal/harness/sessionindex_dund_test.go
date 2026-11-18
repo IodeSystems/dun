@@ -13,6 +13,7 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -63,7 +64,7 @@ func TestSessionIndex_FoldThenSessionSearch(t *testing.T) {
 	}
 	waitFor(t, 5*time.Second, func() bool { return len(rag.syncCalls()) == 1 })
 	q := rag.syncCalls()[0]
-	if q.Index != sessionsIndex || q.Project != raglitProject(ws) || len(q.Files) != 1 || q.Files[0].Path != file ||
+	if q.Index != sessionsIndex || q.Project != mcpserver.RaglitProject(ws) || len(q.Files) != 1 || q.Files[0].Path != file ||
 		!slices.Equal(q.Files[0].Tags, []string{"session:s1", "kind:fold"}) || q.Files[0].Title != "find the port" {
 		t.Fatalf("sync %+v", q)
 	}
@@ -263,7 +264,7 @@ func TestForgetSessionFolds(t *testing.T) {
 	if err := ForgetSessionFolds(rag, ws, "s1"); err != nil {
 		t.Fatal(err)
 	}
-	if q := rag.syncCalls(); len(q) != 1 || q[0].Index != sessionsIndex || q[0].Project != raglitProject(ws) || !slices.Equal(q[0].Gone, []string{span}) {
+	if q := rag.syncCalls(); len(q) != 1 || q[0].Index != sessionsIndex || q[0].Project != mcpserver.RaglitProject(ws) || !slices.Equal(q[0].Gone, []string{span}) {
 		t.Fatalf("sync %+v", q)
 	}
 	if !pruneTranscript(ws, "s1") {
@@ -301,7 +302,7 @@ func TestForgetSessionFolds_RetriedWhenDundIsBack(t *testing.T) {
 	if err := ForgetSessionFolds(rag, ws, "s2"); err != nil {
 		t.Fatal(err)
 	}
-	if q := rag.syncCalls(); len(q) != 1 || !slices.Equal(q[0].Gone, []string{span}) || q[0].Project != raglitProject(ws) {
+	if q := rag.syncCalls(); len(q) != 1 || !slices.Equal(q[0].Gone, []string{span}) || q[0].Project != mcpserver.RaglitProject(ws) {
 		t.Fatalf("retry %+v", q)
 	}
 	if _, err := os.Stat(pending); !os.IsNotExist(err) {

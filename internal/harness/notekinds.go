@@ -16,6 +16,8 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/dun/internal/project"
 )
 
 // Memories, strategies and constraints: one file shape, three kinds
@@ -76,7 +78,7 @@ func strategiesDir(project string) string {
 // strategyFor is the strategies and constraints store of a workspace's
 // project and the global set, indexed through link (nil: files only).
 func strategyFor(link *memLink, workspace string) *memoryStore {
-	m := &memoryStore{dir: strategiesDir(raglitProject(workspace)), global: strategiesDir(globalMemoryDir), now: time.Now,
+	m := &memoryStore{dir: strategiesDir(mcpserver.RaglitProject(workspace)), global: strategiesDir(globalMemoryDir), now: time.Now,
 		index: strategiesIndex, kinds: []string{kindStrategy, kindConstraint}, groups: [2]string{groupStrategy, groupStrategyGlobal}}
 	if link == nil {
 		return m
@@ -381,7 +383,7 @@ func (h *Harness) readItem(kind, name string) string {
 
 // noteMeta is where a write from this session says it came from.
 func (h *Harness) noteMeta() noteMeta {
-	meta := noteMeta{Commit: gitLine(h.cfg.Workspace, "rev-parse", "--short", "HEAD")}
+	meta := noteMeta{Commit: project.GitLine(h.cfg.Workspace, "rev-parse", "--short", "HEAD")}
 	if h.cfg.SessionFile != "" {
 		meta.Session = strings.TrimSuffix(filepath.Base(h.cfg.SessionFile), ".jsonl")
 	}

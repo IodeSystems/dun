@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // Commit messages — the model writes them, the human approves them.
@@ -37,17 +38,6 @@ import (
 // latency, and throwing it away is how a session that spent more time on
 // commit messages than on turns looked exactly like one that did not.
 
-// CommitConfig is the `commit` section of dun.json: how the message is written.
-type CommitConfig struct {
-	// Format names a built-in style. "conventional" (the default) or "plain".
-	Format string `json:"format,omitempty"`
-	// Instruction replaces the built-in rules with free text handed to the
-	// model verbatim, for a project whose convention is its own. It wins over
-	// Format, which is why both can be set without a precedence puzzle: the
-	// specific statement beats the named one.
-	Instruction string `json:"instruction,omitempty"`
-}
-
 // The default we suggest. Conventional Commits, because it is the convention
 // most repos that have one have, and because the type/scope prefix is the part
 // a model gets reliably right while a human reads the subject line anyway.
@@ -71,8 +61,8 @@ const commitPlainRules = `Write the message as:
 - subject is imperative mood, under 72 characters, no trailing period, and no type/scope prefix.
 - body explains WHY the change was made — not a restatement of the diff, which the reader already has. Wrap at 72 columns.`
 
-// rules is the style the model is asked to follow.
-func (c *CommitConfig) rules() string {
+// commitRules is the style the model is asked to follow.
+func commitRules(c *mcpserver.CommitConfig) string {
 	if c != nil {
 		if s := strings.TrimSpace(c.Instruction); s != "" {
 			return s
@@ -118,7 +108,7 @@ func (h *Harness) CommitMessage(ctx context.Context, wt *Worktree) (string, erro
 
 	var b strings.Builder
 	b.WriteString("Write the git commit message for the change below.\n\n")
-	b.WriteString(cfg.rules())
+	b.WriteString(commitRules(cfg))
 	if intent := h.recentIntent(ctx); intent != "" {
 		b.WriteString("\n\nWhat the session was asked to do (context for the WHY; the diff below is the " +
 			"authority on what actually changed):\n" + intent)

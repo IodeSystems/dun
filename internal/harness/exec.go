@@ -22,6 +22,7 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/proc"
 )
 
@@ -755,7 +756,7 @@ type DockerExec struct {
 	// container at /<name>. These are how external dependencies (e.g. a
 	// sibling module referenced by go.mod replace) become accessible inside
 	// the container.
-	ExtraMounts []MountSpec
+	ExtraMounts []mcpserver.MountSpec
 	// TmpDir is the session's isolation tmp (isotmp.go), mounted read-only at
 	// its own path so a saved result's path means the same file in here as on
 	// the host. "" mounts nothing.

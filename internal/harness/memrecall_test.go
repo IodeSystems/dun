@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -344,7 +345,7 @@ func TestMemRecall_ProjectAndGlobalAreSeparateGroups(t *testing.T) {
 	}
 	setHits := func(project, global []proto.RagHit) {
 		rag.mu.Lock()
-		rag.hits = map[string][]proto.RagHit{raglitProject(ws): project, "": global}
+		rag.hits = map[string][]proto.RagHit{mcpserver.RaglitProject(ws): project, "": global}
 		rag.mu.Unlock()
 	}
 

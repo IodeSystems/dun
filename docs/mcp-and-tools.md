@@ -2,7 +2,7 @@
 
 Why the tool-server layer is built the way it is. Short rules on startup,
 rebuilds and config files: "Tool servers and extensions" in `decisions.md`.
-Switch scopes (session, project, global): `internal/harness/mcpscope.go`.
+Switch scopes (session, project, global): `internal/mcpserver/scope.go` (resolution), `internal/harness/mcpscope.go` (setters, follow).
 
 `/rag` (USER 2026-10-28; it was `/raglit`) is the search indexes as a switch
 table: every index raglit lists (`raglit index --list --json`), each on, off
@@ -48,9 +48,9 @@ project switch still wins where it is set (USER 2026-10-28).
 ## Servers: direct or in the shell
 
 (USER 2026-10-22.) Default is direct. A user-added server may instead be
-hosted inside mcpshell (`ServerSpec.Via`, `"direct"` / `"shell"`), so its tool
+hosted inside mcpshell (`mcpserver.Spec.Via`, `"direct"` / `"shell"`), so its tool
 schemas leave every request and the model reaches it through `eval`. Built-in
-servers cannot be moved. Code: `internal/harness/shellhost.go`, `internal/harness/servers_config.go`.
+servers cannot be moved. Code: `internal/harness/shellhost.go`, `internal/mcpserver/config.go`.
 
 - A shell-placed server is never started by mcpmgr. The shell is launched with
   `--mcp <$DUN_HOME/projects/<id>/shell-mcp.json>` (0600, removed when nothing
@@ -86,7 +86,7 @@ session, agent)".
 
 **The switch.** `instance` is a third per-server switch beside on/off and
 mode, set at global, project or session scope; the nearest scope that sets
-it decides, as `via` does (`ServerScopes.Instance*`, `ServerSpec.Instance`,
+it decides, as `via` does (`mcpserver.Scopes.Instance*`, `mcpserver.Spec.Instance`,
 `SessionServer.Instance`). `/mcp instance <id> shared|session|agent|unset
 [--global|--project|--session]`, and a column in the `/mcp` table.
 
@@ -115,7 +115,7 @@ again.
 
 Not switchable: the built-in servers. Each declares its fixed instance in
 one place beside the built-in definitions (`builtinInstances`,
-`internal/harness/serverdefs.go`); the refusal reads it, and the `/mcp` table shows it as
+`internal/mcpserver/defs.go`); the refusal reads it, and the `/mcp` table shows it as
 `<instance> (built-in)` (USER 2026-11-06):
 
 - shell: `session`. mcpshell holds the session's `eval` state, and the
@@ -262,7 +262,7 @@ on every request). The older HTTP+SSE transport and the server-initiated GET
 stream are not built. `url`, `bearer` (`$NAME` reads the environment at use,
 never written resolved) and `headers` are on the spec.
 
-OAuth (`ServerSpec.OAuth`; `internal/oauth/mcpoauth.go`, `internal/harness/servers_oauth.go`). Targets that
+OAuth (`mcpserver.Spec.OAuth`; `internal/oauth/mcpoauth.go`, `internal/harness/servers_oauth.go`). Targets that
 shaped it: Snowflake's managed MCP (401 -> RFC 9728 -> RFC 8414, no dynamic
 client registration, pre-registered client and **exact** redirect URI),
 Superset (validates an external IdP's JWT; with Google that is the ID token),
@@ -412,7 +412,7 @@ receipt of an edit.
 
 (USER 2026-10-22.) "we don't want to pollute git trees and we cannot tell
 people to use dun": no `.dun/` created in a repo, no `.gitignore` entry asked of
-anyone. Code: `internal/harness/project.go`, `internal/harness/servers_config.go` (`serverConfigPaths`).
+anyone. Code: `internal/project/project.go`, `internal/mcpserver/config.go` (`serverConfigPaths`).
 
 - `$DUN_HOME/projects.json` maps an absolute source dir to an id, written
   temp-and-rename under flock. State lives in `$DUN_HOME/projects/<id>/`

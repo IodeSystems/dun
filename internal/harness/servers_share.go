@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/oauth"
 )
 
@@ -20,7 +21,9 @@ import (
 
 // shareable reports whether a standalone server s is reached through dund's
 // gateway (sharedInstance).
-func (h *Harness) shareable(s Server) bool { return s.Via != ViaShell && h.sharedInstance(s) }
+func (h *Harness) shareable(s mcpserver.Server) bool {
+	return s.Via != mcpserver.ViaShell && h.sharedInstance(s)
+}
 
 // sharedInstance reports whether s is one connection in dund: under dund,
 // not built in, instance shared, and no host hook (an extension's hook
@@ -30,11 +33,11 @@ func (h *Harness) shareable(s Server) bool { return s.Via != ViaShell && h.share
 // A child starts only its own instances (childOwn): an agent one is its own
 // key in dund, a shared one re-resolved for its own tree another key. A
 // session's own agent instance is the engine's, as session is.
-func (h *Harness) sharedInstance(s Server) bool {
-	if h.cfg.Gateway == nil || builtinServer(s.ID) {
+func (h *Harness) sharedInstance(s mcpserver.Server) bool {
+	if h.cfg.Gateway == nil || mcpserver.IsBuiltin(s.ID) {
 		return false
 	}
-	if s.Instance != InstanceShared && (s.Instance != InstanceAgent || h.parent == nil) {
+	if s.Instance != mcpserver.InstanceShared && (s.Instance != mcpserver.InstanceAgent || h.parent == nil) {
 		return false
 	}
 	if e, ok := h.extension(s.ID); ok && len(e.HostHooks) > 0 {
@@ -44,7 +47,7 @@ func (h *Harness) sharedInstance(s Server) bool {
 }
 
 // shareSpec is s as this engine resolved it: the key of its upstream.
-func shareSpec(s Server, command string, args, env []string, timeout time.Duration) ShareSpec {
+func shareSpec(s mcpserver.Server, command string, args, env []string, timeout time.Duration) ShareSpec {
 	sp := ShareSpec{ID: s.ID, Timeout: int(timeout / time.Second)}
 	if s.URL != "" {
 		sp.URL, sp.Headers = s.URL, maps.Clone(s.Headers)
@@ -60,9 +63,9 @@ func shareSpec(s Server, command string, args, env []string, timeout time.Durati
 }
 
 // shareStart asks the gateway for s's endpoint and points mcfg at it.
-func (h *Harness) shareStart(ctx context.Context, s Server, mcfg *mcpmgr.MCPConfig, timeout time.Duration) error {
+func (h *Harness) shareStart(ctx context.Context, s mcpserver.Server, mcfg *mcpmgr.MCPConfig, timeout time.Duration) error {
 	req := ShareRequest{Spec: shareSpec(s, mcfg.Command, mcfg.Args, mcfg.Env, timeout), Instance: s.Instance}
-	if s.Instance == InstanceAgent {
+	if s.Instance == mcpserver.InstanceAgent {
 		req.Agent = h.agentPath()
 	}
 	g, err := h.cfg.Gateway.Share(ctx, req)
@@ -121,7 +124,7 @@ func (h *Harness) shareHosted(ctx context.Context, shell string, phase *startPha
 		command := s.Command
 		if command != "" {
 			var err error
-			if command, err = FindCommand(command); err != nil {
+			if command, err = mcpserver.FindCommand(command); err != nil {
 				continue // the shell says it did not connect
 			}
 		}
@@ -210,9 +213,9 @@ func (h *Harness) mgrFor(id string) *mcpmgr.Manager {
 // {{workspace}} (poly-lsp included), re-resolved against that tree. Every
 // other server stays its parent's. specs is the parent's list; the result
 // is the child's, with its own ones replaced.
-func childOwn(parent *Harness, cfg Config, specs []Server) ([]Server, map[string]bool) {
+func childOwn(parent *Harness, cfg Config, specs []mcpserver.Server) ([]mcpserver.Server, map[string]bool) {
 	isolated := cfg.Workspace != parent.cfg.Workspace
-	var mine map[string]Server
+	var mine map[string]mcpserver.Server
 	if isolated {
 		root := parent
 		for root.parent != nil {
@@ -220,16 +223,16 @@ func childOwn(parent *Harness, cfg Config, specs []Server) ([]Server, map[string
 		}
 		base := root.cfg.Servers
 		if base == nil {
-			base = DefaultServers(cfg.Workspace, cfg.RaglitHome)
+			base = mcpserver.DefaultServers(cfg.Workspace, cfg.RaglitHome)
 		}
 		root.srvMu.Lock()
 		sess := maps.Clone(root.sessSw)
 		root.srvMu.Unlock()
-		re, err := resolveServers(cfg.ConfigDir, cfg.Workspace, cfg.RaglitHome, extServers(base, root.exts), sess, cfg.AutostartOverride)
+		re, err := mcpserver.Resolve(cfg.ConfigDir, cfg.Workspace, cfg.RaglitHome, mcpserver.ExtServers(base, root.exts), sess, cfg.AutostartOverride)
 		if err != nil {
 			log.Printf("dun: a child's servers for its own tree: %v; it uses its parent's", err)
 		}
-		mine = map[string]Server{}
+		mine = map[string]mcpserver.Server{}
 		for _, s := range re {
 			mine[s.ID] = s
 		}
@@ -237,14 +240,14 @@ func childOwn(parent *Harness, cfg Config, specs []Server) ([]Server, map[string
 	out := slices.Clone(specs)
 	own := map[string]bool{}
 	for i, s := range out {
-		if !s.Autostart || s.Via == ViaShell {
+		if !s.Autostart || s.Via == mcpserver.ViaShell {
 			continue
 		}
 		if r, ok := mine[s.ID]; ok && s.PerWorkspace {
 			out[i], own[s.ID] = r, true
 			continue
 		}
-		if s.Instance == InstanceAgent && !builtinServer(s.ID) {
+		if s.Instance == mcpserver.InstanceAgent && !mcpserver.IsBuiltin(s.ID) {
 			own[s.ID] = true
 		}
 	}

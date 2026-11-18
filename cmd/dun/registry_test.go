@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	dunreg "github.com/iodesystems/dun/internal/registry"
 	"github.com/iodesystems/dun/release"
 )
@@ -17,8 +17,8 @@ func TestSupportedTool_RegistryRaises(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	harness.UseRegistry(ix, "v0.1.3")
-	t.Cleanup(func() { harness.UseRegistry(nil, "") })
+	mcpserver.UseRegistry(ix, "v0.1.3")
+	t.Cleanup(func() { mcpserver.UseRegistry(nil, "") })
 	s, ok := supportedTool("raglit")
 	if !ok || s.Recommended != "v9.9.9" || s.Min != built.Min {
 		t.Errorf("raglit: %+v (built %+v)", s, built)

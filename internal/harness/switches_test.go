@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // A kind's switches: on unless a scope says otherwise; session over project
@@ -24,22 +26,22 @@ func TestSwitches_Resolve(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	mustSet("pdf-*", ScopeGlobal, &off)
-	mustSet("pdf-merge", ScopeProject, &on)
-	mustSet("deploy", ScopeGlobal, &off)
-	mustSet("deploy", ScopeSession, &on)
+	mustSet("pdf-*", mcpserver.ScopeGlobal, &off)
+	mustSet("pdf-merge", mcpserver.ScopeProject, &on)
+	mustSet("deploy", mcpserver.ScopeGlobal, &off)
+	mustSet("deploy", mcpserver.ScopeSession, &on)
 	v := h.switchView(k)
 	got := map[string]SwitchState{}
 	for _, it := range v.Items {
 		got[it.Name] = it
 	}
-	if s := got["pdf-fill"]; s.On || s.From != ScopeGlobal || s.Global != "off" {
+	if s := got["pdf-fill"]; s.On || s.From != mcpserver.ScopeGlobal || s.Global != "off" {
 		t.Errorf("pdf-fill: %+v", s)
 	}
-	if s := got["pdf-merge"]; !s.On || s.From != ScopeProject || s.Global != "off" || s.Project != "on" {
+	if s := got["pdf-merge"]; !s.On || s.From != mcpserver.ScopeProject || s.Global != "off" || s.Project != "on" {
 		t.Errorf("pdf-merge: %+v", s)
 	}
-	if s := got["deploy"]; !s.On || s.From != ScopeSession {
+	if s := got["deploy"]; !s.On || s.From != mcpserver.ScopeSession {
 		t.Errorf("deploy: %+v", s)
 	}
 	if s := got["notes"]; !s.On || s.From != "" {
@@ -48,20 +50,20 @@ func TestSwitches_Resolve(t *testing.T) {
 	if v.Mode != "listed" || v.ModeFrom != "" {
 		t.Errorf("default mode: %+v", v)
 	}
-	if _, err := h.setSwitchMode(k, "surfaced", ScopeProject); err != nil {
+	if _, err := h.setSwitchMode(k, "surfaced", mcpserver.ScopeProject); err != nil {
 		t.Fatal(err)
 	}
-	if v := h.switchView(k); v.Mode != "surfaced" || v.ModeFrom != ScopeProject || v.Modes[ScopeProject] != "surfaced" {
+	if v := h.switchView(k); v.Mode != "surfaced" || v.ModeFrom != mcpserver.ScopeProject || v.Modes[mcpserver.ScopeProject] != "surfaced" {
 		t.Errorf("mode: %+v", v)
 	}
-	if _, err := h.setSwitchMode(k, "loud", ScopeGlobal); err == nil {
+	if _, err := h.setSwitchMode(k, "loud", mcpserver.ScopeGlobal); err == nil {
 		t.Error("an unknown mode must be refused")
 	}
-	if _, err := h.setSwitch(k, "nope-*", ScopeGlobal, &off); err == nil || !strings.Contains(err.Error(), "nothing matches") {
+	if _, err := h.setSwitch(k, "nope-*", mcpserver.ScopeGlobal, &off); err == nil || !strings.Contains(err.Error(), "nothing matches") {
 		t.Errorf("a switch that matches nothing: %v", err)
 	}
-	mustSet("deploy", ScopeSession, nil) // unset
-	if s := h.switchView(k).Items[2]; s.On || s.From != ScopeGlobal {
+	mustSet("deploy", mcpserver.ScopeSession, nil) // unset
+	if s := h.switchView(k).Items[2]; s.On || s.From != mcpserver.ScopeGlobal {
 		t.Errorf("after unset: %+v", s)
 	}
 	if changes != 6 {

@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/numfmt"
 )
 
@@ -180,8 +181,8 @@ const polyLSPCommand = "poly-lsp-mcp"
 
 // asksIndex reports whether dun asks s's binary whether it speaks the index
 // protocol: poly-lsp-mcp by name, or the code server.
-func asksIndex(s Server) bool {
-	return s.URL == "" && s.Command != "" && (filepath.Base(s.Command) == polyLSPCommand || s.ID == ServerCode)
+func asksIndex(s mcpserver.Server) bool {
+	return s.URL == "" && s.Command != "" && (filepath.Base(s.Command) == polyLSPCommand || s.ID == mcpserver.ServerCode)
 }
 
 // IndexSupport is what a poly-lsp-mcp binary takes of the index protocol.
@@ -262,7 +263,7 @@ func IndexProtocol(command string) (sup IndexSupport, resolved string, err error
 // its index after the handshake — it said so this session (an index
 // notification), or its binary does (IndexProtocol) — and what else of the
 // protocol its binary takes. Not under srvMu: it may run a process.
-func (h *Harness) speaksIndex(s Server, command string) (indexes bool, sup IndexSupport) {
+func (h *Harness) speaksIndex(s mcpserver.Server, command string) (indexes bool, sup IndexSupport) {
 	h.srvMu.Lock()
 	seen := h.indexSeen[s.ID]
 	h.srvMu.Unlock()
@@ -665,14 +666,14 @@ func (h *Harness) SetIndexBudget(ctx context.Context, id, budget string) (string
 	if h.IndexBudget(id) == b {
 		return "", false, nil
 	}
-	p, err := h.editIndexSpec(ctx, id, true, func(s *ServerSpec) { s.IndexBudget = b })
+	p, err := h.editIndexSpec(ctx, id, true, func(s *mcpserver.Spec) { s.IndexBudget = b })
 	return p, err == nil, err
 }
 
 // editExcludes rewrites id's project excludes and applies them (editIndexSpec).
 func (h *Harness) editExcludes(ctx context.Context, id string, wait bool, edit func([]string) []string) (string, error) {
 	next := edit(h.excludesOf(id))
-	return h.editIndexSpec(ctx, id, wait, func(s *ServerSpec) {
+	return h.editIndexSpec(ctx, id, wait, func(s *mcpserver.Spec) {
 		s.Exclude = next
 		if len(next) == 0 {
 			s.Exclude = nil // the entry goes when nothing else is in it
@@ -682,8 +683,8 @@ func (h *Harness) editExcludes(ctx context.Context, id string, wait bool, edit f
 
 // editIndexSpec edits id's project entry and applies it: a running server
 // restarts (waited for when wait).
-func (h *Harness) editIndexSpec(ctx context.Context, id string, wait bool, edit func(*ServerSpec)) (string, error) {
-	p, err := updateLocalServer(h.configDir(), id, edit)
+func (h *Harness) editIndexSpec(ctx context.Context, id string, wait bool, edit func(*mcpserver.Spec)) (string, error) {
+	p, err := mcpserver.UpdateLocalServer(h.configDir(), id, edit)
 	if err != nil {
 		return "", err
 	}

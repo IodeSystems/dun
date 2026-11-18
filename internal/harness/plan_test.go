@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/iodesystems/agentkit/taskgraph"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 func planHarness(t *testing.T, file bool) *Harness {
@@ -113,8 +114,8 @@ func TestPlan_ChangesWorkspace(t *testing.T) {
 		name, server string
 		want         bool
 	}{
-		{"search", ServerDocs, false}, {"rename_symbol", ServerCode, true}, {"hover", ServerCode, false},
-		{"run", ServerShell, true}, {"anything", ServerShell, true},
+		{"search", mcpserver.ServerDocs, false}, {"rename_symbol", mcpserver.ServerCode, true}, {"hover", mcpserver.ServerCode, false},
+		{"run", mcpserver.ServerShell, true}, {"anything", mcpserver.ServerShell, true},
 		{"git__commit", "git", true}, {"git__log", "git", false}, {"srv__apply_patch", "srv", true},
 		{"srv__prefix", "srv", false}, // "fix" inside a word is not a verb
 	} {

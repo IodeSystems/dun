@@ -9,13 +9,14 @@ import (
 	"testing"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 func TestHarness_AddMount_DuplicateName(t *testing.T) {
 	h := &Harness{
 		cfg: Config{
 			Exec: HostExec{Dir: "/tmp"},
-			ExtraMounts: []MountSpec{
+			ExtraMounts: []mcpserver.MountSpec{
 				{Source: "/a", Name: "dep1"},
 			},
 		},

@@ -11,6 +11,8 @@ import (
 	"sync"
 
 	"github.com/iodesystems/dun/internal/fsutil"
+	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/dun/internal/project"
 )
 
 // Scoped switches: a kind of thing the person turns on and off at the three
@@ -90,7 +92,7 @@ type switchKind struct {
 }
 
 // switchScopes is precedence, highest first.
-var switchScopes = []string{ScopeSession, ScopeProject, ScopeGlobal}
+var switchScopes = []string{mcpserver.ScopeSession, mcpserver.ScopeProject, mcpserver.ScopeGlobal}
 
 // switchFile is a kind's file at scope, "" when the scope has none here (an
 // in-memory session, a workspace with no project state).
@@ -99,15 +101,15 @@ func (h *Harness) switchFile(kind, scope string) string {
 		kind = rulesKindFiles
 	}
 	switch scope {
-	case ScopeGlobal:
+	case mcpserver.ScopeGlobal:
 		return filepath.Join(DunHome(), kind+".json")
-	case ScopeProject:
-		p, err := EnsureProject(h.configDir())
+	case mcpserver.ScopeProject:
+		p, err := project.Ensure(h.configDir())
 		if err != nil {
 			return ""
 		}
 		return filepath.Join(p.WriteDir(), kind+".json")
-	case ScopeSession:
+	case mcpserver.ScopeSession:
 		if h.cfg.SessionFile == "" {
 			return ""
 		}
@@ -168,7 +170,7 @@ func (s switchSet) on(name string) (on bool, from string, at map[string]string) 
 		if !ok {
 			continue
 		}
-		at[sc] = onOffWord(v)
+		at[sc] = mcpserver.OnOffWord(v)
 		if from == "" {
 			on, from = v, sc
 		}
@@ -216,7 +218,7 @@ func (h *Harness) switchView(k switchKind) SwitchView {
 	for _, it := range k.items() {
 		on, from, at := set.on(it.Name)
 		v.Items = append(v.Items, SwitchState{SwitchItem: it, On: on, From: from,
-			Global: at[ScopeGlobal], Project: at[ScopeProject], Session: at[ScopeSession]})
+			Global: at[mcpserver.ScopeGlobal], Project: at[mcpserver.ScopeProject], Session: at[mcpserver.ScopeSession]})
 	}
 	if k.note != nil {
 		v.Note = k.note(v.Mode)
@@ -268,7 +270,7 @@ func (h *Harness) setSwitch(k switchKind, pattern, scope string, on *bool) (stri
 	}
 	what := "unset"
 	if on != nil {
-		what = onOffWord(*on)
+		what = mcpserver.OnOffWord(*on)
 	}
 	noun := strings.TrimSuffix(k.name, "s")
 	if k.name == rulesKind {
@@ -336,11 +338,11 @@ func (h *Harness) editSwitchFile(kind, scope string, edit func(*SwitchFile)) err
 // scopeWords is a scope as a phrase.
 func scopeWords(scope string) string {
 	switch scope {
-	case ScopeGlobal:
+	case mcpserver.ScopeGlobal:
 		return "every project"
-	case ScopeProject:
+	case mcpserver.ScopeProject:
 		return "this project"
-	case ScopeSession:
+	case mcpserver.ScopeSession:
 		return "this session"
 	}
 	return scope

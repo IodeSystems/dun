@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 type fakeLoops struct {
@@ -26,7 +28,7 @@ func (f *fakeLoops) LoopCtl(_ context.Context, nextIn time.Duration, stop bool, 
 // (USER 2026-10-28).
 func TestLoopCtl_ListedForARootUnderDund(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	h, err := Start(context.Background(), Config{Workspace: t.TempDir(), Servers: []Server{}, Peers: &fakePeers{}, Loops: &fakeLoops{}})
+	h, err := Start(context.Background(), Config{Workspace: t.TempDir(), Servers: []mcpserver.Server{}, Peers: &fakePeers{}, Loops: &fakeLoops{}})
 	if err != nil {
 		t.Fatal(err)
 	}

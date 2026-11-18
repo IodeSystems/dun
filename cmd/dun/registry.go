@@ -8,7 +8,7 @@ import (
 
 	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/internal/dunconfig"
-	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	dunreg "github.com/iodesystems/dun/internal/registry"
 	"github.com/iodesystems/dun/internal/update"
 	"github.com/iodesystems/dun/release"
@@ -52,7 +52,7 @@ func useRegistry() {
 		return
 	}
 	if ix, err := s.Load(); err == nil {
-		harness.UseRegistry(ix, buildinfo.Version)
+		mcpserver.UseRegistry(ix, buildinfo.Version)
 	}
 }
 

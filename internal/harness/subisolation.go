@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/iodesystems/dun/internal/fsutil"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // Sub-agent isolation (USER 2026-10-27: "subagents working simultaneously …
@@ -148,7 +149,7 @@ func (h *Harness) dirWorktree(mode, dir string) (isolation, error) {
 	mounts := h.cfg.ExtraMounts
 	if foreign {
 		// The parent's mounts are its go.mod's; this repo has its own.
-		mounts = LoadMounts(repo, repo)
+		mounts = mcpserver.LoadMounts(repo, repo)
 	}
 	wt, err := newWorktreeIn(top, repo, mounts)
 	if err != nil {
@@ -249,7 +250,7 @@ func (iso isolation) apply(cfg *Config) {
 		cfg.Exec = &HostShell{Dir: iso.Dir}
 	case IsoWorktree, IsoDocker:
 		if iso.Foreign {
-			cfg.ExtraMounts = LoadMounts(iso.Repo, iso.Repo)
+			cfg.ExtraMounts = mcpserver.LoadMounts(iso.Repo, iso.Repo)
 		}
 		ws := iso.workspace()
 		cfg.Workspace = ws
@@ -265,7 +266,7 @@ func (iso isolation) apply(cfg *Config) {
 		cfg.Workspace = iso.Path
 		cfg.Worktree = nil
 		cfg.NoDir = true
-		cfg.Files = &FilesConfig{Tools: []string{}}
+		cfg.Files = &mcpserver.FilesConfig{Tools: []string{}}
 		cfg.Exec = &HostShell{Dir: iso.Path}
 	}
 }

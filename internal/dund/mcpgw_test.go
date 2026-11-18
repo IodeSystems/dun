@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -50,7 +51,7 @@ func TestMcpShare_TwoEnginesOneUpstream(t *testing.T) {
 	ts, inits := gwUpstream(t)
 	a1, _ := svc.Create(alice, t.TempDir(), nil, "")
 	a2, _ := svc.Create(alice, t.TempDir(), nil, "")
-	req, _ := json.Marshal(harness.ShareRequest{Spec: harness.ShareSpec{ID: "el", URL: ts.URL}, Instance: harness.InstanceShared})
+	req, _ := json.Marshal(harness.ShareRequest{Spec: harness.ShareSpec{ID: "el", URL: ts.URL}, Instance: mcpserver.InstanceShared})
 	share := func(id, rid string) proto.McpShareRep {
 		t.Helper()
 		js, _ := json.Marshal(proto.PeerRequest{RID: rid, Op: "mcp_share", Share: &proto.McpShareReq{Request: string(req)}})

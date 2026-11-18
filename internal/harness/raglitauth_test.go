@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // A raglit with keys (raglit never-open): dun logs in with its own token,
@@ -30,7 +32,7 @@ func (r raglitRun) token() string {
 
 // fakeRaglit puts a raglit with keys on PATH and answers its key and ingest
 // commands; runs records every call.
-func fakeRaglit(t *testing.T) (*[]raglitRun, Server) {
+func fakeRaglit(t *testing.T) (*[]raglitRun, mcpserver.Server) {
 	t.Helper()
 	t.Setenv("DUN_HOME", t.TempDir())
 	bin := t.TempDir()
@@ -61,7 +63,7 @@ func fakeRaglit(t *testing.T) (*[]raglitRun, Server) {
 	}
 	raglitHasKeys = func(string) bool { return true }
 	t.Cleanup(func() { runRaglit, raglitHasKeys = oldRun, oldHas })
-	return &runs, Server{ID: ServerDocs, Command: "raglit"}
+	return &runs, mcpserver.Server{ID: mcpserver.ServerDocs, Command: "raglit"}
 }
 
 func TestRaglitAuth_NeedsLoginThenMintsOneSessionKey(t *testing.T) {
@@ -113,7 +115,7 @@ func TestRaglitAuth_OlderRaglitIsUntouched(t *testing.T) {
 	if env, err := h.raglitAuth(context.Background(), docs); env != nil || err != nil {
 		t.Errorf("%v, %v", env, err)
 	}
-	if env, err := h.raglitAuth(context.Background(), Server{ID: ServerCode, Command: "raglit"}); env != nil || err != nil {
+	if env, err := h.raglitAuth(context.Background(), mcpserver.Server{ID: mcpserver.ServerCode, Command: "raglit"}); env != nil || err != nil {
 		t.Errorf("another server: %v, %v", env, err)
 	}
 }

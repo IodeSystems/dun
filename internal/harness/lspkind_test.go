@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // fakeLSPList stands in for `poly-lsp-mcp lsp list|add|remove`.
@@ -29,7 +31,7 @@ func lspHarness(t *testing.T) *Harness {
 	t.Helper()
 	t.Setenv("DUN_HOME", t.TempDir())
 	h, err := Start(context.Background(), Config{Workspace: t.TempDir(), SessionFile: t.TempDir() + "/s.jsonl",
-		Servers: []Server{{ID: ServerCode, Command: "poly-lsp-mcp"}}})
+		Servers: []mcpserver.Server{{ID: mcpserver.ServerCode, Command: "poly-lsp-mcp"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,19 +75,19 @@ func TestLSPKind_TableAndFlags(t *testing.T) {
 	}
 
 	off, on := false, true
-	if _, err := h.SetSwitch(lspKind, "go", ScopeProject, &off); err != nil {
+	if _, err := h.SetSwitch(lspKind, "go", mcpserver.ScopeProject, &off); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.SetSwitch(lspKind, "java", ScopeSession, &on); err != nil {
+	if _, err := h.SetSwitch(lspKind, "java", mcpserver.ScopeSession, &on); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := h.codeLSPArgs(), []string{"--lsp-off", "go", "--lsp-on", "java"}; !slices.Equal(got, want) {
 		t.Errorf("args %q, want %q", got, want)
 	}
-	if _, err := h.SetSwitch(lspKind, "rust", ScopeSession, &on); err == nil || !strings.Contains(err.Error(), "go, python, java") {
+	if _, err := h.SetSwitch(lspKind, "rust", mcpserver.ScopeSession, &on); err == nil || !strings.Contains(err.Error(), "go, python, java") {
 		t.Errorf("an unknown language: %v", err)
 	}
-	if _, err := h.SetSwitch(lspKind, "go", ScopeProject, nil); err != nil {
+	if _, err := h.SetSwitch(lspKind, "go", mcpserver.ScopeProject, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := h.codeLSPArgs(), []string{"--lsp-on", "java"}; !slices.Equal(got, want) {

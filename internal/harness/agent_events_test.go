@@ -8,6 +8,7 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // callRound is a model round that makes one call to name with args.
@@ -34,7 +35,7 @@ func TestAgentCall_EventsAndHistoryNameTheChild(t *testing.T) {
 	starts := map[string]ToolStart{}
 	ends := map[string]ToolEnd{}
 	h, err := Start(context.Background(), Config{
-		Workspace: dir, Servers: []Server{}, Client: parent,
+		Workspace: dir, Servers: []mcpserver.Server{}, Client: parent,
 		ClientFor: func(string, string) (ChildClient, error) {
 			return ChildClient{Runner: &scriptRunner{rounds: []roundFn{textRound("child done")}}}, nil
 		},

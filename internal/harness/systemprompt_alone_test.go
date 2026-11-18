@@ -7,13 +7,14 @@ import (
 	"testing"
 
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // The pass-through worktree dun makes without --worktree is the directory
 // itself: the prompt must not call it an isolated worktree. A real one (its
 // own branch) still says so.
 func TestSystemFor_ContainmentOnlyWhenIsolated(t *testing.T) {
-	tools := []mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}
+	tools := []mcpmgr.MCPTool{{Name: "eval", ServerID: mcpserver.ServerShell}}
 	inPlace := systemFor(tools, HostExec{Dir: "/w"}, &Worktree{Path: "/w"}, "", false)
 	if strings.Contains(inPlace, "worktree") || strings.Contains(inPlace, "isolated") {
 		t.Errorf("in place, the prompt claims isolation: %s", inPlace)
@@ -27,7 +28,7 @@ func TestSystemFor_ContainmentOnlyWhenIsolated(t *testing.T) {
 // --non-interactive leaves out the thinking headings, which only the TUI's thought line
 // uses.
 func TestSystemFor_BareDropsThinkingHeadings(t *testing.T) {
-	tools := []mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}
+	tools := []mcpmgr.MCPTool{{Name: "eval", ServerID: mcpserver.ServerShell}}
 	if !strings.Contains(systemFor(tools, nil, nil, "", false), "# Thinking:") {
 		t.Error("a client-facing run lost the thinking headings")
 	}
@@ -39,7 +40,7 @@ func TestSystemFor_BareDropsThinkingHeadings(t *testing.T) {
 // Every run's work line says to finish, install what is missing, and check
 // the task's requirements; --non-interactive adds that the model is alone.
 func TestSystemFor_FinishAlwaysAloneOnlyNonInteractive(t *testing.T) {
-	tools := []mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}
+	tools := []mcpmgr.MCPTool{{Name: "eval", ServerID: mcpserver.ServerShell}}
 	for _, alone := range []bool{false, true} {
 		s := systemFor(tools, nil, nil, "", alone)
 		if !strings.Contains(s, "Treat data you were given as the only copy") {
@@ -59,7 +60,7 @@ func TestSystemFor_FinishAlwaysAloneOnlyNonInteractive(t *testing.T) {
 // and a script gets the output without the model retyping it.
 func TestBare_KeepsOutputSlotsDropsClientNotes(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	h, err := Start(context.Background(), Config{Workspace: t.TempDir(), Servers: []Server{}, NonInteractive: true})
+	h, err := Start(context.Background(), Config{Workspace: t.TempDir(), Servers: []mcpserver.Server{}, NonInteractive: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +85,7 @@ func TestBare_KeepsOutputSlotsDropsClientNotes(t *testing.T) {
 func TestSystemRecap_WithTheToolOnly(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	ws := t.TempDir()
-	h, err := Start(context.Background(), Config{Workspace: ws, Servers: []Server{}, Exec: &HostShell{Dir: ws}})
+	h, err := Start(context.Background(), Config{Workspace: ws, Servers: []mcpserver.Server{}, Exec: &HostShell{Dir: ws}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +96,7 @@ func TestSystemRecap_WithTheToolOnly(t *testing.T) {
 	if strings.Contains(recapToolDef().Function.Description, "not recommended") {
 		t.Error("the recap description still argues against it")
 	}
-	if _, err := h.SetServerOn(context.Background(), "dun:recap", ScopeProject, ptr(false)); err != nil {
+	if _, err := h.SetServerOn(context.Background(), "dun:recap", mcpserver.ScopeProject, ptr(false)); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(h.Session.System, "recap what is settled") {

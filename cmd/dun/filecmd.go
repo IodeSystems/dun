@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // fileUsage is /file's grammar.
@@ -35,7 +36,7 @@ func fileCmd(h *harness.Harness, action string) (string, error) {
 			}
 		}
 	}
-	scope, err := scopeArg(flags, harness.ScopeSession)
+	scope, err := scopeArg(flags, mcpserver.ScopeSession)
 	if err != nil {
 		return "", err
 	}

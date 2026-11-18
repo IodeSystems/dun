@@ -22,31 +22,32 @@ import (
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/proto"
 )
 
 // startFakeRaglit starts a harness on ws whose raglit is the fake, with the
 // serve args dun gives the real one, plus any other servers. It returns the
 // harness, the fake's log and the hits file its search answers from.
-func startFakeRaglit(t *testing.T, ws string, start bool, others ...Server) (*Harness, string, string) {
+func startFakeRaglit(t *testing.T, ws string, start bool, others ...mcpserver.Server) (*Harness, string, string) {
 	t.Helper()
 	return startFakeRaglitRag(t, ws, start, nil, others...)
 }
 
 // startFakeRaglitRag is startFakeRaglit with a RagLink for the memory notes.
-func startFakeRaglitRag(t *testing.T, ws string, start bool, rag RagLink, others ...Server) (*Harness, string, string) {
+func startFakeRaglitRag(t *testing.T, ws string, start bool, rag RagLink, others ...mcpserver.Server) (*Harness, string, string) {
 	t.Helper()
 	hits := filepath.Join(t.TempDir(), "hits.json")
 	cmd, logPath := fakeBin(t, "raglit", "raglit", fakeHitsEnv+"="+hits)
-	servers := append([]Server{{ID: ServerDocs, Command: cmd, Timeout: 20,
-		Args: []string{"serve", "--project", raglitProject(ws), "--index", raglitIndex(ws)}}}, others...)
+	servers := append([]mcpserver.Server{{ID: mcpserver.ServerDocs, Command: cmd, Timeout: 20,
+		Args: []string{"serve", "--project", mcpserver.RaglitProject(ws), "--index", mcpserver.RaglitIndex(ws)}}}, others...)
 	h, err := Start(context.Background(), Config{Workspace: ws, Servers: servers, Rag: rag})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(h.Close)
 	if start {
-		if err := h.StartServer(context.Background(), ServerDocs); err != nil {
+		if err := h.StartServer(context.Background(), mcpserver.ServerDocs); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -145,12 +146,12 @@ func TestRaglitStart_IngestsTheWorkspace(t *testing.T) {
 	ws := t.TempDir()
 	writeRule(t, filepath.Join(ws, "README.md"), "the zebra cluster")
 	h, logPath, _ := startFakeRaglit(t, ws, true)
-	logHas(t, logPath, "raglit ingest --project "+raglitProject(ws)+" --index "+raglitIndex(ws)+" --now", "README.md")
-	st, _ := serverState(h, ServerDocs)
+	logHas(t, logPath, "raglit ingest --project "+mcpserver.RaglitProject(ws)+" --index "+mcpserver.RaglitIndex(ws)+" --now", "README.md")
+	st, _ := serverState(h, mcpserver.ServerDocs)
 	if !st.Running || st.Ingest == "" {
 		t.Errorf("raglit should be up and carry its ingest summary: %+v", st)
 	}
-	if st, _ := serverState(h, ServerDocs); st.ID != ServerDocs {
+	if st, _ := serverState(h, mcpserver.ServerDocs); st.ID != mcpserver.ServerDocs {
 		t.Fatal("raglit is not listed")
 	}
 }
@@ -182,7 +183,7 @@ func TestRaglit_SurfacesMemorySkillMCPAndWorkspaceHitsBeforeATurn(t *testing.T) 
 	writeRule(t, wsDoc, "zebra notes from the workspace")
 	writeHits(t, hits, skillMD, mcpDoc, wsDoc)
 	rag.mu.Lock()
-	rag.hits = map[string][]proto.RagHit{raglitProject(ws): {{Path: "file://" + note, Title: "zebra.md",
+	rag.hits = map[string][]proto.RagHit{mcpserver.RaglitProject(ws): {{Path: "file://" + note, Title: "zebra.md",
 		Text: "Zebra deploys need --frostbite.", Score: 3, Matched: 2, Terms: 2}}}
 	rag.mu.Unlock()
 
@@ -202,7 +203,7 @@ func TestRaglit_SurfacesMemorySkillMCPAndWorkspaceHitsBeforeATurn(t *testing.T) 
 		t.Error("what surfaced once must not surface again")
 	}
 
-	if err := h.StopServer(ServerDocs); err != nil {
+	if err := h.StopServer(mcpserver.ServerDocs); err != nil {
 		t.Fatal(err)
 	}
 	// The memories are dund's: their search stays.
@@ -220,16 +221,16 @@ func TestRaglit_MemoryIsNotTheDocsServers(t *testing.T) {
 	if slices.Contains(modelToolNames(h), "memory") || h.memoryStore() != nil {
 		t.Fatal("raglit brought the memory tool")
 	}
-	servers := []Server{{ID: ServerDocs, Command: h.cfg.Servers[0].Command, Timeout: 20, Args: h.cfg.Servers[0].Args}}
+	servers := []mcpserver.Server{{ID: mcpserver.ServerDocs, Command: h.cfg.Servers[0].Command, Timeout: 20, Args: h.cfg.Servers[0].Args}}
 	h2, err := Start(context.Background(), Config{Workspace: ws, Servers: servers, Rag: &fakeRag{}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(h2.Close)
-	if err := h2.StartServer(context.Background(), ServerDocs); err != nil {
+	if err := h2.StartServer(context.Background(), mcpserver.ServerDocs); err != nil {
 		t.Fatal(err)
 	}
-	if err := h2.StopServer(ServerDocs); err != nil {
+	if err := h2.StopServer(mcpserver.ServerDocs); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Contains(modelToolNames(h2), "memory") || h2.docsPrep == nil {
@@ -248,7 +249,7 @@ func TestRaglit_SkillsIndexTakesSkillMDAndReferenceFiles(t *testing.T) {
 	ws := t.TempDir()
 	h, logPath, _ := startFakeRaglit(t, ws, true)
 	skillMD := filepath.Join(home, "skills", "release", "SKILL.md")
-	logHas(t, logPath, "raglit ingest --project "+raglitProject(ws)+" --index skills --now", skillMD, ref)
+	logHas(t, logPath, "raglit ingest --project "+mcpserver.RaglitProject(ws)+" --index skills --now", skillMD, ref)
 	waitFor(t, 10*time.Second, func() bool { hit, ok := h.skillForDoc(ref); return ok && hit.File == "checklist.md" })
 }
 
@@ -264,14 +265,14 @@ func TestRaglit_RulesIndexModeIngestsTheImportsAndSurfacesThem(t *testing.T) {
 	if _, err := h.SetRulesMode(context.Background(), RulesIndex); err == nil || !strings.Contains(err.Error(), "/rag on") {
 		t.Errorf("index mode without raglit: %v", err)
 	}
-	if err := h.StartServer(context.Background(), ServerDocs); err != nil {
+	if err := h.StartServer(context.Background(), mcpserver.ServerDocs); err != nil {
 		t.Fatal(err)
 	}
 	msg, err := h.SetRulesMode(context.Background(), RulesIndex)
 	if err != nil || !strings.Contains(msg, `going into index "rules"`) {
 		t.Fatalf("index mode: %q %v", msg, err)
 	}
-	logHas(t, logPath, "raglit ingest --project "+raglitProject(ws)+" --index rules --now", imp)
+	logHas(t, logPath, "raglit ingest --project "+mcpserver.RaglitProject(ws)+" --index rules --now", imp)
 	waitFor(t, 10*time.Second, func() bool { return h.isRulesDoc(imp) })
 	if strings.Contains(h.Session.System, "the zebra fact") {
 		t.Error("an indexed import is still in the system prompt")
@@ -333,7 +334,7 @@ func TestRaglit_MCPDocsRefreshIngestsIntoTheServersIndex(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	ws := t.TempDir()
 	ts := fakeDocsMCP(t)
-	h, logPath, _ := startFakeRaglit(t, ws, false, Server{ID: "corp", URL: ts.URL, Timeout: 10})
+	h, logPath, _ := startFakeRaglit(t, ws, false, mcpserver.Server{ID: "corp", URL: ts.URL, Timeout: 10})
 	if err := h.StartServer(context.Background(), "corp"); err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +342,7 @@ func TestRaglit_MCPDocsRefreshIngestsIntoTheServersIndex(t *testing.T) {
 	if err != nil || !strings.Contains(msg, "2 indexed") || !strings.Contains(msg, "index mcp-corp") {
 		t.Fatalf("sync: %q %v", msg, err)
 	}
-	logHas(t, logPath, "raglit ingest --project "+raglitProject(ws)+" --index mcp-corp --now", mcpDocsDir("corp"))
+	logHas(t, logPath, "raglit ingest --project "+mcpserver.RaglitProject(ws)+" --index mcp-corp --now", mcpDocsDir("corp"))
 }
 
 // Starting poly-lsp-mcp arms the AGENTS.md guard: POLY_LSP_HOOK names the
@@ -352,15 +353,15 @@ func TestPolyLspStart_ArmsTheAgentsMDGuard(t *testing.T) {
 	ws := t.TempDir()
 	lsp, lspLog := fakeBin(t, "poly-lsp-mcp", "poly-lsp")
 	other, otherLog := fakeBin(t, "poly-lsp-mcp", "poly-lsp")
-	h, err := Start(context.Background(), Config{Workspace: ws, Servers: []Server{
-		{ID: ServerCode, Command: lsp, Args: []string{"mcp", "--root", ws}, Timeout: 20},
+	h, err := Start(context.Background(), Config{Workspace: ws, Servers: []mcpserver.Server{
+		{ID: mcpserver.ServerCode, Command: lsp, Args: []string{"mcp", "--root", ws}, Timeout: 20},
 		{ID: "other", Command: other, Timeout: 20},
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer h.Close()
-	for _, id := range []string{ServerCode, "other"} {
+	for _, id := range []string{mcpserver.ServerCode, "other"} {
 		if err := h.StartServer(context.Background(), id); err != nil {
 			t.Fatal(err)
 		}

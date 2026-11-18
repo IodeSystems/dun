@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -25,8 +26,8 @@ func TestRecordReplies_SpellsCommandsAsTyped(t *testing.T) {
 	rec(&proto.ControlEvent{ID: "slash", Action: "rag status", Message: "raglit: running"})
 	rec(&proto.ControlEvent{ID: "ext", Action: "view", Message: "the list"})
 	rec(&proto.ControlEvent{ID: "unqueue", Action: "", Message: "[]"})
-	rec(&proto.ServerEvent{ID: harness.ServerDocs, Action: "start", Message: "raglit up"})
-	rec(&proto.ServerEvent{ID: harness.ServerDocs, Action: "on", Message: "raglit: on for this session"})
+	rec(&proto.ServerEvent{ID: mcpserver.ServerDocs, Action: "start", Message: "raglit up"})
+	rec(&proto.ServerEvent{ID: mcpserver.ServerDocs, Action: "on", Message: "raglit: on for this session"})
 	h.Close()
 	var lines []string
 	for _, it := range harness.SessionHistory(sf) {

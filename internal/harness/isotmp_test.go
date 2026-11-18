@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 func isoHarness(t *testing.T) (*Harness, string) {
@@ -113,7 +114,7 @@ func TestSavedOutput_ReadWithFileRead(t *testing.T) {
 	t.Setenv("TMPDIR", t.TempDir())
 	ws := t.TempDir()
 	sf := filepath.Join(t.TempDir(), "20261106-230000.jsonl")
-	h, err := Start(context.Background(), Config{Workspace: ws, SessionFile: sf, Servers: []Server{}})
+	h, err := Start(context.Background(), Config{Workspace: ws, SessionFile: sf, Servers: []mcpserver.Server{}})
 	if err != nil {
 		t.Fatal(err)
 	}

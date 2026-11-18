@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -50,7 +51,7 @@ func switchOp(h *harness.Harness, kind string, f []string) (string, error) {
 		if len(rest) == 0 {
 			return "", errUsage(kind, "mode <mode|unset> [--global|--project|--session]")
 		}
-		scope, err := scopeArg(rest[1:], harness.ScopeSession)
+		scope, err := scopeArg(rest[1:], mcpserver.ScopeSession)
 		if err != nil {
 			return "", err
 		}
@@ -63,7 +64,7 @@ func switchOp(h *harness.Harness, kind string, f []string) (string, error) {
 	if verb != "on" && verb != "off" && verb != "unset" || len(rest) == 0 {
 		return "", errUsage(kind, "on|off|unset <name or glob> [--global|--project|--session] · mode <mode|unset> [--scope]")
 	}
-	scope, err := scopeArg(rest[1:], harness.ScopeSession)
+	scope, err := scopeArg(rest[1:], mcpserver.ScopeSession)
 	if err != nil {
 		return "", err
 	}
@@ -105,7 +106,7 @@ func rulesCmd(ctx context.Context, h *harness.Harness, action string) (string, e
 		if len(f) < 2 {
 			return "", errUsage("rules", f[0]+" <path> [--global|--project|--session]")
 		}
-		scope, err := scopeArg(f[2:], harness.ScopeSession)
+		scope, err := scopeArg(f[2:], mcpserver.ScopeSession)
 		if err != nil {
 			return "", err
 		}

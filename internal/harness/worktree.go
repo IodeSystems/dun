@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/proc"
+	"github.com/iodesystems/dun/internal/project"
 )
 
 // Isolation, tier 1 — the git worktree.
@@ -28,7 +30,7 @@ type Worktree struct {
 	// Mounts are the extra local path references resolved for this worktree.
 	// Symlinks are created in the worktree parent directory so go.mod replace
 	// directives (and equivalent mechanisms in other ecosystems) resolve.
-	Mounts []MountSpec
+	Mounts []mcpserver.MountSpec
 }
 
 // RepoRoot is the top of the git repo containing dir, or "" when there is none.
@@ -64,7 +66,7 @@ func WorktreeInPlace(repoDir string) (wt *Worktree, isRepo bool) {
 // For each mount, a symlink is created in the worktree parent directory pointing
 // to the resolved source path. This is how go.mod replace directives (and
 // equivalent mechanisms in other ecosystems) resolve inside the worktree.
-func NewWorktree(repoDir string, mounts []MountSpec) (wt *Worktree, isRepo bool, err error) {
+func NewWorktree(repoDir string, mounts []mcpserver.MountSpec) (wt *Worktree, isRepo bool, err error) {
 	top, terr := git("", "-C", repoDir, "rev-parse", "--show-toplevel")
 	if terr != nil {
 		return &Worktree{Path: repoDir, Mounts: mounts}, false, nil // not a git repo → work in place
@@ -88,7 +90,7 @@ func MainRepo(dir string) string {
 // newWorktreeIn branches a worktree off the HEAD of the checkout root, kept
 // in repo's project store; repo is its main checkout (root itself, unless
 // root is a linked worktree).
-func newWorktreeIn(root, repo string, mounts []MountSpec) (*Worktree, error) {
+func newWorktreeIn(root, repo string, mounts []mcpserver.MountSpec) (*Worktree, error) {
 	// Remember what branch we're on — this is the base the worktree branches from.
 	baseBranch, _ := git("", "-C", root, "rev-parse", "--abbrev-ref", "HEAD")
 	baseBranch = strings.TrimSpace(baseBranch)
@@ -122,8 +124,8 @@ func newWorktreeIn(root, repo string, mounts []MountSpec) (*Worktree, error) {
 //
 // Worktrees used to live in <repo>/.dun/worktrees/; ones already there are
 // still found (ScanWorktrees) and reused (ReuseWorktree), never moved.
-func worktreeParent(root string, mounts []MountSpec) (string, error) {
-	p, err := EnsureProject(root)
+func worktreeParent(root string, mounts []mcpserver.MountSpec) (string, error) {
+	p, err := project.Ensure(root)
 	if err != nil {
 		return "", err
 	}
@@ -140,7 +142,7 @@ func worktreeParent(root string, mounts []MountSpec) (string, error) {
 }
 
 // linkMount puts m's symlink in wtParent unless something is already there.
-func linkMount(wtParent string, m MountSpec) error {
+func linkMount(wtParent string, m mcpserver.MountSpec) error {
 	link := filepath.Join(wtParent, m.Name)
 	if _, err := os.Lstat(link); err == nil {
 		return nil
@@ -477,7 +479,7 @@ func git(dir string, args ...string) (string, error) {
 // that branch (preserving the commits). Falls back to NewWorktree if neither
 // works. A worktree in the old in-repo location (<repo>/.dun/worktrees/) is
 // reused where it is; anything created is created in the project's state dir.
-func ReuseWorktree(repoDir string, oldPath, oldBranch string, mounts []MountSpec) (wt *Worktree, isRepo bool, err error) {
+func ReuseWorktree(repoDir string, oldPath, oldBranch string, mounts []mcpserver.MountSpec) (wt *Worktree, isRepo bool, err error) {
 	top, terr := git("", "-C", repoDir, "rev-parse", "--show-toplevel")
 	if terr != nil {
 		return &Worktree{Path: repoDir, Mounts: mounts}, false, nil

@@ -7,17 +7,18 @@ import (
 
 	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/proto"
 )
 
 // A user's extension cannot shadow a command either — the engine's or
 // the TUI's own: it loads without its slash command, and says so.
 func TestExtensionsDoNotShadowCommands(t *testing.T) {
-	ext := func(id, slash string) harness.Extension {
-		return harness.Extension{ID: id, Source: harness.ExtUser, Slash: &harness.ExtSlash{Name: slash,
-			Commands: map[string]harness.ExtSlashCmd{"greet": {ExtStep: harness.ExtStep{Tool: "greet", Args: map[string]any{"name": "{{arg}}"}}}}}}
+	ext := func(id, slash string) mcpserver.Extension {
+		return mcpserver.Extension{ID: id, Source: mcpserver.ExtUser, Slash: &mcpserver.ExtSlash{Name: slash,
+			Commands: map[string]mcpserver.ExtSlashCmd{"greet": {ExtStep: mcpserver.ExtStep{Tool: "greet", Args: map[string]any{"name": "{{arg}}"}}}}}}
 	}
-	exts, refused := engineExtensions(append(harness.BundledExtensions(), ext("a", "mcp"), ext("b", "help"), ext("c", "ext"), ext("hello", "hello")))
+	exts, refused := engineExtensions(append(mcpserver.BundledExtensions(), ext("a", "mcp"), ext("b", "help"), ext("c", "ext"), ext("hello", "hello")))
 	if len(refused) != 3 {
 		t.Errorf("refused: %v", refused)
 	}
@@ -69,7 +70,7 @@ func TestExtensionsDoNotShadowCommands(t *testing.T) {
 }
 
 func TestCommandListShowsState(t *testing.T) {
-	l := enginecmd.CommandList([]harness.ServerState{{ID: harness.ServerDocs, Running: true, Auto: true}}, harness.IsoDocker)
+	l := enginecmd.CommandList([]harness.ServerState{{ID: mcpserver.ServerDocs, Running: true, Auto: true}}, harness.IsoDocker)
 	got := map[string]string{}
 	for _, c := range l.Items {
 		got[c.Name] = c.State + "/" + c.Detail
@@ -263,12 +264,12 @@ func TestParseWatchAndAttach(t *testing.T) {
 		list         bool
 	}
 	for in, want := range map[string]att{
-		"":              {"", harness.ScopeSession, true},
-		"--list":        {"", harness.ScopeSession, true},
-		"x":             {"x", harness.ScopeSession, false},
-		"p:x --project": {"p:x", harness.ScopeProject, false},
-		"--global p:x":  {"p:x", harness.ScopeGlobal, false},
-		"x --session":   {"x", harness.ScopeSession, false},
+		"":              {"", mcpserver.ScopeSession, true},
+		"--list":        {"", mcpserver.ScopeSession, true},
+		"x":             {"x", mcpserver.ScopeSession, false},
+		"p:x --project": {"p:x", mcpserver.ScopeProject, false},
+		"--global p:x":  {"p:x", mcpserver.ScopeGlobal, false},
+		"x --session":   {"x", mcpserver.ScopeSession, false},
 	} {
 		i, s, l, err := parseAttach(strings.Fields(in))
 		if err != nil || (att{i, s, l}) != want {

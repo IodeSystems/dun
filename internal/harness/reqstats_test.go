@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // fakeClock is a time the test moves.
@@ -184,7 +185,7 @@ func TestHarness_RequestStatsTurnOnly(t *testing.T) {
 	log := &reqLog{}
 	h, err := Start(context.Background(), Config{
 		Workspace:   dir,
-		Servers:     []Server{},
+		Servers:     []mcpserver.Server{},
 		Client:      &thinkRunner{chunks: thinkingRound()},
 		SessionFile: filepath.Join(dir, "s.jsonl"),
 		OnRequest:   log.on,

@@ -11,6 +11,7 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
 
 	filetools "github.com/iodesystems/agentkit/files"
 )
@@ -33,27 +34,6 @@ import (
 // off unless listed: read lists a directory and, with grep, searches a file
 // or a tree, so grep and list only add definitions to every request.
 
-// FilesConfig is the "files" section of dun.json.
-type FilesConfig struct {
-	// Tools enables tools by name: read, edit, write, grep, list, delete,
-	// move. nil inherits (default: DefaultFileTools); an empty list turns the
-	// file tools off.
-	// No omitempty: null inherits and [] is off, and both must round-trip.
-	Tools []string `json:"tools"`
-	// ReadOnly keeps read, grep and list only (of those enabled). A pointer so a higher layer can
-	// say false.
-	ReadOnly *bool `json:"read_only,omitempty"`
-	// Caps; 0 inherits agentkit's defaults (64KB ranged read, 8KB unranged,
-	// 100 grep matches, 200 list entries).
-	ReadMax     int `json:"read_max,omitempty"`
-	UnrangedMax int `json:"unranged_max,omitempty"`
-	GrepMax     int `json:"grep_max,omitempty"`
-	ListMax     int `json:"list_max,omitempty"`
-	// Ignore are gitignore-syntax patterns hidden from grep and list on top
-	// of .gitignore. Accumulated across layers, not replaced.
-	Ignore []string `json:"ignore,omitempty"`
-}
-
 // DefaultFileTools are the file tools a session gets when no config names
 // any. Not agentkit's default, which also has grep and list: read does both
 // (on a directory it lists; with grep it searches), and each tool's
@@ -63,55 +43,8 @@ type FilesConfig struct {
 // tool that reads and searches is the one a model reaches for.
 var DefaultFileTools = []string{filetools.Read, filetools.Edit, filetools.Write}
 
-// LoadFiles resolves the effective files config for a workspace across the
-// same layers as LoadCommit. nil means no section anywhere: the defaults.
-func LoadFiles(dir string) *FilesConfig {
-	var out *FilesConfig
-	for _, path := range append([]string{UserServersFile()}, serverConfigPaths(dir)...) {
-		f, err := readServersFile(path)
-		if err != nil || f == nil || f.Files == nil {
-			continue
-		}
-		if out == nil {
-			cp := *f.Files
-			out = &cp
-			continue
-		}
-		merged := mergeFiles(*out, *f.Files)
-		out = &merged
-	}
-	return out
-}
-
-// mergeFiles layers next over prev: what next states wins, what it does not
-// state is inherited, and ignore patterns add up.
-func mergeFiles(prev, next FilesConfig) FilesConfig {
-	if next.Tools != nil {
-		prev.Tools = next.Tools
-	}
-	if next.ReadOnly != nil {
-		prev.ReadOnly = next.ReadOnly
-	}
-	if next.ReadMax != 0 {
-		prev.ReadMax = next.ReadMax
-	}
-	if next.UnrangedMax != 0 {
-		prev.UnrangedMax = next.UnrangedMax
-	}
-	if next.GrepMax != 0 {
-		prev.GrepMax = next.GrepMax
-	}
-	if next.ListMax != 0 {
-		prev.ListMax = next.ListMax
-	}
-	if len(next.Ignore) > 0 {
-		prev.Ignore = append(append([]string(nil), prev.Ignore...), next.Ignore...)
-	}
-	return prev
-}
-
-// toolsetConfig is the agentkit config for root. ok=false: file tools off.
-func (c *FilesConfig) toolsetConfig(root string) (filetools.Config, bool) {
+// filesToolset is the agentkit config for root. ok=false: file tools off.
+func filesToolset(c *mcpserver.FilesConfig, root string) (filetools.Config, bool) {
 	cfg := filetools.Config{Root: root, Tools: DefaultFileTools}
 	if c == nil {
 		return cfg, root != ""
@@ -135,7 +68,7 @@ func (c *FilesConfig) toolsetConfig(root string) (filetools.Config, bool) {
 // this session has read — what write's overwrite guard consults — and a
 // server starting is no reason to forget that. Callers hold turnMu.
 func (h *Harness) fileTools() *filetools.Toolset {
-	cfg, ok := h.cfg.Files.toolsetConfig(h.cfg.Workspace)
+	cfg, ok := filesToolset(h.cfg.Files, h.cfg.Workspace)
 	if !ok {
 		h.files, h.filesKey = nil, ""
 		return nil
@@ -144,7 +77,7 @@ func (h *Harness) fileTools() *filetools.Toolset {
 	cfg.ReadOnly = !write
 	key, _ := json.Marshal(struct {
 		Root  string
-		Cfg   *FilesConfig
+		Cfg   *mcpserver.FilesConfig
 		Write bool
 	}{h.cfg.Workspace, h.cfg.Files, write})
 	if h.files != nil && h.filesKey == string(key) {
@@ -200,7 +133,7 @@ func tmpReaders(cfg filetools.Config) []*filetools.Toolset {
 // file tools are off. Rebuilt with the tool set: they track no reads that
 // matter, since nothing writes through them.
 func (h *Harness) tmpReaders() []*filetools.Toolset {
-	cfg, ok := h.cfg.Files.toolsetConfig(h.cfg.Workspace)
+	cfg, ok := filesToolset(h.cfg.Files, h.cfg.Workspace)
 	if !ok {
 		return nil
 	}

@@ -11,51 +11,15 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
-
-// Via survives the user file and the layered load; "direct" reads as the
-// default; anything else, and a built-in in the shell, is refused by name.
-func TestServerSpec_ViaRoundTrip(t *testing.T) {
-	t.Setenv("DUN_HOME", t.TempDir())
-	if _, err := PutUserServer(ServerSpec{ID: "corp", Command: "corp-mcp", Via: ViaShell}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := PutUserServer(ServerSpec{ID: "db", Command: "db-mcp", Via: ViaDirect}); err != nil {
-		t.Fatal(err)
-	}
-	f, _ := readServersFile(UserServersFile())
-	if f.Servers[0].Via != ViaShell {
-		t.Errorf("file: %+v", f.Servers)
-	}
-	dir := t.TempDir()
-	got, err := LoadServers(dir, "/ws", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if byID(got)["corp"].Via != ViaShell || byID(got)["db"].Via != "" {
-		t.Errorf("corp %+v db %+v", byID(got)["corp"], byID(got)["db"])
-	}
-	// A project file can move it back with an explicit "direct".
-	writeJSON(t, dir, ProjectServersFile, `{"servers":[{"id":"corp","via":"direct"}]}`)
-	if got, _ := LoadServers(dir, "/ws", ""); byID(got)["corp"].Via != "" {
-		t.Errorf("direct over shell: %+v", byID(got)["corp"])
-	}
-	writeJSON(t, dir, ProjectServersFile, `{"servers":[{"id":"corp","via":"sideways"}]}`)
-	if _, err := LoadServers(dir, "/ws", ""); err == nil || !strings.Contains(err.Error(), "sideways") {
-		t.Errorf("bad via: %v", err)
-	}
-	writeJSON(t, dir, ProjectServersFile, `{"servers":[{"id":"code","via":"shell"}]}`)
-	if _, err := LoadServers(dir, "/ws", ""); err == nil || !strings.Contains(err.Error(), "built in") {
-		t.Errorf("a built-in in the shell: %v", err)
-	}
-}
 
 // The generated file is mcpshell's {"mcpServers": …}: a stdio server keeps
 // its command, args and env; a URL server's $NAME bearer becomes auth_cmd
 // (the token is never written), a literal one an Authorization header.
 func TestMcpshellConfig_StdioAndURL(t *testing.T) {
 	t.Setenv("CORP_TOKEN", "s3cret")
-	b, err := mcpshellConfig([]Server{
+	b, err := mcpshellConfig([]mcpserver.Server{
 		{ID: "corp-docs", Command: "corp-mcp", Args: []string{"--stdio"}, Env: []string{"DSN=x=y"}},
 		{ID: "el", URL: "https://el/mcp", Bearer: "$CORP_TOKEN", Headers: map[string]string{"Authorization": "Bearer s3cret", "X-A": "1"}},
 		{ID: "lit", URL: "https://lit/mcp", Bearer: "abc", Headers: map[string]string{"Authorization": "Bearer abc"}},
@@ -90,14 +54,14 @@ func TestMcpshellConfig_StdioAndURL(t *testing.T) {
 	if _, ok := s["_9x"]; !ok {
 		t.Errorf("namespaces must be identifiers: %v", s)
 	}
-	if _, err := mcpshellConfig([]Server{{ID: "a-b", Command: "x"}, {ID: "a_b", Command: "y"}}, nil); err == nil {
+	if _, err := mcpshellConfig([]mcpserver.Server{{ID: "a-b", Command: "x"}, {ID: "a_b", Command: "y"}}, nil); err == nil {
 		t.Error("two servers on one namespace must be refused")
 	}
 }
 
 func TestMcpshellConfig_ShellOptions(t *testing.T) {
-	b, err := mcpshellConfig([]Server{
-		{ID: "vay", URL: "https://v/mcp", Shell: &ShellOptions{
+	b, err := mcpshellConfig([]mcpserver.Server{
+		{ID: "vay", URL: "https://v/mcp", Shell: &mcpserver.ShellOptions{
 			Categories: map[string][]string{"ci": {"ci-*"}, "bad": {"["}},
 			Unchecked:  []string{"grafana-*", "["},
 		}},
@@ -121,23 +85,13 @@ func TestMcpshellConfig_ShellOptions(t *testing.T) {
 	}
 }
 
-func TestMergeSpec_ShellReplaced(t *testing.T) {
-	low := ServerSpec{ID: "x", Shell: &ShellOptions{Unchecked: []string{"a"}}}
-	if got := mergeSpec(low, ServerSpec{ID: "x"}); got.Shell == nil || !slices.Equal(got.Shell.Unchecked, []string{"a"}) {
-		t.Errorf("a layer without a shell block keeps the lower one: %+v", got.Shell)
-	}
-	if got := mergeSpec(low, ServerSpec{ID: "x", Shell: &ShellOptions{Unchecked: []string{"*"}}}); !slices.Equal(got.Shell.Unchecked, []string{"*"}) {
-		t.Errorf("a later shell block replaces: %+v", got.Shell)
-	}
-}
-
-func newServerHarness(t *testing.T, specs ...Server) *Harness {
+func newServerHarness(t *testing.T, specs ...mcpserver.Server) *Harness {
 	h := newNoteHarness(t)
 	h.mgr, h.lastErr, h.lastStart = mcpmgr.NewManager(), map[string]string{}, map[string]time.Duration{}
 	t.Cleanup(h.mgr.Close)
 	h.Session = &agent.Session{}
 	h.specs = specs
-	h.cfg.Servers = append([]Server{}, specs...) // the base the files layer over; not the built-ins
+	h.cfg.Servers = append([]mcpserver.Server{}, specs...) // the base the files layer over; not the built-ins
 	h.cfg.Workspace = t.TempDir()
 	return h
 }
@@ -147,12 +101,12 @@ func newServerHarness(t *testing.T, specs ...Server) *Harness {
 func TestShellArgs_McpOnlyWhenHosted(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("DUN_HOME", home)
-	shell := Server{ID: ServerShell, Command: "mcpshell", Args: []string{"mcp", "--files-dir", "/ws"}}
-	h := newServerHarness(t, shell, Server{ID: "corp", Command: "corp-mcp", Autostart: true})
+	shell := mcpserver.Server{ID: mcpserver.ServerShell, Command: "mcpshell", Args: []string{"mcp", "--files-dir", "/ws"}}
+	h := newServerHarness(t, shell, mcpserver.Server{ID: "corp", Command: "corp-mcp", Autostart: true})
 	if got := h.shellArgs(shell); !slices.Equal(got, shell.Args) {
 		t.Errorf("nothing hosted: %v", got)
 	}
-	h.specs[1].Via = ViaShell
+	h.specs[1].Via = mcpserver.ViaShell
 	got := h.shellArgs(shell)
 	if len(got) != 5 || got[3] != "--mcp" || !strings.HasPrefix(got[4], home) {
 		t.Fatalf("hosted: %v", got)
@@ -173,8 +127,8 @@ func TestShellArgs_McpOnlyWhenHosted(t *testing.T) {
 		t.Error("the stale file must go")
 	}
 	// A shell that is not mcpshell cannot host.
-	h.specs[1].Via = ViaShell
-	other := Server{ID: ServerShell, Command: "/opt/othershell", Args: []string{"x"}}
+	h.specs[1].Via = mcpserver.ViaShell
+	other := mcpserver.Server{ID: mcpserver.ServerShell, Command: "/opt/othershell", Args: []string{"x"}}
 	if args := h.shellArgs(other); !slices.Equal(args, other.Args) {
 		t.Errorf("not mcpshell: %v", args)
 	}
@@ -190,7 +144,7 @@ func TestMoveServer_BothWays(t *testing.T) {
 	h := newServerHarness(t)
 	ctx := context.Background()
 
-	if _, err := h.AddServer(ctx, ServerSpec{ID: "corp", URL: ts.URL, Bearer: "tok", Via: ViaShell}); err != nil {
+	if _, err := h.AddServer(ctx, mcpserver.Spec{ID: "corp", URL: ts.URL, Bearer: "tok", Via: mcpserver.ViaShell}); err != nil {
 		t.Fatal(err)
 	}
 	if h.mgr.ServerStarted("corp") {
@@ -203,36 +157,36 @@ func TestMoveServer_BothWays(t *testing.T) {
 		t.Errorf("refresh: %v", err)
 	}
 	st := h.Servers()[0]
-	if st.Via != ViaShell || st.Namespace != "corp" || st.Running {
+	if st.Via != mcpserver.ViaShell || st.Namespace != "corp" || st.Running {
 		t.Errorf("state %+v", st)
 	}
 
-	if _, err := h.MoveServer(ctx, "corp", ScopeGlobal, ViaDirect); err != nil {
+	if _, err := h.MoveServer(ctx, "corp", mcpserver.ScopeGlobal, mcpserver.ViaDirect); err != nil {
 		t.Fatal(err)
 	}
 	if !h.mgr.ServerStarted("corp") || !slices.Contains(h.ToolNames(), "corp__search") {
 		t.Fatalf("direct: started %v tools %v", h.mgr.ServerStarted("corp"), h.ToolNames())
 	}
-	if f, _ := readServersFile(UserServersFile()); f.Servers[0].Via != ViaDirect {
+	if f, _ := mcpserver.ReadConfig(mcpserver.UserServersFile()); f.Servers[0].Via != mcpserver.ViaDirect {
 		t.Errorf("saved %+v", f.Servers[0])
 	}
 
-	if _, err := h.MoveServer(ctx, "corp", ScopeGlobal, ViaShell); err != nil {
+	if _, err := h.MoveServer(ctx, "corp", mcpserver.ScopeGlobal, mcpserver.ViaShell); err != nil {
 		t.Fatal(err)
 	}
 	if h.mgr.ServerStarted("corp") || slices.Contains(h.ToolNames(), "corp__search") {
 		t.Errorf("shell: started %v tools %v", h.mgr.ServerStarted("corp"), h.ToolNames())
 	}
-	if f, _ := readServersFile(UserServersFile()); f.Servers[0].Via != ViaShell {
+	if f, _ := mcpserver.ReadConfig(mcpserver.UserServersFile()); f.Servers[0].Via != mcpserver.ViaShell {
 		t.Errorf("saved %+v", f.Servers[0])
 	}
 
-	h.cfg.Servers = append(h.cfg.Servers, Server{ID: ServerCode, Command: "poly-lsp-mcp"})
+	h.cfg.Servers = append(h.cfg.Servers, mcpserver.Server{ID: mcpserver.ServerCode, Command: "poly-lsp-mcp"})
 	_ = h.reloadServers(ctx, true, nil)
-	if _, err := h.MoveServer(ctx, ServerCode, ScopeGlobal, ViaShell); err == nil || !strings.Contains(err.Error(), "built-in") {
+	if _, err := h.MoveServer(ctx, mcpserver.ServerCode, mcpserver.ScopeGlobal, mcpserver.ViaShell); err == nil || !strings.Contains(err.Error(), "built-in") {
 		t.Errorf("built-in: %v", err)
 	}
-	if _, err := h.MoveServer(ctx, "corp", ScopeGlobal, "sideways"); err == nil {
+	if _, err := h.MoveServer(ctx, "corp", mcpserver.ScopeGlobal, "sideways"); err == nil {
 		t.Error("a bad placement must be refused")
 	}
 }
@@ -246,7 +200,7 @@ mcpshell mcp: upstream "vay" connected (vay) — 112 tool(s), schema 152000 byte
 mcpshell mcp: failed to connect upstream "el": dial: refused
 mcpshell mcp: skipping upstream "me" — it identifies as mcpshell; wiring it in would let eval recurse into itself
 mcpshell mcp: serving on stdio`
-	got := parseHosted(tail, []Server{{ID: "corp-docs"}, {ID: "el"}, {ID: "me"}, {ID: "quiet"}, {ID: "vay"}})
+	got := parseHosted(tail, []mcpserver.Server{{ID: "corp-docs"}, {ID: "el"}, {ID: "me"}, {ID: "quiet"}, {ID: "vay"}})
 	if c := got["corp-docs"]; !c.Connected || c.Tools != 7 || c.SchemaBytes != 0 {
 		t.Errorf("connected: %+v", c)
 	}
@@ -268,11 +222,11 @@ mcpshell mcp: serving on stdio`
 // The model learns a hosted namespace from the system prompt — mcpshell's
 // eval description names none — and a move reads as a move.
 func TestShellHosted_ModelView(t *testing.T) {
-	sys := systemFor([]mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}, nil, nil, "", false, "corp_docs")
+	sys := systemFor([]mcpmgr.MCPTool{{Name: "eval", ServerID: mcpserver.ServerShell}}, nil, nil, "", false, "corp_docs")
 	if !strings.Contains(sys, "corp_docs") || !strings.Contains(sys, `help("corp_docs")`) {
 		t.Errorf("system:\n%s", sys)
 	}
-	if strings.Contains(systemFor([]mcpmgr.MCPTool{{Name: "eval", ServerID: ServerShell}}, nil, nil, "", false), "hosted") {
+	if strings.Contains(systemFor([]mcpmgr.MCPTool{{Name: "eval", ServerID: mcpserver.ServerShell}}, nil, nil, "", false), "hosted") {
 		t.Error("no hosted line without hosted servers")
 	}
 	before := []mcpmgr.MCPTool{{Name: "search", ServerID: "corp-docs"}}
@@ -304,7 +258,7 @@ func TestWithFilesDir(t *testing.T) {
 // mcpshell saves over-limit eval output to a per-session dir: beside the
 // session file, keyed by its id, so a restart or resume finds the same files.
 func TestShellEnv_OverflowDir(t *testing.T) {
-	shell := Server{ID: ServerShell, Command: "/usr/local/bin/mcpshell", Env: []string{"A=1"}}
+	shell := mcpserver.Server{ID: mcpserver.ServerShell, Command: "/usr/local/bin/mcpshell", Env: []string{"A=1"}}
 	h := newServerHarness(t, shell)
 	h.cfg.SessionFile = "/home/u/.dun/sessions/repo/20261023-101500.jsonl"
 	want := "MCPSHELL_TMP_OVERFLOW_DIR=/home/u/.dun/sessions/repo/overflow/20261023-101500"
@@ -317,7 +271,7 @@ func TestShellEnv_OverflowDir(t *testing.T) {
 		t.Errorf("configured dir overridden: %v", got)
 	}
 	// Not mcpshell: untouched.
-	other := Server{ID: ServerShell, Command: "/opt/othershell"}
+	other := mcpserver.Server{ID: mcpserver.ServerShell, Command: "/opt/othershell"}
 	if got := h.shellEnv(other, nil); len(got) != 0 {
 		t.Errorf("not mcpshell: %v", got)
 	}

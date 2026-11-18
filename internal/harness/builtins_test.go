@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // dun's own tools are rows in /mcp, a group each: switched off at a scope,
@@ -31,14 +33,14 @@ func TestBuiltinGroups_SwitchAGroupAndATool(t *testing.T) {
 	if _, ok := rows["dun:core"]; !ok {
 		t.Fatalf("no dun:core: %v", rows)
 	}
-	if _, err := h.SetServerOn(context.Background(), "dun:core", ScopeSession, ptr(false)); err == nil {
+	if _, err := h.SetServerOn(context.Background(), "dun:core", mcpserver.ScopeSession, ptr(false)); err == nil {
 		t.Error("core was switched off")
 	}
 	has := func(name string) bool { return slices.Contains(h.ToolNames(), name) }
 	if !has("recap") || !has("file_read") {
 		t.Fatalf("tools: %v", h.ToolNames())
 	}
-	if _, err := h.SetServerOn(context.Background(), "dun:recap", ScopeProject, ptr(false)); err != nil {
+	if _, err := h.SetServerOn(context.Background(), "dun:recap", mcpserver.ScopeProject, ptr(false)); err != nil {
 		t.Fatal(err)
 	}
 	if has("recap") {
@@ -48,14 +50,14 @@ func TestBuiltinGroups_SwitchAGroupAndATool(t *testing.T) {
 		t.Errorf("a call to it: %s", out)
 	}
 	// The session's on beats the project's off.
-	if _, err := h.SetServerOn(context.Background(), "dun:recap", ScopeSession, ptr(true)); err != nil {
+	if _, err := h.SetServerOn(context.Background(), "dun:recap", mcpserver.ScopeSession, ptr(true)); err != nil {
 		t.Fatal(err)
 	}
 	if !has("recap") {
 		t.Error("session on did not win")
 	}
 	// One tool alone.
-	if _, changed, err := h.SetToolOn("dun:files", "file_write", ScopeSession, ptr(false)); err != nil || !changed {
+	if _, changed, err := h.SetToolOn("dun:files", "file_write", mcpserver.ScopeSession, ptr(false)); err != nil || !changed {
 		t.Fatalf("tool off: %v %v", changed, err)
 	}
 	if has("file_write") || !has("file_read") {

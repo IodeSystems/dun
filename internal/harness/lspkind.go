@@ -10,6 +10,8 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // The "lsp" switch kind (USER 2026-10-28): /lsp is a table of the languages
@@ -49,7 +51,7 @@ const lspCLITimeout = 15 * time.Second
 // runLSPCLI runs `<code server's command> lsp <args>` with its environment
 // (its daemon home among it), in the workspace.
 var runLSPCLI = func(ctx context.Context, command string, env []string, dir string, args ...string) ([]byte, error) {
-	p, err := FindCommand(command)
+	p, err := mcpserver.FindCommand(command)
 	if err != nil {
 		return nil, err
 	}
@@ -70,10 +72,10 @@ var runLSPCLI = func(ctx context.Context, command string, env []string, dir stri
 }
 
 // codeServer is the code server's spec, under srvMu.
-func (h *Harness) codeServer() (Server, bool) {
+func (h *Harness) codeServer() (mcpserver.Server, bool) {
 	h.srvMu.Lock()
 	defer h.srvMu.Unlock()
-	return h.spec(ServerCode)
+	return h.spec(mcpserver.ServerCode)
 }
 
 // lspLanguages is poly-lsp-mcp's language registry for this workspace.
@@ -110,7 +112,7 @@ func (h *Harness) lspView() SwitchView {
 	for _, l := range langs {
 		on, from, at := lspOn(set, l)
 		v.Items = append(v.Items, SwitchState{SwitchItem: lspItem(l), On: on, From: from,
-			Global: at[ScopeGlobal], Project: at[ScopeProject], Session: at[ScopeSession]})
+			Global: at[mcpserver.ScopeGlobal], Project: at[mcpserver.ScopeProject], Session: at[mcpserver.ScopeSession]})
 	}
 	v.Status = []string{
 		"a language that is off keeps its tree-sitter index: definitions and references from it, edits checked by a parse only",
@@ -197,12 +199,12 @@ func lspArgs(set switchSet, langs []lspLanguage) []string {
 // no scope switches a language (the list is not run then).
 func (h *Harness) codeLSPArgs() []string {
 	set := h.switchSet(lspKind)
-	if len(set[ScopeGlobal].On)+len(set[ScopeProject].On)+len(set[ScopeSession].On) == 0 {
+	if len(set[mcpserver.ScopeGlobal].On)+len(set[mcpserver.ScopeProject].On)+len(set[mcpserver.ScopeSession].On) == 0 {
 		return nil
 	}
 	langs, err := h.lspLanguages(context.Background())
 	if err != nil {
-		log.Printf("dun: %s: the language switches are not applied: %v", ServerCode, err)
+		log.Printf("dun: %s: the language switches are not applied: %v", mcpserver.ServerCode, err)
 		return nil
 	}
 	return lspArgs(set, langs)
@@ -245,7 +247,7 @@ func (h *Harness) setLSPSwitch(pattern, scope string, on *bool) (string, error) 
 	}
 	what := "unset"
 	if on != nil {
-		what = onOffWord(*on)
+		what = mcpserver.OnOffWord(*on)
 	}
 	n := fmt.Sprintf("%d language", matched)
 	if matched != 1 {
@@ -282,13 +284,13 @@ func (h *Harness) LSPEdit(ctx context.Context, verb string, args []string) (stri
 // restartCode restarts a running code server, so a language change takes
 // effect, and says so; "" when it is not running.
 func (h *Harness) restartCode() string {
-	if !h.mgr.ServerStarted(ServerCode) {
+	if !h.mgr.ServerStarted(mcpserver.ServerCode) {
 		return ""
 	}
-	if err := h.reloadServers(context.Background(), false, map[string]bool{ServerCode: true}); err != nil {
+	if err := h.reloadServers(context.Background(), false, map[string]bool{mcpserver.ServerCode: true}); err != nil {
 		return " · it did not restart: " + oneLine(err.Error(), 200)
 	}
-	return " · " + ServerCode + " restarts"
+	return " · " + mcpserver.ServerCode + " restarts"
 }
 
 // lspFlagsKnown reports whether the binary's mcp help lists --lsp-off.

@@ -11,6 +11,7 @@ import (
 
 	"github.com/iodesystems/agentkit/mcpmgr"
 	"github.com/iodesystems/agentkit/mcpmgr/mcpauth"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/oauth"
 )
 
@@ -21,7 +22,7 @@ import (
 // (Config.OAuthBroker, internal/oauth/oauthbroker.go) when the engine runs under it, else
 // the engine's own client. It is kept across restarts; a changed oauth
 // block replaces it.
-func (h *Harness) oauthFor(s Server) oauth.Source {
+func (h *Harness) oauthFor(s mcpserver.Server) oauth.Source {
 	if s.OAuth == nil || s.URL == "" {
 		return nil
 	}
@@ -64,7 +65,7 @@ func (h *Harness) HasOAuth(id string) bool {
 }
 
 // authState is the /mcp listing's auth column for s.
-func (h *Harness) authState(s Server) string {
+func (h *Harness) authState(s mcpserver.Server) string {
 	if _, keyed := raglitKeyed(s); keyed { // raglitauth.go
 		if loadRaglitToken() == "" {
 			return "needs /rag login"
@@ -107,7 +108,7 @@ func (h *Harness) LoginServer(ctx context.Context, id string) (string, error) {
 	} else {
 		oc := h.oauthFor(s)
 		if oc == nil {
-			return "", fmt.Errorf("%s has no oauth block — add one (client_id, …) to its entry in %s", id, UserServersFile())
+			return "", fmt.Errorf("%s has no oauth block — add one (client_id, …) to its entry in %s", id, mcpserver.UserServersFile())
 		}
 		if err := oc.Login(ctx, ""); err != nil {
 			return "", err
@@ -166,7 +167,7 @@ func (h *Harness) LogoutServer(ctx context.Context, id string) (string, error) {
 // explainStartErr turns a remote server's failed start into what to do about
 // it: a login gate in front of it (internal/oauth/mcpgate.go), or a server that wants an
 // OAuth login and has none configured.
-func explainStartErr(ctx context.Context, s Server, err error) error {
+func explainStartErr(ctx context.Context, s mcpserver.Server, err error) error {
 	if s.URL == "" {
 		return err
 	}
@@ -192,7 +193,7 @@ func explainStartErr(ctx context.Context, s Server, err error) error {
 // wantsOAuth reports whether a remote server with no credentials of its
 // own answers an unauthenticated initialize with a 401 Bearer challenge
 // naming its protected-resource metadata (RFC 9728): the MCP OAuth flow.
-func wantsOAuth(ctx context.Context, s ServerSpec) bool {
+func wantsOAuth(ctx context.Context, s mcpserver.Spec) bool {
 	if s.URL == "" || s.Bearer != "" {
 		return false
 	}

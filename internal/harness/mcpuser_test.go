@@ -17,6 +17,8 @@ import (
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/dun/internal/project"
 )
 
 // TestMain keeps every test off the real $DUN_HOME and ~/.claude: LoadServers reads the
@@ -38,38 +40,6 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	os.RemoveAll(home)
 	os.Exit(code)
-}
-
-// The user list is the lowest file layer; a remote server's bearer becomes
-// an Authorization header, read from the environment when it says $NAME.
-func TestLoadServers_UserListAndBearer(t *testing.T) {
-	t.Setenv("DUN_HOME", t.TempDir())
-	t.Setenv("CORP_TOKEN", "s3cret")
-	if _, err := PutUserServer(ServerSpec{ID: "corp", URL: "https://corp/mcp", Bearer: "$CORP_TOKEN"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := PutUserServer(ServerSpec{ID: "gone", URL: "https://x/mcp"}); err != nil {
-		t.Fatal(err)
-	}
-	if st, _ := os.Stat(UserServersFile()); st.Mode().Perm() != 0o600 {
-		t.Errorf("the user list holds tokens: perms %v", st.Mode().Perm())
-	}
-	dir := t.TempDir()
-	writeJSON(t, dir, ProjectServersFile, `{"servers":[{"id":"gone","disabled":true}]}`)
-	got, err := LoadServers(dir, "/ws", "/rag")
-	if err != nil {
-		t.Fatal(err)
-	}
-	corp, ok := byID(got)["corp"]
-	if !ok || corp.URL != "https://corp/mcp" || corp.Headers["Authorization"] != "Bearer s3cret" {
-		t.Fatalf("corp = %+v", corp)
-	}
-	if _, ok := byID(got)["gone"]; ok {
-		t.Error("a project file must be able to disable a user server")
-	}
-	if ok, _ := RemoveUserServer("corp"); !ok {
-		t.Error("remove")
-	}
 }
 
 // fakeMCP is a Streamable HTTP MCP server with one tool named like raglit's.
@@ -112,17 +82,17 @@ func TestAddServer_RemoteToolsAreNamespacedAndRemovable(t *testing.T) {
 	h.mgr, h.lastErr, h.lastStart = mcpmgr.NewManager(), map[string]string{}, map[string]time.Duration{}
 	defer h.mgr.Close()
 	h.Session = &agent.Session{}
-	h.cfg.Servers = []Server{}
+	h.cfg.Servers = []mcpserver.Server{}
 	ctx := context.Background()
 
-	if _, err := h.AddServer(ctx, ServerSpec{ID: "docs", URL: ts.URL}); err == nil {
+	if _, err := h.AddServer(ctx, mcpserver.Spec{ID: "docs", URL: ts.URL}); err == nil {
 		t.Error("a built-in id must be refused")
 	}
-	path, err := h.AddServer(ctx, ServerSpec{ID: "corp", URL: ts.URL, Bearer: "wrong"})
+	path, err := h.AddServer(ctx, mcpserver.Spec{ID: "corp", URL: ts.URL, Bearer: "wrong"})
 	if path == "" || err == nil || !strings.Contains(err.Error(), "401") {
 		t.Fatalf("a bad token saves but does not start: %q %v", path, err)
 	}
-	if _, err := h.AddServer(ctx, ServerSpec{ID: "corp", URL: ts.URL, Bearer: "tok"}); err != nil {
+	if _, err := h.AddServer(ctx, mcpserver.Spec{ID: "corp", URL: ts.URL, Bearer: "tok"}); err != nil {
 		t.Fatal(err)
 	}
 	var names []string
@@ -132,7 +102,7 @@ func TestAddServer_RemoteToolsAreNamespacedAndRemovable(t *testing.T) {
 	if !slices.Contains(names, "corp__search") || slices.Contains(names, "search") {
 		t.Fatalf("tools = %v; an added server's tools carry its id", names)
 	}
-	if len(searchExts(BundledExtensions(), h.mgr.GetTools())) != 0 {
+	if len(searchExts(mcpserver.BundledExtensions(), h.mgr.GetTools())) != 0 {
 		t.Error("an added server's search must not be taken for raglit's")
 	}
 	tc := llm.ToolCall{}
@@ -150,7 +120,7 @@ func TestAddServer_RemoteToolsAreNamespacedAndRemovable(t *testing.T) {
 	if h.mgr.ServerStarted("corp") || slices.Contains(names, "corp__search") {
 		t.Error("remove must stop it and drop its tools")
 	}
-	if f, _ := readServersFile(UserServersFile()); f == nil || len(f.Servers) != 0 {
+	if f, _ := mcpserver.ReadConfig(mcpserver.UserServersFile()); f == nil || len(f.Servers) != 0 {
 		t.Errorf("remove must delete it from the user list: %+v", f)
 	}
 }
@@ -166,38 +136,38 @@ func TestRemoveServer_ClearsProjectAndSessionEntries(t *testing.T) {
 	h.mgr, h.lastErr, h.lastStart = mcpmgr.NewManager(), map[string]string{}, map[string]time.Duration{}
 	defer h.mgr.Close()
 	h.Session = &agent.Session{}
-	h.cfg.Servers = []Server{}
+	h.cfg.Servers = []mcpserver.Server{}
 	h.cfg.Workspace = repo
 	h.cfg.SessionFile = filepath.Join(t.TempDir(), "s.jsonl")
 	ctx := context.Background()
 
-	if _, err := h.AddServer(ctx, ServerSpec{ID: "corp", URL: ts.URL, Bearer: "tok"}); err != nil {
+	if _, err := h.AddServer(ctx, mcpserver.Spec{ID: "corp", URL: ts.URL, Bearer: "tok"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, d := range []string{repo, other} {
-		if _, err := updateLocalServer(d, "corp", func(s *ServerSpec) { s.Tools = map[string]bool{"search": false} }); err != nil {
+		if _, err := mcpserver.UpdateLocalServer(d, "corp", func(s *mcpserver.Spec) { s.Tools = map[string]bool{"search": false} }); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if _, err := setAutostart(repo, "keep", true); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.SetServerOn(ctx, "corp", ScopeSession, boolp(true)); err != nil {
+	if _, err := h.SetServerOn(ctx, "corp", mcpserver.ScopeSession, boolp(true)); err != nil {
 		t.Fatal(err)
 	}
 	cleared, err := h.RemoveServer("corp")
 	if err != nil || len(cleared) != 2 {
 		t.Fatalf("cleared %v %v", cleared, err)
 	}
-	f, _ := readServersFile(filepath.Join(ResolveProject(repo).StateDir, LocalServersFile))
+	f, _ := mcpserver.ReadConfig(filepath.Join(project.Resolve(repo).StateDir, project.LocalServersFile))
 	if f == nil || len(f.Servers) != 1 || f.Servers[0].ID != "keep" {
 		t.Errorf("this project's file: %+v", f)
 	}
-	f, _ = readServersFile(filepath.Join(ResolveProject(other).StateDir, LocalServersFile))
+	f, _ = mcpserver.ReadConfig(filepath.Join(project.Resolve(other).StateDir, project.LocalServersFile))
 	if f == nil || len(f.Servers) != 1 || f.Servers[0].ID != "corp" {
 		t.Errorf("another project's file must stay: %+v", f)
 	}
-	if sw := LoadSessionServers(h.cfg.SessionFile); len(sw) != 0 {
+	if sw := mcpserver.LoadSessionServers(h.cfg.SessionFile); len(sw) != 0 {
 		t.Errorf("session entries: %+v", sw)
 	}
 }
