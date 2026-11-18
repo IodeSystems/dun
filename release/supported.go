@@ -31,7 +31,7 @@ var Supported = []Tool{
 	// Recommended v0.7.0 (d14b745, 2026-10-29), tarballs in deps.json: on
 	// the 401 re-run only, auth_cmd gets MCPSHELL_AUTH_RETRY=1 and
 	// MCPSHELL_AUTH_REJECTED=<the refused token>, which `dun oauth token`
-	// reads so dund refreshes a refused token (oauthbroker.go); regexp2
+	// reads so dund refreshes a refused token (internal/oauth/oauthbroker.go); regexp2
 	// v2.12.0. Recommended v0.7.1 (185037c, 2026-10-29): reading a let from
 	// an earlier eval says a let lasts one eval (it was "Unknown command",
 	// or the builtin of that name); 1/0 shows Infinity. Recommended v0.8.0

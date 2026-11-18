@@ -35,7 +35,7 @@ type PeerRequest struct {
 	Sched *SchedReq `json:"sched,omitempty"`
 	// OAuth is the operation for Op "oauth": dund holds every OAuth
 	// server's token and is the one process that refreshes it or logs in
-	// (dun/oauthbroker.go).
+	// (internal/oauth/oauthbroker.go).
 	OAuth *OAuthReq `json:"oauth,omitempty"`
 	// Share is the operation for Op "mcp_share" (an endpoint of dund's MCP
 	// gateway, dun/gateway.go) and "mcp_release" (a client given back).
@@ -91,7 +91,7 @@ type McpNotify struct {
 // after a login if it has none ("ensure"), for a new one because the
 // server refused the last ("unauthorized"), or to log in, log out or say
 // the login's state ("login", "logout", "status"). Spec is the server's
-// oauth block as harness.OAuthSpec, its client secret resolved. A login's URL
+// oauth block as oauth.Spec, its client secret resolved. A login's URL
 // goes to the asking session as an mcp_login event.
 type OAuthReq struct {
 	Op  string `json:"op"`
@@ -105,7 +105,7 @@ type OAuthReq struct {
 }
 
 // OAuthResult answers an OAuthReq: the Authorization header value ("" for
-// none), the login's state as harness.OAuthStatus, and for "logout" whether a
+// none), the login's state as oauth.Status, and for "logout" whether a
 // token was revoked.
 type OAuthResult struct {
 	Authorization string `json:"authorization,omitempty"`

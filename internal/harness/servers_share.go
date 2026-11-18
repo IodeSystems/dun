@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/oauth"
 )
 
 // The engine's half of dund's gateway (gateway.go): a shared server is
@@ -49,7 +50,7 @@ func shareSpec(s Server, command string, args, env []string, timeout time.Durati
 		sp.URL, sp.Headers = s.URL, maps.Clone(s.Headers)
 		if s.OAuth != nil {
 			o := *s.OAuth
-			o.ClientSecret = (&oauthClient{spec: o}).clientSecret() // read here, where the env is
+			o.ClientSecret = oauth.ClientSecret(o) // read here, where the env is
 			sp.OAuth = &o
 		}
 		return sp

@@ -268,7 +268,7 @@ derive them from `turn`, tokens, tool calls or `done`.
   session started is waited on); then `done` when it went through, or
   `failed` with `error`. One end per start the client was shown.
 - Sent by whoever runs the login: the engine (its own token, `OnLogin` /
-  `OnLoginEnd`, `internal/harness/mcpoauth.go`), or dund (the broker for an engine's token,
+  `OnLoginEnd`, `internal/oauth/mcpoauth.go`), or dund (the broker for an engine's token,
   `internal/dund/oauth.go`; the gateway for a shared server, `mcpgw.go`).
 - A client settles the start's notice on the end; it does not infer the
   outcome from a later `mcp_tools` listing (the web client did, and could

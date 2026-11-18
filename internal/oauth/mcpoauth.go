@@ -1,4 +1,10 @@
-package harness
+// Package oauth is dun's login to OAuth- and OIDC-protected remote MCP
+// servers: discovery, the browser login, the token file and its refresh
+// (this file), the client dun picks when none is configured (oauthauto.go),
+// dund's broker that holds every token (oauthbroker.go), and the login-gate
+// probe (mcpgate.go). The harness side (one login per server, /mcp login
+// and logout, the /mcp auth column) is internal/harness/servers_oauth.go.
+package oauth
 
 import (
 	"context"
@@ -15,6 +21,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -22,6 +29,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/mcpmgr/mcpauth"
+	"github.com/iodesystems/dun/internal/dunhome"
 	"github.com/iodesystems/dun/internal/fsutil"
 )
 
@@ -47,10 +55,10 @@ import (
 //     when refresh is impossible, the interactive login again — bounded by
 //     oauthLoginTimeout, never forever.
 
-// DefaultOAuthRedirectPort is the loopback port of the redirect URI when a
+// DefaultRedirectPort is the loopback port of the redirect URI when a
 // spec names none. Fixed rather than random because Snowflake and others
 // match the registered redirect URI exactly.
-const DefaultOAuthRedirectPort = 33418
+const DefaultRedirectPort = 33418
 
 // oauthLoginTimeout bounds one interactive login: the person has this long
 // to finish in the browser. A var for tests.
@@ -60,9 +68,9 @@ var oauthLoginTimeout = 5 * time.Minute
 // not set out with a token that expires on the way.
 const oauthSkew = 60 * time.Second
 
-// OAuthDir holds one token file per server: $DUN_HOME/oauth.
-func OAuthDir() string {
-	return filepath.Join(filepath.Dir(SessionsDir()), "oauth")
+// Dir holds one token file per server: $DUN_HOME/oauth.
+func Dir() string {
+	return filepath.Join(dunhome.Dir(), "oauth")
 }
 
 // oauthToken is a server's token file.
@@ -128,10 +136,10 @@ func parseIDToken(jwt string) (idClaims, error) {
 	return c, nil
 }
 
-// oauthClient logs in to one server and hands out its token.
-type oauthClient struct {
+// Client logs in to one server and hands out its token.
+type Client struct {
 	id, url string
-	spec    OAuthSpec
+	spec    Spec
 	path    string
 	hc      *http.Client
 	// notify surfaces the login URL to the person; open tries a browser.
@@ -152,21 +160,22 @@ type oauthClient struct {
 
 	loginMu   sync.Mutex  // one interactive login at a time
 	loggingIn atomic.Bool // a login is waiting on the person
-	// ended, when set, hears how a login whose URL was shown ended (nil
+	// Ended, when set, hears how a login whose URL was shown ended (nil
 	// err: it went through): the mcp_login that closes the started one.
 	// loginShown is this login's URL was shown; both under loginMu.
-	ended      func(id string, err error)
+	Ended      func(id string, err error)
 	loginShown bool
 }
 
-func newOAuthClient(s Server, notify func(id, authURL string), open func(string) error) *oauthClient {
-	return &oauthClient{id: s.ID, url: s.URL, spec: *s.OAuth,
-		path:   filepath.Join(OAuthDir(), s.ID+".json"),
+// NewClient is server id's login, at url, with its oauth block.
+func NewClient(id, url string, spec Spec, notify func(id, authURL string), open func(string) error) *Client {
+	return &Client{id: id, url: url, spec: spec,
+		path:   filepath.Join(Dir(), id+".json"),
 		hc:     &http.Client{Timeout: 30 * time.Second},
 		notify: notify, open: open, now: time.Now}
 }
 
-func (c *oauthClient) send() string {
+func (c *Client) send() string {
 	if c.spec.Send == SendIDToken {
 		return SendIDToken
 	}
@@ -174,7 +183,7 @@ func (c *oauthClient) send() string {
 }
 
 // value is the token that goes in Authorization, and when it expires.
-func (c *oauthClient) value(t *oauthToken) (string, time.Time) {
+func (c *Client) value(t *oauthToken) (string, time.Time) {
 	if c.send() == SendIDToken {
 		if t.IDToken == "" {
 			return "", time.Time{}
@@ -188,12 +197,12 @@ func (c *oauthClient) value(t *oauthToken) (string, time.Time) {
 	return t.AccessToken, t.Expiry
 }
 
-func (c *oauthClient) fresh(t *oauthToken) bool {
+func (c *Client) fresh(t *oauthToken) bool {
 	v, exp := c.value(t)
 	return v != "" && (exp.IsZero() || c.now().Add(oauthSkew).Before(exp))
 }
 
-func (c *oauthClient) canRefresh(t *oauthToken) bool {
+func (c *Client) canRefresh(t *oauthToken) bool {
 	return t != nil && t.RefreshToken != "" && t.RefreshToken != c.deadRefresh && t.TokenEndpoint != ""
 }
 
@@ -201,7 +210,7 @@ func (c *oauthClient) canRefresh(t *oauthToken) bool {
 // session refreshed it, or /mcp logout removed it). A token for another
 // client or issuer than the spec names is not this config's: nil. Caller
 // holds mu.
-func (c *oauthClient) current() *oauthToken {
+func (c *Client) current() *oauthToken {
 	fi, err := os.Stat(c.path)
 	if err != nil {
 		c.tok, c.tokMod = nil, time.Time{}
@@ -231,7 +240,7 @@ func (c *oauthClient) current() *oauthToken {
 }
 
 // save writes t, 0600, and makes it current. Caller holds mu.
-func (c *oauthClient) save(t *oauthToken) error {
+func (c *Client) save(t *oauthToken) error {
 	b, err := json.MarshalIndent(t, "", "  ")
 	if err != nil {
 		return err
@@ -249,7 +258,7 @@ func (c *oauthClient) save(t *oauthToken) error {
 // Authorization is mcpmgr's per-request hook: "Bearer <token>", refreshed
 // first when it is about to expire. With no usable token it sends none, and
 // the server's 401 runs OnUnauthorized.
-func (c *oauthClient) Authorization(ctx context.Context) (string, error) {
+func (c *Client) Authorization(ctx context.Context) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	t := c.current()
@@ -273,7 +282,7 @@ func (c *oauthClient) Authorization(ctx context.Context) (string, error) {
 }
 
 // OnUnauthorized is mcpmgr's 401 hook: refresh, else log in again.
-func (c *oauthClient) OnUnauthorized(ctx context.Context, wwwAuthenticate string) error {
+func (c *Client) OnUnauthorized(ctx context.Context, wwwAuthenticate string) error {
 	c.mu.Lock()
 	t := c.current()
 	refreshed := false
@@ -297,23 +306,23 @@ func (c *oauthClient) OnUnauthorized(ctx context.Context, wwwAuthenticate string
 // ensure gets a usable token before the server is connected, so the
 // handshake does not wait out a login inside its own timeout. A server that
 // answers without a token needs none.
-func (c *oauthClient) ensure(ctx context.Context) error {
+func (c *Client) Ensure(ctx context.Context) error {
 	if v, _ := c.Authorization(ctx); v != "" {
 		return nil
 	}
 	www := ""
 	if c.spec.Issuer == "" {
-		p, err := probeMCP(ctx, c.url)
+		p, err := Probe(ctx, c.url)
 		if err != nil {
 			return err
 		}
-		if p.gate != "" {
-			return errors.New(p.gate)
+		if p.Gate != "" {
+			return errors.New(p.Gate)
 		}
-		if p.status/100 == 2 {
+		if p.Status/100 == 2 {
 			return nil
 		}
-		www = p.www
+		www = p.WWW
 	}
 	return c.Login(ctx, www)
 }
@@ -327,7 +336,7 @@ type asInfo struct {
 
 // discover finds the authorization server: the spec's issuer, or the one the
 // server names. wwwAuthenticate is the 401's; empty probes for it.
-func (c *oauthClient) discover(ctx context.Context, wwwAuthenticate string) (asInfo, error) {
+func (c *Client) discover(ctx context.Context, wwwAuthenticate string) (asInfo, error) {
 	if c.spec.Issuer != "" {
 		md, err := mcpauth.FetchAuthServerMetadata(ctx, c.hc, c.spec.Issuer)
 		if err != nil {
@@ -336,14 +345,14 @@ func (c *oauthClient) discover(ctx context.Context, wwwAuthenticate string) (asI
 		return asInfo{md: md, resource: c.resourceParam(""), scopes: c.spec.Scopes}, nil
 	}
 	if wwwAuthenticate == "" {
-		p, err := probeMCP(ctx, c.url)
+		p, err := Probe(ctx, c.url)
 		if err != nil {
 			return asInfo{}, err
 		}
-		if p.gate != "" {
-			return asInfo{}, errors.New(p.gate)
+		if p.Gate != "" {
+			return asInfo{}, errors.New(p.Gate)
 		}
-		wwwAuthenticate = p.www
+		wwwAuthenticate = p.WWW
 	}
 	ch, _ := mcpauth.BearerChallenge(wwwAuthenticate)
 	mdURL := ch.Params["resource_metadata"]
@@ -390,7 +399,7 @@ func coversResource(resource, serverURL string) bool {
 }
 
 // resourceParam applies the spec's resource setting to the discovered one.
-func (c *oauthClient) resourceParam(discovered string) string {
+func (c *Client) resourceParam(discovered string) string {
 	switch c.spec.Resource {
 	case "none":
 		return ""
@@ -400,16 +409,24 @@ func (c *oauthClient) resourceParam(discovered string) string {
 	return c.spec.Resource
 }
 
-func (c *oauthClient) redirectPort() int {
+func (c *Client) redirectPort() int {
 	if c.spec.RedirectPort > 0 {
 		return c.spec.RedirectPort
 	}
-	return DefaultOAuthRedirectPort
+	return DefaultRedirectPort
 }
+
+// envRef matches a value that is only a variable reference: "$NAME" or
+// "${NAME}". harness has the same one for a bearer (shellhost.go).
+var envRef = regexp.MustCompile(`^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))$`)
+
+// ClientSecret is spec's client secret resolved as a client resolves it,
+// for a spec that is sent on to another process.
+func ClientSecret(spec Spec) string { return (&Client{spec: spec}).clientSecret() }
 
 // clientSecret resolves the spec's secret: "$NAME" or "${NAME}" from the
 // environment, anything else as written.
-func (c *oauthClient) clientSecret() string {
+func (c *Client) clientSecret() string {
 	if c.spec.ClientID == "" {
 		return c.auto.Secret // a registration's, when it was given one
 	}
@@ -423,7 +440,7 @@ func (c *oauthClient) clientSecret() string {
 // authMethod picks how the client authenticates at the token endpoint: a
 // public client sends its id; a confidential one uses basic when the server
 // allows it (RFC 8414's default when it lists nothing), else post.
-func (c *oauthClient) authMethod(supported []string) string {
+func (c *Client) authMethod(supported []string) string {
 	if c.clientSecret() == "" {
 		return "none"
 	}
@@ -438,15 +455,15 @@ func (c *oauthClient) authMethod(supported []string) string {
 
 // Login runs the interactive flow and stores the token. wwwAuthenticate is
 // the 401 that asked for it, or "".
-func (c *oauthClient) Login(ctx context.Context, wwwAuthenticate string) (err error) {
+func (c *Client) Login(ctx context.Context, wwwAuthenticate string) (err error) {
 	c.loginMu.Lock()
 	defer c.loginMu.Unlock()
 	c.loggingIn.Store(true)
 	defer c.loggingIn.Store(false)
 	c.loginShown = false
 	defer func() {
-		if c.loginShown && c.ended != nil {
-			c.ended(c.id, err)
+		if c.loginShown && c.Ended != nil {
+			c.Ended(c.id, err)
 		}
 	}()
 	ctx, cancel := context.WithTimeout(ctx, oauthLoginTimeout)
@@ -606,7 +623,7 @@ func (c *oauthClient) Login(ctx context.Context, wwwAuthenticate string) (err er
 // waitOtherLogin: the callback port is taken — most likely another session
 // logging in to the same server, whose token lands in the same file. Wait
 // for it rather than fail; if no token comes, the port is just busy.
-func (c *oauthClient) waitOtherLogin(ctx context.Context, port int, bindErr error) error {
+func (c *Client) waitOtherLogin(ctx context.Context, port int, bindErr error) error {
 	if c.notify != nil {
 		c.notify(c.id, "")
 		c.loginShown = true
@@ -662,7 +679,7 @@ func (r tokenResponse) apply(t *oauthToken, now time.Time) {
 
 // postForm POSTs form to an endpoint of the authorization server with the
 // client's authentication, and returns the status and body.
-func (c *oauthClient) postForm(ctx context.Context, endpoint, method string, form url.Values) (int, []byte, error) {
+func (c *Client) postForm(ctx context.Context, endpoint, method string, form url.Values) (int, []byte, error) {
 	switch method {
 	case "none":
 		form.Set("client_id", c.clientID())
@@ -691,7 +708,7 @@ func (c *oauthClient) postForm(ctx context.Context, endpoint, method string, for
 
 // tokenRequest asks the token endpoint for a token. Errors carry the
 // server's error code, never a token.
-func (c *oauthClient) tokenRequest(ctx context.Context, endpoint, method string, form url.Values) (tokenResponse, error) {
+func (c *Client) tokenRequest(ctx context.Context, endpoint, method string, form url.Values) (tokenResponse, error) {
 	var tr tokenResponse
 	status, b, err := c.postForm(ctx, endpoint, method, form)
 	if err != nil {
@@ -717,7 +734,7 @@ func (c *oauthClient) tokenRequest(ctx context.Context, endpoint, method string,
 // refresh trades the refresh token for a new token and stores it. A refusal
 // marks the refresh token dead, so the next 401 goes to a login. Caller
 // holds mu.
-func (c *oauthClient) refresh(ctx context.Context, t *oauthToken) (*oauthToken, error) {
+func (c *Client) refresh(ctx context.Context, t *oauthToken) (*oauthToken, error) {
 	form := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {t.RefreshToken}}
 	if t.Resource != "" {
 		form.Set("resource", t.Resource)
@@ -743,7 +760,7 @@ func (c *oauthClient) refresh(ctx context.Context, t *oauthToken) (*oauthToken, 
 // Logout deletes the stored token and, when the server has a revocation
 // endpoint, revokes it (best effort: the file is gone either way). It
 // reports whether anything was revoked.
-func (c *oauthClient) Logout(ctx context.Context) (bool, error) {
+func (c *Client) Logout(ctx context.Context) (bool, error) {
 	c.mu.Lock()
 	t := c.current()
 	if t == nil {
@@ -777,8 +794,8 @@ func (c *oauthClient) Logout(ctx context.Context) (bool, error) {
 	return revoked, nil
 }
 
-// OAuthStatus is a server's login as the stored token describes it.
-type OAuthStatus struct {
+// Status is a server's login as the stored token describes it.
+type Status struct {
 	LoggedIn bool      // a token is stored for this client
 	Pending  bool      // a login is waiting on the person
 	Fresh    bool      // and it is not expired
@@ -788,14 +805,14 @@ type OAuthStatus struct {
 }
 
 // status reads the stored token, without any network.
-func (c *oauthClient) status() OAuthStatus {
+func (c *Client) Status() Status {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	t := c.current()
 	if t == nil {
-		return OAuthStatus{Pending: c.loggingIn.Load()}
+		return Status{Pending: c.loggingIn.Load()}
 	}
-	st := OAuthStatus{LoggedIn: true, Fresh: c.fresh(t), Refresh: c.canRefresh(t)}
+	st := Status{LoggedIn: true, Fresh: c.fresh(t), Refresh: c.canRefresh(t)}
 	_, st.Until = c.value(t)
 	if t.IDToken != "" {
 		if cl, err := parseIDToken(t.IDToken); err == nil {
@@ -809,7 +826,7 @@ func (c *oauthClient) status() OAuthStatus {
 }
 
 // String is the /mcp listing's auth column.
-func (s OAuthStatus) String() string {
+func (s Status) String() string {
 	who := ""
 	if s.Who != "" {
 		who = " as " + s.Who

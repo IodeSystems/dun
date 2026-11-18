@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/oauth"
 )
 
 // `dun oauth token` takes its server as --spec; a bad one is a usage error,
@@ -20,8 +20,8 @@ func TestOAuthCmd_SpecAndErrors(t *testing.T) {
 	if rc := oauthCmd([]string{"token", "--spec", "!!"}, &out, &errb); rc != 2 {
 		t.Errorf("bad spec: %d %q", rc, errb.String())
 	}
-	spec := harness.EncodeOAuthAuthSpec(harness.OAuthAuthSpec{ID: "eleven", URL: "http://127.0.0.1:1/mcp",
-		OAuth: harness.OAuthSpec{ClientID: "c", Issuer: "http://127.0.0.1:1"}})
+	spec := oauth.EncodeAuthSpec(oauth.AuthSpec{ID: "eleven", URL: "http://127.0.0.1:1/mcp",
+		OAuth: oauth.Spec{ClientID: "c", Issuer: "http://127.0.0.1:1"}})
 	errb.Reset()
 	if rc := oauthCmd([]string{"token", "--spec", spec}, &out, &errb); rc != 1 || out.Len() != 0 || !strings.Contains(errb.String(), "dun oauth token:") {
 		t.Errorf("unreachable issuer: %d %q %q", rc, out.String(), errb.String())

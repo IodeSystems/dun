@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/dun/internal/fsutil"
+	"github.com/iodesystems/dun/internal/oauth"
 )
 
 // Shell-placed MCP servers.
@@ -98,7 +99,7 @@ func validGlobs(id string, globs []string) []string {
 // resolved — mcpshell does not expand variables in headers — which is why the
 // file is 0600, like the mcp.json the value came from. An OAuth server's
 // auth_cmd is oauthCmd's: `dun oauth token`, which asks dund for the token
-// (oauthbroker.go); mcpshell runs it at first use, before a JWT expires, and
+// (internal/oauth/oauthbroker.go); mcpshell runs it at first use, before a JWT expires, and
 // after a 401.
 func mcpshellConfig(hosted []Server, oauthCmd func(Server) string) ([]byte, error) {
 	out := map[string]mcpshellServer{}
@@ -428,7 +429,7 @@ func (h *Harness) oauthAuthCmd(s Server) string {
 	if err != nil {
 		exe = "dun"
 	}
-	cmd := shellQuote(exe) + " oauth token --spec " + EncodeOAuthAuthSpec(OAuthAuthSpec{ID: s.ID, URL: s.URL, OAuth: *s.OAuth})
+	cmd := shellQuote(exe) + " oauth token --spec " + oauth.EncodeAuthSpec(oauth.AuthSpec{ID: s.ID, URL: s.URL, OAuth: *s.OAuth})
 	if id := h.SessionID(); id != "" {
 		cmd += " --session " + shellQuote(id)
 	}
@@ -452,7 +453,7 @@ func (h *Harness) loginHosted(ctx context.Context, shell string, phase *startPha
 			continue
 		}
 		phase.set("logging in (OAuth) to " + hs.ID)
-		if err := src.ensure(ctx); err != nil {
+		if err := src.Ensure(ctx); err != nil {
 			h.noteServer(shell, "%s: no OAuth login: %s", hs.ID, oneLine(err.Error(), 300))
 		}
 	}

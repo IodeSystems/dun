@@ -1,4 +1,4 @@
-package harness
+package oauth
 
 import (
 	"bytes"
@@ -42,14 +42,14 @@ type autoClient struct {
 
 // clientID is the client this login uses: the spec's, else the one dun
 // chose.
-func (c *oauthClient) clientID() string {
+func (c *Client) clientID() string {
 	if c.spec.ClientID != "" {
 		return c.spec.ClientID
 	}
 	return c.auto.ID
 }
 
-func autoClientFile(id string) string { return filepath.Join(OAuthDir(), id+".client.json") }
+func autoClientFile(id string) string { return filepath.Join(Dir(), id+".client.json") }
 
 // loadAutoClient is the client a stored token was issued to: the saved
 // registration when it is that client, else dun's metadata URL.
@@ -67,8 +67,8 @@ func loadAutoClient(id, clientID string) autoClient {
 }
 
 // chooseClient picks the client for a login to md with no client_id set.
-func (c *oauthClient) chooseClient(ctx context.Context, md *mcpauth.AuthServerMetadata, redirect string, port int) (autoClient, error) {
-	if md.ClientIDMetadataDocumentSupported && port == DefaultOAuthRedirectPort {
+func (c *Client) chooseClient(ctx context.Context, md *mcpauth.AuthServerMetadata, redirect string, port int) (autoClient, error) {
+	if md.ClientIDMetadataDocumentSupported && port == DefaultRedirectPort {
 		return autoClient{ID: DunClientMetadataURL, How: "metadata", Issuer: md.Issuer}, nil
 	}
 	if md.RegistrationEndpoint != "" {
@@ -84,21 +84,21 @@ func (c *oauthClient) chooseClient(ctx context.Context, md *mcpauth.AuthServerMe
 			return a, err
 		}
 		b, _ := json.MarshalIndent(a, "", "  ")
-		if err := os.MkdirAll(OAuthDir(), 0o700); err != nil {
+		if err := os.MkdirAll(Dir(), 0o700); err != nil {
 			return a, err
 		}
 		return a, fsutil.WriteAtomic(autoClientFile(c.id), append(b, '\n'), 0o600)
 	}
 	why := "offers neither dynamic client registration nor client ID metadata documents"
 	if md.ClientIDMetadataDocumentSupported {
-		why = fmt.Sprintf("takes dun's client URL only with the default redirect port %d (this server's redirect_port is %d)", DefaultOAuthRedirectPort, port)
+		why = fmt.Sprintf("takes dun's client URL only with the default redirect port %d (this server's redirect_port is %d)", DefaultRedirectPort, port)
 	}
 	return autoClient{}, fmt.Errorf("%s: its authorization server %s %s — register a client there with redirect URI %s and set oauth.client_id (/mcp add asks for it)",
 		c.id, md.Issuer, why, redirect)
 }
 
 // register is RFC 7591: a public client (PKCE, no secret) for this redirect.
-func (c *oauthClient) register(ctx context.Context, md *mcpauth.AuthServerMetadata, redirect string) (autoClient, error) {
+func (c *Client) register(ctx context.Context, md *mcpauth.AuthServerMetadata, redirect string) (autoClient, error) {
 	body, _ := json.Marshal(map[string]any{
 		"client_name":                "dun",
 		"client_uri":                 "https://dun.iodesystems.com",
@@ -134,24 +134,4 @@ func (c *oauthClient) register(ctx context.Context, md *mcpauth.AuthServerMetada
 		return autoClient{}, fmt.Errorf("client registration at %s: HTTP %d %s — set oauth.client_id instead", md.RegistrationEndpoint, resp.StatusCode, why)
 	}
 	return autoClient{ID: r.ClientID, Secret: r.ClientSecret, How: "registered", Issuer: md.Issuer, Redirect: redirect}, nil
-}
-
-// wantsOAuth reports whether a remote server with no credentials of its
-// own answers an unauthenticated initialize with a 401 Bearer challenge
-// naming its protected-resource metadata (RFC 9728): the MCP OAuth flow.
-func wantsOAuth(ctx context.Context, s ServerSpec) bool {
-	if s.URL == "" || s.Bearer != "" {
-		return false
-	}
-	for k := range s.Headers {
-		if strings.EqualFold(k, "Authorization") {
-			return false
-		}
-	}
-	p, err := probeMCP(ctx, s.URL)
-	if err != nil || p.status != http.StatusUnauthorized {
-		return false
-	}
-	ch, ok := mcpauth.BearerChallenge(p.www)
-	return ok && ch.Params["resource_metadata"] != ""
 }

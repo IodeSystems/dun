@@ -13,6 +13,7 @@ import (
 
 	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/oauth"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -55,14 +56,14 @@ func (p *peerLink) call(ctx context.Context, req proto.PeerRequest) (proto.PeerR
 var oauthTimeout = 6 * time.Minute
 
 // oauth asks dund for an OAuth server's token, or to log in or out
-// (dun/oauthbroker.go).
-func (p *peerLink) oauth(ctx context.Context, req harness.OAuthRequest) (harness.OAuthResult, error) {
+// (internal/oauth/oauthbroker.go).
+func (p *peerLink) oauth(ctx context.Context, req oauth.Request) (oauth.Result, error) {
 	rep, err := p.callFor(ctx, proto.PeerRequest{Op: "oauth", OAuth: &proto.OAuthReq{
-		Op: req.Op, ID: req.ID, URL: req.URL, WWW: req.WWW, Rejected: req.Rejected, Spec: harness.MarshalOAuthSpec(req.Spec)}}, oauthTimeout)
-	var res harness.OAuthResult
+		Op: req.Op, ID: req.ID, URL: req.URL, WWW: req.WWW, Rejected: req.Rejected, Spec: oauth.MarshalSpec(req.Spec)}}, oauthTimeout)
+	var res oauth.Result
 	if rep.OAuth != nil {
-		res = harness.OAuthResult{Authorization: rep.OAuth.Authorization, Revoked: rep.OAuth.Revoked,
-			Status: harness.UnmarshalOAuthStatus(rep.OAuth.Status)}
+		res = oauth.Result{Authorization: rep.OAuth.Authorization, Revoked: rep.OAuth.Revoked,
+			Status: oauth.UnmarshalStatus(rep.OAuth.Status)}
 	}
 	return res, err
 }

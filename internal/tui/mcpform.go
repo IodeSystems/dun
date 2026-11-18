@@ -14,6 +14,7 @@ import (
 
 	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/oauth"
 )
 
 // /mcp add [preset] — a form for a new MCP server. It asks one thing: what
@@ -324,7 +325,7 @@ func (m *tuiModel) mcpRowErr() string {
 			return "env: " + err.Error()
 		}
 	case mcpSend:
-		if v != "" && v != harness.SendAccessToken && v != harness.SendIDToken {
+		if v != "" && v != oauth.SendAccessToken && v != oauth.SendIDToken {
 			return "send is access_token or id_token"
 		}
 	}
@@ -513,14 +514,14 @@ func envName(k string) bool {
 
 // mcpFormOAuth is the oauth block from the form's rows; nil when every row
 // is empty (a server that answers with an OAuth challenge still gets one,
-// AddServer). An empty client id is dun's choice (dun/oauthauto.go). Scopes
+// AddServer). An empty client id is dun's choice (internal/oauth/oauthauto.go). Scopes
 // split on spaces or commas.
-func mcpFormOAuth(clientID, scopes, issuer, send string) *harness.OAuthSpec {
+func mcpFormOAuth(clientID, scopes, issuer, send string) *oauth.Spec {
 	clientID = strings.TrimSpace(clientID)
 	if clientID == "" && strings.TrimSpace(scopes+issuer+send) == "" {
 		return nil
 	}
-	o := &harness.OAuthSpec{ClientID: clientID, Issuer: strings.TrimSpace(issuer), Send: strings.TrimSpace(send)}
+	o := &oauth.Spec{ClientID: clientID, Issuer: strings.TrimSpace(issuer), Send: strings.TrimSpace(send)}
 	o.Scopes = strings.FieldsFunc(scopes, func(r rune) bool { return r == ' ' || r == ',' })
 	if len(o.Scopes) == 0 {
 		o.Scopes = nil
@@ -537,7 +538,7 @@ func (m tuiModel) mcpFormPanel() string {
 		}
 		if i == mcpClient {
 			rows = append(rows, "  "+StDim.Render("oauth login: empty, dun uses its own client where the server takes it, or registers one; else a client id"),
-				"  "+StDim.Render("registered by hand, redirect URI http://127.0.0.1:"+strconv.Itoa(harness.DefaultOAuthRedirectPort)+"/oauth/callback; secret, audience and the rest go in mcp.json"))
+				"  "+StDim.Render("registered by hand, redirect URI http://127.0.0.1:"+strconv.Itoa(oauth.DefaultRedirectPort)+"/oauth/callback; secret, audience and the rest go in mcp.json"))
 		}
 		row := formRow(labels[i], i == m.mcpStep, f.View())
 		if i == mcpServer {

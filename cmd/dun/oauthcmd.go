@@ -15,13 +15,14 @@ import (
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/oauth"
 	"github.com/iodesystems/dun/proto"
 )
 
 // `dun oauth token --spec <b64> [--session <id>]` prints an OAuth MCP
 // server's bearer token: mcpshell's auth_cmd for a scripted OAuth server
 // (shellhost.go). It asks dund, which holds the token and refreshes it
-// (dun/oauthbroker.go); with no dund, it refreshes from the token file
+// (internal/oauth/oauthbroker.go); with no dund, it refreshes from the token file
 // itself. MCPSHELL_AUTH_RETRY=1 is mcpshell saying the server refused the
 // last token: refresh, else log in.
 
@@ -40,7 +41,7 @@ func oauthCmd(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
 	}
-	spec, err := harness.DecodeOAuthAuthSpec(*specB64)
+	spec, err := oauth.DecodeAuthSpec(*specB64)
 	if err != nil {
 		fmt.Fprintln(stderr, "dun oauth token:", err)
 		return 2
@@ -50,8 +51,7 @@ func oauthCmd(args []string, stdout, stderr io.Writer) int {
 	defer cancel()
 	auth, err := oauthFromDund(ctx, spec, *session, retry)
 	if errors.Is(err, errNoDund) {
-		s := harness.Server{ID: spec.ID, URL: spec.URL, OAuth: &spec.OAuth}
-		auth, err = harness.OAuthTokenHere(ctx, s, retry,
+		auth, err = oauth.TokenHere(ctx, spec, retry,
 			func(id, url string) { fmt.Fprintln(stderr, enginecmd.LoginLine(id, url)) }, nil)
 	}
 	if err == nil && auth == "" {
@@ -68,7 +68,7 @@ func oauthCmd(args []string, stdout, stderr io.Writer) int {
 var errNoDund = errors.New("no dund")
 
 // oauthFromDund asks dund over its socket; errNoDund when none answers.
-func oauthFromDund(ctx context.Context, spec harness.OAuthAuthSpec, session string, retry bool) (string, error) {
+func oauthFromDund(ctx context.Context, spec oauth.AuthSpec, session string, retry bool) (string, error) {
 	c, err := net.DialTimeout("unix", dundcli.Socket(harness.DunHome()), 2*time.Second)
 	if err != nil {
 		return "", errNoDund
@@ -81,7 +81,7 @@ func oauthFromDund(ctx context.Context, spec harness.OAuthAuthSpec, session stri
 	o.ClientSecret = resolveRef(o.ClientSecret)
 	enc, dec := json.NewEncoder(c), json.NewDecoder(c)
 	ask := func(op string) (string, error) {
-		req := proto.OAuthReq{Op: op, ID: spec.ID, URL: spec.URL, Spec: harness.MarshalOAuthSpec(o)}
+		req := proto.OAuthReq{Op: op, ID: spec.ID, URL: spec.URL, Spec: oauth.MarshalSpec(o)}
 		if op == "unauthorized" {
 			if r := os.Getenv("MCPSHELL_AUTH_REJECTED"); r != "" {
 				req.Rejected = "Bearer " + r
