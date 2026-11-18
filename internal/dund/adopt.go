@@ -172,38 +172,73 @@ func (s *Service) Detach() {
 
 // adoptAll takes back the engines an earlier dund left (called by New,
 // before the crash check and resumeFlagged) and settles the fallback
-// records: dropped for an adopted session, applied for the others. It
-// returns the adopted sessions.
+// records. An adopted session drops its record. A session whose engine is
+// not adopted gets it only once that engine is provably gone (endEngine):
+// never two engines on one transcript. One whose engine may still run is
+// blocked (blockPid): not resumed, no engine started for it, shown by dun
+// ps, until that process is gone. It returns the sessions the crash check
+// must leave alone: the adopted and the blocked.
 func (s *Service) adoptAll(ad Adopter) map[string]bool {
+	skip := map[string]bool{}
 	adopted := map[string]bool{}
-	for _, a := range ad.Adopt() {
+	oks, fails := ad.Adopt()
+	for _, a := range oks {
 		ses := s.sessions[a.Hello.Session]
+		why := ""
 		switch {
 		case ses == nil:
-			a.Refuse("its session is not in the registry")
-			continue
+			why = "its session is not in the registry"
 		case adopted[ses.id]:
-			a.Refuse("its session has another engine")
-			continue
+			why = "its session has another engine"
 		}
-		eng, err := a.Accept()
-		if err != nil {
-			log.Printf("dund: engine %d (session %s) not adopted: %v", a.Hello.Pid, ses.id, err)
-			continue
+		if why == "" {
+			eng, err := a.Accept()
+			if err == nil {
+				ses.adopt(eng, a.Hello, ad.EngineBuild())
+				adopted[ses.id], skip[ses.id] = true, true
+				log.Printf("dund: adopted engine %d of session %s (build %q)", a.Hello.Pid, ses.id, a.Hello.Version)
+				if a.Hello.Shared > 0 {
+					ses.sharedGone()
+				}
+				continue
+			}
+			why = err.Error()
 		}
-		ses.adopt(eng, a.Hello, ad.EngineBuild())
-		adopted[ses.id] = true
-		log.Printf("dund: adopted engine %d of session %s (build %q)", a.Hello.Pid, ses.id, a.Hello.Version)
+		a.conn.Close()
+		fails = append(fails, AdoptFailure{Info: a.Info, Why: why, Dir: a.dir})
+	}
+	blocked := map[string]string{}
+	for _, f := range fails {
+		gone := endEngine(f.Dir, f.Info, f.Why)
+		if ses := s.sessions[f.Info.Session]; ses != nil && !gone && !adopted[ses.id] {
+			blocked[ses.id] = f.Why
+			ses.actMu.Lock()
+			ses.blockPid, ses.blockWhy = f.Info.Pid, f.Why
+			ses.actMu.Unlock()
+		}
 	}
 	changed := false
 	for _, ses := range s.sessions {
 		ses.actMu.Lock()
 		if fb := ses.fallback; fb != nil {
 			changed = true
-			ses.fallback = nil
-			if !adopted[ses.id] && ses.resume == "" && ses.restored == nil {
+			// The registry holds the record twice: in fallback, and in the
+			// fields an older dund reads (saveRegistry), loaded as ours.
+			fromFallback := ses.resume == fb.Resume && (ses.restored == nil) == (fb.Ask == nil)
+			switch {
+			case adopted[ses.id] || blocked[ses.id] != "":
+				if fromFallback {
+					ses.resume, ses.restored, ses.resumeQuiet, ses.cutAgents = "", nil, false, nil
+				}
+			case ses.resume == "" && ses.restored == nil:
 				ses.resume, ses.restored, ses.resumeQuiet, ses.cutAgents = fb.Resume, fb.Ask, fb.Quiet, fb.Agents
 			}
+			if blocked[ses.id] == "" {
+				ses.fallback = nil
+			}
+		}
+		if blocked[ses.id] != "" {
+			skip[ses.id] = true
 		}
 		ses.actMu.Unlock()
 	}
@@ -212,5 +247,37 @@ func (s *Service) adoptAll(ad Adopter) map[string]bool {
 			log.Printf("dund: registry: %v", err)
 		}
 	}
-	return adopted
+	return skip
+}
+
+// sharedGone tells an adopted engine's agent, and its clients, that the
+// shared MCP servers it used through the old dund's gateway are gone until
+// its next idle, when it moves to a new engine and they come back (USER
+// review 2026-11-18).
+func (s *session) sharedGone() {
+	const text = "dund restarted: the shared MCP servers this session used through dund are stopped. " +
+		"A call to one fails until this session is next idle, when dun restarts its engine and they come back; retry then."
+	_ = s.sendLoaded(proto.NewCommand("", &proto.ServiceNotice{Quiet: true, Text: text}))
+	s.log.Append(proto.NewEvent(&proto.Notification{Kind: "service", Text: text}))
+}
+
+// pidAliveFn is pidAlive (a variable: the tests' engines are no processes).
+var pidAliveFn = pidAlive
+
+// blocked is why this session may not start an engine: one from before
+// dund's restart may still run on its transcript. Cleared once that
+// process is gone. Called with mu held (actMu is a leaf).
+func (s *session) blocked() error {
+	s.actMu.Lock()
+	defer s.actMu.Unlock()
+	if s.blockPid == 0 {
+		return nil
+	}
+	if pidAliveFn(s.blockPid) {
+		return fmt.Errorf("this session's engine from before dund's restart (pid %d) may still be running (%s), "+
+			"and two engines must not share a conversation: end it (kill %d), then try again", s.blockPid, s.blockWhy, s.blockPid)
+	}
+	log.Printf("dund: session %s: engine %d is gone; the session runs again", s.id, s.blockPid)
+	s.blockPid, s.blockWhy, s.fallback = 0, "", nil
+	return nil
 }

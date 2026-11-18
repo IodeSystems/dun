@@ -36,9 +36,33 @@ var fakePids atomic.Int64
 func newLinkSpawner(t *testing.T, dir string) *linkSpawner {
 	t.Helper()
 	ls := &linkSpawner{fakeSpawner: &fakeSpawner{}, dir: dir, links: map[int]*fakeLink{}}
-	old := adoptProc
+	old, oldEnd, oldAlive := adoptProc, endEngine, pidAliveFn
 	adoptProc = func(pid int) proc { return fakeProcOf(pid) }
-	t.Cleanup(func() { adoptProc = old })
+	// Ending a fake engine: provable unless the test says it is not
+	// (unprovable), as endEngine's /proc check would.
+	endEngine = func(dir string, info proto.EngineInfo, why string) bool {
+		fakeProcsMu.Lock()
+		l := fakeProcs[info.Pid]
+		fakeProcsMu.Unlock()
+		if l == nil || l.ended() {
+			removeEngineFiles(dir, info.Pid)
+			return true
+		}
+		if l.unprovable.Load() {
+			return false
+		}
+		l.kill()
+		<-l.gone
+		removeEngineFiles(dir, info.Pid)
+		return true
+	}
+	pidAliveFn = func(pid int) bool {
+		fakeProcsMu.Lock()
+		defer fakeProcsMu.Unlock()
+		l := fakeProcs[pid]
+		return l != nil && !l.ended()
+	}
+	t.Cleanup(func() { adoptProc, endEngine, pidAliveFn = old, oldEnd, oldAlive })
 	return ls
 }
 
@@ -83,10 +107,10 @@ func (ls *linkSpawner) Spawn(workspace string, args []string) (Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newLinkEngine(c, sc, h, l, proto.LinkResume{})
+	return newLinkEngine(c, sc, h, l, proto.LinkResume{Token: l.token})
 }
 
-func (ls *linkSpawner) Adopt() []*Adoption  { return adoptEngines(ls.dir) }
+func (ls *linkSpawner) Adopt() ([]*Adoption, []AdoptFailure) { return adoptEngines(ls.dir) }
 func (ls *linkSpawner) EngineBuild() string { return ls.build }
 
 // linkOf is the fake link of session id's engine.
@@ -121,6 +145,10 @@ type fakeLink struct {
 	done    bool
 	gone    chan struct{} // closed once the engine ended and the link closed
 	state   map[string]uint64
+	token   string
+	shared  int // gateway grants, in the hello
+	// unprovable: endEngine cannot tell it is an engine (no /proc).
+	unprovable atomic.Bool
 }
 
 func startFakeLink(dir string, pid int, version string, protoV int, eng *fakeEngine) (*fakeLink, error) {
@@ -129,7 +157,8 @@ func startFakeLink(dir string, pid int, version string, protoV int, eng *fakeEng
 	}
 	n := strconv.Itoa(pid)
 	l := &fakeLink{dir: dir, sock: filepath.Join(dir, n+".sock"), info: filepath.Join(dir, n+".json"), pid: pid,
-		version: version, proto: protoV, eng: eng, first: 1, gone: make(chan struct{}), state: map[string]uint64{}}
+		version: version, proto: protoV, eng: eng, first: 1, gone: make(chan struct{}), state: map[string]uint64{},
+		token: "tok" + n}
 	l.cond = sync.NewCond(&l.mu)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
@@ -151,7 +180,7 @@ func startFakeLink(dir string, pid int, version string, protoV int, eng *fakeEng
 func (l *fakeLink) writeInfo() {
 	l.mu.Lock()
 	b, _ := json.Marshal(proto.EngineInfo{Pid: l.pid, Sock: l.sock, Session: l.session, Version: l.version,
-		Proto: l.proto, Link: proto.LinkVersion})
+		Proto: l.proto, Link: proto.LinkVersion, Token: l.token})
 	l.mu.Unlock()
 	_ = os.WriteFile(l.info, b, 0o600)
 }
@@ -257,15 +286,7 @@ func (l *fakeLink) accept() {
 		if err != nil {
 			return
 		}
-		l.mu.Lock()
-		busy := l.conn != nil
-		l.mu.Unlock()
-		if busy {
-			_, _ = c.Write([]byte(proto.LinkBusyLine + "\n"))
-			c.Close()
-			continue
-		}
-		l.serve(c)
+		go l.serve(c)
 	}
 }
 
@@ -274,7 +295,7 @@ func (l *fakeLink) serve(c net.Conn) {
 	seq := uint64(len(l.lines))
 	first := max(l.first, l.acked+1)
 	h := proto.LinkHello{Type: proto.LinkHelloType, Link: proto.LinkVersion, Proto: l.proto, Version: l.version,
-		Pid: l.pid, Session: l.session, Seq: seq, Acked: l.acked, First: first}
+		Pid: l.pid, Session: l.session, Seq: seq, Acked: l.acked, First: first, Shared: l.shared}
 	l.mu.Unlock()
 	b, _ := json.Marshal(h)
 	if _, err := c.Write(append(b, '\n')); err != nil {
@@ -289,8 +310,21 @@ func (l *fakeLink) serve(c net.Conn) {
 	}
 	var res proto.LinkResume
 	_ = json.Unmarshal(sc.Bytes(), &res)
+	if res.Token != l.token {
+		c.Close()
+		return
+	}
 	l.mu.Lock()
-	var out []byte
+	if l.conn != nil {
+		l.mu.Unlock()
+		_, _ = c.Write([]byte(proto.LinkBusyLine + "\n"))
+		c.Close()
+		return
+	}
+	// The hello's numbers again: events may have come since it was sent.
+	seq = uint64(len(l.lines))
+	first = max(l.first, l.acked+1)
+	out := []byte(proto.LinkOkLine + "\n")
 	after := min(res.After, seq)
 	if after+1 < first {
 		g, _ := json.Marshal(proto.LinkGap{Type: proto.LinkGapType, After: after, First: first})

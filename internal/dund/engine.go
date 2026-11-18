@@ -48,7 +48,9 @@ type execEngine struct {
 }
 
 func (s ExecSpawner) Spawn(workspace string, args []string) (Engine, error) {
-	if linkable(s.EnginesDir) {
+	// A --docker engine is not on the link: its container would outlive
+	// the process dund knows (docs/engine-adoption.md).
+	if linkable(s.EnginesDir) && flagOf(args, "--docker") == "" {
 		return s.spawnLinked(workspace, args)
 	}
 	cmd := exec.Command(s.Bin, append([]string{"--engine", "--workspace", workspace}, args...)...)

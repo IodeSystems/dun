@@ -137,6 +137,11 @@ type session struct {
 	// moving: the move is under way.
 	stale        string
 	live, moving bool
+	// blockPid is an engine from before dund's restart that was not
+	// adopted and may still run on this transcript: no engine starts for
+	// the session while it lives (blocked), and blockWhy says why.
+	blockPid int
+	blockWhy string
 	// fallback is what the next start does if this session's engine is not
 	// adopted after an upgrade's restart: the resume record a stop would
 	// have written (registry).
@@ -519,6 +524,9 @@ func (s *session) ensureRunning() error {
 	}
 	if s.svc.isClosing() {
 		return errors.New("service is shutting down")
+	}
+	if err := s.blocked(); err != nil {
+		return err
 	}
 	eng, err := s.svc.spawner.Spawn(s.workspace, s.spawnArgs())
 	if err != nil {

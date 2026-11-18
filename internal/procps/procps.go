@@ -204,6 +204,9 @@ func (a *attributor) add(p *Proc, group, label, job, root string, orphan bool) {
 // walkSession labels the engine's tree.
 func (a *attributor) walkSession(s proto.ProcSession) {
 	label := SessionLabel(s.ID, s.Workspace)
+	if s.Blocked != "" {
+		label += " (not adopted after dund's restart: " + s.Blocked + "; kill it to go on)"
+	}
 	jobs := map[int]proto.ProcJob{}
 	for _, j := range s.Jobs {
 		if j.PGID != 0 {

@@ -31,3 +31,6 @@ func waitPid(pid int) error {
 	_, err = p.Wait()
 	return err
 }
+
+// pidAlive cannot tell here: taken as alive, so nothing is assumed gone.
+func pidAlive(pid int) bool { return pid > 0 }

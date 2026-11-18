@@ -69,6 +69,8 @@ type Service struct {
 	boxes map[[2]string]*mailbox
 	// gwh is the MCP gateway, started on first use (mcpgw.go).
 	gwh gatewayHolder
+	// peerDone remembers the mutating peer requests done (peerdone.go).
+	peerDone *peerDone
 }
 
 // New opens the registry in dir, loading the sessions it lists. Their engines
@@ -77,7 +79,8 @@ func New(dir string, spawner Spawner) (*Service, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("dund: %w", err)
 	}
-	s := &Service{dir: dir, spawner: spawner, sessions: map[string]*session{}, done: make(chan struct{})}
+	s := &Service{dir: dir, spawner: spawner, sessions: map[string]*session{}, done: make(chan struct{}),
+		peerDone: loadPeerDone(dir)}
 	s.up.init()
 	sched, err := loadScheduler(filepath.Join(dir, "schedule.json"), time.Now)
 	if err != nil {
@@ -118,7 +121,7 @@ func New(dir string, spawner Spawner) (*Service, error) {
 	}
 	// The engines an earlier dund left running (an upgrade's restart) are
 	// taken back first: their sessions are mid-turn for a reason, not cut.
-	adopted := map[string]bool{}
+	adopted := map[string]bool{} // and blocked: adoptAll
 	if ad, ok := spawner.(Adopter); ok {
 		adopted = s.adoptAll(ad)
 	}
@@ -831,6 +834,11 @@ func (s *Service) saveRegistry() error {
 		r.Resume, r.Ask, r.ResumeQuiet, r.Continued = ses.resume, ses.restored, ses.resumeQuiet, ses.continued
 		r.Agents, r.Queued = slices.Clone(ses.cutAgents), slices.Clone(ses.queued)
 		r.Fallback = ses.fallback
+		if fb := ses.fallback; fb != nil && r.Resume == "" && r.Ask == nil {
+			// Also where an older dund reads it (a downgrade): it resumes
+			// the session as before. This dund drops it when it adopts.
+			r.Resume, r.Ask, r.ResumeQuiet, r.Agents = fb.Resume, fb.Ask, fb.Quiet, slices.Clone(fb.Agents)
+		}
 		ses.actMu.Unlock()
 		recs = append(recs, r)
 	}

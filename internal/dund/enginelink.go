@@ -31,9 +31,13 @@ import (
 var (
 	// linkDialWait bounds how long a new engine may take to listen.
 	linkDialWait = 30 * time.Second
-	// linkAckEvery: dund acks this many events at a time (and exactly on
-	// detach), so the engine's ring stays small.
+	// dund acks what it took (and exactly on detach) every linkAckEvery
+	// events or linkAckBytes bytes, whichever first, and linkAckIdle after
+	// the last event it has not acked: the engine waits on a full ring
+	// while attached, so an ack that never comes would hang the turn.
 	linkAckEvery uint64 = 64
+	linkAckBytes        = 1 << 20
+	linkAckIdle         = 200 * time.Millisecond
 	// adoptDial bounds the dial and the hello of an engine at adoption.
 	adoptDial = 3 * time.Second
 	// engineLogKeep: logs of engines long gone are pruned after this.
@@ -99,11 +103,18 @@ type linkEngine struct {
 	mu        sync.Mutex
 	delivered uint64 // the last event handed to Stdout
 	acked     uint64
+	unacked   int // bytes taken since the last ack
+	ackTimer  *time.Timer
 	detaching bool
 	readDone  chan struct{}
 }
 
-// newLinkEngine sends the resume and starts reading.
+// PID is the engine's process (dun ps).
+func (e *linkEngine) PID() int { return e.pid }
+
+// newLinkEngine sends the resume (with the engine's token) and starts
+// reading once the engine took it: errLinkBusy when another dund is
+// attached.
 func newLinkEngine(conn net.Conn, sc *bufio.Scanner, hello proto.LinkHello, p proc, res proto.LinkResume) (*linkEngine, error) {
 	e := &linkEngine{pid: hello.Pid, proc: p, conn: conn, hello: hello, readDone: make(chan struct{}),
 		acked: res.After, delivered: res.After}
@@ -111,6 +122,18 @@ func newLinkEngine(conn net.Conn, sc *bufio.Scanner, hello proto.LinkHello, p pr
 	res.Type = proto.LinkResumeType
 	if err := e.writeJSON(res); err != nil {
 		return nil, fmt.Errorf("engine link: %w", err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(adoptDial))
+	if !sc.Scan() {
+		return nil, errors.New("engine link: the engine refused the resume (a wrong token?)")
+	}
+	_ = conn.SetReadDeadline(time.Time{})
+	switch sc.Text() {
+	case proto.LinkOkLine:
+	case proto.LinkBusyLine:
+		return nil, errLinkBusy
+	default:
+		return nil, fmt.Errorf("engine link: %.80q is not link_ok", sc.Text())
 	}
 	go e.read(sc)
 	return e, nil
@@ -170,15 +193,33 @@ func (e *linkEngine) read(sc *bufio.Scanner) {
 		}
 		e.mu.Lock()
 		e.delivered = seq
-		due := seq-e.acked >= linkAckEvery
-		if due {
-			e.acked = seq
+		e.unacked += len(line)
+		due := seq-e.acked >= linkAckEvery || e.unacked >= linkAckBytes
+		if !due {
+			if e.ackTimer == nil {
+				e.ackTimer = time.AfterFunc(linkAckIdle, e.ackNow)
+			} else {
+				e.ackTimer.Reset(linkAckIdle)
+			}
 		}
 		e.mu.Unlock()
 		if due {
-			_ = e.writeJSON(proto.LinkAck{Type: proto.LinkAckType, Seq: seq})
+			e.ackNow()
 		}
 	}
+}
+
+// ackNow acks what was taken, if anything since the last ack.
+func (e *linkEngine) ackNow() {
+	e.mu.Lock()
+	seq := e.delivered
+	if e.detaching || seq <= e.acked {
+		e.mu.Unlock()
+		return
+	}
+	e.acked, e.unacked = seq, 0
+	e.mu.Unlock()
+	_ = e.writeJSON(proto.LinkAck{Type: proto.LinkAckType, Seq: seq})
 }
 
 // linkGapMark is what Stdout carries for a link_gap: readEvents sends the
@@ -225,6 +266,9 @@ func (e *linkEngine) Kill() {
 func (e *linkEngine) stopReading() {
 	e.mu.Lock()
 	e.detaching = true
+	if e.ackTimer != nil {
+		e.ackTimer.Stop()
+	}
 	e.mu.Unlock()
 	_ = e.conn.SetReadDeadline(time.Now())
 	<-e.readDone
@@ -268,7 +312,8 @@ func dialLink(sock string, timeout time.Duration) (net.Conn, *bufio.Scanner, pro
 	return c, sc, h, nil
 }
 
-// connectNew dials a new engine's socket until it listens or exits.
+// connectNew dials a new engine's socket until it listens or exits; the
+// token is in <pid>.json beside the socket, written before it listens.
 func connectNew(sock string, p *cmdProc, logPath string) (*linkEngine, error) {
 	deadline := time.Now().Add(linkDialWait)
 	delay := 5 * time.Millisecond
@@ -280,7 +325,13 @@ func connectNew(sock string, p *cmdProc, logPath string) (*linkEngine, error) {
 		}
 		c, sc, h, err := dialLink(sock, time.Second)
 		if err == nil {
-			e, err := newLinkEngine(c, sc, h, p, proto.LinkResume{After: 0})
+			info, ierr := readEngineInfo(strings.TrimSuffix(sock, ".sock") + ".json")
+			if ierr != nil {
+				c.Close()
+				p.kill()
+				return nil, fmt.Errorf("engine link: %w", ierr)
+			}
+			e, err := newLinkEngine(c, sc, h, p, proto.LinkResume{After: 0, Token: info.Token})
 			if err != nil {
 				c.Close()
 				p.kill()
@@ -385,7 +436,7 @@ func scopeArgs() []string {
 }
 
 // Adoption is an engine an earlier dund left running, dialed and heard:
-// Accept makes it a session's engine, Refuse ends it.
+// Accept makes it a session's engine.
 type Adoption struct {
 	Info  proto.EngineInfo
 	Hello proto.LinkHello
@@ -394,31 +445,49 @@ type Adoption struct {
 	dir   string
 }
 
-// Accept resumes the engine after what the last dund took, its state first.
+// Accept resumes the engine after what the last dund took, its state
+// first. "Busy" right after a restart is usually the last dund's
+// connection, which the engine has not seen close yet (an in-place exec is
+// quick): it is dialed again for adoptDial.
 func (a *Adoption) Accept() (Engine, error) {
-	e, err := newLinkEngine(a.conn, a.sc, a.Hello, adoptProc(a.Hello.Pid),
-		proto.LinkResume{After: a.Hello.Acked, State: true})
-	if err != nil {
+	deadline := time.Now().Add(adoptDial)
+	for {
+		e, err := newLinkEngine(a.conn, a.sc, a.Hello, adoptProc(a.Hello.Pid),
+			proto.LinkResume{After: a.Hello.Acked, State: true, Token: a.Info.Token})
+		if err == nil {
+			return e, nil
+		}
 		a.conn.Close()
-		return nil, err
+		if !errors.Is(err, errLinkBusy) || time.Now().After(deadline) {
+			return nil, err
+		}
+		time.Sleep(20 * time.Millisecond)
+		c, sc, h, derr := dialLink(engineSock(a.dir, a.Info), adoptDial)
+		if derr != nil {
+			return nil, derr
+		}
+		if h.Pid != a.Info.Pid || h.Session != a.Info.Session {
+			c.Close()
+			return nil, fmt.Errorf("answered as pid %d of session %q", h.Pid, h.Session)
+		}
+		a.conn, a.sc, a.Hello = c, sc, h
 	}
-	return e, nil
 }
 
-// Refuse ends an engine no session takes: it is ours (it answered on its
-// socket with its pid), so it is killed and its files removed.
-func (a *Adoption) Refuse(why string) {
-	log.Printf("dund: engine %d (session %q): %s: killed", a.Hello.Pid, a.Hello.Session, why)
-	a.conn.Close()
-	adoptProc(a.Hello.Pid).kill()
-	removeEngineFiles(a.dir, a.Info.Pid)
+// AdoptFailure is an engine an earlier dund left that is not adopted, and
+// why. It may still run: endEngine ends it, provably, before its session
+// starts another engine (never two on one transcript).
+type AdoptFailure struct {
+	Info proto.EngineInfo
+	Why  string
+	Dir  string // the engines directory
 }
 
 // Adopter is a Spawner that can hand back the engines an earlier dund left.
 // EngineBuild is the build it starts engines on ("" when unknown): an
 // adopted engine of another build moves to it at its next idle.
 type Adopter interface {
-	Adopt() []*Adoption
+	Adopt() ([]*Adoption, []AdoptFailure)
 	EngineBuild() string
 }
 
@@ -426,74 +495,102 @@ type Adopter interface {
 func (s ExecSpawner) EngineBuild() string { return s.Version }
 
 // Adopt is ExecSpawner's: the engines in its EnginesDir.
-func (s ExecSpawner) Adopt() []*Adoption {
+func (s ExecSpawner) Adopt() ([]*Adoption, []AdoptFailure) {
 	if s.EnginesDir == "" {
-		return nil
+		return nil, nil
 	}
 	reapExited()
 	return adoptEngines(s.EnginesDir)
 }
 
-// adoptEngines dials every engine in dir that an earlier dund left and
-// keeps those fit to adopt. An engine of another link or proto version is
-// killed; a dead socket's files are removed; one whose hello does not
-// match its file is left alone. Each refusal is logged.
-func adoptEngines(dir string) []*Adoption {
+func engineSock(dir string, info proto.EngineInfo) string {
+	if info.Sock != "" {
+		return info.Sock
+	}
+	return filepath.Join(dir, strconv.Itoa(info.Pid)+".sock")
+}
+
+func readEngineInfo(path string) (proto.EngineInfo, error) {
+	var info proto.EngineInfo
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return info, err
+	}
+	if err := json.Unmarshal(b, &info); err != nil || info.Pid <= 0 {
+		return info, fmt.Errorf("%s: not an engine entry", path)
+	}
+	return info, nil
+}
+
+// adoptEngines dials every engine in dir that an earlier dund left: the
+// ones fit to adopt, and the others with why. It ends none.
+func adoptEngines(dir string) ([]*Adoption, []AdoptFailure) {
 	pruneEngineLogs(dir)
 	paths, _ := filepath.Glob(filepath.Join(dir, "*.json"))
-	var out []*Adoption
+	var ok []*Adoption
+	var failed []AdoptFailure
 	for _, p := range paths {
-		b, err := os.ReadFile(p)
+		info, err := readEngineInfo(p)
 		if err != nil {
-			continue
-		}
-		var info proto.EngineInfo
-		if json.Unmarshal(b, &info) != nil || info.Pid <= 0 {
-			log.Printf("dund: %s: not an engine entry; removed", p)
+			log.Printf("dund: %v; removed", err)
 			os.Remove(p)
 			continue
 		}
-		sock := info.Sock
-		if sock == "" {
-			sock = filepath.Join(dir, strconv.Itoa(info.Pid)+".sock")
-		}
-		c, sc, h, err := dialAdopt(sock)
-		if err != nil {
-			log.Printf("dund: engine %d (session %q) not adopted: %v; its session resumes from the record", info.Pid, info.Session, err)
-			if !errors.Is(err, errLinkBusy) {
-				removeEngineFiles(dir, info.Pid)
-			}
-			continue
-		}
-		a := &Adoption{Info: info, Hello: h, conn: c, sc: sc, dir: dir}
+		fail := func(why string) { failed = append(failed, AdoptFailure{Info: info, Why: why, Dir: dir}) }
+		c, sc, h, err := dialLink(engineSock(dir, info), adoptDial)
 		switch {
+		case err != nil:
+			fail(err.Error())
+			continue
 		case h.Pid != info.Pid || h.Session != info.Session:
-			log.Printf("dund: engine %d answered as pid %d of session %q, not session %q: left alone", info.Pid, h.Pid, h.Session, info.Session)
 			c.Close()
+			fail(fmt.Sprintf("answered as pid %d of session %q", h.Pid, h.Session))
 			continue
 		case h.Link != proto.LinkVersion || h.Proto != proto.Version:
-			a.Refuse(fmt.Sprintf("link %d proto %d, this dund speaks link %d proto %d", h.Link, h.Proto, proto.LinkVersion, proto.Version))
+			c.Close()
+			fail(fmt.Sprintf("link %d proto %d, this dund speaks link %d proto %d", h.Link, h.Proto, proto.LinkVersion, proto.Version))
 			continue
 		case h.Session == "":
-			a.Refuse("it never named a session")
+			c.Close()
+			fail("it never named a session")
 			continue
 		}
-		out = append(out, a)
+		ok = append(ok, &Adoption{Info: info, Hello: h, conn: c, sc: sc, dir: dir})
 	}
-	return out
+	return ok, failed
 }
 
-// dialAdopt is dialLink for an adoption. "Busy" right after a restart is
-// usually the last dund's connection, which the engine has not seen close
-// yet (an in-place exec is quick): tried again for adoptDial.
-func dialAdopt(sock string) (net.Conn, *bufio.Scanner, proto.LinkHello, error) {
-	deadline := time.Now().Add(adoptDial)
-	for {
-		c, sc, h, err := dialLink(sock, adoptDial)
-		if !errors.Is(err, errLinkBusy) || time.Now().After(deadline) {
-			return c, sc, h, err
-		}
-		time.Sleep(20 * time.Millisecond)
+// endEngine ends an engine that is not adopted and reports whether it is
+// gone: not running, or a pid since reused by another program, or killed
+// and seen to exit. false: it may still run (it could not be proven an
+// engine, or did not exit), and its session must not start another. A
+// variable: the tests' engines are no processes.
+var endEngine = func(dir string, info proto.EngineInfo, why string) bool {
+	pid := info.Pid
+	if !pidAlive(pid) {
+		removeEngineFiles(dir, pid)
+		return true
+	}
+	switch verifyEngine(pid, dir, info.Started) {
+	case engineNot:
+		log.Printf("dund: engine %d (session %q) not adopted (%s): the pid is another program now", pid, info.Session, why)
+		removeEngineFiles(dir, pid)
+		return true
+	case engineUnknown:
+		log.Printf("dund: engine %d (session %q) not adopted (%s), and it cannot be told whether pid %d is still that engine: left alone, its session not resumed", pid, info.Session, why, pid)
+		return false
+	}
+	log.Printf("dund: engine %d (session %q) not adopted (%s): killed", pid, info.Session, why)
+	killPidGroup(pid)
+	done := make(chan struct{})
+	go func() { _ = waitPid(pid); close(done) }()
+	select {
+	case <-done:
+		removeEngineFiles(dir, pid)
+		return true
+	case <-time.After(5 * time.Second):
+		log.Printf("dund: engine %d did not exit after SIGKILL: its session is not resumed", pid)
+		return false
 	}
 }
 

@@ -77,3 +77,12 @@ func waitPid(pid int) error {
 		time.Sleep(pidPoll)
 	}
 }
+
+// pidAlive: a process with this pid exists (EPERM: one of another user).
+func pidAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || err == syscall.EPERM
+}
