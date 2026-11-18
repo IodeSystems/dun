@@ -452,6 +452,17 @@ func (c *conn) handle(cmd proto.Command) {
 		}
 		ses, err := svc.Get(c.who, cmd.Session)
 		if err == nil {
+			// An automatic message while an upgrade is pending waits for the
+			// restart; the sender is told, with or without a cid.
+			if held, qerr := svc.queueIfUpgrading(ses, cmd); held {
+				if qerr != nil {
+					c.ack(cmd, cmd.Session, qerr)
+					return
+				}
+				c.reply(cmd, cmd.Session, &proto.Ack{Queued: queuedText})
+				return
+			}
+			ses.personEnded(cmd)
 			err = ses.send(stampAnswer(cmd, c.who))
 		}
 		if a, ok := p.(*proto.AgentCmd); ok && err == nil {

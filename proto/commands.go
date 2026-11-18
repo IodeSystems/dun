@@ -22,6 +22,11 @@ func init() {
 type User struct {
 	Content string  `json:"content"`
 	Images  []Image `json:"images,omitempty"`
+	// Auto: no person typed it; a program sent it (dun mcp's dun_start and
+	// dun_send). While an upgrade is pending dund queues an automatic
+	// message for after the restart instead of starting its turn now; a
+	// person's message starts at once (USER 2026-11-17).
+	Auto bool `json:"auto,omitempty"`
 }
 
 // Image is one image attached to a user message: a file the engine reads,
@@ -57,8 +62,11 @@ type ControlCmd struct {
 
 // AgentCmd views or steers a sub-agent. ID is its number, as a string.
 type AgentCmd struct {
-	ID      string `json:"id"`
-	Action  string `json:"action"` // view (history, then agent_entry events) | leave (ends the view) | tell
+	ID string `json:"id"`
+	// view (history, then agent_entry events) | leave (ends the view) | tell |
+	// continue (dund after a restart: restart a child the restart cut, if it
+	// is stopped, and tell it Content)
+	Action  string `json:"action"`
 	Content string `json:"content,omitempty"`
 }
 

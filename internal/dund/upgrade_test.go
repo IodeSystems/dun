@@ -324,9 +324,9 @@ func TestUpgradeNowWithNothingPending(t *testing.T) {
 
 // A message for a session cut by a crash says so.
 func TestResumeMessage(t *testing.T) {
-	m := resumeMessage("dund stopped unexpectedly", true, nil, []proto.AgentInfo{{ID: 2}})
+	m := resumeMessage("dund stopped unexpectedly", true, nil, []proto.AgentInfo{{ID: 2, Prompt: "lint"}}, []string{`exec {"cmd":"make"}`})
 	for _, want := range []string{"[automatic] dund stopped unexpectedly while you were working; your turn was interrupted",
-		"sub-agents: #2", "Resume the task."} {
+		"sub-agents mid-run: #2 (lint)", "The tool call in flight was cut: `exec {\"cmd\":\"make\"}`", "Resume the task."} {
 		if !strings.Contains(m, want) {
 			t.Errorf("%q lacks %q", m, want)
 		}
@@ -335,7 +335,7 @@ func TestResumeMessage(t *testing.T) {
 		t.Errorf("%q tells the agent to ask again", m)
 	}
 	// A question cut beside a job: the answer carries what was killed.
-	a := answerMessage("Which?", "b", resumeMessage("dund restarted", false, []proto.JobInfo{{ID: 3, Command: "make"}}, nil))
+	a := answerMessage("Which?", "b", resumeMessage("dund restarted", false, []proto.JobInfo{{ID: 3, Command: "make"}}, nil, nil))
 	if a != "[automatic] Answer to your question \"Which?\": b\ndund restarted while you were working. "+
 		"The restart killed these background jobs: #3 `make`; start again the ones you still need. Resume the task." {
 		t.Errorf("answer %q", a)

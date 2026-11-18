@@ -293,7 +293,7 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 				s.users <- msg
 			case "answer":
 				s.answers <- proto.Answer{Value: ev.Value, AskID: ev.AskID, By: ev.By}
-			case "peer", "peer_reply", "servers", "service_notice", "mcp_notify":
+			case "peer", "peer_reply", "servers", "service_notice", "upgrade_hold", "mcp_notify":
 				// Never an answer: a peer message cannot close an open
 				// ask_user, whatever it says.
 				s.peerCmd(ev.Type, []byte(line))

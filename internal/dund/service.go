@@ -52,6 +52,9 @@ type Service struct {
 	done     chan struct{} // closed by Close
 
 	up upgrader // a pending restart into a new build (upgrade.go)
+	// stopWhy is a planned stop's reason, once PrepareStop began (until it
+	// fails). Guarded by mu.
+	stopWhy string
 
 	// sched holds and fires the scheduled messages and loops (schedule.go).
 	sched *scheduler
@@ -101,10 +104,12 @@ func New(dir string, spawner Spawner) (*Service, error) {
 	for _, r := range recs {
 		ses := &session{svc: s, id: r.ID, workspace: r.Workspace, owner: r.Owner,
 			members: r.Members, args: r.Args, persist: r.Persist, resume: r.Resume, restored: r.Ask,
+			resumeQuiet: r.ResumeQuiet, continued: r.Continued, cutAgents: r.Agents, queued: r.Queued,
 			log: proto.NewLog(r.ID, logCapacity), shown: true}
 		// A session nothing was ever asked in is not kept (USER 2026-10-22);
-		// no engine runs yet, so it can simply be left out.
-		if !ses.persist && !ses.hasMessages() && !sched.has(r.ID) {
+		// no engine runs yet, so it can simply be left out. One with a
+		// message queued for now is: that message is its first.
+		if !ses.persist && !ses.hasMessages() && !sched.has(r.ID) && len(r.Queued) == 0 {
 			ses.log.Close()
 			dropped++
 			continue
@@ -116,7 +121,9 @@ func New(dir string, spawner Spawner) (*Service, error) {
 	// way, and said so.
 	for _, ses := range s.sessions {
 		if ses.resume == "" && ses.restored == nil && crashedMidTurn(ses.workspace, ses.id) {
-			ses.resume = resumeMessage("dund stopped unexpectedly (a crash, or it was killed)", true, nil, nil)
+			ses.resume = resumeMessage("dund stopped unexpectedly (a crash, or it was killed)", true, nil, nil, nil)
+			// The turn that crashed it was dund's own continue: not again.
+			ses.resumeQuiet = ses.continued
 		}
 	}
 	if dropped > 0 {
@@ -397,6 +404,7 @@ func (s *Service) Send(principal, id string, c proto.Command) error {
 	if err != nil {
 		return err
 	}
+	ses.personEnded(c)
 	return ses.send(stampAnswer(c, principal))
 }
 
@@ -618,6 +626,7 @@ func (s *Service) Stop(principal, id string) error {
 	if err != nil {
 		return err
 	}
+	ses.personEnded(proto.NewCommand("", &proto.Stop{}))
 	ses.stop()
 	s.dropIfEmpty(ses)
 	return nil
@@ -761,6 +770,18 @@ type record struct {
 	// Ask is the ask_user question the stop cut: shown again on the next
 	// start, and its answer wakes the session (upgrade.go restoredReply).
 	Ask *proto.Ask `json:"ask,omitempty"`
+	// ResumeQuiet: Resume goes as a quiet note, waking nothing: the stop
+	// cut a turn that was itself an automatic continue (upgrade.go).
+	ResumeQuiet bool `json:"resume_quiet,omitempty"`
+	// Continued: the last start woke the session to go on with cut work,
+	// and that turn has not ended yet.
+	Continued bool `json:"continued,omitempty"`
+	// Agents are the sub-agents the stop cut mid-run: each is told to go on
+	// with its task on the next start.
+	Agents []int `json:"agents,omitempty"`
+	// Queued are automatic messages held while an upgrade was pending: sent
+	// on the next start (USER 2026-11-17).
+	Queued []string `json:"queued,omitempty"`
 }
 
 func (s *Service) registryPath() string { return filepath.Join(s.dir, "sessions.json") }
@@ -794,9 +815,13 @@ func (s *Service) saveRegistry() error {
 	s.mu.Lock()
 	recs := make([]record, 0, len(s.sessions))
 	for _, ses := range s.sessions {
-		recs = append(recs, record{ID: ses.id, Workspace: ses.workspace, Owner: ses.owner,
-			Members: ses.members, Args: ses.args, Persist: ses.persist, Resume: ses.resumeNote(),
-			Ask: ses.restoredAsk()})
+		r := record{ID: ses.id, Workspace: ses.workspace, Owner: ses.owner,
+			Members: ses.members, Args: ses.args, Persist: ses.persist}
+		ses.actMu.Lock()
+		r.Resume, r.Ask, r.ResumeQuiet, r.Continued = ses.resume, ses.restored, ses.resumeQuiet, ses.continued
+		r.Agents, r.Queued = slices.Clone(ses.cutAgents), slices.Clone(ses.queued)
+		ses.actMu.Unlock()
+		recs = append(recs, r)
 	}
 	s.mu.Unlock()
 	sort.Slice(recs, func(i, j int) bool { return recs[i].ID < recs[j].ID })

@@ -52,7 +52,7 @@ func (s *Service) handlePeer(from *session, eng Engine, req proto.PeerRequest) {
 		if err != nil {
 			rep.Error = err.Error()
 		}
-		rep.ID, rep.Name, rep.Busy, rep.Started = d.ID, d.Name, d.Busy, d.Started
+		rep.ID, rep.Name, rep.Busy, rep.Started, rep.Queued = d.ID, d.Name, d.Busy, d.Started, d.Queued
 	case "sched":
 		if req.Sched == nil {
 			rep.Error = "sched: no operation"
@@ -108,6 +108,7 @@ type PeerDelivery struct {
 	Name    string // and its name
 	Busy    bool   // it was in a turn: the message rides that turn
 	Started bool   // it was idle and woken: a turn starts there
+	Queued  bool   // idle, not woken: dund is upgrading; woken after the restart
 }
 
 // PeerSend delivers text from session from to session to (a name from
@@ -179,8 +180,16 @@ func (s *Service) PeerSend(principal, from, to, text string, wake bool) (PeerDel
 	if !s.peerAllow(from, dst.ID, time.Now()) {
 		return PeerDelivery{}, fmt.Errorf("rate limit: at most %d messages a minute to %s — wait for its reply", peerRateMax, dst.Name)
 	}
+	if s.stopReason() != "" {
+		return PeerDelivery{}, errRestarting
+	}
 	d := PeerDelivery{ID: dst.ID, Name: dst.Name, Busy: ses.busy()}
 	d.Started = wake && !d.Busy
+	if d.Started && s.UpgradeStatus() != nil {
+		// Its engine is held (proto.UpgradeHold): it keeps the message,
+		// and is woken for it after the restart.
+		d.Started, d.Queued = false, true
+	}
 	msg := proto.PeerMsg{From: from, FromName: src.Name, Text: text, Wake: wake}
 	if err := ses.sendLoaded(proto.NewCommand("", &msg)); err != nil {
 		return PeerDelivery{}, fmt.Errorf("%s: %w", dst.Name, err)

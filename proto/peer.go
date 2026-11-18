@@ -54,9 +54,12 @@ type PeerReply struct {
 	Name     string        `json:"name,omitempty"`
 	Busy     bool          `json:"busy,omitempty"`
 	Started  bool          `json:"started,omitempty"`
-	Sched    *SchedReply   `json:"sched,omitempty"`
-	OAuth    *OAuthResult  `json:"oauth,omitempty"`
-	Share    *McpShareRep  `json:"share,omitempty"`
+	// Queued: the target was idle and would have been woken, but an upgrade
+	// is pending: it holds the message and reads it after the restart.
+	Queued bool         `json:"queued,omitempty"`
+	Sched  *SchedReply  `json:"sched,omitempty"`
+	OAuth  *OAuthResult `json:"oauth,omitempty"`
+	Share  *McpShareRep `json:"share,omitempty"`
 }
 
 // McpShareReq asks dund's gateway for a shared server's endpoint: Request
@@ -145,6 +148,9 @@ type PeerMsg struct {
 	FromName string `json:"from_name"`
 	Text     string `json:"text"`
 	Wake     bool   `json:"wake,omitempty"`
+	// Human: a person sent it (`dun msg` from a shell), not another
+	// session's agent. Its wake is not held by an upgrade (UpgradeHold).
+	Human bool `json:"human,omitempty"`
 }
 
 // ServersChanged tells an engine that another session of its owner wrote the
