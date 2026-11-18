@@ -90,6 +90,15 @@ export default function SignIn() {
     }
   }
 
+  // Web: dund's own page signs in (cookie); this screen is never shown.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !auth.ready || auth.token) return;
+    const why = landing()?.error;
+    window.location.replace(
+      '/auth/signin?return=' + encodeURIComponent('/web/') + (why ? '&error=' + encodeURIComponent(why) : ''),
+    );
+  }, [auth.ready, auth.token]);
+
   // Signed in (a token kept, here or from the provider's landing): go on.
   useEffect(() => {
     if (auth.ready && auth.token) router.replace('/');
