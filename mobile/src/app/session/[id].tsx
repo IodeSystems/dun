@@ -29,6 +29,7 @@ import {
   SwitchModel,
   UpgradeNow,
 } from '@/api/ops';
+import { CopyRaw } from '@/components/CopyRaw';
 import { Markdown } from '@/components/markdown/Markdown';
 import { McpForm } from '@/components/McpForm';
 import { McpToolsPanel } from '@/components/McpToolsPanel';
@@ -732,6 +733,7 @@ function Row({ item }: { item: Item }) {
             {item.text}
             {item.queued ? '  (queued)' : item.lost ? '  (not delivered: the engine stopped)' : ''}
           </Text>
+          <CopyRaw item={item} />
         </View>
       );
     case 'assistant':
@@ -746,6 +748,7 @@ function Row({ item }: { item: Item }) {
           }}
         >
           <Markdown text={item.text} streaming={item.key === 'streaming'} />
+          {item.key === 'streaming' ? null : <CopyRaw item={item} />}
         </View>
       );
     case 'tools':
