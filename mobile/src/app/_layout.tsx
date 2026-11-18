@@ -29,7 +29,7 @@ export default function RootLayout() {
     const loc = (globalThis as { location?: { reload(): void } }).location;
     let first: string | null = null;
     const tick = () => {
-      void fetch('/version.json', { cache: 'no-store' })
+      void fetch((process.env.EXPO_BASE_URL ?? '') + '/version.json', { cache: 'no-store' })
         .then((r) => r.json())
         .then((j: { v?: string }) => {
           const v = j.v ?? '';

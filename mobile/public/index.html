@@ -5,9 +5,9 @@
     <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
     <title>%WEB_TITLE%</title>
-    <link rel="manifest" href="/manifest.json" />
+    <link rel="manifest" href="/web/manifest.json" />
     <meta name="theme-color" content="#161615" />
-    <link rel="apple-touch-icon" href="/logo192.png" />
+    <link rel="apple-touch-icon" href="/web/logo192.png" />
     <!-- The `react-native-web` recommended style reset: https://necolas.github.io/react-native-web/docs/setup/#root-element -->
     <style id="expo-reset">
       /* These styles make the body full-height */
@@ -37,7 +37,23 @@
       // Installable, and the shell opens offline (public/sw.js).
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', function () {
-          navigator.serviceWorker.register('/sw.js').catch(function () {});
+          // The app moved from / to /web/. A worker installed with scope /
+          // still serves the old shell at /: drop every registration whose
+          // scope is not /web/ (the root one is the only such case).
+          navigator.serviceWorker
+            .getRegistrations()
+            .then(function (rs) {
+              return Promise.all(
+                rs.map(function (r) {
+                  return new URL(r.scope).pathname === '/web/' ? null : r.unregister();
+                }),
+              );
+            })
+            .catch(function () {})
+            .then(function () {
+              return navigator.serviceWorker.register('/web/sw.js', { scope: '/web/' });
+            })
+            .catch(function () {});
         });
       }
     </script>

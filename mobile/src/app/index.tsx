@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Redirect, router, Stack } from 'expo-router';
 import { useEffect } from 'react';
-import { ActivityIndicator, FlatList, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Platform, Pressable, Text, View } from 'react-native';
 
 import { explain, UnauthorizedError } from '@/api/client';
 import { ListSessions } from '@/api/ops';
@@ -42,9 +42,16 @@ export default function Sessions() {
       <Stack.Screen
         options={{
           headerRight: () => (
-            <Pressable onPress={() => void auth.signOut()} style={{ paddingHorizontal: space.md }}>
-              <Text style={{ color: c.muted }}>Sign out</Text>
-            </Pressable>
+            <View style={{ flexDirection: 'row' }}>
+              {Platform.OS === 'web' ? (
+                <Pressable onPress={() => window.location.assign('/?choose=1')} style={{ paddingHorizontal: space.md }}>
+                  <Text style={{ color: c.muted }}>Switch</Text>
+                </Pressable>
+              ) : null}
+              <Pressable onPress={() => void auth.signOut()} style={{ paddingHorizontal: space.md }}>
+                <Text style={{ color: c.muted }}>Sign out</Text>
+              </Pressable>
+            </View>
           ),
         }}
       />

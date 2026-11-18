@@ -4,10 +4,12 @@
 //
 // Pages: network first (a new build is picked up at once), the cached shell
 // when offline. Hashed bundles (/_expo/…) and icons: cache first.
-const CACHE = 'dun-v2';
+const CACHE = 'dun-v3';
+// The app is served under /web/ (app.json experiments.baseUrl); /api etc. stay at the root.
+const B = '/web';
 // Type-checked through public/tsconfig.json (webworker lib).
 const sw = /** @type {ServiceWorkerGlobalScope} */ (/** @type {unknown} */ (self));
-const SHELL = ['/', '/manifest.json', '/logo192.png', '/logo512.png', '/favicon.ico'];
+const SHELL = [B + '/', B + '/manifest.json', B + '/logo192.png', B + '/logo512.png', B + '/favicon.ico'];
 
 sw.addEventListener('install', (e) => {
   e.waitUntil(
@@ -35,19 +37,19 @@ sw.addEventListener('fetch', (e) => {
       fetch(e.request)
         .then((r) => {
           const copy = r.clone();
-          e.waitUntil(caches.open(CACHE).then((c) => c.put('/', copy)));
+          e.waitUntil(caches.open(CACHE).then((c) => c.put(B + '/', copy)));
           return r;
         })
-        .catch(async () => (await caches.match('/')) ?? Response.error()),
+        .catch(async () => (await caches.match(B + '/')) ?? Response.error()),
     );
     return;
   }
-  if (url.pathname === '/version.json') {
+  if (url.pathname === B + '/version.json') {
     // The deploy stamp: never cached, so a polling client sees a new build.
     e.respondWith(fetch(e.request));
     return;
   }
-  if (url.pathname.startsWith('/_expo/') || SHELL.includes(url.pathname)) {
+  if (url.pathname.startsWith(B + '/_expo/') || SHELL.includes(url.pathname)) {
     e.respondWith(
       caches.match(e.request).then(
         (hit) =>

@@ -11,9 +11,16 @@ export class UnauthorizedError extends Error {
   }
 }
 
+/**
+ * The web build holds no bearer: dund's session cookie (HttpOnly, same
+ * origin) authenticates it. This stands in for a token in app state.
+ */
+export const COOKIE_SESSION = 'cookie';
+
 export function makeClient(baseUrl: string, token: string): GraphQLClient {
   return new GraphQLClient(baseUrl.replace(/\/+$/, '') + '/api/graphql', {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: token === COOKIE_SESSION ? {} : { Authorization: `Bearer ${token}` },
+    credentials: 'same-origin',
   });
 }
 
