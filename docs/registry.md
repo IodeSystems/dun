@@ -63,7 +63,7 @@ key (`release/minisign.pub`, with the updater's key rotation).
 - **Tool pins:** an entry for this dun raises Min and Recommended above the
   built-in ones (never lowers them); `dun doctor --fix`, and a session that
   first needs the tool, download from its
-  files into `$DUN_HOME/tools/<tool>/<version>/`, sha256 checked, as from
+  files into `$DUN_HOME/tools/<tool>/<version>/<goos>-<goarch>/`, sha256 checked, as from
   deps.json. `/upgrade` (USER
   2026-11-04) lists each tool against its pin through `dun tools`, which
   fetches the index first; `/upgrade now` runs `dun tools --upgrade` (the

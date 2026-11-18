@@ -51,7 +51,7 @@ const lspCLITimeout = 15 * time.Second
 // runLSPCLI runs `<code server's command> lsp <args>` with its environment
 // (its daemon home among it), in the workspace.
 var runLSPCLI = func(ctx context.Context, command string, env []string, dir string, args ...string) ([]byte, error) {
-	p, err := mcpserver.FindCommand(command)
+	p, err := mcpserver.FindCommandContext(ctx, command)
 	if err != nil {
 		return nil, err
 	}

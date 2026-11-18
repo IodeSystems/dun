@@ -3,10 +3,13 @@
 package fsutil
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
+	"time"
 )
 
 // WriteAtomic replaces path with data via a temp file in the same
@@ -74,4 +77,35 @@ func LockFile(path string) (func(), error) {
 		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 		f.Close()
 	}, nil
+}
+
+// lockPoll is how often LockFileContext tries again while the lock is held.
+const lockPoll = 100 * time.Millisecond
+
+// LockFileContext is LockFile that stops waiting when ctx ends: a
+// non-blocking flock, tried again every lockPoll.
+func LockFileContext(ctx context.Context, path string) (func(), error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("dun: lock %s: %w", path, err)
+	}
+	for {
+		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return func() {
+				_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+				f.Close()
+			}, nil
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EINTR) {
+			f.Close()
+			return nil, fmt.Errorf("dun: lock %s: %w", path, err)
+		}
+		select {
+		case <-ctx.Done():
+			f.Close()
+			return nil, fmt.Errorf("dun: lock %s: %w", path, context.Cause(ctx))
+		case <-time.After(lockPoll):
+		}
+	}
 }

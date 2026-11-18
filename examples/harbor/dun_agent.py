@@ -86,6 +86,9 @@ class Dun(BaseInstalledAgent):
             # "none", so a fold (effort off) is sent as low instead.
             "DUN_EFFORT_OFF": os.environ.get("DUN_EFFORT_OFF", "low"),
             "DUN_NO_AUTOBUILD": "1",
+            # dun runs its own tools from DUN_HOME, not PATH or its directory:
+            # point it at the mcpshell uploaded beside it.
+            "DUN_MCPSHELL": f"{REMOTE}/mcpshell",
             # Evals run with no memory (USER 2026-11-08): no notes carried
             # between trials. A run that wants memory sets DUN_MEMORY.
             "DUN_MEMORY": os.environ.get("DUN_MEMORY", "0"),

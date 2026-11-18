@@ -18,7 +18,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/iodesystems/dun/internal/fsutil"
 	"github.com/iodesystems/dun/internal/update"
 	"github.com/iodesystems/dun/release"
 )
@@ -64,6 +66,14 @@ func TestResolveTool_Order(t *testing.T) {
 	if !errors.As(err, &miss) || !strings.Contains(err.Error(), "no eval tool") || !strings.Contains(err.Error(), "dun doctor") {
 		t.Fatalf("missing mcpshell: %v", err)
 	}
+	// The copy on PATH is named as unused, with how to use it, in one line.
+	onPath := filepath.Join(os.Getenv("PATH"), "mcpshell")
+	if want := "; " + onPath + " on PATH is not used (set DUN_MCPSHELL or tools.mcpshell.path to use it)"; !strings.HasSuffix(err.Error(), want) || strings.Contains(err.Error(), "\n") {
+		t.Errorf("missing with a copy on PATH: %v", err)
+	}
+	if got := PinnedPath("mcpshell", "v1.0.0"); got != filepath.Join(home, "tools", "mcpshell", "v1.0.0", runtime.GOOS+"-"+runtime.GOARCH, "mcpshell") {
+		t.Errorf("PinnedPath %s", got)
+	}
 
 	// A kept copy at or past Min runs when the pin's is not there; one
 	// below Min does not.
@@ -78,7 +88,7 @@ func TestResolveTool_Order(t *testing.T) {
 	}
 
 	// The pin's copy.
-	want := exe(t, filepath.Join(home, "tools", "mcpshell", pin, "mcpshell"))
+	want := exe(t, PinnedPath("mcpshell", pin))
 	if r := ResolveTool("mcpshell"); r.Source != SourcePinned || r.Path != want || r.Version != pin || r.Stale() {
 		t.Errorf("pinned: %+v", r)
 	}
@@ -261,5 +271,30 @@ func TestEnsureCommand_NonReleaseDoesNotFetch(t *testing.T) {
 	}
 	if _, _, ok := PinnedDownload("mcpshell"); ok {
 		t.Error("a non-release build has a pinned download")
+	}
+}
+
+// A session waiting for another dun's fetch stops waiting when its ctx
+// ends (closed, or the server switched off): the tool is missing, not hung.
+func TestEnsureCommand_WaitHonoursContext(t *testing.T) {
+	toolHome(t)
+	_, gate := fakeRelease(t, true, "")
+	defer close(gate)
+	dir := filepath.Join(ToolsDir(), "mcpshell")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := fsutil.LockFile(filepath.Join(dir, ".lock")) // another dun fetching
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	t0 := time.Now()
+	_, err = EnsureCommand(ctx, "mcpshell", nil)
+	var miss *MissingError
+	if !errors.As(err, &miss) || time.Since(t0) > 5*time.Second {
+		t.Fatalf("after %s: %v", time.Since(t0), err)
 	}
 }

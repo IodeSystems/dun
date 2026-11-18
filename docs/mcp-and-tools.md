@@ -11,7 +11,7 @@ poly-lsp-mcp and raglit are resolved, in order:
 | source | where |
 |---|---|
 | override | `$DUN_MCPSHELL`, `$DUN_POLY_LSP_MCP`, `$DUN_RAGLIT`; else `"tools": {"<name>": {"path": "…"}}` in `$DUN_HOME/mcp.json` (env wins); a server entry whose `command` is a path is used as it is |
-| pinned | `$DUN_HOME/tools/<tool>/<version>/<tool>`, the version this dun pins; else the newest kept copy at or past Min |
+| pinned | `$DUN_HOME/tools/<tool>/<version>/<goos>-<goarch>/<tool>`, the version this dun pins; else the newest kept copy at or past Min |
 | missing | the server is off, with the `dun doctor` hint |
 
 PATH and dun's own directory are not searched for these. A release build

@@ -1161,7 +1161,7 @@ weeks; the version was checked only in `dun doctor` and `dun tools`.
 `internal/mcpserver/tools.go`.
 
 - **Managed first.** For each tool: an override, else the pinned copy at
-  `$DUN_HOME/tools/<tool>/<version>/<tool>`, else not installed. The user's
+  `$DUN_HOME/tools/<tool>/<version>/<goos>-<goarch>/<tool>`, else not installed. The user's
   PATH and dun's directory are not searched for these three. Other commands
   (git, language servers, ant) are found on PATH as before.
 - **Overrides.** `$DUN_MCPSHELL`, `$DUN_POLY_LSP_MCP`, `$DUN_RAGLIT`, else
@@ -1188,7 +1188,7 @@ weeks; the version was checked only in `dun doctor` and `dun tools`.
   event). A failure is "not installed"; the session goes on. A build that
   is not a release does not fetch; its `doctor --fix` runs `go install`
   with GOBIN set to a temp directory under `tools/<tool>/`, then renames the
-  binary into `tools/<tool>/<version>/`.
+  binary into `tools/<tool>/<version>/<goos>-<goarch>/`.
 - **Old versions are kept; there is no prune.** When the pin's directory is
   missing (the registry raised the pin while offline, or a build that does
   not fetch), the newest kept copy at or past Min runs, and doctor and the
@@ -1198,6 +1198,17 @@ weeks; the version was checked only in `dun doctor` and `dun tools`.
   there, unused. doctor names each copy on PATH or in dun's directory as
   "unused (dun uses <managed path>)", with the `rm`, and `tools.<name>.path`
   to keep using it.
+- **Images set the overrides.** The Dockerfile (`--docker`) sets
+  `DUN_MCPSHELL`, `DUN_POLY_LSP_MCP` and `DUN_RAGLIT` to its
+  `/usr/local/bin` copies; the harbor agent sets `DUN_MCPSHELL` to the copy
+  it uploads; the release workflow exports all three for its tests.
+- **A waiting fetch ends with its context**: the lock is a non-blocking
+  flock tried again every 100 ms (`fsutil.LockFileContext`), so an engine
+  closed or a server switched off while another dun downloads stops waiting.
+  The per-platform directory lets one DUN_HOME on a shared disk serve Linux
+  and macOS.
+- **A copy on PATH is named** in the session's "not installed" line, with
+  `DUN_<TOOL>` / `tools.<name>.path` to use it.
 - **dund and engines** resolve through the same code in the same DUN_HOME,
   so the service's PATH no longer matters for these tools; doctor's
   service-PATH warning is kept for git only.

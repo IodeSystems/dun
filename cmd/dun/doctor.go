@@ -39,7 +39,7 @@ import (
 // self-updating build's source tree and Go. Exit 1 when anything fails.
 //
 // `dun doctor --fix` installs a missing tool into $DUN_HOME/tools/<tool>/
-// <version>/ (owner, item 49; USER 2026-11-18): a release build downloads
+// <version>/<goos>-<goarch>/ (owner, item 49; USER 2026-11-18): a release build downloads
 // it from the release the build was made with, checked against the sha256
 // pinned in the build (release.Deps, mcpserver.FetchPinned: the same code a
 // session's first need runs); any other build runs `go install

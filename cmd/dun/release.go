@@ -32,7 +32,7 @@ var channel = ""
 var pinnedTool = mcpserver.PinnedDownload
 
 // installPinned downloads name's pinned release into its managed directory,
-// $DUN_HOME/tools/<name>/<version>/ (mcpserver.FetchPinned: the same code a
+// $DUN_HOME/tools/<name>/<version>/<goos>-<goarch>/ (mcpserver.FetchPinned: the same code a
 // session's first need runs). A variable for the tests.
 var installPinned = func(name string) (string, error) {
 	return mcpserver.FetchPinned(context.Background(), name, func(s string) { fmt.Fprintln(os.Stderr, s) })

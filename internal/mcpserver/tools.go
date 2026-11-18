@@ -29,7 +29,7 @@ import (
 //	                 tools.<name>.path in $DUN_HOME/mcp.json (env wins, as
 //	                 env does over every config file); a server entry whose
 //	                 command is a path is used as it is, before either
-//	the pinned copy  $DUN_HOME/tools/<name>/<version>/<name>, the version
+//	the pinned copy  $DUN_HOME/tools/<name>/<version>/<goos>-<goarch>/<name>, the version
 //	                 this dun pins (PinVersion); when that one is not
 //	                 there, the newest kept copy at or past the tool's Min
 //	not installed    a MissingError
@@ -70,8 +70,9 @@ func pinned(name string) string {
 // MissingError is a server command that is not installed: a managed tool
 // with no override and no pinned copy, or another command on neither PATH
 // nor beside dun. Why, when set, is the reason (an override that is not an
-// executable, a fetch that failed).
-type MissingError struct{ Command, Why string }
+// executable, a fetch that failed). OnPath is a copy of a managed tool
+// on PATH, which dun no longer runs: said, with how to use it.
+type MissingError struct{ Command, Why, OnPath string }
 
 func (e *MissingError) Error() string {
 	msg := e.Command + " is not installed"
@@ -81,7 +82,20 @@ func (e *MissingError) Error() string {
 	if t, ok := ToolInstall[e.Command]; ok {
 		msg += ": " + t.Lost
 	}
-	return msg + " — dun doctor says how to get it"
+	msg += " — dun doctor says how to get it"
+	if e.OnPath != "" {
+		msg += "; " + e.OnPath + " on PATH is not used (set " + ToolEnv(e.Command) + " or tools." + e.Command + ".path to use it)"
+	}
+	return msg
+}
+
+// missingTool is managed tool name's MissingError, naming a copy on PATH.
+func missingTool(name, why string) *MissingError {
+	e := &MissingError{Command: name, Why: why}
+	if p, err := exec.LookPath(name); err == nil {
+		e.OnPath = p
+	}
+	return e
 }
 
 // Tool sources (Resolved.Source).
@@ -124,9 +138,11 @@ func ToolEnv(name string) string {
 // ToolsDir is where the pinned copies are: $DUN_HOME/tools.
 func ToolsDir() string { return filepath.Join(dunHomeDir(), "tools") }
 
-// PinnedPath is name's copy at version: $DUN_HOME/tools/<name>/<version>/<name>.
+// PinnedPath is name's copy at version for this machine:
+// $DUN_HOME/tools/<name>/<version>/<goos>-<goarch>/<name> (a DUN_HOME on a
+// shared or synced disk can hold several platforms' copies).
 func PinnedPath(name, version string) string {
-	return filepath.Join(ToolsDir(), name, version, name)
+	return filepath.Join(ToolsDir(), name, version, runtime.GOOS+"-"+runtime.GOARCH, name)
 }
 
 // ToolConfig is one entry of the `tools` section of $DUN_HOME/mcp.json.
@@ -220,11 +236,23 @@ func isExec(p string) bool {
 	return err == nil && !st.IsDir() && st.Mode()&0o111 != 0
 }
 
+// findTimeout bounds a fetch FindCommand starts for a caller with no ctx.
+const findTimeout = 2 * time.Minute
+
 // FindCommand resolves a server's command: a path as it is; a managed tool
-// as EnsureCommand does, saying a fetch in the log; any other bare name on
-// PATH, then beside this executable.
+// as EnsureCommand does, saying a fetch in the log, for at most
+// findTimeout; any other bare name on PATH, then beside this executable.
+// A caller with a ctx uses FindCommandContext.
 func FindCommand(name string) (string, error) {
-	return EnsureCommand(context.Background(), name, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), findTimeout)
+	defer cancel()
+	return EnsureCommand(ctx, name, nil)
+}
+
+// FindCommandContext is FindCommand under ctx: a fetch, or the wait for
+// another dun's, stops when ctx ends.
+func FindCommandContext(ctx context.Context, name string) (string, error) {
+	return EnsureCommand(ctx, name, nil)
 }
 
 // EnsureCommand is FindCommand for a session that needs the command now: a
@@ -258,9 +286,9 @@ func EnsureCommand(ctx context.Context, name string, say func(string)) (string, 
 	case r.Source == SourcePinned: // a kept copy still runs
 		return r.Path, nil
 	case errors.Is(err, ErrNotPinned):
-		return "", &MissingError{Command: name}
+		return "", missingTool(name, "")
 	}
-	return "", &MissingError{Command: name, Why: textfmt.OneLine(err.Error())}
+	return "", missingTool(name, textfmt.OneLine(err.Error()))
 }
 
 // findOnPath is a command that is not managed: on PATH, then beside dun.
@@ -362,7 +390,9 @@ func FetchPinned(ctx context.Context, name string, say func(string)) (string, er
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return "", err
 	}
-	unlock, err := fsutil.LockFile(filepath.Join(ToolsDir(), name, ".lock"))
+	// The wait for another dun's fetch ends with ctx (a session closed, the
+	// server switched off).
+	unlock, err := fsutil.LockFileContext(ctx, filepath.Join(ToolsDir(), name, ".lock"))
 	if err != nil {
 		return "", err
 	}
