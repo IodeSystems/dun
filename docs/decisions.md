@@ -931,6 +931,19 @@ From the 2026-11-18 inventory of model calls nobody typed for.
   its heartbeats stay asides; an IDLE child's heartbeat never escalates,
   because it waits for the parent and is not wedged. Only a running, silent
   child's does.
+- **Job progress reports have a floor and an hourly cap**
+  (`internal/harness/jobs.go` `tuneJob`, `internal/harness/bgjob.go`
+  `sendReport`). Each report is a notify, so a wake: `every_secs:5` on an
+  hour-long build was 720 model calls. `every_secs` under 60 is raised to 60
+  and the tool result says so (0 stays off). One job's reports (by bytes or
+  by time) wake the agent at most 12 times in an hour; past that they are
+  asides, carried by the next turn that runs anyway, until the person's next
+  message (`Harness.personMsgs`, counted in `SayAs` and `AskAs`). The count
+  is of reports sent as wakes, not of turns: several may share one turn, so
+  the cap is the stricter reading. A job's finish is never capped. The
+  settle prompt (`settle.go`) no longer tells the model to set a report
+  rate when it waits on a job: the finish wakes it, and reports are for
+  progress it must act on before the end.
 
 ## Release updates
 

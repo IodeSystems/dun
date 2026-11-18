@@ -86,7 +86,8 @@ A notify starts a turn through `h.wake`: the engine's loop, and in `--engine` mo
 |---|---|---|
 | the job ends | exit status, duration, log path | notify |
 | `every_bytes: N` | "+N bytes, +M lines written since the last report", no output text | notify |
-| `every_secs: N` | the same, at most every N seconds | notify |
+| `every_secs: N` | the same, at most every N seconds (N is at least 60) | notify |
+| a 13th report within an hour | either report above | aside, until the person's next message |
 | quiet for 1m, 5m, ... | "STILL RUNNING, quiet for 5m", plus a process sample: CPU and IO rates and a verdict from `procstat.Usage.Verdict` (waiting on disk or IO, only zombies left, nothing running, asleep) | keyed aside, escalates |
 | `mute`, `kill` | no more reports; end it | |
 
@@ -163,9 +164,9 @@ When a turn that used tools ends, a settle timer starts (proposed: 2 minutes).
   - **done:** what was done;
   - **remaining:** what is left, and that it continues;
   - **needs you:** a decision only the user can make;
-  - **waiting on:** a job or an agent by id, and what for. The model sets that
-    job's reports (`every_secs`, `every_bytes`) to the rate it wants, and ends
-    the turn. The job's own notify wakes it.
+  - **waiting on:** a job or an agent by id, and what for. The model ends the
+    turn; the job's finish wakes it. It sets reports (`every_secs`,
+    `every_bytes`) only if it must act on progress before the end.
 - The timer does not wait for jobs or children. Long-running work is normal, and
   "waiting on" covers it.
 - **Once per user message.** The settle turn never schedules another one.

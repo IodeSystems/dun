@@ -117,6 +117,13 @@ type bgJob struct {
 	// escalations counts the heartbeats that woke the agent (capped at
 	// maxHeartbeatEscalations, asidettl.go).
 	escalations atomic.Int32
+	// reportWakes is when each progress report that woke the agent was sent,
+	// within the last hour; reportCapped is set when they reach
+	// maxReportWakesPerHour, until the person's next message (reportGen is
+	// Harness.personMsgs when it was last read). Under mu.
+	reportWakes  []time.Time
+	reportCapped bool
+	reportGen    uint64
 }
 
 // bgEarlyMax bounds the in-memory buffer a not-yet-promoted job keeps. Its
@@ -158,7 +165,7 @@ func (j *bgJob) Write(p []byte) (int, error) {
 	// out to a UI callback, and nothing good comes of holding a job's lock
 	// across either.
 	if note != "" {
-		j.notify(note)
+		j.sendReport(note)
 	}
 	return len(p), nil
 }
@@ -225,9 +232,61 @@ func (j *bgJob) armReportLocked() {
 		}
 		j.mu.Unlock()
 		if note != "" {
-			j.notify(note)
+			j.sendReport(note)
 		}
 	})
+}
+
+// minReportSecs is the floor of every_secs (USER 2026-11-18): each
+// time-based report is a wake, so every_secs:5 on an hour-long build was 720
+// model calls to hear "+2 KB written".
+const minReportSecs = 60
+
+// maxReportWakesPerHour is how many progress reports of one job may wake
+// the agent in an hour. Past it they are asides until the person's next
+// message: the agent still reads them in the next turn that runs anyway.
+const maxReportWakesPerHour = 12
+
+// sendReport delivers a progress report: a notify that wakes the agent while
+// the job is under its hourly cap, an aside past it. Either way it is the job
+// speaking, so the heartbeat's debounce is reset.
+func (j *bgJob) sendReport(note string) {
+	if j.reportMayWake(time.Now()) {
+		j.notify(note)
+		return
+	}
+	if j.hb != nil {
+		j.hb.Spoke()
+	}
+	j.h.notifyQuietly(note + fmt.Sprintf("\n(This job sent %d progress reports in the last hour; until the person "+
+		"writes, its reports no longer wake you. Its finish still does.)", maxReportWakesPerHour))
+}
+
+// reportMayWake records a report that wakes the agent at now, or says it
+// may not: the job reached maxReportWakesPerHour, and no person message came
+// since.
+func (j *bgJob) reportMayWake(now time.Time) bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if g := j.h.personMsgs.Load(); g != j.reportGen {
+		j.reportGen, j.reportCapped, j.reportWakes = g, false, nil
+	}
+	if j.reportCapped {
+		return false
+	}
+	keep := j.reportWakes[:0]
+	for _, t := range j.reportWakes {
+		if now.Sub(t) < time.Hour {
+			keep = append(keep, t)
+		}
+	}
+	j.reportWakes = keep
+	if len(j.reportWakes) >= maxReportWakesPerHour {
+		j.reportCapped = true
+		return false
+	}
+	j.reportWakes = append(j.reportWakes, now)
+	return true
 }
 
 // finish records the outcome and releases whoever is waiting on it. If the job

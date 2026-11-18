@@ -50,7 +50,8 @@ const (
 	settlePrompt = "[settle] The user has been away since your last reply. Compare what you did with what they asked; " +
 		"finish what you can without them; then end with a short status: done (what was done), remaining (what is left, " +
 		"and that you continue), needs you (a decision only the user can make), or waiting on (which job or agent, and " +
-		"what for; set its reports with jobs({job, every_secs}) to the rate you want, then end the turn: it wakes you)."
+		"what for; then end the turn: its finish wakes you. Set reports with jobs({job, every_secs}) only if you must act on " +
+		"its progress before it ends)."
 
 	// settleResumeNote rides the first user turn of a resumed session whose
 	// settle was owed. No request is sent for it.

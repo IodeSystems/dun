@@ -412,6 +412,10 @@ type Harness struct {
 	// sideCalls accumulates the per-kind stats for the non-turn LLM calls
 	// (suggest, rephrase, commit, rescue) — see sidecall.go.
 	sideCalls *sideCallStats
+	// personMsgs counts the person's messages (SayAs, AskAs): a job whose
+	// progress reports hit their hourly cap wakes the agent again after the
+	// next one (bgjob.go, sendReport).
+	personMsgs atomic.Uint64
 	// surfacing accumulates what proactive RAG appends and re-sends — see
 	// surfacing.go.
 	surfacing *surfacingStats
@@ -952,6 +956,7 @@ func (h *Harness) AskAs(ctx context.Context, id, task string) (agent.TurnResult,
 	ctx, end := h.interruptible(ctx)
 	defer end()
 	h.clearBudgetNotes()
+	h.personMsgs.Add(1)
 	h.settleBegin(true)
 	h.planAutoArchive(ctx)
 	h.prepareTurn(ctx)

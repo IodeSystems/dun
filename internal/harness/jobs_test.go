@@ -121,7 +121,11 @@ func TestJobs_ProgressSaysHowMuchNotWhat(t *testing.T) {
 	t.Cleanup(be.Close)
 	j := h.newJobStarted(be, "sleep 0.3; echo shh | tr s z; sleep 30") // writes "zhh", not in the command
 	t.Cleanup(func() { j.killAndWait("test") })
-	jobsCall(t, h, "jobs", fmt.Sprintf(`{"job":%d,"every_secs":1}`, j.id))
+	// every_secs has a 60s floor through the tool; set the monitor directly
+	// so the burst-then-silence report fires within the test.
+	j.mu.Lock()
+	j.mon.EverySecs = 1
+	j.mu.Unlock()
 	deadline := time.Now().Add(4 * time.Second)
 	var got string
 	for time.Now().Before(deadline) && got == "" {

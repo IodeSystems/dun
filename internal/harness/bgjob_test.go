@@ -306,15 +306,107 @@ func TestJobs_TuneACommandsJob(t *testing.T) {
 	h.bgJobs = map[int]*bgJob{9: j}
 	h.bgMu.Unlock()
 
-	out := jobsCall(t, h, "jobs", `{"job":9,"every_bytes":100,"every_secs":30,"mute":false}`)
-	if !strings.Contains(out, "#9 RUNNING") || !strings.Contains(out, "every 100 B or 30s") {
+	out := jobsCall(t, h, "jobs", `{"job":9,"every_bytes":100,"every_secs":90,"mute":false}`)
+	if !strings.Contains(out, "#9 RUNNING") || !strings.Contains(out, "every 100 B or 90s") {
 		t.Errorf("the report should lead with the job's state and say its monitor: %q", out)
 	}
 	j.mu.Lock()
 	mon := j.mon
 	j.mu.Unlock()
-	if mon.EveryBytes != 100 || mon.EverySecs != 30 || mon.Mute {
+	if mon.EveryBytes != 100 || mon.EverySecs != 90 || mon.Mute {
 		t.Errorf("settings were not applied: %+v", mon)
+	}
+}
+
+// every_secs under 60 is raised to 60, and the tool result says so; 0 stays
+// off.
+func TestJobs_EverySecsFloor(t *testing.T) {
+	h := testHarness(t)
+	j := testJob(h, 9, "build")
+	h.bgMu.Lock()
+	h.bgJobs = map[int]*bgJob{9: j}
+	h.bgMu.Unlock()
+
+	out := jobsCall(t, h, "jobs", `{"job":9,"every_secs":5}`)
+	if !strings.Contains(out, "every_secs 5 raised to 60") || !strings.Contains(out, "#9 RUNNING") {
+		t.Errorf("the clamp must be told, before the report: %q", out)
+	}
+	j.mu.Lock()
+	got := j.mon.EverySecs
+	j.mu.Unlock()
+	if got != minReportSecs {
+		t.Errorf("EverySecs = %d, want %d", got, minReportSecs)
+	}
+	if out := jobsCall(t, h, "jobs", `{"job":9,"every_secs":0}`); strings.Contains(out, "raised") {
+		t.Errorf("0 (off) must not be raised: %q", out)
+	}
+	j.mu.Lock()
+	got = j.mon.EverySecs
+	j.mu.Unlock()
+	if got != 0 {
+		t.Errorf("every_secs 0 = %d, want off", got)
+	}
+}
+
+// At most 12 progress reports of one job wake the agent in an hour; after
+// that they are asides until the person writes, then they wake again. Older
+// than an hour does not count.
+func TestBgJob_ReportWakesCappedPerHour(t *testing.T) {
+	h := testHarness(t)
+	j := testJob(h, 4, "build")
+	queuedKinds := func() (notes, asides int) {
+		h.noteMu.Lock()
+		defer h.noteMu.Unlock()
+		for _, q := range h.queue {
+			switch q.kind {
+			case queuedNotification:
+				notes++
+			case queuedAside:
+				asides++
+			}
+		}
+		h.queue = nil
+		return
+	}
+	for range maxReportWakesPerHour {
+		j.sendReport("+1 KB")
+	}
+	if n, a := queuedKinds(); n != maxReportWakesPerHour || a != 0 {
+		t.Fatalf("under the cap: %d notes, %d asides", n, a)
+	}
+	j.sendReport("+1 KB")
+	j.sendReport("+1 KB")
+	if n, a := queuedKinds(); n != 0 || a != 2 {
+		t.Fatalf("past the cap: %d notes, %d asides; want asides", n, a)
+	}
+	select {
+	case <-h.wake: // the earlier notifies posted one
+	default:
+	}
+	j.sendReport("+1 KB")
+	select {
+	case <-h.wake:
+		t.Error("a capped report woke the agent")
+	default:
+	}
+	queuedKinds()
+
+	// The person writes: reports wake again.
+	h.Say("how is it going?")
+	j.sendReport("+1 KB")
+	if n, _ := queuedKinds(); n != 1 {
+		t.Errorf("after a person message a report must wake again, notes %d", n)
+	}
+
+	// The window is an hour: wakes older than that do not count.
+	j2 := testJob(h, 5, "build")
+	old := time.Now().Add(-61 * time.Minute)
+	j2.reportGen = h.personMsgs.Load()
+	for range maxReportWakesPerHour {
+		j2.reportWakes = append(j2.reportWakes, old)
+	}
+	if !j2.reportMayWake(time.Now()) {
+		t.Error("wakes older than an hour still counted")
 	}
 }
 

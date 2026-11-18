@@ -148,6 +148,7 @@ func (h *Harness) Say(text string) { h.SayAs(NewMessageID(), text) }
 // event's): delivered and withdrawn name it.
 func (h *Harness) SayAs(id, text string) {
 	h.settleCancel() // the user answered: no settle (settle.go)
+	h.personMsgs.Add(1)
 	h.workInput(text)
 	h.noteMu.Lock()
 	h.queue = append(h.queue, queued{kind: queuedUser, text: text, id: id})

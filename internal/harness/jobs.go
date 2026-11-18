@@ -42,7 +42,7 @@ func jobsToolDef(commands, agents bool) llm.ToolDef {
 		props["kill"] = map[string]any{"type": "boolean", "description": "true ends the command and everything it started"}
 		props["mute"] = map[string]any{"type": "boolean", "description": "true: no more reports about it, its finish included; it keeps running"}
 		props["every_bytes"] = map[string]any{"type": "integer", "description": "report each time this many more bytes are written; 0 = off"}
-		props["every_secs"] = map[string]any{"type": "integer", "description": "report new output at most this often; 0 = off"}
+		props["every_secs"] = map[string]any{"type": "integer", "description": "report new output at most this often, at least 60; 0 = off"}
 		desc = "Manage a command that outlived its exec timeout (job:N). " +
 			"Its output is its log; read it with file_read. Reports as " +
 			"output grows are off until you set every_bytes or every_secs (whichever comes first); they say how " +
@@ -195,7 +195,9 @@ func runJobs(h *Harness, a jobsArgs) string {
 	if j == nil {
 		return fmt.Sprintf("ERROR: no background job #%d. %s", *a.Job, h.jobsRunning())
 	}
-	tuneJob(h, j, a.EveryBytes, a.EverySecs, a.Mute)
+	if note := tuneJob(h, j, a.EveryBytes, a.EverySecs, a.Mute); note != "" {
+		return note + "\n" + jobReport(j)
+	}
 	return jobReport(j)
 }
 
@@ -322,17 +324,24 @@ func (j *bgJob) waitChange(ctx context.Context, h *Harness) string {
 	}
 }
 
-// tuneJob applies the monitor settings given.
-func tuneJob(h *Harness, j *bgJob, everyBytes, everySecs *int, mute *bool) {
+// tuneJob applies the monitor settings given. It returns what the model is
+// told about a setting it did not get as asked: every_secs under
+// minReportSecs is raised to it.
+func tuneJob(h *Harness, j *bgJob, everyBytes, everySecs *int, mute *bool) (told string) {
 	if everyBytes == nil && everySecs == nil && mute == nil {
-		return
+		return ""
 	}
 	j.mu.Lock()
 	if everyBytes != nil {
 		j.mon.EveryBytes = max(*everyBytes, 0)
 	}
 	if everySecs != nil {
-		j.mon.EverySecs = max(*everySecs, 0)
+		s := max(*everySecs, 0)
+		if s > 0 && s < minReportSecs {
+			told = fmt.Sprintf("every_secs %d raised to %d, the least it may be: each report wakes you.", s, minReportSecs)
+			s = minReportSecs
+		}
+		j.mon.EverySecs = s
 	}
 	if mute != nil {
 		j.mon.Mute = *mute
@@ -341,9 +350,10 @@ func tuneJob(h *Harness, j *bgJob, everyBytes, everySecs *int, mute *bool) {
 	j.armReportLocked()
 	j.mu.Unlock()
 	if note != "" {
-		j.notify(note)
+		j.sendReport(note)
 	}
 	h.jobsChanged() // muting/unmuting changes what the row says about itself
+	return told
 }
 
 // jobReport is one command's state: status, what its processes are doing,
