@@ -576,7 +576,9 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   came back; with persist, dund's own restart message leaves them out
   rather than call them stopped. A transcript with no sidecar comes back
   stopped. Children come back idle, not re-run: re-running a cut task
-  without the parent's word could repeat its side effects.
+  without the parent's word could repeat its side effects. (Superseded for
+  a child a dund stop cut mid-run, USER 2026-11-17: dund resumes it with
+  its task; see "automatic launches wait for the new build".)
 - **A watched child's entries are pushed (2026-10-27).** The TUI's view of
   a child was a pull of its history; it is now the history and then each
   entry its transcript gets (`agent_entry`), while someone watches
@@ -888,7 +890,55 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   happen" notice are quiet; a session with nothing running is not told.
   Not covered: the engine's own wakes (a
   job finishing, an aside escalating, a tool server's wake) and a peer's
-  `dun_msg` with wake; they are not idle actions of dund's.
+  `dun_msg` with wake; they are not idle actions of dund's. (Covered since
+  USER 2026-11-17, next bullet.)
+- **Decided (USER, 2026-11-17): automatic launches wait for the new build;
+  the resume is written before anything is cut, and continues the cut
+  work.** Drain gate: while an upgrade is pending, a message no person
+  typed is kept in the registry (`record.Queued`) and sent after the
+  restart; the sender gets `ack {queued}` ("dund is upgrading; …"), also
+  without a cid, and `dun_start`/`dun_send` return `queued: …`. Automatic is
+  `User.Auto` (new; dun mcp sets it) or any message to a `--worker` session
+  — no client or source field existed, and an older dun mcp sends no
+  `Auto`; a person typing into a worker session is taken for a program
+  (accepted). A message a person types starts at once and holds the
+  restart as before. `dun_start` while pending makes the session and
+  starts its idle engine (no turn: nothing the upgrade waits for); only
+  the first message waits, and a session whose only message is queued is
+  kept on load. Engine self-wakes: dund sends `upgrade_hold {on}` to every
+  engine (and to each one started while pending; `on:false` when the
+  upgrade fails). Held, the engine's loop runs no turn of its own — every
+  self-wake (job end, peer `dun_msg`, server wake, escalated aside, settle)
+  goes through `h.wake` and `Pending`, one place to gate —; it writes the
+  waking news into the conversation (`HoldPending`, persisted in the
+  transcript) and emits `wake_held`, which dund keeps out of the log and
+  turns into a registry wake for the next start. Chosen over "the engine
+  queues it in its state": the engine is killed at the restart (adoption
+  is icebox i_1m7pe91wn18bq6j9m61cv1), so in-memory state would need a
+  second durable store; the transcript already is one, and the next turn
+  reads the news where it would have anyway. A person's message and dund's
+  waking wrap-up notice (one pass) still start a turn; quiet news (asides,
+  `wake:false`) stays in memory and rides the next turn, lost at a restart
+  as before. A peer's `dun_msg` and `dun msg` to an idle session say
+  "queued". Scheduled entries stay held as before. Durable resume: the
+  stop records every working session's resume (and held wakes, cut
+  sub-agents) and writes the registry first; a failed write takes the
+  flags back, interrupts nothing, and puts the upgrade back to `pending`
+  with the error, retried every `upgradeRetry` (5 s). A SIGTERM cannot be
+  refused: the error is logged and dund stops. After the restart each cut
+  turn auto-continues: the `[automatic]` message names the tool calls in
+  flight (dund now tracks `tool_call`/`tool_result`) and the killed jobs
+  with their commands. One continue per cut turn: dund marks the session
+  `continued` until a turn ends not interrupted; a stop or crash that cuts
+  it again records `resume_quiet`, and the next start leaves a quiet
+  `[dun]` note and wakes nothing (no loop). Sub-agents running at the
+  stop are recorded (`record.Agents`) and each gets `agent {action:
+  continue}` after the parent's message — restarted from its transcript
+  if it came back stopped (`Harness.AgentContinue`), then told to go on —
+  and the parent's message and an aside say so. This replaces the
+  2026-10-27 "children come back idle, not re-run" for children a restart
+  cut; a child idle at the stop still comes back idle. Open `ask_user`
+  is unchanged.
 
 ## Sessions, supervision and diagnosis
 

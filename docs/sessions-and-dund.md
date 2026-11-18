@@ -101,10 +101,18 @@ build must not cut work short, and no one should have to coordinate it.
 - Restart happens when idle, on `/upgrade now` or "Restart now", or after
   `upgradeGrace` (10 min).
 - A restart that cuts work (also SIGTERM and a service restart) first
-  interrupts turns with a reason (`Interrupt(reason)`), flags `resume` in the
-  registry, and the next dund wakes only those sessions with a user message
-  starting `[automatic] ` (`resumePrefix`; killed jobs are listed). The
-  marker is that text prefix, not a transcript tag.
+  writes each working session's `resume` to the registry, then interrupts
+  turns with a reason (`Interrupt(reason)`); the next dund wakes only those
+  sessions with a user message starting `[automatic] ` (`resumePrefix`),
+  and the turn runs: it names the tool call in flight and the killed jobs
+  with their commands. The marker is that text prefix, not a transcript
+  tag. If the registry write fails, nothing is interrupted and the upgrade
+  is `pending` again with the error (USER 2026-11-17).
+- One continue per cut turn: a continued turn cut again (by a stop or a
+  crash) gets a quiet `[dun]` note on the next start, not another wake.
+- A sub-agent running at the stop is told to continue its task after the
+  restart (restarted from its transcript first if it came back stopped);
+  the parent's message says so.
 - An open `ask_user` question does not hold the upgrade (Carl 2026-11-10).
   The stop interrupts its turn and saves the question (the whole `Ask`) in
   the registry record (`ask`). The next dund shows it again as an open
@@ -126,6 +134,15 @@ build must not cut work short, and no one should have to coordinate it.
   Scheduled messages and loops are held: an entry keeps its time in
   `schedule.json` and fires once when the hold ends — at the next dund's
   start, or at once when the upgrade fails — however many runs it missed.
+- Automatic launches wait for the new build (USER 2026-11-17). A message no
+  person typed (`User.Auto`: dun mcp's `dun_start`/`dun_send`; any message to
+  a `--worker` session) is kept in the registry and sent after the restart;
+  the sender gets `ack {queued}` and dun mcp returns `queued: …`. A message a
+  person types starts its turn at once. Each engine is held
+  (`upgrade_hold`): its own wakes — a finished job, a peer's `dun_msg`, a
+  server's wake, an escalated aside — start no turn; the news goes into the
+  conversation and `wake_held` tells dund, which wakes the session after the
+  restart. A failed upgrade lifts the hold and sends what was kept.
 - The TUI re-execs into its own binary when that is dund's new build; the web
   app reloads on a new build.
 
