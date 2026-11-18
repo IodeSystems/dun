@@ -168,8 +168,13 @@ var Supported = []Tool{
 	// Recommended v0.9.0 (2026-11-10, af18801), tarballs in deps.json: IndexTree
 	// and WatchTree/WatchHub (library only), failed-source backoff, vector reuse
 	// by text hash; the CLI is unchanged. linux_amd64 prints version 0.9.0.
+	// Recommended v0.10.0 (2026-11-18), tarballs in deps.json: `status --json
+	// --all` (GET /api/status): per-root activity for every index the token may
+	// read, which dun ps reads (internal/procps/raglit.go). v0.9.0 has no
+	// --all flag; dun ps then shows "needs raglit >= v0.10.0" under the daemon
+	// row and nothing else breaks, so Min stays.
 	{Name: "raglit", Module: "github.com/iodesystems/raglit/cmd/raglit",
-		Min: "v0.0.0-20261024184452-5d24299365a3", Recommended: "v0.9.0"},
+		Min: "v0.0.0-20261024184452-5d24299365a3", Recommended: "v0.10.0"},
 }
 
 // Tool is one Supported entry.
