@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -48,6 +49,25 @@ func TestAnswer_StreamFinalIsRender(t *testing.T) {
 		}
 		if got := e.collapsed; got != strings.Trim(want, "\n") {
 			t.Errorf("w=%d: Final differs from Render:\n got %q\nwant %q", w, got, want)
+		}
+	}
+}
+
+// A tool call the model wrote as text shows raw, as a code block: the
+// renderer dropped ASCII tags as HTML and reflowed DSML into one paragraph
+// (USER 2026-11-18). Each markup line stays whole, on its own row.
+func TestAnswer_ToolMarkupShowsRaw(t *testing.T) {
+	for _, call := range []string{
+		"<｜DSML｜invoke name=\"exec\">\n<｜DSML｜parameter name=\"command\">go build ./...</｜DSML｜parameter>\n</｜DSML｜invoke>",
+		"<invoke name=\"exec\">\n<parameter name=\"command\">go build ./...</parameter>\n</invoke>",
+	} {
+		e, _ := streamAnswer(t, "Let me check.\n\n"+call+"\n", 100, 5)
+		plain := ansi.Strip(e.collapsed)
+		rows := strings.Split(plain, "\n")
+		for _, want := range strings.Split(call, "\n") {
+			if !slices.ContainsFunc(rows, func(r string) bool { return strings.TrimSpace(r) == want }) {
+				t.Errorf("no row %q in:\n%s", want, plain)
+			}
 		}
 	}
 }

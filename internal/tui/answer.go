@@ -10,6 +10,7 @@ import (
 	"charm.land/glamour/v2/styles"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/iodesystems/bubbleteandmd"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // Answers render through bubbleteandmd: one Doc (a Stream with interactive
@@ -117,7 +118,9 @@ func answerOutLead(s *bubbleteandmd.Doc, src string, final bool) (string, int) {
 	if s == nil {
 		return bubbleteandmd.Sanitize(src), 0
 	}
-	in := demoteStepHeads(src)
+	// A tool call the model wrote as text shows raw, in a code block: the
+	// renderer would drop its tags as HTML and show bare arguments.
+	in := demoteStepHeads(textfmt.FenceToolMarkup(src))
 	var out string
 	var err error
 	if final {
