@@ -1,11 +1,14 @@
 package dundcli
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/iodesystems/dun/proto"
 )
 
 func TestRenderUnit(t *testing.T) {
@@ -82,6 +85,33 @@ func TestServicePATHFromUnit(t *testing.T) {
 	_ = os.WriteFile(path, []byte(renderUnit("/bin/dun", nil, "/h", nil, []string{"PATH=/a b/bin:/usr/bin"})), 0o644)
 	if got, ok := ServicePATH(ServiceUnit); !ok || got != "/a b/bin:/usr/bin" {
 		t.Errorf("ServicePATH = %q %v", got, ok)
+	}
+}
+
+// A unit written before web.json names the listener in its flags; a change
+// made while dund is stopped seeds from it (so it does not turn web off).
+func TestUnitWebAddr(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("the unit format is the Linux one")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dunHome := filepath.Join(home, ".dun")
+	path, _ := UnitPath(ServiceUnit)
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
+	_ = os.WriteFile(path, []byte(renderUnit("/bin/dun", []string{"dund"}, dunHome, []string{"--web-experimental", "192.168.1.76:20003"}, nil)), 0o644)
+	if got := unitWebAddr(dunHome); got != "192.168.1.76:20003" {
+		t.Errorf("unitWebAddr = %q", got)
+	}
+	if got := unitWebAddr(filepath.Join(home, "other")); got != "" {
+		t.Errorf("another home's unit: %q", got)
+	}
+	l := &loader{home: dunHome, sock: filepath.Join(home, "none.sock")}
+	if err := webSet(l, io.Discard, proto.WebSet{TUI: ptr(true)}); err != nil {
+		t.Fatal(err)
+	}
+	if st, _, _ := loadWebState(dunHome); st != (webState{Enabled: true, Addr: "192.168.1.76:20003", TUI: true}) {
+		t.Errorf("offline change did not seed from the unit: %+v", st)
 	}
 }
 
