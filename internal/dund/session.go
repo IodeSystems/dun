@@ -221,6 +221,9 @@ func (s *session) track(ev proto.Event) {
 		}
 	case *proto.UserEcho:
 		s.lastUser = p.Content
+		if harness.PersonText(p.Content) {
+			s.personSeq++
+		}
 	case *proto.Jobs:
 		s.jobs = nil
 		for _, j := range p.Jobs {

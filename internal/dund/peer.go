@@ -27,6 +27,25 @@ const (
 	peerRateWindow = time.Minute
 )
 
+// Wakes (USER 2026-11-18). A message still goes; what is bounded is the turn
+// it starts: at most peerWakeMax wakes an hour per (sender, target), as a
+// server's (harness serverwake.go). And a reply to a message that woke its
+// sender's peer does not wake the sender when no person wrote in either
+// session in between (A wakes B, B's reply to A rides A's next turn): two
+// agents answering each other would otherwise run for as long as the
+// provider pays. Over either, the message is delivered with wake false and
+// the sender is told why (PeerDelivery.Unwoken).
+const (
+	peerWakeMax    = 20
+	peerWakeWindow = time.Hour
+)
+
+// peerHop is a waking message's sessions' person counts as it went
+// (session.personSeq).
+type peerHop struct {
+	fromSeq, toSeq uint64
+}
+
 // peerTaskMax clips a listed task line.
 const peerTaskMax = 120
 
@@ -59,7 +78,7 @@ func (s *Service) peerOp(from *session, eng Engine, req proto.PeerRequest) proto
 		if err != nil {
 			rep.Error = err.Error()
 		}
-		rep.ID, rep.Name, rep.Busy, rep.Started, rep.Queued = d.ID, d.Name, d.Busy, d.Started, d.Queued
+		rep.ID, rep.Name, rep.Busy, rep.Started, rep.Queued, rep.Unwoken = d.ID, d.Name, d.Busy, d.Started, d.Queued, d.Unwoken
 	case "sched":
 		if req.Sched == nil {
 			rep.Error = "sched: no operation"
@@ -115,6 +134,8 @@ type PeerDelivery struct {
 	Busy    bool   // it was in a turn: the message rides that turn
 	Started bool   // it was idle and woken: a turn starts there
 	Queued  bool   // idle, not woken: dund is upgrading; woken after the restart
+	// Unwoken: wake was asked and not given, and why (peerWake).
+	Unwoken string
 }
 
 // PeerSend delivers text from session from to session to (a name from
@@ -189,7 +210,15 @@ func (s *Service) PeerSend(principal, from, to, text string, wake bool) (PeerDel
 	if s.stopReason() != "" {
 		return PeerDelivery{}, errRestarting
 	}
-	d := PeerDelivery{ID: dst.ID, Name: dst.Name, Busy: ses.busy()}
+	var unwoken string
+	if wake {
+		if srcSes, err := s.Get(principal, from); err == nil {
+			if unwoken = s.peerWake(srcSes, ses, time.Now()); unwoken != "" {
+				wake = false
+			}
+		}
+	}
+	d := PeerDelivery{ID: dst.ID, Name: dst.Name, Busy: ses.busy(), Unwoken: unwoken}
 	d.Started = wake && !d.Busy
 	if d.Started && s.UpgradeStatus() != nil {
 		// Its engine is held (proto.UpgradeHold): it keeps the message,
@@ -300,6 +329,44 @@ func (s *Service) peerAllow(from, to string, now time.Time) bool {
 	}
 	s.peerSent[key] = append(kept, now)
 	return true
+}
+
+// peerWake decides whether a waking message from → to may wake: "" yes
+// (and it is counted), else why not.
+func (s *Service) peerWake(from, to *session, now time.Time) string {
+	fromSeq, toSeq := from.personCount(), to.personCount()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.peerWoke == nil {
+		s.peerWoke = map[[2]string][]time.Time{}
+		s.peerHops = map[[2]string]peerHop{}
+	}
+	// to woke from, and nobody wrote in either since: this is the reply.
+	if h, ok := s.peerHops[[2]string{to.id, from.id}]; ok && h.fromSeq == toSeq && h.toSeq == fromSeq {
+		delete(s.peerHops, [2]string{to.id, from.id})
+		return "a reply to a message that woke this session, with no message from a person in either session since; it reads it at its next turn"
+	}
+	key := [2]string{from.id, to.id}
+	var kept []time.Time
+	for _, t := range s.peerWoke[key] {
+		if now.Sub(t) < peerWakeWindow {
+			kept = append(kept, t)
+		}
+	}
+	if len(kept) >= peerWakeMax {
+		s.peerWoke[key] = kept
+		return fmt.Sprintf("this session woke it %d times in the last hour, the most it may; it reads it at its next turn", peerWakeMax)
+	}
+	s.peerWoke[key] = append(kept, now)
+	s.peerHops[key] = peerHop{fromSeq: fromSeq, toSeq: toSeq}
+	return ""
+}
+
+// personCount is how many messages the person typed in this session.
+func (s *session) personCount() uint64 {
+	s.actMu.Lock()
+	defer s.actMu.Unlock()
+	return s.personSeq
 }
 
 // loaded: an engine runs this session now.

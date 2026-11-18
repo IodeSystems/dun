@@ -56,10 +56,13 @@ type PeerReply struct {
 	Started  bool          `json:"started,omitempty"`
 	// Queued: the target was idle and would have been woken, but an upgrade
 	// is pending: it holds the message and reads it after the restart.
-	Queued bool         `json:"queued,omitempty"`
-	Sched  *SchedReply  `json:"sched,omitempty"`
-	OAuth  *OAuthResult `json:"oauth,omitempty"`
-	Share  *McpShareRep `json:"share,omitempty"`
+	Queued bool `json:"queued,omitempty"`
+	// Unwoken: wake was asked and dund did not give it (a pair's hourly
+	// wakes used, or a reply that would ping-pong), and why. Delivered.
+	Unwoken string       `json:"unwoken,omitempty"`
+	Sched   *SchedReply  `json:"sched,omitempty"`
+	OAuth   *OAuthResult `json:"oauth,omitempty"`
+	Share   *McpShareRep `json:"share,omitempty"`
 }
 
 // McpShareReq asks dund's gateway for a shared server's endpoint: Request

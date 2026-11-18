@@ -317,3 +317,65 @@ func TestServersChangedReachesTheOwnersOtherSessions(t *testing.T) {
 		}
 	}
 }
+
+// A pair's wakes: peerWakeMax an hour; past that the message is delivered
+// with wake false, and the sender told why. The window slides.
+func TestPeerSendWakeHourlyCap(t *testing.T) {
+	svc, _, _ := newSvc(t)
+	a1, _ := svc.Create(alice, t.TempDir(), nil, "")
+	a2, _ := svc.Create(alice, t.TempDir(), nil, "")
+	s1, _ := svc.Get(alice, a1)
+	s2, _ := svc.Get(alice, a2)
+	now := time.Now()
+	for i := 0; i < peerWakeMax; i++ {
+		if why := svc.peerWake(s1, s2, now); why != "" {
+			t.Fatalf("wake %d refused: %s", i+1, why)
+		}
+	}
+	if why := svc.peerWake(s1, s2, now); !strings.Contains(why, "the most it may") {
+		t.Fatalf("wake past the cap: %q", why)
+	}
+	// Through PeerSend: delivered, not woken, and why.
+	d, err := svc.PeerSend(alice, a1, a2, "ping", true)
+	if err != nil || d.Started || !strings.Contains(d.Unwoken, "the most it may") {
+		t.Fatalf("over the cap: %+v %v", d, err)
+	}
+	if why := svc.peerWake(s1, s2, now.Add(peerWakeWindow+time.Second)); why != "" {
+		t.Errorf("still capped an hour later: %s", why)
+	}
+}
+
+// A wakes B, B's reply to A does not wake A while no person wrote in either
+// session; once a person writes, it does.
+func TestPeerSendPingPongReplyIsQuiet(t *testing.T) {
+	svc, sp, _ := newSvc(t)
+	a, _ := svc.Create(alice, t.TempDir(), nil, "")
+	b, _ := svc.Create(alice, t.TempDir(), nil, "")
+	if d, err := svc.PeerSend(alice, a, b, "can you check X?", true); err != nil || !d.Started {
+		t.Fatalf("A to B: %+v %v", d, err)
+	}
+	d, err := svc.PeerSend(alice, b, a, "X is fine", true)
+	if err != nil || d.Started || !strings.Contains(d.Unwoken, "a reply") {
+		t.Fatalf("B's reply woke A: %+v %v", d, err)
+	}
+	if r := waitRecord(t, sp, "peer "+a+":"); !strings.Contains(r, "wake=false: X is fine") {
+		t.Fatalf("delivered %q", r)
+	}
+	// A person writes in B (a scheduled firing is not one): B's next
+	// message to A wakes it again.
+	if d, err := svc.PeerSend(alice, a, b, "and Y?", true); err != nil || !d.Started {
+		t.Fatalf("A to B again: %+v %v", d, err)
+	}
+	sb, _ := svc.Get(alice, b)
+	sb.track(proto.NewEvent(&proto.UserEcho{Content: "[scheduled 10:00 for 10:05] not a person"}))
+	if d, _ := svc.PeerSend(alice, b, a, "Y is fine?", true); d.Started {
+		t.Fatalf("a scheduled firing counted as a person: %+v", d)
+	}
+	if d, err := svc.PeerSend(alice, a, b, "and Z?", true); err != nil || !d.Started {
+		t.Fatalf("A to B a third time: %+v %v", d, err)
+	}
+	sb.track(proto.NewEvent(&proto.UserEcho{Content: "tell A about Z"}))
+	if d, err := svc.PeerSend(alice, b, a, "Z is fine", true); err != nil || !d.Started || d.Unwoken != "" {
+		t.Fatalf("after a person's message: %+v %v", d, err)
+	}
+}

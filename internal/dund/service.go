@@ -64,6 +64,10 @@ type Service struct {
 	// peerSent is when each (sender, target) pair's recent dun_msg went, for
 	// the rate limit (peer.go). Guarded by mu.
 	peerSent map[[2]string][]time.Time
+	// peerWoke is when each pair's waking messages went, and peerHops the
+	// last one's person counts (peer.go, peerWake). Guarded by mu.
+	peerWoke map[[2]string][]time.Time
+	peerHops map[[2]string]peerHop
 	// boxes are the listeners (dun msg --name), by owner and name
 	// (mailbox.go).
 	boxes map[[2]string]*mailbox

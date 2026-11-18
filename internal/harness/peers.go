@@ -36,6 +36,8 @@ type PeerSent struct {
 	// Queued: idle, and not woken now because dund is upgrading; it reads
 	// the message after the restart.
 	Queued bool
+	// Unwoken: wake was asked and dund did not give it, and why.
+	Unwoken string
 }
 
 // PeerLink is the way to dund. Its errors are dund's refusals, worded for
@@ -67,7 +69,8 @@ func dunMsgToolDef() llm.ToolDef {
 		"would. A busy session reads it inside its current turn; an idle one starts a turn for it (unless " +
 		"wake is false — then it waits for that session's next turn). The other session cannot answer a " +
 		"question meant for your user. It replies, if it does, with dun_msg back to you. At most 6 messages " +
-		"a minute to one session. A listener (dun_list) gets the message as text; it answers, if it does, " +
+		"a minute to one session, and 20 wakes an hour; your reply to a message that woke you does not wake its " +
+		"sender unless a person wrote in between. A listener (dun_list) gets the message as text; it answers, if it does, " +
 		"with a message to you."
 	td.Function.Parameters = map[string]any{
 		"type": "object",
@@ -105,6 +108,8 @@ func withPeers(inner agent.ToolDispatcher, link PeerLink, onCall func(string, ma
 			switch {
 			case err != nil:
 				out = "ERROR: " + err.Error()
+			case sent.Unwoken != "" && !sent.Busy:
+				out = fmt.Sprintf("delivered to %s (%s), not woken: %s.", sent.Name, sent.ID, sent.Unwoken)
 			case sent.Busy:
 				out = fmt.Sprintf("delivered to %s (%s): it is busy and reads it in its current turn.", sent.Name, sent.ID)
 			case sent.Queued:

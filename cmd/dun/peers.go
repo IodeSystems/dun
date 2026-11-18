@@ -200,7 +200,7 @@ func (p *peerLink) Send(ctx context.Context, to, text string, wake bool) (harnes
 	if err != nil {
 		return harness.PeerSent{}, err
 	}
-	return harness.PeerSent{ID: rep.ID, Name: rep.Name, Busy: rep.Busy, Started: rep.Started, Queued: rep.Queued}, nil
+	return harness.PeerSent{ID: rep.ID, Name: rep.Name, Busy: rep.Busy, Started: rep.Started, Queued: rep.Queued, Unwoken: rep.Unwoken}, nil
 }
 
 // peerIn routes the peer frames the input reader gets: dund's reply to this
