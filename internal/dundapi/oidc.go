@@ -30,8 +30,10 @@ import (
 // id, nonce, a verified email on the allow-list), and mints a dund sign-in
 // token for the owner: every allowed person sees the owner's sessions, so a
 // phone sees what the TUI sees. The token goes back in the URL fragment —
-// never a query, which servers and proxies log — to /signin on the web, or
-// to the dun:// link the app opened the login with.
+// never a query, which servers and proxies log — to /web/signin for the web
+// app, or to the dun:// link the app opened the login with. A browser also
+// gets the session cookie (front.go); a return outside the web app (/, /tui)
+// needs nothing else.
 
 const (
 	signInTTL  = 30 * 24 * time.Hour
@@ -63,6 +65,9 @@ type sso struct {
 	cfg   OIDC
 	svc   *dund.Service
 	owner string
+
+	// session sets a browser's session cookie (Server.startSession).
+	session func(w http.ResponseWriter, r *http.Request, principal, from string) error
 
 	mu       sync.Mutex
 	provider *oidc.Provider
@@ -190,8 +195,26 @@ func (s *sso) callback(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, st.ret, err.Error())
 		return
 	}
-	http.Redirect(w, r, landing(st.ret, url.Values{"token": {tok}}), http.StatusFound)
+	if strings.HasPrefix(st.ret, appScheme) {
+		http.Redirect(w, r, landing(st.ret, url.Values{"token": {tok}}), http.StatusFound)
+		return
+	}
+	// A browser: a session cookie too (front.go), ending with this token.
+	if s.session != nil {
+		if err := s.session(w, r, s.owner, s.svc.TokenSource(tok)); err != nil {
+			s.fail(w, r, st.ret, err.Error())
+			return
+		}
+	}
+	if !webReturn(st.ret) {
+		hop(w, st.ret) // the chooser or the TUI: the cookie is all they need
+		return
+	}
+	hop(w, landing(st.ret, url.Values{"token": {tok}}))
 }
+
+// webReturn: ret is in the web app, which keeps the token itself.
+func webReturn(ret string) bool { return ret == "/web" || strings.HasPrefix(ret, "/web/") }
 
 // finish turns the code into a dund sign-in token, or says why not.
 func (s *sso) finish(ctx context.Context, st pending, code string) (string, error) {
@@ -231,21 +254,26 @@ func (s *sso) finish(ctx context.Context, st pending, code string) (string, erro
 	return s.svc.MintSignIn(s.owner, email, signInTTL)
 }
 
-// fail lands back where the sign-in started, with why in the fragment.
+// fail lands back where the sign-in started, with why: in the fragment for
+// the app and the web app, on the sign-in page for the rest.
 func (s *sso) fail(w http.ResponseWriter, r *http.Request, ret, why string) {
 	if ret == "" {
 		ret = "/"
 	}
-	http.Redirect(w, r, landing(ret, url.Values{"error": {why}}), http.StatusFound)
+	if strings.HasPrefix(ret, appScheme) || webReturn(ret) {
+		http.Redirect(w, r, landing(ret, url.Values{"error": {why}}), http.StatusFound)
+		return
+	}
+	http.Redirect(w, r, signinURL(ret, why), http.StatusFound)
 }
 
-// landing is where a sign-in returns: the app's dun:// link, or the web's
-// sign-in page (which keeps the token and goes on to ret), with the result
-// in the fragment.
+// landing is where a sign-in returns: the app's dun:// link, or the web
+// app's sign-in page (/web/signin, which keeps the token and goes on to
+// ret), with the result in the fragment.
 func landing(ret string, frag url.Values) string {
 	if strings.HasPrefix(ret, appScheme) {
 		return ret + "#" + frag.Encode()
 	}
 	frag.Set("return", ret)
-	return "/signin#" + frag.Encode()
+	return "/web/signin#" + frag.Encode()
 }

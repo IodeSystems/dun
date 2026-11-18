@@ -193,12 +193,12 @@ func TestGraphQLRunsTheOperations(t *testing.T) {
 	}
 }
 
-// A source build has no web app: / is open (it holds nothing), renders
-// nothing, and says where the app is (USER 2026-10-28: two renderers, the
-// TUI and the web app; dund renders neither).
+// A source build has no web app: /web/ renders nothing and says where the
+// app is (USER 2026-10-28: two renderers, the TUI and the web app; dund
+// renders neither).
 func TestPageWithoutTheAppSaysWhereItIs(t *testing.T) {
-	srv, _, _ := setup(t)
-	resp, err := http.Get(srv.URL + "/")
+	srv, tok, _ := setup(t)
+	resp, err := signedIn(t, srv, tok).Get(srv.URL + "/web/")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,8 +209,8 @@ func TestPageWithoutTheAppSaysWhereItIs(t *testing.T) {
 	}
 }
 
-// A web root is served at /, with the app shell for its client routes; the
-// API still needs the token.
+// A web root is served at /web/, prefix stripped, with the app shell for its
+// client routes; the pages need a sign-in, and the API still needs the token.
 func TestWebRootServesTheClient(t *testing.T) {
 	dir := t.TempDir()
 	svc, _ := dund.New(dir, &fakeSpawner{})
@@ -225,8 +225,10 @@ func TestWebRootServesTheClient(t *testing.T) {
 	}
 	srv := httptest.NewServer(h)
 	defer srv.Close()
-	for path, want := range map[string]string{"/": "app shell", "/session/abc": "app shell", "/_expo/app.js": "js"} {
-		resp, err := http.Get(srv.URL + path)
+	tok, _ := dund.NewToken(dir)
+	c := signedIn(t, srv, tok)
+	for path, want := range map[string]string{"/web/": "app shell", "/web/session/abc": "app shell", "/web/_expo/app.js": "js"} {
+		resp, err := c.Get(srv.URL + path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -236,8 +238,8 @@ func TestWebRootServesTheClient(t *testing.T) {
 			t.Errorf("%s: %d %q", path, resp.StatusCode, b)
 		}
 	}
-	for _, path := range []string{"/_expo/x.js", "/_expo/static/js/web/missing-deadbeef.js", "/foo.png", "/assets/y", "/a/b.json"} {
-		resp, err := http.Get(srv.URL + path)
+	for _, path := range []string{"/web/_expo/x.js", "/web/_expo/static/js/web/missing-deadbeef.js", "/web/foo.png", "/web/assets/y", "/web/a/b.json", "/_expo/app.js"} {
+		resp, err := c.Get(srv.URL + path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -246,8 +248,15 @@ func TestWebRootServesTheClient(t *testing.T) {
 			t.Errorf("missing %s: %d, want 404", path, resp.StatusCode)
 		}
 	}
-	if resp, _ := http.Get(srv.URL + "/signin"); resp.StatusCode != 200 {
-		t.Errorf("/signin: %d", resp.StatusCode)
+	if code, loc, _ := get(t, c, srv.URL+"/web"); code != http.StatusMovedPermanently || loc != "/web/" {
+		t.Errorf("/web: %d %s", code, loc)
+	}
+	if resp, _ := c.Get(srv.URL + "/web/signin"); resp.StatusCode != 200 {
+		t.Errorf("/web/signin: %d", resp.StatusCode)
+	}
+	resp, _ := noRedirect().Get(srv.URL + "/web/session/abc")
+	if loc := resp.Header.Get("Location"); resp.StatusCode != http.StatusFound || loc != "/auth/signin?return=%2Fweb%2Fsession%2Fabc" {
+		t.Errorf("signed out: %d %s", resp.StatusCode, loc)
 	}
 	if resp, _ := http.Get(srv.URL + "/api/v1/sessions"); resp.StatusCode != 401 {
 		t.Errorf("api without token: %d", resp.StatusCode)
