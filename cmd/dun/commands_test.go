@@ -53,7 +53,12 @@ func TestExtensionsDoNotShadowCommands(t *testing.T) {
 		"plan approve":                     {"control", "plan", "approve"},
 		"plan edit 2 title Fix The Parser": {"control", "plan", "edit 2 title Fix The Parser"},
 		"plan drop 3 not needed":           {"control", "plan", "drop 3 not needed"},
-		"plan frob":                        {"reply", "usage: /plan [mode on|off | approve | edit <id> title|details <text> | drop <id> [why] | clear | unarchive]", ""},
+		"plan frob":                        {"reply", "usage: /plan [mode on|off | approve | edit <id> title|details <text> | drop <id> [why] | clear | unarchive | summary]", ""},
+		"plan summary":                     {"control", "plan", "summary"},
+		"journal":                          {"control", "journal", ""},
+		"journal now":                      {"control", "journal", "now"},
+		"journal view 3":                   {"control", "journal", "view 3"},
+		"journal frob":                     {"reply", "usage: /journal [view <n> | now]", ""},
 	} {
 		calls = nil
 		routeSlash(line, r)

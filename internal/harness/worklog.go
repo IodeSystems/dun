@@ -11,7 +11,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun/internal/fsutil"
 )
 
@@ -685,31 +684,16 @@ func (h *Harness) WriteWorklog(ctx context.Context, arg string) (string, error) 
 		_ = h.saveWorklogLocked()
 	}
 	h.wlMu.Unlock()
+	h.journalWorklog(t, path, text) // the account is a /journal entry too
 	return path, nil
 }
 
 // worklogSideCall asks the model once, outside the conversation.
 func (h *Harness) worklogSideCall(ctx context.Context, prompt string) (string, error) {
-	start := time.Now()
-	ch, err := untee(h.Session.Runner).ChatStream(ctx, []llm.Message{{Role: "user", Content: prompt}}, nil, nil)
+	text, _, err := h.askOnce(ctx, "worklog", prompt)
 	if err != nil {
-		h.noteSideCall("worklog", start, nil)
 		return "", err
 	}
-	var out strings.Builder
-	var usage *llm.Usage
-	for c := range ch {
-		if c.Error != "" {
-			h.noteSideCall("worklog", start, nil)
-			return "", fmt.Errorf("%s", c.Error)
-		}
-		out.WriteString(c.Content)
-		if c.Usage != nil {
-			usage = c.Usage
-		}
-	}
-	h.noteSideCall("worklog", start, usage)
-	text := strings.TrimSpace(out.String())
 	if text == "" {
 		return "", fmt.Errorf("the model wrote no account")
 	}

@@ -190,6 +190,7 @@ func (h *Harness) foldHistory(ctx context.Context, cause foldCause) (int, error)
 		return 0, fmt.Errorf("re-root: %w", err)
 	}
 	log.Printf("dun: rescue fold — %d entries → one summary marker (%d chars)", len(older), len(summary))
+	h.journalFold(fmt.Sprintf("rescue fold: %d entries", len(older)), summary, "")
 	// Report what the fold actually SAVED. These used to go out as zeros, so
 	// every rescue logged "0 → 0 tokens (saved 0)" — a measurement-shaped number
 	// that measured nothing, which is the failure this whole area was about. The

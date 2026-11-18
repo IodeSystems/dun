@@ -197,6 +197,8 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m = m.noteExtensions(ev)
 	case "plan":
 		m = m.notePlan(ev)
+	case "journal":
+		m = m.noteJournal(ev)
 	case "mcp_login":
 		// The engine (or dund) says how the login went: started, done,
 		// failed (docs/session-events.md, "MCP login").

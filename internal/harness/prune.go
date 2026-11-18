@@ -511,6 +511,9 @@ func ForgetSession(root, id string) {
 	// Its folded history's span files (sessionindex_dund.go); their dund
 	// documents go first, with ForgetSessionFolds.
 	_ = os.RemoveAll(foldsDir(SessionFile(root, id)))
+	// /journal now's entries and /worklog write's accounts.
+	_ = os.RemoveAll(JournalDir(SessionFile(root, id)))
+	_ = os.RemoveAll(WorklogDir(SessionFile(root, id)))
 	// The shell's saved output (Harness.overflowDir), the children's too.
 	over, _ := filepath.Glob(filepath.Join(RootDir(root), "overflow", id+".*"))
 	for _, d := range append(over, filepath.Join(RootDir(root), "overflow", id)) {

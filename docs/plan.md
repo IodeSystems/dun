@@ -113,6 +113,11 @@ owner's call before work starts.
   Built (internal/harness/worklog.go; `<session>.worklog.json`, accounts in
   `<session>.worklog/<n>-<slug>.md`). Person-driven only. Possible
   extension: let the model open and close tasks too (a tool).
+- [x] `/journal` (USER 2026-11-17): folds, `/journal now` entries and
+  `/worklog write` accounts in time order (internal/harness/journal.go;
+  `<session>.journal.jsonl`). `/plan summary` (`s` on /plan): Done / Doing /
+  Next in one side call beside the turn (plansummary.go). docs/taskplan.md,
+  "Summary" and "Journal".
 
 ## The CLI
 

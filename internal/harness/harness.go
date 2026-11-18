@@ -328,6 +328,10 @@ type Harness struct {
 	wlMu   sync.Mutex
 	wl     *Worklog
 	wlFile string
+	// The session's /journal (journal.go) and the last /plan summary
+	// (plansummary.go).
+	journal journalState
+	planSum planSummaryState
 	// The session's task plan (plan.go), read from its sidecar on first use.
 	planMu sync.Mutex
 	plan   *planState

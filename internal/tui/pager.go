@@ -356,6 +356,9 @@ func (m *tuiModel) syncPager() {
 			before := slices.Clone(pv.keys)
 			doc := pv.page()
 			pv.keepPlace(&m.pg, before)
+			if pv.sum != nil && !slices.Contains(before, planSumKey) {
+				m.pg.open[0] = true // a summary arrives open (planview.go)
+			}
 			m.pg.layout(doc, m.vp.Width, h)
 			return
 		}

@@ -30,6 +30,9 @@ import (
 //	v            the view: outline (goals over what they need), order (the
 //	             graph's own tree), flat (one row per node); not saved
 //	c            on the finished row: /plan clear, archive the finished trees
+//	s            /plan summary: the model says Done / Doing / Next (one side
+//	             call, beside the turn); again, a fresh one. It shows as the
+//	             first row, open, with when it was made and its cost
 //	enter, →     the node's details, done-when, needs, why it waits
 //
 // Marking a node done is the model's, so there is no key for it. What the
@@ -60,7 +63,21 @@ type planView struct {
 	// view is how the rows are laid out (planOutline, planOrder, planFlat),
 	// kept across refreshes of one open screen.
 	view int
+	// sum is the last /plan summary, or the one being made; nil before one.
+	sum *planSum
 }
+
+// planSum is the plan event's summary (dun/plansummary.go).
+type planSum struct {
+	text, made, err string
+	running         bool
+}
+
+// planSumKey is the summary row's key (keys), and planSumRow its order.
+const (
+	planSumKey = "summary"
+	planSumRow = -2
+)
 
 const (
 	planOutline = iota // goals at the root, what each needs beneath it
@@ -222,7 +239,26 @@ func (v *planView) page() pageDoc {
 	v.order, v.keys, v.animating = v.order[:0], v.keys[:0], false
 	seen := map[string]int{}
 	live, done, units := v.layout()
-	nodes := make([]pageNode, 0, len(v.rows))
+	nodes := make([]pageNode, 0, len(v.rows)+1)
+	if s := v.sum; s != nil {
+		head := "summary"
+		switch {
+		case s.running:
+			head += " · summarizing…"
+		case s.made != "":
+			head += " · " + s.made
+		}
+		body := s.text
+		if body == "" && s.running {
+			body = "summarizing…"
+		}
+		if s.err != "" {
+			body = strings.TrimSpace(body + "\n\nlast try failed: " + s.err)
+		}
+		nodes = append(nodes, pageNode{head: head, body: body, style: &stNote})
+		v.order = append(v.order, planSumRow)
+		v.keys = append(v.keys, planSumKey)
+	}
 	for _, d := range live {
 		i, r := d.i, v.rows[d.i]
 		mark, style, ownerTag := v.motion(r)
@@ -295,7 +331,7 @@ func (v *planView) page() pageDoc {
 		v.order = append(v.order, -1)
 		v.keys = append(v.keys, "≡")
 	}
-	if len(nodes) == 0 {
+	if len(nodes) == 0 || len(nodes) == 1 && v.sum != nil {
 		nodes = append(nodes, pageNode{body: "The plan is empty. The model makes nodes with its plan tools when a task has several steps."})
 	}
 	return pageDoc{title: textfmt.Plural(v.total, "node"), nodes: nodes}
@@ -367,9 +403,9 @@ func (v *planView) motion(r planRow) (mark string, style *lipgloss.Style, tag st
 func (v *planView) hint() string {
 	name := "view: " + planViewNames[v.view]
 	if v.width > 0 && v.width < narrowW {
-		return "t tell · a approve · e m d edit/drop · v " + planViewNames[v.view] + " · enter · esc"
+		return "s summary · t tell · a approve · e m d edit/drop · v " + planViewNames[v.view] + " · enter · esc"
 	}
-	return StDim.Render(name+" ") + hotKey("change view", "v") + StDim.Render(" · ") + hotKey("tell", "t") + StDim.Render(" · ") + hotKey("approve", "a") + StDim.Render(" · ") + hotKey("edit title", "e") +
+	return StDim.Render(name+" ") + hotKey("summary", "s") + StDim.Render(" · ") + hotKey("change view", "v") + StDim.Render(" · ") + hotKey("tell", "t") + StDim.Render(" · ") + hotKey("approve", "a") + StDim.Render(" · ") + hotKey("edit title", "e") +
 		StDim.Render(" · ") + hotKey("details", "m") + StDim.Render(" · ") + hotKey("drop", "d") +
 		StDim.Render(" · enter dive into its agent, else details · → details · esc back")
 }
@@ -400,6 +436,10 @@ func (m tuiModel) notePlan(ev evMsg) tuiModel {
 	v.approved, _ = ev["approved"].(bool)
 	if msg := str(ev["note"]); msg != "" { // auto-archive: said once, in the status line
 		m.flashText, m.flashUntil = msg, time.Now().Add(flashFor)
+	}
+	if o, ok := ev["summary"].(map[string]any); ok {
+		v.sum = &planSum{text: str(o["text"]), made: str(o["made"]), err: str(o["error"])}
+		v.sum.running, _ = o["running"].(bool)
 	}
 	rows, _ := ev["rows"].([]any)
 	for _, x := range rows {
@@ -454,6 +494,17 @@ func (planListPane) key(m *tuiModel, msg tea.KeyPressMsg) bool {
 		r = &v.rows[v.order[m.pg.cur]]
 	}
 	switch k {
+	case "s":
+		if v.sum != nil && v.sum.running {
+			m.flashText, m.flashUntil = "summarizing…", time.Now().Add(flashFor)
+			return true
+		}
+		if !m.proc.controlCmd("plan", "summary") {
+			m.flashText, m.flashUntil = "no engine right now — /reconnect first", time.Now().Add(flashFor)
+			return true
+		}
+		m.flashText, m.flashUntil = "/plan summary", time.Now().Add(flashFor)
+		return true
 	case "v":
 		v.view = (v.view + 1) % planViews
 		m.syncPager()

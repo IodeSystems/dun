@@ -448,11 +448,20 @@ func withSessionSearch(inner agent.ToolDispatcher, run func(context.Context, str
 // its config is read through, so it asks for the session index each call.
 type lateSessionIndex struct{ h *Harness }
 
+// A fold is also a /journal entry (journal.go): a reference to its span's
+// file when it was written, else the summary itself.
 func (l lateSessionIndex) Put(ctx context.Context, d agent.SessionDoc) error {
+	var err error
+	path := ""
 	if x := l.h.sessionIndex(); x != nil {
-		return x.Put(ctx, d)
+		if err = x.Put(ctx, d); err == nil {
+			path = filepath.Join(x.dir, foldFileName(d.Key))
+		}
 	}
-	return nil
+	if d.Kind == agent.SessionDocFold {
+		l.h.journalFold(d.Name, d.Summary, path)
+	}
+	return err
 }
 
 func (l lateSessionIndex) Search(ctx context.Context, q string, n int) ([]agent.SessionHit, error) {
