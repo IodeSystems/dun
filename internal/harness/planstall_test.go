@@ -102,14 +102,15 @@ func TestPlanStall_RepeatsAtMostThree(t *testing.T) {
 	n := r.calls()
 	r.mu.Lock()
 	r.reply = func(i int, forced bool) *llm.ToolCall {
-		if i-n >= 5 {
+		if i-n >= 8 {
 			return nil
 		}
 		return nudgeCall(fmt.Sprintf("d%d", i), "exec", fmt.Sprintf(`{"command":"true %d"}`, i))
 	}
 	r.mu.Unlock()
 	askOK(t, h)
-	// Turn 2: 5 execs, the text, the end-of-turn check.
+	// Turn 2: 8 execs and the text; no end-of-turn check, the plan being
+	// unchanged since turn 1's (idlecheck.go).
 	if at := r.forcedAt(); !slices.Equal(at[3:], []int{n + 3, n + 6}) {
 		t.Errorf("a new turn's count did not start again: forced at %v (turn began at %d)", at, n)
 	}

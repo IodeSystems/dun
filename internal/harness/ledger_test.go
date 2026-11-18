@@ -249,7 +249,7 @@ func TestAsks_NodesAndTheTurnEndCheck(t *testing.T) {
 	if g, _ := (planStore{h}).View(context.Background()); h.openWork(g) != 0 {
 		t.Error("asks count as the agent's open work (the plan nudges)")
 	}
-	note := h.idleNote(1)
+	note, _ := h.idleNote(1)
 	for _, w := range []string{"1 ask: fix the flaky test", `the user wrote: "fix the flaky test it fails one run in ten"`,
 		"2 ask: also update the docs", `the user wrote: "also update the docs"`} {
 		if !strings.Contains(note, w) {

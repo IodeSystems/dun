@@ -265,7 +265,7 @@ func TestLearn_HeldUntilTheTaskVerifies(t *testing.T) {
 	runSteps(t, h, churn(3)...)
 	h.learnAfterTurn(context.Background(), nil)
 	planCall(t, h, "plan_add", `{"title":"build it","done_when":"it builds"}`)
-	h.idle.mark()
+	h.idle.mark(planRev{})
 	h.learnAfterTurn(context.Background(), nil) // a node open
 	planCall(t, h, "plan_update", `{"id":"1","status":"doing"}`)
 	planCall(t, h, "plan_close", `{"outcome":"done","id":"1","account":"it builds"}`)

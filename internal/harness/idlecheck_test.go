@@ -32,6 +32,7 @@ func TestOnIdle(t *testing.T) {
 	}
 
 	h.cfg.NonInteractive = false
+	h.idle.reset() // a new turn
 	planCall(t, h, "plan_add", `{"title":"write the parser","done_when":"tests pass"}`)
 	if got := h.onIdle(ctx, 3, 0); !strings.Contains(got, "Open plan nodes") || !strings.Contains(got, "write the parser") {
 		t.Errorf("interactive with an open plan: %q", got)

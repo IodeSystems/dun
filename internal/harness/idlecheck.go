@@ -11,6 +11,7 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/agentkit/taskgraph"
 )
 
 // idlecheck.go — what dun says when the model is about to end a turn
@@ -30,6 +31,13 @@ import (
 // round, unless the plan still has open nodes: the model then finishes them,
 // or marks them done or dropped (USER 2026-11-07). Both modes list the open
 // nodes with their done_when.
+//
+// Bounds (USER 2026-11-18): no check in an automatic turn (autoturn.go)
+// that made no tool call; a blocked node is not listed (it waits on the
+// person); the open nodes are not listed again while the plan is unchanged
+// since the last check, in this turn or an earlier one; the count is the
+// turn's, not the attempt's (turnBegin), so a retried turn gets no new
+// checks.
 
 // idleChecklist is the --non-interactive check.
 // The wording keeps the turn open when a requirement fails: TB2.1
@@ -57,7 +65,7 @@ func (h *Harness) idleOpenNodes() string {
 	var lines []string
 	more := 0
 	for _, n := range g.Nodes {
-		if n.Owner != "" || !planOpen(n) {
+		if n.Owner != "" || !planOpen(n) || n.Status == taskgraph.Blocked {
 			continue
 		}
 		if len(lines) == idlePlanMax {
@@ -84,9 +92,19 @@ const idleChecksMax = 2
 // idleRearm starts the second check; %s is the change.
 const idleRearm = "You %s after the last check: check the requirements again against what is there now."
 
-func (h *Harness) onIdle(_ context.Context, rounds, asks int) string {
+// onIdle is agent.Session.OnIdle. Its count of checks is agentkit's for
+// one Session.Turn call, which a retry starts again; the turn's own count
+// (idleState.n) is what bounds it.
+func (h *Harness) onIdle(_ context.Context, rounds, _ int) string {
+	asks := h.idle.count()
 	if asks >= idleChecksMax {
 		return ""
+	}
+	if asks == 0 {
+		// A wake that did no tool work has nothing to check.
+		if o, calls := h.turnOriginNow(); o == originAuto && calls == 0 {
+			return ""
+		}
 	}
 	var change string
 	if asks > 0 {
@@ -97,11 +115,11 @@ func (h *Harness) onIdle(_ context.Context, rounds, asks int) string {
 			return ""
 		}
 	}
-	note := h.idleNote(rounds)
+	note, plan := h.idleNote(rounds)
 	if note == "" {
 		return ""
 	}
-	h.idle.mark()
+	h.idle.mark(plan)
 	if change != "" {
 		note = fmt.Sprintf(idleRearm, change) + "\n\n" + note
 	}
@@ -109,42 +127,71 @@ func (h *Harness) onIdle(_ context.Context, rounds, asks int) string {
 }
 
 // idleNote is the check itself: the requirements (--non-interactive, a turn
-// that did work) and the main agent's open plan nodes.
-func (h *Harness) idleNote(rounds int) string {
+// that did work) and the main agent's open plan nodes, these only when the
+// plan changed since the last check. plan is the plan's revision as read.
+func (h *Harness) idleNote(rounds int) (string, planRev) {
 	var note string
 	if h.cfg.NonInteractive && rounds > 1 {
 		note = idleChecklist
 	}
+	var rev planRev
 	if !h.isChild() {
-		if open := h.idleOpenNodes(); open != "" {
-			if note != "" {
-				note += "\n\n"
+		p := h.planNow()
+		rev = planRev{p.store, p.store.revNow()}
+		if rev != h.idle.lastPlan() {
+			if open := h.idleOpenNodes(); open != "" {
+				if note != "" {
+					note += "\n\n"
+				}
+				note += fmt.Sprintf(idlePlanOpen, open)
 			}
-			note += fmt.Sprintf(idlePlanOpen, open)
 		}
 	}
-	return note
+	return note, rev
 }
 
-// idleState is what the turn changed since its last check; prepareTurn
-// resets it.
+// planRev is a plan store and its revision: the plan as a check read it.
+type planRev struct {
+	store *planMemStore
+	rev   int
+}
+
+// idleState is what the turn changed since its last check; turnBegin
+// resets it, all but plan.
 type idleState struct {
 	mu      sync.Mutex
 	checked bool
+	n       int      // checks given in this turn
 	paths   []string // file_edit and file_write paths, in order, once each
+	plan    planRev  // the plan as the last check read it, in any turn
 }
 
 func (s *idleState) reset() {
 	s.mu.Lock()
-	s.checked, s.paths = false, nil
+	s.checked, s.paths, s.n = false, nil, 0
 	s.mu.Unlock()
 }
 
 // mark records a check: changes count from here.
-func (s *idleState) mark() {
+func (s *idleState) mark(plan planRev) {
 	s.mu.Lock()
-	s.checked, s.paths = true, nil
+	s.checked, s.paths, s.plan = true, nil, plan
+	s.n++
 	s.mu.Unlock()
+}
+
+// count is the checks given in this turn.
+func (s *idleState) count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.n
+}
+
+// lastPlan is the plan as the last check read it.
+func (s *idleState) lastPlan() planRev {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.plan
 }
 
 // wasChecked reports whether a check was given in this turn.
