@@ -779,6 +779,38 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   archives, and the span files are one (the 2026-11-14 rule). `/clear` keeps
   the session id, so the spans of the cleared log stay with the session.
 
+## /plan summary and /journal (USER 2026-11-17)
+
+- **`/plan summary` (`s` on the /plan screen) is one side call, beside the
+  turn** (`internal/harness/plansummary.go`). The session's model reads the plan
+  (`Graph.List`) and the recent session (the newest entries, each cut at 800
+  runes, 12,000 in all: `tailLines`) and answers in three parts, `## Done`,
+  `## Doing`, `## Next`. It goes through `askOnce` (`sidecall.go`), which takes no
+  turn lock: a running turn is neither interrupted nor waited for (`fork`
+  takes `turnMu`, so it was not used). Counted as side call kind
+  `plan_summary`; the spend meter sees it as every call. The last summary is
+  in memory and rides the `plan` event (`proto.PlanSummary`: text, when made,
+  tokens, cost, running), so every client shows the same and the TUI shows
+  "summarizing…" while it runs; a second request while one runs is refused.
+  Not kept across a restart: it is a reading of the moment.
+- **`/journal` is a time-ordered list of what the agent did**
+  (`internal/harness/journal.go`), kept in `<session>.journal.jsonl`,
+  append-only, so it survives a resume. Three kinds: `fold` (every compaction
+  fold, from the summary the fold wrote: `lateSessionIndex.Put` adds the entry
+  as a reference to `<session>.folds/<key>.md`; with no dund link there is no
+  file and the entry keeps the summary; the rescue fold, which writes no span,
+  does the same; recaps are not entries, they are many and small), `now`
+  (`/journal now`: one side call, kind `journal`, over the plan and the
+  session's entries since the last journal entry, bounded like `/worklog
+  write`; its text goes to `<session>.journal/<n>.md` and into dund's
+  sessions index as `kind:journal`, so `session_search` finds it), and
+  `worklog` (an account `/worklog write` wrote, by reference). No extra model
+  call for folds or worklog accounts. `/worklog` itself is unchanged.
+- **Reason.** A fold deletes from the context what it summarizes; the
+  summary was on disk but no view listed them in order. The plan says what
+  is planned, not where the work stands; a summary on request answers that
+  without a turn.
+
 ## dund's HTTP listener: runtime, one listener, chooser (USER 2026-11-17)
 
 - **dund starts and stops its HTTP listener while it runs.** `dun dund

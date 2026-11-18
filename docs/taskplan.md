@@ -101,6 +101,21 @@ the rest as asides that ride its next turn. The engine sends the graph as a `pla
 event (control `plan` `view`, then again on every change by anyone); the screen
 never works out what can start.
 
+**Summary.** `s` on the screen, or `/plan summary` from any client, asks the
+session's model in one side call for where the work stands: `## Done`, `## Doing`,
+`## Next`, from the plan and the recent session (bounded). It runs beside the turn,
+never queued behind it or interrupting it. The summary shows as the first row of the
+tree, open (enter or ← collapses it), with when it was made, its tokens and its cost;
+"summarizing…" while one runs; `s` again makes a fresh one. A text client gets the
+summary as the command's reply. In memory only (decisions.md, "/plan summary and
+/journal").
+
+**Journal.** `/journal` lists what the agent did, newest first: each compaction fold
+(its summary), each `/journal now` entry (one side call over what happened since the
+last entry) and each `/worklog write` account. In the TUI it is a screen (enter opens
+an entry, `n` is `/journal now`); text clients use `/journal view <n>`. Kept in
+`<session>.journal.jsonl`.
+
 **Archive.** `/plan clear` archives every finished tree: a connected component (edges
 either way) whose nodes are all done or dropped; one with an open node is left whole.
 The ids go in the sidecar (`archived`); the nodes stay in the graph so edges hold, and
