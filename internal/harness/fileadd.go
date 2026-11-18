@@ -179,21 +179,32 @@ func (h *Harness) editPathsFile(scope string, edit func(*pathsFile)) error {
 }
 
 // addedSets is addedWriters' answer, kept until a paths file changes.
+// Built once and not changed after: a caller may keep it.
 type addedSets struct {
 	ts       []*filetools.Toolset
-	readOnly map[*filetools.Toolset]bool
+	readOnly map[*filetools.Toolset]bool            // a directory's toolset: open for reading only
+	writable map[*filetools.Toolset]map[string]bool // a file set's toolset: file → open for writing
+}
+
+// readOnlyAt reports whether p, routed to t, is open for reading only. A
+// toolset that is no grant's (the workspace, tmp) is not.
+func (s *addedSets) readOnlyAt(t *filetools.Toolset, p string) bool {
+	if w, ok := s.writable[t]; ok {
+		write, open := w[filepath.Clean(p)]
+		return open && !write // not open at all: the set's Resolve says so
+	}
+	return s.readOnly[t]
 }
 
 // addedNow is the grants as the file tools route them: built once, then
 // kept until a paths file is edited here.
-func (h *Harness) addedNow() ([]*filetools.Toolset, map[*filetools.Toolset]bool) {
+func (h *Harness) addedNow() *addedSets {
 	h.addedMu.Lock()
 	defer h.addedMu.Unlock()
 	if h.added == nil {
-		ts, ro := h.addedWriters()
-		h.added = &addedSets{ts: ts, readOnly: ro}
+		h.added = h.addedWriters()
 	}
-	return h.added.ts, h.added.readOnly
+	return h.added
 }
 
 // dropAdded forgets the grants, and the loop guard's run: a call refused
@@ -510,20 +521,18 @@ func cleanAdded(p string) (string, error) {
 
 // addedWriters is a toolset per open directory, and one per directory
 // holding open files, held to those files; configured like the workspace's.
-// readOnly marks the ones whose paths are open for reading only: an edit or
-// a write routed to one is refused (withFiles).
-func (h *Harness) addedWriters() (out []*filetools.Toolset, readOnly map[*filetools.Toolset]bool) {
-	readOnly = map[*filetools.Toolset]bool{}
+// A directory's toolset is read only or not as a whole; a file set's mode
+// is each file's own (writable): one file open for writing does not open
+// its neighbours, which a read prompt (fileaccess.go) leaves open read only.
+// An edit or a write to a path open for reading only is refused (withFiles).
+func (h *Harness) addedWriters() *addedSets {
+	s := &addedSets{readOnly: map[*filetools.Toolset]bool{}, writable: map[*filetools.Toolset]map[string]bool{}}
 	cfg, ok := filesToolset(h.cfg.Files, h.cfg.Workspace)
 	if !ok {
-		return nil, readOnly
-	}
-	type fileSet struct {
-		files map[string]bool
-		write bool
+		return s
 	}
 	var dirs []AddedPath
-	files := map[string]*fileSet{} // directory → its open files
+	files := map[string]map[string]bool{} // directory → its open files → write
 	for _, a := range h.AddedEntries() {
 		if !a.On {
 			continue
@@ -536,35 +545,41 @@ func (h *Harness) addedWriters() (out []*filetools.Toolset, readOnly map[*fileto
 		default:
 			d := filepath.Dir(a.Path)
 			if files[d] == nil {
-				files[d] = &fileSet{files: map[string]bool{}}
+				files[d] = map[string]bool{}
 			}
-			files[d].files[a.Path] = true
-			files[d].write = files[d].write || a.Write
+			files[d][a.Path] = a.Write
 		}
 	}
-	add := func(root string, write bool, resolve func(string) (string, error)) {
+	add := func(root string, resolve func(string) (string, error)) *filetools.Toolset {
 		c := cfg
 		c.ExtraIgnore, c.Root, c.Resolve = nil, root, resolve
-		if ts, err := filetools.New(c); err == nil {
-			out = append(out, ts)
-			readOnly[ts] = !write
+		ts, err := filetools.New(c)
+		if err != nil {
+			return nil
 		}
+		s.ts = append(s.ts, ts)
+		return ts
 	}
 	for _, d := range dirs {
 		root := d.Path
-		add(root, d.Write, func(rel string) (string, error) { return filetools.Under(root, rel) })
+		if ts := add(root, func(rel string) (string, error) { return filetools.Under(root, rel) }); ts != nil {
+			s.readOnly[ts] = !d.Write
+		}
 	}
 	for d, set := range files {
-		root, allowed := d, set.files
-		add(root, set.write, func(rel string) (string, error) {
+		root, allowed := d, set
+		ts := add(root, func(rel string) (string, error) {
 			got, err := filetools.Under(root, rel)
-			if err == nil && !allowed[got] {
+			if _, open := allowed[got]; err == nil && !open {
 				return "", fmt.Errorf("%s: only the files added from %s are open (ask the user: /file add %s)", got, root, got)
 			}
 			return got, err
 		})
+		if ts != nil {
+			s.writable[ts] = allowed
+		}
 	}
-	return out, readOnly
+	return s
 }
 
 // pathsSwitchKind is /file's table: every path a scope names, on, off or

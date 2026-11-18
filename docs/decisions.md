@@ -1127,8 +1127,15 @@ exec edits followed an "outside the root" refusal. `internal/harness/fileaccess.
   that scope (`AddPath`), for writing when the call writes. It is not
   indexed: `/file add` indexes a directory by default, but raglit watching
   a tree is not what a file call asked for (`/file index` turns it on). A
-  read-only grant gets mode write at that scope (`SetPathMode`). The call
-  then runs once and its result is the answer.
+  read-only grant gets mode write at that scope (`SetPathMode`). The
+  chosen scope decides: the nearer scopes forget the path's on (and, for a
+  write, its mode), else a session's read would hide a project's write
+  (`clearNearer`). The call then runs once and its result is the answer;
+  a note after the option (the TUI's `<option> — <note>`) rides with it.
+  A move asks about its `to` as well.
+- **A file's mode is its own.** A directory's grants used to share one
+  mode, so one file open for writing opened its read-only neighbours;
+  each file now keeps its own (`addedSets.writable`).
 - **Nobody to answer.** A sub-agent and `--non-interactive` have no Ask:
   the refusal is as before, with the exact `/file add <path> [--write]`.
   In a round dun added (`autoRound`: automatic turns, which include a

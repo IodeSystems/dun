@@ -179,10 +179,11 @@ func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, tmp []*filetoo
 		if !ts.Handles(tc.Function.Name) {
 			return inner(ctx, tc)
 		}
-		var out string
+		var out, note string
 		asked := tc.Function.Arguments // tmp is read by an absolute path, not one fileAccess resolved
-		tc.Function.Arguments, out = h.fileAccess(ctx, ts, tmp, tc.Function.Name, tc.Function.Arguments)
-		added, readOnly := h.addedNow() // read per call (and after a grant): see Harness.added
+		tc.Function.Arguments, out, note = h.fileAccess(ctx, ts, tmp, tc.Function.Name, tc.Function.Arguments)
+		sets := h.addedNow() // read per call (and after a grant): see Harness.added
+		added := sets.ts
 		route := ts
 		writes := writesFiles(ts, tc.Function.Name)
 		if out == "" {
@@ -194,14 +195,26 @@ func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, tmp []*filetoo
 				// The same, named through a symlink: an added path is kept
 				// resolved, and the model writes the path the person typed.
 				route, tc.Function.Arguments = t, args
-			} else if hint := outsideHint(ts, tc.Function.Name, outsidePath(ts, tc.Function.Arguments)); hint != "" {
+			} else if hint := outsideHint(ts, tc.Function.Name, outsidePath(ts, tc.Function.Arguments, "path")); hint != "" {
 				out = hint
 			}
 		}
 		// A path open for reading only (/file, mode read): no edit, no write.
-		if out == "" && writes && readOnly[route] {
-			out = fmt.Sprintf("ERROR: %s is open to dun for reading only. To change it the user runs /file mode %s write "+
-				"(the path, or the directory added). Do not work around this with exec.", route.Root(), route.Root())
+		// A file set's mode is the file's: the path, and a move's target.
+		if out == "" && writes {
+			for _, key := range pathKeys(ts, tc.Function.Name) {
+				p := argPath(tc.Function.Arguments, key)
+				if p == "" || !sets.readOnlyAt(route, p) {
+					continue
+				}
+				what := route.Root()
+				if _, fileSet := sets.writable[route]; fileSet {
+					what = filepath.Clean(p)
+				}
+				out = fmt.Sprintf("ERROR: %s is open to dun for reading only. To change it the user runs /file mode %s write "+
+					"(the path, or the directory added). Do not work around this with exec.", what, what)
+				break
+			}
 		}
 		// The workspace read only: the tools stay listed and say so, where
 		// a list without them sent the model to exec.
@@ -216,6 +229,9 @@ func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, tmp []*filetoo
 		}
 		if out == "" {
 			out = route.Dispatch(ctx, tc.Function.Name, tc.Function.Arguments)
+		}
+		if note != "" {
+			out += "\n\n[the user, opening the path: " + note + "]"
 		}
 		if onCall != nil {
 			var args map[string]any

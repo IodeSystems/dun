@@ -27,6 +27,11 @@ func (a *accessAsker) ask(_ context.Context, q string, opts []string, _ bool, _ 
 // accessHarness is a session in ws, with a file outside it, whose Ask is a.
 func accessHarness(t *testing.T, a *accessAsker) (h *Harness, ws, outside string) {
 	t.Helper()
+	return accessHarnessFiles(t, a, nil)
+}
+
+func accessHarnessFiles(t *testing.T, a *accessAsker, files *mcpserver.FilesConfig) (h *Harness, ws, outside string) {
+	t.Helper()
 	t.Setenv("DUN_HOME", t.TempDir())
 	old := tmpRoots
 	tmpRoots = func() []string { return nil } // these dirs are in /tmp, which reads may see
@@ -36,7 +41,7 @@ func accessHarness(t *testing.T, a *accessAsker) (h *Harness, ws, outside string
 	if err := os.WriteFile(outside, []byte("alpha\nbeta\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg := Config{Workspace: ws, SessionFile: filepath.Join(t.TempDir(), "s.jsonl"), Client: &scriptRunner{}}
+	cfg := Config{Workspace: ws, SessionFile: filepath.Join(t.TempDir(), "s.jsonl"), Client: &scriptRunner{}, Files: files}
 	if a != nil {
 		cfg.Ask = a.ask
 	}
@@ -238,5 +243,99 @@ func TestFileTools_ReadOnlyRefusesAndMultiEdit(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(p); strings.Contains(string(b), "2") {
 		t.Error("edited a read-only workspace")
+	}
+}
+
+// An option with the TUI's note after it is that option, and the note
+// reaches the model; a bare yes, y or ok is this session; other words are
+// a no with them as the reason.
+func TestFileAccess_AnswerWithANote(t *testing.T) {
+	for _, c := range []struct{ ans, scope, note string }{
+		{accessProject + " — only the README", mcpserver.ScopeProject, "only the README"},
+		{"Yes, for this session — careful", mcpserver.ScopeSession, "careful"},
+		{"yes", mcpserver.ScopeSession, ""}, {"y", mcpserver.ScopeSession, ""}, {"OK", mcpserver.ScopeSession, ""},
+		{accessNo + " — use docs/ instead", "", "use docs/ instead"},
+		{"not that one", "", "not that one"},
+	} {
+		if scope, note := accessScope(c.ans); scope != c.scope || note != c.note {
+			t.Errorf("%q: %q %q, want %q %q", c.ans, scope, note, c.scope, c.note)
+		}
+	}
+	a := &accessAsker{ans: accessSession + " — keep the header"}
+	h, _, outside := accessHarness(t, a)
+	out := editAlpha(t, h, outside)
+	if strings.Contains(out, "ERROR") || !strings.Contains(out, "keep the header") {
+		t.Fatalf("yes with a note: %s", out)
+	}
+	if b, _ := os.ReadFile(outside); !strings.Contains(string(b), "gamma") {
+		t.Errorf("not edited: %s", b)
+	}
+}
+
+// The scope the person picks decides, though a nearer one said otherwise:
+// a session's read under a project's yes, and a session's off.
+func TestFileAccess_ChosenScopeOutranksNearer(t *testing.T) {
+	a := &accessAsker{ans: accessProject}
+	h, _, outside := accessHarness(t, a)
+	if _, err := h.AddPath(outside, mcpserver.ScopeSession, PathOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if out := editAlpha(t, h, outside); strings.Contains(out, "ERROR") || len(a.asks) != 1 {
+		t.Fatalf("write at project under a session read: %s (%d asks)", out, len(a.asks))
+	}
+	if e := entryFor(h, outside); e == nil || !e.Write || !e.On {
+		t.Errorf("entry: %+v", e)
+	}
+	other := filepath.Join(filepath.Dir(outside), "other.txt")
+	os.WriteFile(other, []byte("alpha\n"), 0o644)
+	if _, err := h.SetPathOn(other, mcpserver.ScopeSession, false); err != nil {
+		t.Fatal(err)
+	}
+	if out := editAlpha(t, h, other); strings.Contains(out, "ERROR") || len(a.asks) != 2 {
+		t.Fatalf("on at project under a session off: %s (%d asks)", out, len(a.asks))
+	}
+}
+
+// One file open for writing does not open its read-only neighbour, with
+// nobody to ask.
+func TestFileAccess_WriteIsPerFile(t *testing.T) {
+	h, _, outside := accessHarness(t, nil)
+	ro := filepath.Join(filepath.Dir(outside), "ro.txt")
+	os.WriteFile(ro, []byte("alpha\n"), 0o644)
+	if _, err := h.AddPath(outside, mcpserver.ScopeSession, PathOptions{Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.AddPath(ro, mcpserver.ScopeSession, PathOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if out := editAlpha(t, h, ro); !strings.Contains(out, ro+" is open to dun for reading only") {
+		t.Errorf("read-only neighbour: %s", out)
+	}
+	if b, _ := os.ReadFile(ro); strings.Contains(string(b), "gamma") {
+		t.Error("edited a read-only file")
+	}
+	if out := editAlpha(t, h, outside); strings.Contains(out, "ERROR") {
+		t.Errorf("the write file: %s", out)
+	}
+	if out := fileCall(t, h, "file_read", map[string]any{"path": ro}); !strings.Contains(out, "alpha") {
+		t.Errorf("read the read-only file: %s", out)
+	}
+}
+
+// A move of an outside file asks about its target too, and a yes to both
+// lets it run.
+func TestFileAccess_MoveAsksForItsTarget(t *testing.T) {
+	a := &accessAsker{ans: accessSession}
+	h, _, outside := accessHarnessFiles(t, a, &mcpserver.FilesConfig{Tools: []string{"read", "edit", "write", "move"}})
+	to := filepath.Join(filepath.Dir(outside), "renamed.txt")
+	out := fileCall(t, h, "file_move", map[string]any{"path": outside, "to": to})
+	if strings.Contains(out, "ERROR") {
+		t.Fatalf("move: %s", out)
+	}
+	if len(a.asks) != 2 || !strings.Contains(a.asks[0], outside) || !strings.Contains(a.asks[1], to) {
+		t.Fatalf("asks: %q", a.asks)
+	}
+	if _, err := os.Stat(to); err != nil {
+		t.Errorf("not moved: %v", err)
 	}
 }
