@@ -423,12 +423,11 @@ func foldSummaryProblems(summary string, ask string) []string {
 type foldRunner struct {
 	inner agent.LLMRunner
 	h     *Harness
+	sh    *agent.Shaper // its SessionPrefix names the prefix fold's system; nil in some tests
 }
 
 func (r foldRunner) ChatStream(ctx context.Context, msgs []llm.Message, tools []llm.ToolDef, opts *llm.ChatOpts) (<-chan llm.StreamChunk, error) {
-	// agentkit's own constant, not a copy; TestFoldRunner_MatchesAgentkitSystem
-	// fails if the Shaper stops sending it.
-	if len(msgs) == 0 || msgs[0].Role != "system" || msgs[0].Content != agent.DefaultSummarySystem {
+	if !r.isFold(msgs) {
 		return r.inner.ChatStream(ctx, msgs, tools, opts)
 	}
 	ask := r.h.askNow().text
@@ -464,6 +463,36 @@ func (r foldRunner) ChatStream(ctx context.Context, msgs []llm.Message, tools []
 		}
 	}
 	return replay(text, ""), nil
+}
+
+// isFold reports whether msgs is a fold request, by its system message. A
+// staged fold sends agentkit's own constant, not a copy
+// (TestFoldRunner_MatchesAgentkitSystem fails if the Shaper stops sending
+// it). A single-stage fold sends the session's prefix: its system is the one
+// sessionPrefix set on the Shaper for this build.
+func (r foldRunner) isFold(msgs []llm.Message) bool {
+	if len(msgs) == 0 || msgs[0].Role != "system" {
+		return false
+	}
+	if msgs[0].Content == agent.DefaultSummarySystem {
+		return true
+	}
+	return r.sh != nil && r.sh.SessionPrefix.System != "" && msgs[0].Content == r.sh.SessionPrefix.System
+}
+
+// sessionPrefix is the prefix a single-stage fold sends ahead of the history
+// (agent.Shaper.SessionPrefix, agentkit v0.33.1), so the provider serves the
+// history from the session's cache; before, the fold read all of it uncached
+// under the compaction worker's own prompt. system is the string
+// agent.Session passes to Build: Turn's effective system, heredoc tool text
+// and slot note included, the bytes the round sends. The tools are the
+// round's (forkTools): the session's tools on the native transport, none on
+// heredoc, where the schemas are in the system prompt. Set at every build
+// (measuredBuild), so a change to the tools or the prompt (a server
+// starting, /rag on) reaches the next fold.
+func sessionPrefix(s *agent.Session, system string) agent.SessionPrefix {
+	tools, _ := forkTools(s)
+	return agent.SessionPrefix{System: system, Tools: tools}
 }
 
 // call is one summarizer call, measured as side-call kind "fold" (USER
@@ -521,5 +550,5 @@ func (h *Harness) foldWire(sh *agent.Shaper) {
 	sh.SummaryOpts = h.foldOpts()
 	sh.TaskFunc = h.foldTask
 	sh.SummaryPrompt = foldSummaryPrompt
-	sh.Runner = foldRunner{inner: sh.Runner, h: h}
+	sh.Runner = foldRunner{inner: sh.Runner, h: h, sh: sh}
 }
