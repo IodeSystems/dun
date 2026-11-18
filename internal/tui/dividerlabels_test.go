@@ -168,8 +168,8 @@ func TestDividerLabels_PaneScreen(t *testing.T) {
 	s.valid = func(*tuiModel) bool { return true }
 	m.scr = s
 	hs := s.heights(&m, 80, m.screenRows())
-	// head rows, then the divider below pane 0 and the one below pane 1.
-	y := len(strings.Split(m.headView(), "\n")) + hs[0] + 1 + hs[1]
+	// head rows, then the first divider (below pane 0): the only one with names.
+	y := len(strings.Split(m.headView(), "\n")) + hs[0]
 	_, spans := renderDivider(80, s.labels(), "")
 	if !m.screenClick(tea.Mouse{Button: tea.MouseLeft, X: spans[0].x0, Y: y}) || s.focus != 1 {
 		t.Errorf("clicking servers: focus %d", s.focus)
@@ -302,5 +302,28 @@ func TestDividerLabels_EmptiedStripStillMarksFocus(t *testing.T) {
 		if got := ansi.Strip(d); !strings.Contains(got, "[") {
 			t.Errorf("w=%d: no focused name: %q", w, got)
 		}
+	}
+}
+
+// The pane strip is drawn once, on the first divider; the divider between the
+// servers and the log is a bare rule.
+func TestDividerLabels_PaneScreenStripOnce(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	m.w, m.h = 80, 24
+	s := mcpScreen()
+	s.valid = func(*tuiModel) bool { return true }
+	m.scr = s
+	out := ansi.Strip(s.view(&m, 80, m.screenRows()))
+	strips := 0
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(l, "─[servers]─ log ─") {
+			strips++
+		}
+	}
+	if strips != 1 {
+		t.Errorf("tab strip drawn %d times, want 1:\n%s", strips, out)
+	}
+	if rules := strings.Count(out, strings.Repeat("─", 80)); rules != 1 {
+		t.Errorf("bare rules: %d, want 1:\n%s", rules, out)
 	}
 }

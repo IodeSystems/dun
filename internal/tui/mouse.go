@@ -480,6 +480,9 @@ func (m tuiModel) screenClick(mo tea.Mouse) bool {
 	hs := s.heights(&m, m.w, m.screenRows())
 	for i := 0; i < len(hs)-1; i++ {
 		y += hs[i]
+		if mo.Y == y && i > 0 { // later dividers are bare rules
+			return false
+		}
 		if mo.Y == y {
 			_, spans := renderDivider(m.w, s.labels(), "")
 			for _, sp := range spans {

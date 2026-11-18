@@ -146,8 +146,10 @@ func (s *paneScreen) view(m *tuiModel, w, rows int) string {
 	hs := s.heights(m, w, rows)
 	out := make([]string, 0, 2*len(s.panes))
 	for i, p := range s.panes {
-		if i > 0 {
+		if i == 1 {
 			out = append(out, s.paneDivider(w))
+		} else if i > 1 {
+			out = append(out, plainDivider(w))
 		}
 		out = append(out, p.body.view(m, w, hs[i]))
 	}
@@ -158,6 +160,13 @@ func (s *paneScreen) view(m *tuiModel, w, rows int) string {
 // base screen's, naming the screen's panes with the focused one marked.
 func (s *paneScreen) paneDivider(w int) string {
 	d, _ := renderDivider(w, s.labels(), "")
+	return d
+}
+
+// plainDivider is a divider with no pane names: the strip is drawn once, on
+// the screen's first divider, and the others are bare rules.
+func plainDivider(w int) string {
+	d, _ := renderDivider(w, nil, "")
 	return d
 }
 
