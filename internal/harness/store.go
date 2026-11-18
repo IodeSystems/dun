@@ -436,6 +436,21 @@ func (s *sessionStore) lastReplyID() string {
 	return ""
 }
 
+// lastRoundEntry is the newest entry a round wrote (a reply, a tool call or
+// result) or the newest user message, notifications skipped: an aside can
+// land between a reply and the idle check that reads it.
+func (s *sessionStore) lastRoundEntry() (agent.Entry, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := len(s.entries) - 1; i >= 0; i-- {
+		switch s.entries[i].Kind {
+		case agent.KindAssistant, agent.KindToolCall, agent.KindToolResult, agent.KindUser:
+			return s.entries[i], true
+		}
+	}
+	return agent.Entry{}, false
+}
+
 // recap replaces a span of the conversation with one entry and records a
 // citation.
 //

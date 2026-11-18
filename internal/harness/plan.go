@@ -287,10 +287,17 @@ func planDescFor(nonInteractive bool) string {
 }
 
 // withPlan adds the plan tools to the dispatcher. onCall hears every plan
-// call and its result.
+// call and its result. An argument with a tool call written as text is
+// refused: the plan's text is shown to the person and in the turn-end check
+// (textcall.go).
 func withPlan(inner agent.ToolDispatcher, tg *taskgraph.Tools, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
 	plan := tg.Wrap(inner)
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+		if n := tc.Function.Name; tg.Has(n) {
+			if what := argsMarkup(tc.Function.Arguments); what != "" {
+				return fmt.Sprintf(textCallRefused, n, what), nil
+			}
+		}
 		out, err := plan(ctx, tc)
 		if onCall != nil && tg.Has(tc.Function.Name) {
 			var a map[string]any

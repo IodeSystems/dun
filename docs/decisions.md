@@ -1151,6 +1151,39 @@ exec edits followed an "outside the root" refusal. `internal/harness/fileaccess.
   call. `file_edit` already takes `edits: [{old, new}, …]`; the prompt line
   says to use it and to run builds and tests in an exec call of their own.
 
+## Tool calls sent as text are retried (USER 2026-11-18)
+
+A DeepSeek Flash session wrote its tool calls into the reply as DSML
+(`<｜DSML｜…<invoke>…<parameter>`, U+FF5C bars) with no tool_calls: nothing
+ran, the turn ended, and the TUI dropped the tags as HTML. Once the markup was
+in a plan node's text. `internal/harness/textcall.go`,
+`internal/textfmt/toolmarkup.go`.
+
+- **Detect structure, not a tag.** A reply with no tool calls whose text,
+  outside code (fenced, also in quotes and list items; indented; inline),
+  has a DSML marker (`<｜DSML｜`, `<|DSML|`) or `<|tool▁calls▁begin|>`;
+  `<invoke name=` with `<parameter name=`; `<function_calls>` with
+  `<invoke`; or `<tool_call>` then `{` and `"name"`. A tag named in prose
+  ("Qwen wraps calls in <tool_call> tags") is not a call.
+- **Respond.** onIdle answers first with one `[automatic] your last reply had
+  a tool call written as text (…)` note and the turn goes on; at most 2 a
+  turn, then the turn ends as before (with its usual turn-end check). Only a
+  reply written in this turn is read: the newest entry as the turn began is
+  skipped, so a wake with an empty reply does not correct the last turn's.
+  It runs in automatic turns too, but as a note inside the running turn,
+  not a new turn: the unrequested-turn budget does not count it.
+- **Plan arguments.** A plan tool call with the markup in any string argument
+  is refused with the same guidance: plan text is shown to the person and in
+  the turn-end check. File contents are not checked.
+- **Display.** The TUI fences each markup span (its lines only, a
+  parameter's value kept whole) before rendering, so it shows raw as a code
+  block. In a blockquote or an indent the fence lines keep the prefix; a span
+  that opens on a list marker line is left as it is. The app (mobile/web) draws HTML nodes as their text
+  and was not changed.
+- Not a gateway fix (Carl, 2026-11-18): the markup is malformed model
+  output (mismatched tags), which no parser can repair; corrallm passes it
+  through. The guard is the fix.
+
 ## Release updates
 
 - **para shares dun's signing key (Carl, 2026-11-10); manifests are bound to

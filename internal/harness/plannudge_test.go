@@ -21,6 +21,7 @@ type nudgeRunner struct {
 	choice []string
 	sent   [][]llm.Message
 	reply  func(i int, forced bool) *llm.ToolCall // nil: answer with text
+	text   func(i int) string                     // that text; nil: "done"
 	refuse bool
 	caps   *llm.Capabilities
 }
@@ -49,6 +50,8 @@ func (r *nudgeRunner) ChatStream(_ context.Context, msgs []llm.Message, _ []llm.
 	out := make(chan llm.StreamChunk, 2)
 	if tc != nil {
 		out <- llm.StreamChunk{ToolCall: tc}
+	} else if r.text != nil {
+		out <- llm.StreamChunk{Content: r.text(i)}
 	} else {
 		out <- llm.StreamChunk{Content: "done"}
 	}
