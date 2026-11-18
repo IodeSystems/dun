@@ -1133,6 +1133,13 @@ exec edits followed an "outside the root" refusal. `internal/harness/fileaccess.
   (`clearNearer`). The call then runs once and its result is the answer;
   a note after the option (the TUI's `<option> — <note>`) rides with it.
   A move asks about its `to` as well.
+- **dun's own session files are readable without a grant.** The isolation
+  tmp (`dun-<id>`, job logs, clipped output), the shell's overflow dir, and
+  a sub-agent's ancestors' are open to read, grep and list with no question
+  (`sessionReadDirs`, files.go); writes ask as above. Another session's
+  `dun-*` is not among them (the temp dir as a whole is still read-open,
+  USER 2026-10-23). Paths are resolved before the tmp check: macOS's
+  `/var/folders` link made the job log dun cited "outside this workspace".
 - **A file's mode is its own.** A directory's grants used to share one
   mode, so one file open for writing opened its read-only neighbours;
   each file now keeps its own (`addedSets.writable`).
