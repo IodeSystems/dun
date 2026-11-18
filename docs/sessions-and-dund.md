@@ -78,7 +78,9 @@ these, never from what they themselves sent.
 - Socket path limit is 107 bytes (per OS). A long `$DUN_HOME` puts the socket in
   `$XDG_RUNTIME_DIR/dund-<hash>.sock`; `--socket` overrides; a path still too
   long fails with a clear error.
-- dund re-execs into a new build once nothing is busy.
+- dund re-execs into a new build; running engines are adopted by the next
+  dund and keep working through it (`engine-adoption.md`). Engines that
+  cannot be adopted (an older build's stdio engines) are waited for as below.
 
 ## Reuse of idle sessions
 

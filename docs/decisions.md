@@ -986,6 +986,21 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
 
 ## Sessions, supervision and diagnosis
 
+- **Engines outlive a dund restart (USER 2026-11-17).** dund starts each
+  engine with `--listen <home>/dund/engines` (its own unix socket; stdin
+  `/dev/null`, output to `engines/<pid>.log`) and, under systemd, in a
+  transient scope of its own; an upgrade's restart (in-place exec and the
+  exit-75 handover) detaches from the engines and the next dund dials them
+  back (`engines/<pid>.json`, hello, `link_resume{after}`). Before, every
+  restart killed every engine four ways: `svc.Close()`, the unit's
+  `KillMode=control-group`, SIGPIPE on fd 1, EOF on stdin; so an upgrade had
+  to drain or cut work. Turns and self-wakes run on in the gap; the engine
+  rings 16 MB of numbered events and replays them, a ring overflow becomes
+  `history{reason:"reattach"}`. An adopted engine of an older build moves to
+  the new build at its next idle. The drain and resume record stay as the
+  fallback when adoption fails (version mismatch, dead socket, wrong
+  session). SIGTERM still stops and kills. Wire format, acks, skew:
+  `engine-adoption.md`.
 - **One representation, not two.** The agentkit entry list is both the model's
   context and the TUI history (`internal/harness/store.go`). Writes are a full rewrite to
   `<path>.tmp` plus rename: a crash leaves the whole old or whole new file.
