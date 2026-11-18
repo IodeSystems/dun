@@ -222,7 +222,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// y yanks the selected block's text to the clipboard (vim's yank).
 		if msg.String() == "y" && m.focus == focusConvo && m.sel >= 0 && m.sel < len(m.convo) {
 			if text := yankText(m.convo[m.sel]); text != "" {
-				return m, copyCmd(text)
+				return m, copyCmdRaw(text, true)
 			}
 			return m, nil
 		}
