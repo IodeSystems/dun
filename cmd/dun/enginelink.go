@@ -3,6 +3,9 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,7 +15,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -40,6 +42,11 @@ var (
 	linkHandshake = 10 * time.Second
 	// linkFlush bounds the wait at exit for the last events to reach dund.
 	linkFlush = 5 * time.Second
+	// linkForeignWait: a dund runs on this home and has not attached for
+	// this long: it does not adopt engines (an older build, a downgrade) and
+	// resumes the session on an engine of its own, so this one stops at
+	// once rather than run beside it (docs/engine-adoption.md).
+	linkForeignWait = 15 * time.Second
 )
 
 // maxLinkSock is the longest socket path the link listens on: under both
@@ -58,7 +65,15 @@ type engineLink struct {
 	started             time.Time
 	capBytes            int           // linkRingCap at the start
 	orphanWait          time.Duration // linkOrphanWait at the start
+	foreignWait         time.Duration // linkForeignWait at the start
 	ln                  net.Listener
+	// token is the secret in <pid>.json (0600): a dialer must name it in
+	// its resume, so another process of this user cannot drive the engine
+	// or hold its link.
+	token string
+	// dundUp reports whether a dund runs on this home (its pidfile names a
+	// live process); nil: not known.
+	dundUp func() bool
 
 	// in is what the engine reads as its input (inputStream); every
 	// connection's commands go into inW, and nothing closes it but stop.
@@ -74,8 +89,7 @@ type engineLink struct {
 	sent    uint64               // the last event written to the attached dund
 	state   map[string]linkFrame // the latest event of each state type
 	partial []byte               // a line Write has not finished
-	conn    net.Conn             // the attached dund, nil when none
-	claimed bool                 // a dialer is attached or handshaking
+	conn    net.Conn             // the attached dund (authenticated), nil when none
 	alone   time.Time            // since when no dund is attached
 	closing bool
 	session string
@@ -87,8 +101,9 @@ type engineLink struct {
 	shared   func() int
 }
 
-// listenLink starts the link in dir: the socket, and <pid>.json beside it.
-func listenLink(dir string) (*engineLink, error) {
+// listenLink starts the link in dir: <pid>.json (with the token), then the
+// socket beside it. dundUp: see engineLink.dundUp.
+func listenLink(dir string, dundUp func() bool) (*engineLink, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("--listen: %w", err)
 	}
@@ -97,22 +112,28 @@ func listenLink(dir string) (*engineLink, error) {
 	if len(sock) > maxLinkSock {
 		return nil, fmt.Errorf("--listen: socket path is %d bytes, over %d: %s", len(sock), maxLinkSock, sock)
 	}
+	tok := make([]byte, 32)
+	if _, err := rand.Read(tok); err != nil {
+		return nil, fmt.Errorf("--listen: %w", err)
+	}
+	pr, pw := io.Pipe()
+	l := &engineLink{dir: dir, sock: sock, infoPath: filepath.Join(dir, strconv.Itoa(pid)+".json"), pid: pid,
+		started: time.Now(), in: pr, inW: pw, state: map[string]linkFrame{}, alone: time.Now(),
+		capBytes: linkRingCap, orphanWait: linkOrphanWait, foreignWait: linkForeignWait,
+		token: hex.EncodeToString(tok), dundUp: dundUp}
+	l.cond = sync.NewCond(&l.mu)
+	// The entry first: a dund that sees the socket finds the token.
+	if err := l.writeInfo(); err != nil {
+		return nil, err
+	}
 	_ = os.Remove(sock) // a stale one of a process that had this pid
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
+		_ = os.Remove(l.infoPath)
 		return nil, fmt.Errorf("--listen: %w", err)
 	}
 	_ = os.Chmod(sock, 0o600)
-	pr, pw := io.Pipe()
-	l := &engineLink{dir: dir, sock: sock, infoPath: filepath.Join(dir, strconv.Itoa(pid)+".json"), pid: pid,
-		started: time.Now(), ln: ln, in: pr, inW: pw, state: map[string]linkFrame{}, alone: time.Now(),
-		capBytes: linkRingCap, orphanWait: linkOrphanWait}
-	l.cond = sync.NewCond(&l.mu)
-	if err := l.writeInfo(); err != nil {
-		ln.Close()
-		_ = os.Remove(sock)
-		return nil, err
-	}
+	l.ln = ln
 	go l.accept()
 	go l.watchOrphan()
 	return l, nil
@@ -121,7 +142,7 @@ func listenLink(dir string) (*engineLink, error) {
 func (l *engineLink) writeInfo() error {
 	l.mu.Lock()
 	info := proto.EngineInfo{Pid: l.pid, Sock: l.sock, Session: l.session, Version: buildinfo.Version,
-		Proto: proto.Version, Link: proto.LinkVersion, Started: l.started.UTC().Format(time.RFC3339)}
+		Proto: proto.Version, Link: proto.LinkVersion, Started: l.started.UTC().Format(time.RFC3339), Token: l.token}
 	l.mu.Unlock()
 	b, err := json.Marshal(info)
 	if err != nil {
@@ -233,17 +254,8 @@ func (l *engineLink) accept() {
 		if err != nil {
 			return
 		}
-		l.mu.Lock()
-		busy := l.claimed || l.closing
-		if !busy {
-			l.claimed = true
-		}
-		l.mu.Unlock()
-		if busy {
-			_, _ = c.Write([]byte(proto.LinkBusyLine + "\n"))
-			c.Close()
-			continue
-		}
+		// Not claimed here: only a dialer that names the token claims the
+		// link (serve), so a stray one cannot hold it.
 		go l.serve(c)
 	}
 }
@@ -252,6 +264,9 @@ func (l *engineLink) accept() {
 // events out and commands in until it closes.
 func (l *engineLink) serve(c net.Conn) {
 	defer l.release(c)
+	if l.isClosing() {
+		return
+	}
 	l.mu.Lock()
 	hello := proto.LinkHello{Type: proto.LinkHelloType, Link: proto.LinkVersion, Proto: proto.Version,
 		Version: buildinfo.Version, Pid: l.pid, Session: l.session, Seq: l.seq, Acked: l.acked, First: l.first()}
@@ -271,11 +286,18 @@ func (l *engineLink) serve(c net.Conn) {
 	}
 	_ = c.SetReadDeadline(time.Time{})
 	var res proto.LinkResume
-	if json.Unmarshal(sc.Bytes(), &res) != nil || res.Type != proto.LinkResumeType {
+	if json.Unmarshal(sc.Bytes(), &res) != nil || res.Type != proto.LinkResumeType ||
+		subtle.ConstantTimeCompare([]byte(res.Token), []byte(l.token)) != 1 {
+		fmt.Fprintln(os.Stderr, "dun: engine link: a dialer without the token was refused")
 		return
 	}
 	// The replay, under the lock so no event slips between it and live.
 	l.mu.Lock()
+	if l.conn != nil || l.closing {
+		l.mu.Unlock()
+		_, _ = c.Write([]byte(proto.LinkBusyLine + "\n"))
+		return
+	}
 	after := min(res.After, l.seq)
 	var burst [][]byte
 	if first := l.first(); after+1 < first {
@@ -299,6 +321,7 @@ func (l *engineLink) serve(c net.Conn) {
 			burst = append(burst, frameLine(f))
 		}
 	}
+	burst = append([][]byte{[]byte(proto.LinkOkLine)}, burst...)
 	burst = append(burst, []byte(proto.LinkLiveLine))
 	upto := l.seq
 	l.conn, l.sent = c, after
@@ -403,28 +426,56 @@ func (l *engineLink) release(c net.Conn) {
 		l.conn = nil
 		l.alone = time.Now()
 	}
-	l.claimed = false
 	l.cond.Broadcast()
 	l.mu.Unlock()
 }
 
-// watchOrphan stops the engine after linkOrphanWait with no dund.
+func (l *engineLink) isClosing() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.closing
+}
+
+// watchOrphan stops the engine after linkOrphanWait with no dund, or
+// after linkForeignWait with a dund running that does not attach (one that
+// does not adopt engines resumes the session on its own engine).
 func (l *engineLink) watchOrphan() {
-	t := time.NewTicker(min(time.Second, l.orphanWait/4+time.Millisecond))
+	t := time.NewTicker(min(time.Second, min(l.orphanWait, l.foreignWait)/4+time.Millisecond))
 	defer t.Stop()
+	var foreign time.Time // since when a dund runs and is not attached
 	for range t.C {
 		l.mu.Lock()
-		gone := !l.claimed && !l.closing && !l.orphan && time.Since(l.alone) >= l.orphanWait
-		if gone {
-			l.orphan = true
-		}
+		alone := l.conn == nil && !l.closing && !l.orphan
 		closing := l.closing
 		l.mu.Unlock()
 		if closing {
 			return
 		}
-		if gone {
-			fmt.Fprintf(os.Stderr, "dun: no dund for %s: stopping\n", l.orphanWait)
+		why := ""
+		switch {
+		case !alone:
+			foreign = time.Time{}
+			continue
+		case l.dundUp != nil && l.dundUp():
+			if foreign.IsZero() {
+				foreign = time.Now()
+			}
+			if time.Since(foreign) >= l.foreignWait {
+				why = fmt.Sprintf("a dund runs and has not attached in %s", l.foreignWait)
+			}
+		default:
+			foreign = time.Time{}
+		}
+		l.mu.Lock()
+		if why == "" && time.Since(l.alone) >= l.orphanWait {
+			why = fmt.Sprintf("no dund for %s", l.orphanWait)
+		}
+		if why != "" {
+			l.orphan = true
+		}
+		l.mu.Unlock()
+		if why != "" {
+			fmt.Fprintf(os.Stderr, "dun: %s: stopping\n", why)
 			go func() { _, _ = l.inW.Write([]byte(`{"type":"stop"}` + "\n")) }()
 		}
 	}
@@ -471,20 +522,3 @@ func (l *engineLink) Close() {
 // linkExit closes the engine link, when there is one, before the process
 // exits (fatal, main's return).
 var linkExit func()
-
-// dropListen is args without --listen and its value: an engine re-executed
-// in a container talks over its stdio to this process, which holds the link.
-func dropListen(args []string) []string {
-	out := make([]string, 0, len(args))
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		switch {
-		case a == "--listen" || a == "-listen":
-			i++
-		case strings.HasPrefix(a, "--listen=") || strings.HasPrefix(a, "-listen="):
-		default:
-			out = append(out, a)
-		}
-	}
-	return out
-}

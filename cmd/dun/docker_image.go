@@ -115,7 +115,7 @@ func findDockerfile(start string) string {
 func dockerReexecArgs() []string {
 	reexec := make([]string, 0, len(os.Args))
 	skipNext := false
-	for _, a := range dropListen(os.Args[1:]) {
+	for _, a := range os.Args[1:] {
 		if skipNext {
 			skipNext = false
 			continue

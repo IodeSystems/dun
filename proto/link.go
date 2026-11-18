@@ -32,6 +32,9 @@ type LinkResume struct {
 	Type  string `json:"type"` // "link_resume"
 	After uint64 `json:"after"`
 	State bool   `json:"state,omitempty"`
+	// Token is EngineInfo.Token: without it the engine closes the
+	// connection, and the link stays free.
+	Token string `json:"token"`
 }
 
 // LinkAck says dund took every event to Seq: the engine drops them.
@@ -54,6 +57,7 @@ const (
 	LinkResumeType = "link_resume"
 	LinkAckType    = "link_ack"
 	LinkGapType    = "link_gap"
+	LinkOkLine     = `{"type":"link_ok"}`   // the resume is taken; the replay follows
 	LinkLiveLine   = `{"type":"link_live"}` // the replay is over
 	LinkBusyLine   = `{"type":"link_busy"}` // another dund is attached
 )
@@ -68,6 +72,8 @@ type EngineInfo struct {
 	Proto   int    `json:"proto"`
 	Link    int    `json:"link"`
 	Started string `json:"started,omitempty"` // RFC 3339
+	// Token authenticates a dialer (LinkResume.Token); the file is 0600.
+	Token string `json:"token,omitempty"`
 }
 
 // IsStateType reports whether an event type is state: its latest event is

@@ -41,6 +41,11 @@ type peerLink struct {
 	// open when a dund attaches goes again (resend).
 	link *engineLink
 
+	// ridBase makes request ids unique beyond this engine (pid and start):
+	// dund remembers the mutating ones it did, so a request sent again
+	// after its restart is answered, not done twice (internal/dund/peerdone.go).
+	ridBase string
+
 	mu      sync.Mutex
 	seq     int
 	waiting map[string]*peerCall
@@ -54,12 +59,15 @@ type peerCall struct {
 }
 
 func newPeerLink(em *emitter) *peerLink {
-	return &peerLink{em: em, waiting: map[string]*peerCall{}, shares: map[string]bool{}}
+	return &peerLink{em: em, waiting: map[string]*peerCall{}, shares: map[string]bool{},
+		ridBase: fmt.Sprintf("p%d.%d.", os.Getpid(), time.Now().UnixNano())}
 }
 
 // resend sends every open request again: a dund attached, and the one that
-// had them may have gone without answering (docs/engine-adoption.md). A
-// reply to the first copy that comes after all is dropped (reply).
+// had them may have gone without answering (docs/engine-adoption.md). dund
+// does a mutating one (a message, a schedule change) once: a copy of one it
+// did gets its first answer (internal/dund/peerdone.go). A reply to the
+// first copy that comes after all is dropped (reply).
 func (p *peerLink) resend() {
 	p.mu.Lock()
 	open := make([]proto.PeerRequest, 0, len(p.waiting))
@@ -134,7 +142,7 @@ func (p *peerLink) callFor(ctx context.Context, req proto.PeerRequest, timeout t
 	ch := make(chan proto.PeerReply, 1)
 	p.mu.Lock()
 	p.seq++
-	req.RID = "p" + strconv.Itoa(p.seq)
+	req.RID = p.ridBase + strconv.Itoa(p.seq)
 	p.waiting[req.RID] = &peerCall{req: req, ch: ch}
 	p.mu.Unlock()
 	defer func() {

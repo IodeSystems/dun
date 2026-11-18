@@ -251,7 +251,8 @@ func main() {
 	// the session (a bad flag) must reach it as an event, not die on stderr.
 	var link *engineLink
 	if *prog && *listen != "" {
-		l, err := listenLink(*listen)
+		home := harness.DunHome()
+		l, err := listenLink(*listen, func() bool { _, up := dundcli.Running(home); return up })
 		if err != nil {
 			fatal(err)
 		}
@@ -360,18 +361,16 @@ func main() {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if link != nil {
-			// The container's engine talks over its stdio to this process,
-			// which holds the link (dockerReexecArgs drops --listen).
-			cmd.Stdin, cmd.Stdout = link.in, link
+			// Not adoptable (docs/engine-adoption.md): dund starts a
+			// --docker engine over stdio, as before the link.
+			fatal(fmt.Errorf("--listen does not work with --docker: dund runs a docker engine over stdio"))
 		}
 		if err := cmd.Run(); err != nil {
 			if exitErr, ok := err.(*exec.ExitError); ok {
-				exitLink()
 				os.Exit(exitErr.ExitCode())
 			}
 			fatal(fmt.Errorf("docker run: %w", err))
 		}
-		exitLink()
 		os.Exit(cmd.ProcessState.ExitCode())
 	}
 	if !*prog {

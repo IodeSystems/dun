@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net"
 	"os"
@@ -28,7 +27,7 @@ func linkDir(t *testing.T) string {
 
 func testLink(t *testing.T) *engineLink {
 	t.Helper()
-	l, err := listenLink(linkDir(t))
+	l, err := listenLink(linkDir(t), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,6 +91,9 @@ func (d *linkDialer) replay() (seqs []uint64, texts []string, other []string) {
 		if ln == proto.LinkLiveLine {
 			return
 		}
+		if ln == proto.LinkOkLine {
+			continue
+		}
 		if strings.HasPrefix(ln, "{") {
 			other = append(other, ln)
 			continue
@@ -123,18 +125,12 @@ func wantTokens(t *testing.T, got []string, from, to int) {
 func waitDetached(t *testing.T, l *engineLink) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
-	for l.connected() || l.isClaimed() {
+	for l.connected() {
 		if time.Now().After(deadline) {
 			t.Fatal("link still attached")
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-}
-
-func (l *engineLink) isClaimed() bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.claimed
 }
 
 // A resume after seq N sends N+1 on, each once: what the first dund acked
@@ -146,7 +142,7 @@ func TestLinkResumeAfterSeqNoLossNoDup(t *testing.T) {
 	if h.Seq != 10 || h.Acked != 0 || h.Pid != os.Getpid() || h.Link != proto.LinkVersion || h.Proto != proto.Version {
 		t.Fatalf("hello = %+v", h)
 	}
-	d.send(proto.LinkResume{Type: proto.LinkResumeType, After: 0})
+	d.send(proto.LinkResume{Token: l.token, Type: proto.LinkResumeType, After: 0})
 	seqs, texts, _ := d.replay()
 	wantTokens(t, texts, 1, 10)
 	if seqs[0] != 1 || seqs[9] != 10 {
@@ -167,7 +163,7 @@ func TestLinkResumeAfterSeqNoLossNoDup(t *testing.T) {
 	if h2.Acked != 7 || h2.Seq != 15 || h2.First != 8 {
 		t.Fatalf("second hello = %+v", h2)
 	}
-	d2.send(proto.LinkResume{Type: proto.LinkResumeType, After: h2.Acked})
+	d2.send(proto.LinkResume{Token: l.token, Type: proto.LinkResumeType, After: h2.Acked})
 	seqs, texts, other := d2.replay()
 	wantTokens(t, texts, 8, 15)
 	if len(other) != 0 || seqs[0] != 8 {
@@ -187,7 +183,7 @@ func TestLinkRingOverflowSaysGap(t *testing.T) {
 	if h.First <= 1 || h.Seq != 100 {
 		t.Fatalf("hello = %+v", h)
 	}
-	d.send(proto.LinkResume{Type: proto.LinkResumeType, After: 0})
+	d.send(proto.LinkResume{Token: l.token, Type: proto.LinkResumeType, After: 0})
 	_, texts, other := d.replay()
 	if len(other) != 1 {
 		t.Fatalf("want one link_gap, got %v", other)
@@ -210,7 +206,7 @@ func TestLinkResumeSendsState(t *testing.T) {
 	}
 	l.ack(4)
 	d, _ := dialLink(t, l)
-	d.send(proto.LinkResume{Type: proto.LinkResumeType, After: 4, State: true})
+	d.send(proto.LinkResume{Token: l.token, Type: proto.LinkResumeType, After: 4, State: true})
 	_, texts, other := d.replay()
 	// turn_state (seq 3) is state at or before 4; jobs (5) is replayed.
 	if strings.Join(other, ",") != "0 turn_state,5 jobs" || len(texts) != 0 {
@@ -218,21 +214,80 @@ func TestLinkResumeSendsState(t *testing.T) {
 	}
 }
 
-// One dund at a time: a second dialer is refused.
+// One dund at a time: a second dialer, with the token, is refused.
 func TestLinkRefusesASecondDialer(t *testing.T) {
 	l := testLink(t)
 	d, _ := dialLink(t, l)
-	d.send(proto.LinkResume{Type: proto.LinkResumeType})
+	d.send(proto.LinkResume{Token: l.token, Type: proto.LinkResumeType})
 	d.replay()
-	c, err := net.Dial("unix", l.sock)
+	d2, _ := dialLink(t, l)
+	d2.send(proto.LinkResume{Token: l.token, Type: proto.LinkResumeType})
+	if ln := d2.line(); ln != proto.LinkBusyLine {
+		t.Fatalf("second dialer got %q", ln)
+	}
+}
+
+// A dialer without the token (another process of this user, a tool call)
+// gets nothing in and does not hold the link: the next dund attaches, and
+// the orphan clock runs on meanwhile.
+func TestLinkRefusesADialerWithoutTheToken(t *testing.T) {
+	old := linkOrphanWait
+	linkOrphanWait = 300 * time.Millisecond
+	t.Cleanup(func() { linkOrphanWait = old })
+	l := testLink(t)
+	bad, _ := dialLink(t, l)
+	bad.send(proto.LinkResume{Type: proto.LinkResumeType, Token: strings.Repeat("0", 64)})
+	_ = bad.c.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if bad.sc.Scan() {
+		t.Fatalf("a wrong token got %q", bad.sc.Text())
+	}
+	if l.connected() {
+		t.Fatal("a wrong token claimed the link")
+	}
+	// Held open without a resume: still not claimed, and the orphan stop
+	// comes all the same.
+	idle, _ := dialLink(t, l)
+	defer idle.c.Close()
+	got := make(chan string, 1)
+	go func() {
+		sc := bufio.NewScanner(l.in)
+		sc.Scan()
+		got <- sc.Text()
+	}()
+	select {
+	case ln := <-got:
+		if ln != `{"type":"stop"}` {
+			t.Fatalf("input = %q", ln)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("an unauthenticated dialer held off the orphan stop")
+	}
+}
+
+// A dund runs on this home and does not attach (one that does not adopt):
+// the engine stops soon, not after the orphan wait.
+func TestLinkStopsWhenARunningDundDoesNotAttach(t *testing.T) {
+	old := linkForeignWait
+	linkForeignWait = 100 * time.Millisecond
+	t.Cleanup(func() { linkForeignWait = old })
+	l, err := listenLink(linkDir(t), func() bool { return true })
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c.Close()
-	sc := bufio.NewScanner(c)
-	_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
-	if !sc.Scan() || sc.Text() != proto.LinkBusyLine {
-		t.Fatalf("second dialer got %q", sc.Text())
+	t.Cleanup(l.Close)
+	got := make(chan string, 1)
+	go func() {
+		sc := bufio.NewScanner(l.in)
+		sc.Scan()
+		got <- sc.Text()
+	}()
+	select {
+	case ln := <-got:
+		if ln != `{"type":"stop"}` {
+			t.Fatalf("input = %q", ln)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no stop")
 	}
 }
 
@@ -240,7 +295,7 @@ func TestLinkRefusesASecondDialer(t *testing.T) {
 func TestLinkCommandsReachTheInput(t *testing.T) {
 	l := testLink(t)
 	d, _ := dialLink(t, l)
-	d.send(proto.LinkResume{Type: proto.LinkResumeType})
+	d.send(proto.LinkResume{Token: l.token, Type: proto.LinkResumeType})
 	d.replay()
 	d.send(proto.LinkAck{Type: proto.LinkAckType, Seq: 0})
 	if _, err := d.c.Write([]byte(`{"type":"user","content":"hi"}` + "\n")); err != nil {
@@ -284,11 +339,11 @@ func TestLinkCloseFlushesAndCleansUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	var info proto.EngineInfo
-	if json.Unmarshal(b, &info) != nil || info.Session != "s1" || info.Pid != os.Getpid() || info.Sock != l.sock {
+	if json.Unmarshal(b, &info) != nil || info.Session != "s1" || info.Pid != os.Getpid() || info.Sock != l.sock || len(info.Token) != 64 {
 		t.Fatalf("info = %s", b)
 	}
 	d, _ := dialLink(t, l)
-	d.send(proto.LinkResume{Type: proto.LinkResumeType})
+	d.send(proto.LinkResume{Token: l.token, Type: proto.LinkResumeType})
 	d.replay()
 	emitN(l, 1, 3)
 	// A partial line at exit is written too.
@@ -319,7 +374,7 @@ func TestLinkBackpressureWhileAttached(t *testing.T) {
 	t.Cleanup(func() { linkRingCap = old })
 	l := testLink(t)
 	d, _ := dialLink(t, l)
-	d.send(proto.LinkResume{Type: proto.LinkResumeType})
+	d.send(proto.LinkResume{Token: l.token, Type: proto.LinkResumeType})
 	d.replay()
 	done := make(chan struct{})
 	go func() {
@@ -340,11 +395,4 @@ func TestLinkBackpressureWhileAttached(t *testing.T) {
 	}
 	<-done
 	wantTokens(t, texts, 1, 50)
-}
-
-func TestDropListen(t *testing.T) {
-	got := dropListen([]string{"--engine", "--listen", "/x", "--model", "m", "--listen=/y", "-listen", "/z"})
-	if fmt.Sprint(got) != "[--engine --model m]" {
-		t.Fatalf("got %v", got)
-	}
 }
