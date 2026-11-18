@@ -1,8 +1,8 @@
 # Memory
 
 Notes a later session on a project needs and cannot get from the code, the git
-history or the docs. Code: `internal/harness/memory.go` (tool, store, scan), `internal/harness/memattest.go`
-(refine, void, confirm), `internal/harness/memtrigger.go` (triggers), `internal/harness/fork.go` and `internal/harness/suggest.go`
+history or the docs. Code: `internal/memory/memory.go` (tool, store, scan), `internal/memory/attest.go`
+(refine, void, confirm), `internal/memory/trigger.go` and `internal/harness/memtrigger.go` (triggers), `internal/harness/fork.go` and `internal/harness/suggest.go`
 (the fork's prefix), `internal/harness/notify.go` (surfacing). The retrieval rule itself is in
 `surfacing.md`; this file is why memory is built around it.
 

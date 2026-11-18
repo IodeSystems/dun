@@ -18,6 +18,7 @@ import (
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/frontmatter"
 	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/project"
 )
@@ -159,67 +160,12 @@ func loadLocalSkills(roots []struct{ dir, source string }) []Skill {
 // frontmatter has no name. A skill with no description is not usable — the
 // model could not tell when to load it — and is dropped.
 func parseSkill(text, fallback string) (Skill, bool) {
-	meta, _ := splitFrontmatter(text)
+	meta, _ := frontmatter.Split(text)
 	s := Skill{Name: firstNonEmptyStr(meta["name"], fallback), Description: meta["description"]}
 	s.UserOnly = strings.EqualFold(meta["disable-model-invocation"], "true")
 	s.Name = strings.TrimSpace(s.Name)
 	s.Description = strings.Join(strings.Fields(s.Description), " ")
 	return s, s.Name != "" && s.Description != ""
-}
-
-// splitFrontmatter returns the top-level scalar keys of a leading ---
-// block, and the body after it. It reads the subset SKILL.md files use:
-// key: value, quoted values, and | or > blocks for a long description.
-func splitFrontmatter(text string) (map[string]string, string) {
-	meta := map[string]string{}
-	text = strings.TrimPrefix(text, "\ufeff")
-	if !strings.HasPrefix(text, "---") {
-		return meta, text
-	}
-	rest := text[3:]
-	end := strings.Index(rest, "\n---")
-	if end < 0 {
-		return meta, text
-	}
-	block, body := rest[:end], rest[end+4:]
-	if i := strings.IndexByte(body, '\n'); i >= 0 {
-		body = body[i+1:]
-	} else {
-		body = ""
-	}
-	lines := strings.Split(block, "\n")
-	for i := 0; i < len(lines); i++ {
-		line := strings.TrimRight(lines[i], "\r")
-		if line == "" || line[0] == ' ' || line[0] == '\t' || line[0] == '#' {
-			continue
-		}
-		k, v, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
-		if v == "|" || v == ">" || v == "|-" || v == ">-" {
-			var parts []string
-			for i+1 < len(lines) && (strings.HasPrefix(lines[i+1], " ") || strings.HasPrefix(lines[i+1], "\t") || strings.TrimSpace(lines[i+1]) == "") {
-				i++
-				parts = append(parts, strings.TrimSpace(lines[i]))
-			}
-			v = strings.TrimSpace(strings.Join(parts, " "))
-		} else if len(v) >= 2 && (v[0] == '"' && v[len(v)-1] == '"' || v[0] == '\'' && v[len(v)-1] == '\'') {
-			if v[0] == '"' {
-				var u string
-				if json.Unmarshal([]byte(v), &u) == nil {
-					v = u
-				} else {
-					v = v[1 : len(v)-1]
-				}
-			} else {
-				v = strings.ReplaceAll(v[1:len(v)-1], "''", "'")
-			}
-		}
-		meta[k] = v
-	}
-	return meta, body
 }
 
 // isSkillResource reports whether an MCP resource is a skill's SKILL.md.
@@ -709,7 +655,7 @@ func (h *Harness) loadSkill(ctx context.Context, name, file string) string {
 		}
 		out := text.String()
 		if file == "" {
-			_, out = splitFrontmatter(out)
+			_, out = frontmatter.Split(out)
 			if len(s.Files) > 0 {
 				out += "\n\n(Other files of this skill, read with skill name=" + s.Name + " file=<path>: " + strings.Join(s.Files, ", ") + ")"
 			}
@@ -728,7 +674,7 @@ func (h *Harness) loadSkill(ctx context.Context, name, file string) string {
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}
-	_, body := splitFrontmatter(string(b))
+	_, body := frontmatter.Split(string(b))
 	return clipSkill(body) + "\n\n(This skill's directory is " + s.Dir + "; paths it mentions are relative to it. " +
 		"Read one with skill name=" + s.Name + " file=<path>, or run its scripts from there.)"
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/iodesystems/agentkit/agent"
+	"github.com/iodesystems/dun/internal/memory"
 )
 
 type fixedFinder []agent.DocHit
@@ -173,7 +174,7 @@ func TestDocsPreparer_MarginPerGroup(t *testing.T) {
 	}
 	group := func(id string) string {
 		if strings.HasPrefix(id, "/mem/") {
-			return groupMemory
+			return memory.GroupMemory
 		}
 		return ""
 	}
@@ -347,7 +348,7 @@ func TestDocsPreparer_SourceLabels(t *testing.T) {
 	group := func(id string) string {
 		switch {
 		case strings.Contains(id, "/memory/"):
-			return groupMemory
+			return memory.GroupMemory
 		case id == skillDoc:
 			return groupSkill
 		}

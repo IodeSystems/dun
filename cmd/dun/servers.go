@@ -13,6 +13,7 @@ import (
 	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/mcptable"
+	"github.com/iodesystems/dun/internal/memory"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
@@ -367,12 +368,12 @@ func mcpDocsLine(ctx context.Context, h *harness.Harness, id string) string {
 
 // memoriesListing renders /memories: each note's question (or its first
 // line), when it was written, and what has happened to it since.
-func memoriesListing(ms []harness.MemoryInfo, on bool) string {
+func memoriesListing(ms []memory.Info, on bool) string {
 	if !on {
 		return "memories: off in this session (notes are kept on disk either way)"
 	}
 	if len(ms) == 0 {
-		return "memories: none for this project yet — /remember, or say \"remember, …\"; " + harness.MemoriesUsage
+		return "memories: none for this project yet — /remember, or say \"remember, …\"; " + memory.Usage
 	}
 	var b strings.Builder
 	live, void := 0, 0
@@ -420,7 +421,7 @@ func memoriesListing(ms []harness.MemoryInfo, on bool) string {
 		}
 		fmt.Fprintf(&b, "\n  %s  · %s", title, strings.Join(tags, " · "))
 	}
-	b.WriteString("\nto fix one, tell the model (\"that note about X is wrong, it's Y\") — it refines or voids it with you as the source\n" + harness.MemoriesUsage)
+	b.WriteString("\nto fix one, tell the model (\"that note about X is wrong, it's Y\") — it refines or voids it with you as the source\n" + memory.Usage)
 	return b.String()
 }
 

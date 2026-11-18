@@ -175,7 +175,7 @@ func TestRaglit_SurfacesMemorySkillMCPAndWorkspaceHitsBeforeATurn(t *testing.T) 
 	if m == nil {
 		t.Fatal("no memory store with a RagLink")
 	}
-	note := filepath.Join(m.dir, "zebra.md")
+	note := filepath.Join(m.Dir(), "zebra.md")
 	mcpDoc := filepath.Join(mcpDocsRoot(), "corp", "runbook.md")
 	wsDoc := filepath.Join(ws, "notes.md")
 	writeRule(t, note, "Zebra deploys need --frostbite.")

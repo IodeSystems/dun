@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/memory"
 )
 
 // Forks — one side call that continues the conversation with a single
@@ -123,7 +124,7 @@ func (h *Harness) Remember(ctx context.Context, what string) (string, error) {
 	if m == nil {
 		return "", fmt.Errorf("memory needs dund's project index, and DUN_MEMORY=0 turns it off (a note nothing can search for is never read again)")
 	}
-	results, err := h.fork(ctx, "remember", rememberInstruction(what), memoryToolDef(), func(args string) string {
+	results, err := h.fork(ctx, "remember", rememberInstruction(what), memory.ToolDef(), func(args string) string {
 		return h.memoryCall(m, args)
 	})
 	if err != nil {

@@ -15,6 +15,7 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/memory"
 )
 
 // Proactive notifications — wiring a turn.before extension's search tool
@@ -206,9 +207,9 @@ func docKind(g string, attached bool) string {
 	switch g {
 	case groupSkill:
 		return "skill"
-	case groupMemory, groupMemoryGlobal:
+	case memory.GroupMemory, memory.GroupMemoryGlobal:
 		return "memory"
-	case groupStrategy, groupStrategyGlobal:
+	case memory.GroupStrategy, memory.GroupStrategyGlobal:
 		return "strategy"
 	case groupRules:
 		return "rule"
@@ -576,7 +577,7 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 			}
 			return group(w.h.DocID)
 		}
-		for _, pair := range [][2]string{{groupMemory, groupMemoryGlobal}, {groupStrategy, groupStrategyGlobal}} {
+		for _, pair := range [][2]string{{memory.GroupMemory, memory.GroupMemoryGlobal}, {memory.GroupStrategy, memory.GroupStrategyGlobal}} {
 			if gi := slices.IndexFunc(wins, func(w win) bool { return groupOf(w) == pair[1] }); gi >= 0 {
 				if pi := slices.IndexFunc(wins, func(w win) bool { return groupOf(w) == pair[0] }); pi > gi {
 					gw := wins[gi]
@@ -635,13 +636,13 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 				info.Inline, info.Kind = inline, docKind(g, src.isAttached(index))
 				infos = append(infos, info)
 				switch g {
-				case groupMemory, groupMemoryGlobal:
+				case memory.GroupMemory, memory.GroupMemoryGlobal:
 					// The cue is here because this is the one moment the model
 					// holds the evidence: it is working in what the note is about.
 					b.WriteString("A note an earlier session on this project saved may apply. It records what was true " +
 						"then; if the user or the code now says otherwise, fix it — memory action=refine (or void if it " +
 						"no longer applies) with why and source:\n")
-				case groupStrategy, groupStrategyGlobal:
+				case memory.GroupStrategy, memory.GroupStrategyGlobal:
 					b.WriteString("A strategy or constraint saved for this work may apply (its path is its kind:name; " +
 						"memory action=refine or void fixes one that is wrong, with why and source):\n")
 				case groupMCPDocs:
@@ -658,8 +659,8 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 					fmt.Fprintf(&b, "- %q (id=%s) — %s\n", h.Title, h.DocID, h.Line)
 					fmt.Fprintf(&b, "Source: %s\n", info.Source())
 					switch {
-					case g == groupCode || g == groupDocs, g == groupMemory, g == groupMemoryGlobal,
-						g == groupStrategy, g == groupStrategyGlobal, src == nil || src.reader == "":
+					case g == groupCode || g == groupDocs, g == memory.GroupMemory, g == memory.GroupMemoryGlobal,
+						g == memory.GroupStrategy, g == memory.GroupStrategyGlobal, src == nil || src.reader == "":
 						// dund's hits: the id is a file (file_read takes a
 						// note's path too, withItemRead).
 						b.WriteString("Read it with file_read if it helps.")
@@ -696,14 +697,6 @@ func docsPreparer(store *sessionStore, finder agent.DocFinder, opts agent.Finder
 		return nil
 	})
 }
-
-// groupMemory is the group of hits that are this project's memory notes,
-// groupMemoryGlobal of the global ones (scope global). Separate groups: the
-// two are separate indexes, whose bm25 scores do not compare.
-const (
-	groupMemory       = "memory"
-	groupMemoryGlobal = "memory-global"
-)
 
 // groupSkill is the group of hits that are skills' SKILL.md and reference
 // files.

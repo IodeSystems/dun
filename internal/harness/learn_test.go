@@ -10,6 +10,7 @@ import (
 
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/dun/internal/memory"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -81,19 +82,19 @@ func TestLearn_EpisodeBecomesOneCandidate(t *testing.T) {
 		t.Errorf("prompt:\n%s", prompt)
 	}
 	s := h.strategyStore()
-	p := s.named(kindStrategy, "install-missing-build-tools")
-	if p == "" || !isCandidate(p) {
+	p := s.Named(memory.KindStrategy, "install-missing-build-tools")
+	if p == "" || !memory.IsCandidate(p) {
 		t.Fatalf("no candidate: %q", p)
 	}
-	n, _ := readNote(p)
-	if n.meta["important"] == "true" || p[:len(s.dir)] != s.dir {
-		t.Errorf("important or not in the project's scope: %v %s", n.meta, p)
+	b, _ := os.ReadFile(p)
+	if strings.Contains(string(b), "\nimportant: true\n") || p[:len(s.Dir())] != s.Dir() {
+		t.Errorf("important or not in the project's scope: %s %s", b, p)
 	}
 	in := ingestsOf(f)
-	if len(in) != 1 || in[0].Index != strategiesIndex || !slices.Contains(in[0].Tags, candidateTag) || !slices.Contains(in[0].Tags, "kind:strategy") {
+	if len(in) != 1 || in[0].Index != memory.StrategiesIndex || !slices.Contains(in[0].Tags, memory.CandidateTag) || !slices.Contains(in[0].Tags, "kind:strategy") {
 		t.Errorf("ingest: %+v", in)
 	}
-	if es := readAttest(p); len(es) != 1 || es[0].Kind != "proposed" || es[0].By != "dun:learn" {
+	if es := memory.ReadAttest(p); len(es) != 1 || es[0].Kind != "proposed" || es[0].By != "dun:learn" {
 		t.Errorf("attest: %+v", es)
 	}
 	if h.SideCalls()["learn"]["calls"] != 1 {
@@ -103,10 +104,10 @@ func TestLearn_EpisodeBecomesOneCandidate(t *testing.T) {
 	f.mu.Lock()
 	f.hits = map[string][]proto.RagHit{mcpserver.RaglitProject(h.cfg.Workspace): {{Path: "file://" + p, Text: "x", Score: 1, Matched: 1, Terms: 1}}}
 	f.mu.Unlock()
-	if hits, _ := (&memFinder{l: h.stratLink(), m: s}).Find(context.Background(), []string{"build tool"}); len(hits) != 0 {
+	if hits, _ := memory.NewFinder(h.stratLink(), s, nil).Find(context.Background(), []string{"build tool"}); len(hits) != 0 {
 		t.Errorf("recall surfaced a candidate: %+v", hits)
 	}
-	if hits, _ := (&memFinder{l: h.stratLink(), m: s, candidates: true}).Find(context.Background(), []string{"build tool"}); len(hits) != 1 {
+	if hits, _ := candidateFinder(h.stratLink(), s).Find(context.Background(), []string{"build tool"}); len(hits) != 1 {
 		t.Errorf("dedup search: %+v", hits)
 	}
 	// The same lesson again: one call, no second strategy.
@@ -117,7 +118,7 @@ func TestLearn_EpisodeBecomesOneCandidate(t *testing.T) {
 	if out, _ := h.MemoriesCommand("candidates"); !strings.Contains(out, "seen 2×") {
 		t.Errorf("recurrence not shown: %q", out)
 	}
-	if es := readAttest(p); es[len(es)-1].Kind != "recurred" || !isCandidate(p) {
+	if es := memory.ReadAttest(p); es[len(es)-1].Kind != "recurred" || !memory.IsCandidate(p) {
 		t.Errorf("recurrence not in the log, or accepted: %+v", es)
 	}
 }
@@ -167,45 +168,8 @@ func TestLearn_TaskBoundLessonIsRejected(t *testing.T) {
 	if r.called != 1 || len(outs) != 1 || !strings.Contains(outs[0], "rejected") {
 		t.Fatalf("calls %d, %q", r.called, outs)
 	}
-	if l := h.strategyStore().list(); len(l) != 0 {
+	if l := h.strategyStore().List(); len(l) != 0 {
 		t.Errorf("written: %+v", l)
-	}
-}
-
-func TestLearn_GenericityFilter(t *testing.T) {
-	names := map[string]bool{"render_scene": true, "render_scene.py": true, "src": true, "makefile": true}
-	task := "Build POV-Ray 2.2 and render `illum1.pov`. The scene must match the reference image exactly."
-	episode := "python3 -c 'import parseMoves; parseMoves.run()'\nTraceback: frame_buffer overflow"
-	ok := []string{
-		"When a compiler or build tool is not found, refresh the system package index and install it before retrying the build.",
-		"Run the module with python3 -m pip when pip is not on the path. Check the makefile targets before guessing one.",
-		"Set LD_LIBRARY_PATH when a built library is not found at run time.",
-	}
-	for _, d := range ok {
-		if err := genericityError(lesson{Name: "x-y", Detail: d}, task, episode, names); err != nil {
-			t.Errorf("rejected %q: %v", d, err)
-		}
-	}
-	bad := map[string]string{
-		"Edit /app/povray-2.2/source/config.h before running make.":                    "path",
-		"Run make in src/unix/build first.":                                            "path",
-		"Fix the import in render.py.":                                                 "file name",
-		"Download it from https://example.com/x.tgz.":                                  "URL",
-		"Check out commit 3f9a2c1d before building.":                                   "hash",
-		"Call render_scene with the scene file.":                                       "workspace",
-		"Build POV-Ray from its archive.":                                              "task",
-		"The parseMoves module needs its run function.":                                "failed calls",
-		"Grow frame_buffer before the second pass.":                                    "failed calls",
-		"The scene must match the reference image exactly, so diff the output.":        "repeats the task",
-		"Use \"for (int i = 0; i < n; i++) { buf[i] = 0; } return buf;\" to clear it.": "quotes",
-		"One. Two. Three. Four.":                                                       "sentences",
-		"Use ```make``` here.":                                                         "code",
-	}
-	for d, want := range bad {
-		err := genericityError(lesson{Name: "x-y", Detail: d}, task, episode, names)
-		if err == nil || !strings.Contains(err.Error(), want) {
-			t.Errorf("%q: %v, want %s", d, err, want)
-		}
 	}
 }
 
@@ -228,24 +192,24 @@ func TestLearn_AcceptAndReject(t *testing.T) {
 		t.Fatalf("accept: %q %v", out, err)
 	}
 	s := h.strategyStore()
-	p := s.named(kindStrategy, "install-missing-build-tools")
-	if isCandidate(p) {
+	p := s.Named(memory.KindStrategy, "install-missing-build-tools")
+	if memory.IsCandidate(p) {
 		t.Error("still a candidate")
 	}
 	f.mu.Lock()
 	tags := f.tags[len(f.tags)-1].Tags
 	f.hits = map[string][]proto.RagHit{mcpserver.RaglitProject(h.cfg.Workspace): {{Path: "file://" + p, Text: "x", Score: 1, Matched: 1, Terms: 1}}}
 	f.mu.Unlock()
-	if slices.Contains(tags, candidateTag) {
+	if slices.Contains(tags, memory.CandidateTag) {
 		t.Errorf("retag: %v", tags)
 	}
-	if hits, _ := (&memFinder{l: h.stratLink(), m: s}).Find(context.Background(), []string{"build tool"}); len(hits) != 1 {
+	if hits, _ := memory.NewFinder(h.stratLink(), s, nil).Find(context.Background(), []string{"build tool"}); len(hits) != 1 {
 		t.Errorf("accepted, not recalled: %+v", hits)
 	}
 	if _, err := h.MemoriesCommand("accept strategy:install-missing-build-tools"); err == nil {
 		t.Error("accept of an accepted strategy")
 	}
-	if es := readAttest(p); es[len(es)-1].Kind != "confirmed" || es[len(es)-1].By != "user" {
+	if es := memory.ReadAttest(p); es[len(es)-1].Kind != "confirmed" || es[len(es)-1].By != "user" {
 		t.Errorf("attest: %+v", es)
 	}
 
@@ -259,7 +223,7 @@ func TestLearn_AcceptAndReject(t *testing.T) {
 	if out, err := h.MemoriesCommand("reject strategy:check-tool-versions"); err != nil || !strings.Contains(out, "voided") {
 		t.Fatalf("reject: %q %v", out, err)
 	}
-	if s.named(kindStrategy, "check-tool-versions") != "" {
+	if s.Named(memory.KindStrategy, "check-tool-versions") != "" {
 		t.Error("rejected, still current")
 	}
 	runSteps(t, h, churn(3)...)
@@ -281,7 +245,7 @@ func TestLearn_ModelCannotTagOrUntagCandidates(t *testing.T) {
 	h.learnFlush(context.Background())
 	callTool(t, h, "memory", map[string]any{"action": "refine", "old_text": "strategy:install-missing-build-tools",
 		"content": "Install missing build tools with the package manager.", "tags": []string{"build"}, "why": "shorter", "source": "code"})
-	if p := h.strategyStore().named(kindStrategy, "install-missing-build-tools"); !isCandidate(p) {
+	if p := h.strategyStore().Named(memory.KindStrategy, "install-missing-build-tools"); !memory.IsCandidate(p) {
 		b, _ := os.ReadFile(p)
 		t.Errorf("refine dropped the tag:\n%s", b)
 	}
@@ -376,4 +340,11 @@ func TestLearn_StalledPlanThatMovesIsAnEpisode(t *testing.T) {
 			t.Errorf("prompt lacks %q:\n%s", want, p)
 		}
 	}
+}
+
+// candidateFinder is the finder the duplicate search uses: candidates in.
+func candidateFinder(l *memory.Link, s *memory.Store) *memory.Finder {
+	f := memory.NewFinder(l, s, nil)
+	f.Candidates = true
+	return f
 }

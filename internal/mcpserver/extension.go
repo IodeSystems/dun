@@ -60,7 +60,7 @@ import (
 //	                                winner as an aside (roles.search)
 //	               workspace.open   index the workspace when the server starts
 //	               memory.save      accepted, unused: memory notes are
-//	                                dund's since rag slice 5 (harness/memrecall.go)
+//	                                dund's since rag slice 5 (memory/recall.go)
 //	               skills.changed   the local skills, SKILL.md and references
 //	               rules.changed    the rules' imports, in /rules index mode
 //	               mcp.docs         MCP servers' resources, on /mcp add|refresh

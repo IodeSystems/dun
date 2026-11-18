@@ -2,6 +2,8 @@ package harness
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,7 +11,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/iodesystems/dun/internal/dunhome"
 	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/dun/internal/memory"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -63,13 +67,13 @@ func TestStrategies_ScopeAndIndexAreSeparate(t *testing.T) {
 	}
 	proj := mcpserver.RaglitProject(ws)
 	s, c, m := in[0], in[1], in[2]
-	if s.Index != "strategies" || s.Project != proj || filepath.Dir(s.Path) != strategiesDir(proj) || s.Title != "strategy:bisect-flaky-tests" {
+	if s.Index != "strategies" || s.Project != proj || filepath.Dir(s.Path) != filepath.Join(dunhome.Dir(), "strategies", proj) || s.Title != "strategy:bisect-flaky-tests" {
 		t.Errorf("strategy ingest %+v", s)
 	}
-	if c.Index != "strategies" || c.Project != "" || filepath.Dir(c.Path) != strategiesDir(globalMemoryDir) {
+	if c.Index != "strategies" || c.Project != "" || filepath.Dir(c.Path) != filepath.Join(dunhome.Dir(), "strategies", "@global") {
 		t.Errorf("constraint ingest %+v", c)
 	}
-	if m.Index != "memories" || m.Project != proj || filepath.Dir(m.Path) != memoryDir(proj) {
+	if m.Index != "memories" || m.Project != proj || filepath.Dir(m.Path) != filepath.Join(dunhome.Dir(), "memory", proj) {
 		t.Errorf("memory ingest %+v", m)
 	}
 	b, _ := os.ReadFile(c.Path)
@@ -95,7 +99,7 @@ func systemOf(h *Harness) string {
 }
 
 // An important item is in the system prompt by path, every session, with
-// no retrieval; one that is not is not. The list holds importantCap across
+// no retrieval; one that is not is not. The list holds memory.ImportantCap across
 // the kinds, and a listed one is not surfaced again.
 func TestStrategies_ImportantAlwaysShown(t *testing.T) {
 	f := &fakeRag{}
@@ -134,7 +138,7 @@ func TestStrategies_ImportantAlwaysShown(t *testing.T) {
 		t.Error("the next session has no standing list")
 	}
 	// Listed: not surfaced by retrieval as well.
-	path := h.strategyStore().named(kindConstraint, "no-push")
+	path := h.strategyStore().Named(memory.KindConstraint, "no-push")
 	f.mu.Lock()
 	f.hits = map[string][]proto.RagHit{mcpserver.RaglitProject(ws): {{Path: "file://" + path, Title: "constraint:no-push", Text: "x", Score: 1, Matched: 2, Terms: 2}}}
 	f.mu.Unlock()
@@ -148,7 +152,7 @@ func TestStrategies_ImportantAlwaysShown(t *testing.T) {
 		t.Error("unimportant, still listed")
 	}
 	// The cap: across the kinds, the rest named as a count.
-	for i := range importantCap + 1 {
+	for i := range memory.ImportantCap + 1 {
 		if _, err := h.MemoriesCommand(fmt.Sprintf("add constraint c%02d", i)); err != nil {
 			t.Fatal(err)
 		}
@@ -157,8 +161,8 @@ func TestStrategies_ImportantAlwaysShown(t *testing.T) {
 		}
 	}
 	sys = systemOf(h)
-	if n := strings.Count(sys, "\n- constraint:") + strings.Count(sys, "\n- strategy:") + strings.Count(sys, "\n- memory:"); n != importantCap || !strings.Contains(sys, "3 more marked important are not listed") {
-		t.Errorf("%d listed, want %d and a count of the rest:\n%s", n, importantCap, sys)
+	if n := strings.Count(sys, "\n- constraint:") + strings.Count(sys, "\n- strategy:") + strings.Count(sys, "\n- memory:"); n != memory.ImportantCap || !strings.Contains(sys, "3 more marked important are not listed") {
+		t.Errorf("%d listed, want %d and a count of the rest:\n%s", n, memory.ImportantCap, sys)
 	}
 }
 
@@ -174,7 +178,7 @@ func TestStrategies_NonImportantIsRetrieved(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := h.strategyStore()
-	sp, cp := s.named(kindStrategy, "bisect-flaky"), s.named(kindConstraint, "frozen-api")
+	sp, cp := s.Named(memory.KindStrategy, "bisect-flaky"), s.Named(memory.KindConstraint, "frozen-api")
 	f.mu.Lock()
 	f.hits = map[string][]proto.RagHit{
 		mcpserver.RaglitProject(ws): {{Path: "file://" + sp, Title: "strategy:bisect-flaky", Text: "x", Score: 1, Matched: 2, Terms: 2}},
@@ -225,7 +229,7 @@ func TestStrategies_DundDownDegrades(t *testing.T) {
 	if !strings.Contains(out, "dund is not reachable") {
 		t.Fatalf("add with dund down: %q", out)
 	}
-	mf := &memFinder{l: h.stratLink(), m: h.strategyStore()}
+	mf := memory.NewFinder(h.stratLink(), h.strategyStore(), nil)
 	hits, err := mf.Find(context.Background(), []string{"timing the narwhal job"})
 	if err != nil || len(hits) != 1 || hits[0].Title != "strategy:warm-cache" {
 		t.Fatalf("local recall: %+v %v", hits, err)
@@ -236,7 +240,7 @@ func TestStrategies_DundDownDegrades(t *testing.T) {
 // no store, no standing list even with an important file on disk.
 func TestStrategies_OffWithoutARagLink(t *testing.T) {
 	h, ws := itemHarness(t, nil)
-	dir := strategiesDir(mcpserver.RaglitProject(ws))
+	dir := filepath.Join(dunhome.Dir(), "strategies", mcpserver.RaglitProject(ws))
 	writeRule(t, filepath.Join(dir, "constraint-x.md"), "---\nname: x\nkind: constraint\nimportant: true\n---\nX.\n")
 	h2, err := Start(context.Background(), Config{Workspace: ws})
 	if err != nil {
@@ -270,7 +274,7 @@ func TestStrategies_UserAddReplaces(t *testing.T) {
 	if err != nil || !strings.HasPrefix(out, "replaced constraint:no-push") {
 		t.Fatalf("replace: %q %v", out, err)
 	}
-	p := h.strategyStore().named(kindConstraint, "no-push")
+	p := h.strategyStore().Named(memory.KindConstraint, "no-push")
 	b, _ := os.ReadFile(p)
 	if !strings.Contains(string(b), "unless the user asks") || !strings.Contains(string(b), "important: true") {
 		t.Errorf("replaced file:\n%s", b)
@@ -279,7 +283,7 @@ func TestStrategies_UserAddReplaces(t *testing.T) {
 	if len(in) != n+1 || in[len(in)-1].Path != p {
 		t.Errorf("not indexed again: %+v", in)
 	}
-	log := readAttest(p)
+	log := memory.ReadAttest(p)
 	if len(log) != 1 || log[0].Kind != "corrected" || log[0].Was != "Do not push." || log[0].By != "user" {
 		t.Errorf("log %+v", log)
 	}
@@ -317,7 +321,7 @@ func TestStrategies_ImportantAndRetagSendTagsNotAnIngest(t *testing.T) {
 		t.Fatalf("important: %d ingests, want %d (none)", got, n)
 	}
 	tg := tagsOf()
-	if len(tg) != 1 || tg[0].Index != strategiesIndex || !slices.Equal(tg[0].Tags, []string{"kind:strategy", "important"}) {
+	if len(tg) != 1 || tg[0].Index != memory.StrategiesIndex || !slices.Equal(tg[0].Tags, []string{"kind:strategy", "important"}) {
 		t.Fatalf("important: tag calls %+v", tg)
 	}
 	if _, err := h.MemoriesCommand("unimportant strategy:pelican-drill"); err != nil {
@@ -330,20 +334,27 @@ func TestStrategies_ImportantAndRetagSendTagsNotAnIngest(t *testing.T) {
 	// The memory tool's refine: the same text with new tags is a retag;
 	// new text is an ingest.
 	m := h.memoryStore()
-	if _, err := m.apply(memoryArgs{Action: "add", Content: "Builds need CGO off.", Question: "how to build?"}, noteMeta{}); err != nil {
+	apply := func(a map[string]any) error {
+		b, _ := json.Marshal(a)
+		if out := (memory.Stores{Notes: m}).Call(m, string(b), memory.NoteMeta{}); strings.HasPrefix(out, "memory: ") {
+			return errors.New(out)
+		}
+		return nil
+	}
+	if err := apply(map[string]any{"action": "add", "content": "Builds need CGO off.", "question": "how to build?"}); err != nil {
 		t.Fatal(err)
 	}
 	n = len(ingestsOf(f))
 	if got := ingestsOf(f)[n-1].Text; got != "how to build?\n\nBuilds need CGO off." {
 		t.Fatalf("memory text %q, want its question and answer", got)
 	}
-	if _, err := m.apply(memoryArgs{Action: "refine", OldText: "CGO off", Content: "Builds need CGO off.", Tags: []string{"build"}, Why: "w", Source: "user"}, noteMeta{}); err != nil {
+	if err := apply(map[string]any{"action": "refine", "old_text": "CGO off", "content": "Builds need CGO off.", "tags": []string{"build"}, "why": "w", "source": "user"}); err != nil {
 		t.Fatal(err)
 	}
 	if tg = tagsOf(); len(ingestsOf(f)) != n || len(tg) != 3 || !slices.Equal(tg[2].Tags, []string{"build", "kind:memory"}) {
 		t.Fatalf("retag: tag calls %+v, ingests %d want %d", tg, len(ingestsOf(f)), n)
 	}
-	if _, err := m.apply(memoryArgs{Action: "refine", OldText: "CGO off", Content: "Builds need CGO on.", Why: "w", Source: "user"}, noteMeta{}); err != nil {
+	if err := apply(map[string]any{"action": "refine", "old_text": "CGO off", "content": "Builds need CGO on.", "why": "w", "source": "user"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(ingestsOf(f)) != n+1 || len(tagsOf()) != 3 {
