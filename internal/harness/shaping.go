@@ -317,6 +317,8 @@ func measuredBuild(shaper *agent.Shaper, h *Harness) agent.ContextBuilder {
 			}
 		}
 		shaper.Policy.LODTruncateAboveChars = lodChars() // /context config --tool-lod, live
+		// A fold in this build sends the round's own prefix (fold.go).
+		shaper.SessionPrefix = sessionPrefix(h.Session, system)
 		msgs, err := shaper.Build(ctx, sessionID, system)
 		if err != nil {
 			return msgs, err

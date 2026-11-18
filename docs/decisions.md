@@ -989,6 +989,22 @@ From the 2026-11-18 inventory of model calls nobody typed for.
   not show. `collectText` now reads to the stream's close after the finish,
   as `askOnce` does, because the usage can arrive in its own chunk after it.
   Measurement only: what the Shaper receives is unchanged.
+- **A fold shares the session's prompt cache** (agentkit v0.33.1
+  `Shaper.SessionPrefix`; `internal/harness/fold.go` `sessionPrefix`, set in
+  `measuredBuild`, `internal/harness/shaping.go`). A fold that fits one request
+  sends the round's own system (the string agent.Session passes to Build:
+  heredoc tool text and slot note included), the round's tools
+  (`forkTools`: none on heredoc) and the round's PromptCacheKey, then the
+  history and the summary instruction. Set at every build, so a server
+  starting or `/rag on` reaches the next fold. Before, a fold read the whole
+  history uncached under the compaction worker's prompt (the 85% of a
+  fold's overhead in `compaction.md`). `foldRunner` knows a prefix fold by
+  that system. Limits: a staged fold (history over the budget) keeps the
+  worker prompt and sends no key; pinned entries are left out of the fold
+  request, so with `PinLatestUser` the cache matches up to the latest user
+  entry; the fold sends thinking off, which some templates render
+  differently. Proof: `TestFold_SharesTheRoundsPrefix`; no live
+  measurement yet.
 - **Heartbeat escalation is bounded** (`internal/harness/asidettl.go`,
   `heartbeatOpts`). A job's or child's "still running, quiet" heartbeat is
   an aside that escalates to a wake when no turn carried it in 5 s. Before,

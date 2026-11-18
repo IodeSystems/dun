@@ -68,9 +68,15 @@ without a fold) only the bounding rungs ever run.
   wraps the Shaper's Runner); `foldRestoreNote` always carries the ask
   verbatim (cap 8000) and the open plan, keyed so a second fold in the turn
   replaces the first note. Open: pin the latest user entry in the Shaper
-  itself (request to the agentkit owner). The fold call has its own system prompt
-  ("You are a compaction worker", `shaper.go:808`), so it reads the raw
-  history **uncached**; the next round re-reads the new prompt uncached too.
+  itself (request to the agentkit owner). A fold that fits one request
+  sends the session's prefix (agentkit v0.33.1 `Shaper.SessionPrefix`, set
+  per build by `measuredBuild`): the round's system, tools and
+  PromptCacheKey, then the history, so it reads the history **from the
+  cache** up to the pinned latest user entry (`decisions.md`, "A fold shares
+  the session's prompt cache"). A staged fold (history over the budget)
+  keeps its own system prompt ("You are a compaction worker") and reads
+  uncached. The next round re-reads the new prompt uncached from the marker
+  on.
 - **Rescue and overflow [D].** `internal/harness/rescue.go` folds when the endpoint refuses a
   prompt (≤2 passes, each entry's head only); `internal/harness/overflow.go` folds on a
   length cut only when the room left is under one reservation.
@@ -78,7 +84,8 @@ without a fold) only the bounding rungs ever run.
   child's tokens die with it.
 
 Not present: a `/compact`, a fold at a task boundary, a quality ceiling
-below the window, a cold-cache trigger, a fold that reuses the cache.
+below the window, a cold-cache trigger, a staged fold that reuses the
+cache.
 
 ## What is measured
 
