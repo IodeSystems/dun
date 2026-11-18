@@ -483,6 +483,9 @@ func (m tuiModel) headView() string {
 // Matching claude's mode is what makes tap-to-type work.
 func (m tuiModel) View() tea.View {
 	out := m.drawView()
+	if !hyperlinksOn {
+		out = stripLinks(out)
+	}
 	if m.shown != nil {
 		m.shown.s = out
 	}

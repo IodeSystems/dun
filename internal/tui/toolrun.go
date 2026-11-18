@@ -209,7 +209,7 @@ func callLine(it *runItem) string {
 	if it.head != "" {
 		return mark + it.head
 	}
-	return mark + callText(it.tool, it.args, 80)
+	return mark + callText(it.tool, it.args, previewClip)
 }
 
 // narrowCall is the widest pane on which a one-call run puts its result's
@@ -486,7 +486,7 @@ func (m *tuiModel) callResult(id, tool, result string, failed *bool) {
 		it.failed = toolFailed(it.tool, result)
 	}
 	it.preview = strings.ReplaceAll(preview, "\n", " ")
-	it.head = callText(it.tool, it.args, 80) + it.preview
+	it.head = callText(it.tool, it.args, previewClip) + it.preview
 	m.touchRun(i)
 }
 

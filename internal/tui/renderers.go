@@ -50,7 +50,7 @@ func renderToolResult(rc renderCtx) (preview, full string) {
 // genericRender: a clipped one-line preview + the raw body, diff-colorized when
 // it looks like a unified diff (the prior default behavior, now the fallback).
 func genericRender(rc renderCtx) (string, string) {
-	preview := StDim.Render("  → ") + stSecondary.Render(textfmt.Clip(textfmt.OneLine(rc.result), 100))
+	preview := StDim.Render("  → ") + stSecondary.Render(textfmt.Clip(textfmt.OneLine(rc.result), previewClip))
 	if isDiff(rc.result) {
 		return preview, colorizeDiff(rc.result)
 	}
@@ -86,7 +86,7 @@ func jsonSummary(v any) string {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-		return textfmt.Clip(strings.Join(keys, ", "), 100)
+		return textfmt.Clip(strings.Join(keys, ", "), previewClip)
 	default:
 		return textfmt.Clip(textfmt.OneLine(fmt.Sprint(v)), 100)
 	}
@@ -104,7 +104,7 @@ func diffStat(s string) string {
 		}
 	}
 	if add == 0 && del == 0 {
-		return textfmt.Clip(textfmt.OneLine(s), 100)
+		return textfmt.Clip(textfmt.OneLine(s), previewClip)
 	}
 	return fmt.Sprintf("+%d -%d", add, del)
 }
@@ -275,13 +275,13 @@ func execMonitorRender(rc renderCtx) (string, string) {
 	case strings.HasPrefix(first, "No background jobs"):
 		return StDim.Render("  → ") + stSecondary.Render("no background jobs"), body
 	case strings.HasPrefix(first, "ERROR"):
-		return StDim.Render("  → ") + StErr.Render(textfmt.Clip(first, 90)), body
+		return StDim.Render("  → ") + StErr.Render(textfmt.Clip(first, previewClip)), body
 	}
 	// A listing is one line per job; a single-job report starts with its state.
 	if n := countMatching(rc.result, "#"); n > 1 && !strings.Contains(first, "monitor:") {
 		return StDim.Render("  → ") + stSecondary.Render(textfmt.Plural(n, "job")), body
 	}
-	return StDim.Render("  → ") + stSecondary.Render(textfmt.Clip(textfmt.OneLine(first), 90)), body
+	return StDim.Render("  → ") + stSecondary.Render(textfmt.Clip(textfmt.OneLine(first), previewClip)), body
 }
 
 // jobsRender: the jobs tool answers for a command's job (job:N), a
@@ -293,7 +293,7 @@ func jobsRender(rc renderCtx) (string, string) {
 	case strings.HasPrefix(first, "No background jobs"):
 		return StDim.Render("  → ") + stSecondary.Render("no background jobs"), body
 	case strings.HasPrefix(first, "ERROR"):
-		return StDim.Render("  → ") + StErr.Render(textfmt.Clip(first, 90)), body
+		return StDim.Render("  → ") + StErr.Render(textfmt.Clip(first, previewClip)), body
 	}
 	jobs, agents, other := 0, 0, false
 	for _, ln := range strings.Split(strings.TrimSpace(rc.result), "\n") {
@@ -341,7 +341,7 @@ func sessionRender(rc renderCtx) (string, string) {
 	}
 	body := stSecondary.Render(rc.result)
 	if v.Error != "" {
-		return StDim.Render("  → ") + StErr.Render(textfmt.Clip(v.Error, 90)), body
+		return StDim.Render("  → ") + StErr.Render(textfmt.Clip(v.Error, previewClip)), body
 	}
 	if len(rc.args) > 0 {
 		var parts []string
@@ -353,7 +353,7 @@ func sessionRender(rc renderCtx) (string, string) {
 		}
 		return StDim.Render("  → ") + stSecondary.Render("state: "+textfmt.Clip(textfmt.OneLine(strings.Join(parts, " · ")), 90)), body
 	}
-	return StDim.Render("  → ") + stSecondary.Render(textfmt.Clip("dun "+v.Harness.Version+" · "+v.Harness.Model, 90)), body
+	return StDim.Render("  → ") + stSecondary.Render(textfmt.Clip("dun "+v.Harness.Version+" · "+v.Harness.Model, previewClip)), body
 }
 
 // agentRender: which child, what state, and what it cost — the spend is the
@@ -363,9 +363,9 @@ func agentRender(rc renderCtx) (string, string) {
 	first := firstLine(rc.result)
 	switch {
 	case strings.HasPrefix(first, "ERROR"):
-		return StDim.Render("  → ") + StErr.Render(textfmt.Clip(first, 90)), body
+		return StDim.Render("  → ") + StErr.Render(textfmt.Clip(first, previewClip)), body
 	case strings.HasPrefix(first, "Started agent"):
-		return StDim.Render("  → ") + stSecondary.Render("▸ "+textfmt.Clip(strings.TrimSuffix(first, "."), 80)), body
+		return StDim.Render("  → ") + stSecondary.Render("▸ "+textfmt.Clip(strings.TrimSuffix(first, "."), previewClip)), body
 	}
 	if id, state, cost, ok := agentReportHead(first); ok {
 		// Running and idle are the normal course; a failure is red. Orange is
@@ -418,10 +418,10 @@ func agentMonitorRender(rc renderCtx) (string, string) {
 	case strings.HasPrefix(first, "No sub-agents"):
 		return StDim.Render("  → ") + stSecondary.Render("no sub-agents"), body
 	case strings.HasPrefix(first, "ERROR"), strings.HasPrefix(first, "Could not"):
-		return StDim.Render("  → ") + StErr.Render(textfmt.Clip(first, 90)), body
+		return StDim.Render("  → ") + StErr.Render(textfmt.Clip(first, previewClip)), body
 	case strings.HasPrefix(first, "Answered"), strings.HasPrefix(first, "Told"),
 		strings.HasPrefix(first, "Dismissed"), strings.HasPrefix(first, "Restarted"):
-		return StDim.Render("  → ") + stSecondary.Render(textfmt.Clip(textfmt.OneLine(first), 90)), body
+		return StDim.Render("  → ") + stSecondary.Render(textfmt.Clip(textfmt.OneLine(first), previewClip)), body
 	}
 	if strings.HasPrefix(first, "agent ") {
 		return agentRender(rc)
@@ -437,13 +437,13 @@ func agentMonitorRender(rc renderCtx) (string, string) {
 func tellParentRender(rc renderCtx) (string, string) {
 	var parts []string
 	if s := argStr(rc.args, "final"); s != "" {
-		parts = append(parts, StTool.Render("✓ final: ")+stSecondary.Render(textfmt.Clip(textfmt.OneLine(s), 80)))
+		parts = append(parts, StTool.Render("✓ final: ")+stSecondary.Render(textfmt.Clip(textfmt.OneLine(s), previewClip)))
 	}
 	if s := argStr(rc.args, "message"); s != "" {
-		parts = append(parts, stSecondary.Render("✉ ")+stSecondary.Render(textfmt.Clip(textfmt.OneLine(s), 80)))
+		parts = append(parts, stSecondary.Render("✉ ")+stSecondary.Render(textfmt.Clip(textfmt.OneLine(s), previewClip)))
 	}
 	if s := argStr(rc.args, "status"); s != "" && len(parts) == 0 {
-		parts = append(parts, stSecondary.Render("· "+textfmt.Clip(textfmt.OneLine(s), 80)))
+		parts = append(parts, stSecondary.Render("· "+textfmt.Clip(textfmt.OneLine(s), previewClip)))
 	}
 	if len(parts) == 0 {
 		return genericRender(rc)
@@ -458,7 +458,7 @@ func dunMsgRender(rc renderCtx) (string, string) {
 	if to == "" {
 		return genericRender(rc)
 	}
-	head := stSecondary.Render("✉ "+to+": ") + stSecondary.Render(textfmt.Clip(textfmt.OneLine(text), 70))
+	head := stSecondary.Render("✉ "+to+": ") + stSecondary.Render(textfmt.Clip(textfmt.OneLine(text), previewClip))
 	if strings.HasPrefix(rc.result, "ERROR") {
 		head += StErr.Render("  " + textfmt.Clip(textfmt.OneLine(strings.TrimPrefix(rc.result, "ERROR: ")), 60))
 	}
@@ -507,11 +507,11 @@ func getDocRender(rc renderCtx) (string, string) {
 	body := stSecondary.Render(rc.result)
 	first := firstLine(rc.result)
 	if strings.HasPrefix(first, "error") || strings.HasPrefix(first, "Error") {
-		return StDim.Render("  → ") + StErr.Render("✗ "+textfmt.Clip(first, 90)), body
+		return StDim.Render("  → ") + StErr.Render("✗ "+textfmt.Clip(first, previewClip)), body
 	}
 	n := countLines(rc.result)
 	return StDim.Render("  → ") + StTool.Render("✓") + stSecondary.Render(fmt.Sprintf(" %s · %s",
-		textfmt.Plural(n, "line"), textfmt.Clip(first, 70))), body
+		textfmt.Plural(n, "line"), textfmt.Clip(first, previewClip))), body
 }
 
 // ocrRender: how many pages were extracted.
@@ -519,7 +519,7 @@ func ocrRender(rc renderCtx) (string, string) {
 	body := stSecondary.Render(rc.result)
 	first := firstLine(rc.result)
 	if strings.HasPrefix(first, "error") || strings.HasPrefix(first, "Error") {
-		return StDim.Render("  → ") + StErr.Render("✗ "+textfmt.Clip(first, 90)), body
+		return StDim.Render("  → ") + StErr.Render("✗ "+textfmt.Clip(first, previewClip)), body
 	}
 	// OCR output mentions page counts; fall back to line count.
 	pages := countMatching(rc.result, "page")
@@ -535,9 +535,9 @@ func ingestRender(rc renderCtx) (string, string) {
 	body := stSecondary.Render(rc.result)
 	first := firstLine(rc.result)
 	if strings.HasPrefix(first, "error") || strings.HasPrefix(first, "Error") {
-		return StDim.Render("  → ") + StErr.Render("✗ "+textfmt.Clip(first, 90)), body
+		return StDim.Render("  → ") + StErr.Render("✗ "+textfmt.Clip(first, previewClip)), body
 	}
-	return StDim.Render("  → ") + stSecondary.Render("⏱ queued") + stSecondary.Render(" · "+textfmt.Clip(first, 80)), body
+	return StDim.Render("  → ") + stSecondary.Render("⏱ queued") + stSecondary.Render(" · "+textfmt.Clip(first, previewClip)), body
 }
 
 // recapRender: what was replaced and how much was saved.
@@ -545,9 +545,9 @@ func recapRender(rc renderCtx) (string, string) {
 	body := stSecondary.Render(rc.result)
 	first := firstLine(rc.result)
 	if strings.HasPrefix(first, "error") || strings.HasPrefix(first, "Error") {
-		return StDim.Render("  → ") + StErr.Render("✗ "+textfmt.Clip(first, 90)), body
+		return StDim.Render("  → ") + StErr.Render("✗ "+textfmt.Clip(first, previewClip)), body
 	}
-	return StDim.Render("  → ") + stSecondary.Render("↺ recap") + stSecondary.Render(" · "+textfmt.Clip(first, 80)), body
+	return StDim.Render("  → ") + stSecondary.Render("↺ recap") + stSecondary.Render(" · "+textfmt.Clip(first, previewClip)), body
 }
 
 func firstLine(s string) string {
@@ -588,3 +588,8 @@ func countMatching(s, prefix string) int {
 	}
 	return n
 }
+
+// previewClip is the most a result preview keeps. It is generous on purpose:
+// the row is cut once, at the pane's edge (fitRow), so a wide pane shows what
+// it has room for instead of what a fixed budget left.
+const previewClip = 400

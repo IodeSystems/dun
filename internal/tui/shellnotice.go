@@ -62,6 +62,13 @@ var jobNoticeRe = regexp.MustCompile("(?s)^(background job #\\d+ [^`]*?— )`(.*
 // flatten into a wall. Enter on it shows the rest: the command as shell rows, and
 // the output with its lines as written.
 func noticeEntry(text string, w int) convoEntry {
+	e := noticeEntryAt(text, w)
+	e.noticeSrc, e.noticeAt = text, w
+	return e
+}
+
+// noticeEntryAt is noticeEntry's rows, cut for w columns.
+func noticeEntryAt(text string, w int) convoEntry {
 	if m := jobNoticeRe.FindStringSubmatch(text); m != nil {
 		head := strings.TrimSuffix(strings.TrimSpace(m[1]), "—")
 		took, rest, _ := strings.Cut(strings.TrimPrefix(m[3], " "), "\n")
@@ -107,7 +114,7 @@ func noticeRow(text string, w int) string {
 	if w > 0 {
 		line = ansi.Truncate(line, w, "…")
 	}
-	return stNote.Render(line)
+	return linkifyStyled(stNote.Render(line))
 }
 
 // noticeW is the width a notice's command rows are cut to.

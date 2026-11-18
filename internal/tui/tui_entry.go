@@ -104,6 +104,12 @@ type convoEntry struct {
 	wrapMax   int
 	wrapMaxOK bool
 
+	// noticeSrc is a notice's text and noticeAt the width its row was cut
+	// for: refresh cuts it again when the pane is another width, so the row
+	// is cut once, at the edge it has now (noticeEntry).
+	noticeSrc string
+	noticeAt  int
+
 	// rowOffset is the viewport row (line index) where this entry starts.
 	// Set by refresh() as a cumulative sum of block heights. Used by
 	// scrollOverlay to map vp.YOffset back to conversation entries without

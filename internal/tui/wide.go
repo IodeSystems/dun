@@ -194,7 +194,7 @@ func cutRow(r string, off, avail int) string {
 }
 
 // proseW is the prose column: what m.md wraps at (newMarkdown's floor too).
-func (m tuiModel) proseW() int { return max(20, min(m.mdWidth, bandCap)-2) }
+func (m tuiModel) proseW() int { return max(20, min(m.mdWidth, readingCap)-2) }
 
 // renderEntry renders a finished answer at avail columns from its source
 // (its Doc's Final; the Doc is made again, State kept, when the widths

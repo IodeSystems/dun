@@ -129,7 +129,7 @@ func answerOutLead(s *bubbleteandmd.Doc, src string, final bool) (string, int) {
 		return bubbleteandmd.Sanitize(src), 0
 	}
 	top := strings.TrimLeft(out, "\n")
-	return strings.TrimRight(top, "\n"), len(out) - len(top)
+	return linkifyStyled(strings.TrimRight(top, "\n")), len(out) - len(top)
 }
 
 // curAnswer renders the streaming reply (m.cur) for a pane avail columns

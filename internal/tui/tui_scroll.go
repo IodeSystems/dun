@@ -99,6 +99,12 @@ func (m *tuiModel) refresh() {
 			// after a re-render, and nothing else does between refreshes — so it
 			// is true exactly when the current render matches the current width.
 			// A token therefore never pays for a glamour re-render.
+			if e.noticeSrc != "" && m.vp.Width > 1 && e.noticeAt != wrapW {
+				ne := noticeEntryAt(e.noticeSrc, wrapW)
+				e.collapsed, e.full, e.noticeAt = ne.collapsed, ne.full, wrapW
+				b = e.view()
+				e.invalidateWrap()
+			}
 			if e.mdSource != "" && (e.wrapW == 0 || e.wrapW != width) {
 				e.collapsed = m.renderEntry(e, wrapW)
 				b = e.view()
@@ -149,6 +155,7 @@ func (m *tuiModel) refresh() {
 		} else {
 			w = cellbuf.Wrap(b, wrapW, "")
 		}
+		w = relinkRows(w)
 		// Never shorter than it has been (convoEntry.maxH). Docs blocks change
 		// only when the person opens or closes something in them.
 		switch {

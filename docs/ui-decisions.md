@@ -83,7 +83,17 @@ are in `decisions.md`.
   step below the answer: previews and expanded bodies. `stDim` (240, 2.5:1) is
   for chrome only (arrows, rules, hints, labels). Orange means attention
   (a failed job, not-logged-in; an old transcript's blocked agent); neutral facts are not
-  orange. Answer prose wraps at `bandCap` (100) columns.
+  orange. Answer and user prose wrap at `bandCap` (100) columns, a reading
+  width (long lines are hard to follow back); `DUN_READING_WIDTH=<cols>|off`
+  changes it. Prose wraps at spaces only, so a URL moves whole to the next row.
+  Collapsed one-row kinds (notice, tool call, thought) use the whole pane and
+  are cut once, at its edge.
+- **URLs are OSC 8 links** (`hyperlink.go`): every row of a wrapped URL carries
+  the same `id=`, so cmd/ctrl-click and "copy link" give it whole, and a drag
+  across the wrap copies it unbroken (`selText`). On for terminals known to
+  support it (iTerm2, WezTerm, kitty, Ghostty, VS Code, Windows Terminal, VTE
+  0.50+); off for unknown ones, Terminal.app and tmux/screen.
+  `DUN_HYPERLINKS=on|off` overrides.
 - **Wide blocks scroll sideways, never wrap** (`wide.go`): a code block or
   table wider than the prose column renders at its own width, is cut at the pane
   edge with `... +N cols`, and scrolls with left/right. The streaming reply

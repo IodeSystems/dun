@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -350,10 +352,25 @@ func userRow(text string) string { return userRowAt(text, 0) }
 // the far edge is mostly empty fill.
 const bandCap = 100
 
+// readingCap is the cap in force: bandCap, or DUN_READING_WIDTH (columns;
+// 0 or "off" lets prose fill the pane). docs/ui-decisions.md records the cap.
+var readingCap = readingCapFrom(os.Getenv("DUN_READING_WIDTH"))
+
+func readingCapFrom(v string) int {
+	v = strings.TrimSpace(strings.ToLower(v))
+	if v == "" {
+		return bandCap
+	}
+	if n, err := strconv.Atoi(v); err == nil && n > 0 {
+		return max(n, 20)
+	}
+	return 1 << 20 // 0, off, anything else: the pane's width
+}
+
 // userRowAt is userRow wrapped to width (0: unwrapped), its band filled to
 // width or bandCap, whichever is less — every wrapped row to the same edge.
 func userRowAt(text string, width int) string {
-	width = min(width, bandCap)
+	width = min(width, readingCap)
 	st, row := stUser, "› "+text
 	if rest, ok := strings.CutPrefix(text, autoResumePrefix); ok {
 		st, row = StDim, "↻ resumed after the restart — "+rest
@@ -363,7 +380,9 @@ func userRowAt(text string, width int) string {
 	if strings.HasPrefix(text, "[scheduled ") || strings.HasPrefix(text, "[loop ") {
 		row = "⏲ " + text
 	}
+	row = linkifyStyled(row)
 	if width > 0 {
+		row = wrapProse(row, width)
 		st = st.Width(width)
 	}
 	return st.Render(row)

@@ -260,10 +260,12 @@ func (m tuiModel) activityClick(r int) (tea.Model, tea.Cmd) {
 
 // selText is the plain text of cells from..to (inclusive) of lines, skip
 // columns of gutter left off: ANSI stripped, trailing spaces trimmed per line,
-// one line per pane row. Wrapped rows of one logical line are NOT joined: the
-// pane keeps no record of which row breaks were soft.
+// one line per pane row. Two rows are joined, with no newline between them,
+// when one URL runs over the break (softLink): dun broke it, the source has
+// one URL. The pane keeps no record of other soft breaks.
 func selText(lines []string, from, to cellPos, skip int) string {
-	var out []string
+	var out strings.Builder
+	joined := false // the row before ran on into this one
 	for l := from.line; l <= to.line && l < len(lines); l++ {
 		if l < 0 {
 			continue
@@ -280,9 +282,43 @@ func selText(lines []string, from, to cellPos, skip int) string {
 		if hi > lo {
 			s = ansi.Cut(plain, lo, hi)
 		}
-		out = append(out, strings.TrimRight(s, " \t"))
+		soft := l < to.line && l+1 < len(lines) && softLink(lines[l], lines[l+1])
+		if joined {
+			s = strings.TrimLeft(s, " \t")
+		} else if l > from.line {
+			out.WriteString("\n")
+		}
+		if !soft {
+			s = strings.TrimRight(s, " \t")
+		}
+		out.WriteString(s)
+		joined = soft
 	}
-	return strings.TrimRight(strings.Join(out, "\n"), "\n")
+	return strings.TrimRight(out.String(), "\n")
+}
+
+// softLink says one link runs from the end of row cur to the start of row
+// nxt: cur ends inside a link (relinkRows closes it there) and nxt opens a
+// link with the same id before any text.
+func softLink(cur, nxt string) bool {
+	if !strings.Contains(cur, "\x1b]8;") || !strings.Contains(nxt, "\x1b]8;") {
+		return false
+	}
+	var curID string
+	closedAtEnd := false
+	for _, m := range osc8Re.FindAllStringSubmatchIndex(cur, -1) {
+		if cur[m[4]:m[5]] != "" {
+			curID = cur[m[2]:m[3]]
+			continue
+		}
+		// A close: the end of the row, bar the style resets and fill after it?
+		closedAtEnd = strings.TrimSpace(ansi.Strip(cur[m[1]:])) == ""
+	}
+	loc := osc8Re.FindStringSubmatchIndex(nxt)
+	if curID == "" || !closedAtEnd || loc == nil || nxt[loc[4]:loc[5]] == "" || nxt[loc[2]:loc[3]] != curID {
+		return false
+	}
+	return strings.TrimSpace(ansi.Strip(nxt[:loc[0]])) == ""
 }
 
 // highlight draws the selection over the pane's visible rows (first = the pane
