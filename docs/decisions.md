@@ -1106,6 +1106,32 @@ back. `internal/harness/netwait.go`.
 - `/retry` settings still apply: an unbounded budget never gives up, so
   this path is not reached.
 
+## Tool calls sent as text are retried (USER 2026-11-18)
+
+A DeepSeek Flash session wrote its tool calls into the reply as DSML
+(`<｜DSML｜…<invoke>…<parameter>`, U+FF5C bars) with no tool_calls: nothing
+ran, the turn ended, and the TUI dropped the tags as HTML. Once the markup was
+in a plan node's text. `internal/harness/textcall.go`,
+`internal/textfmt/toolmarkup.go`.
+
+- **Detect.** A reply with no tool calls whose text, outside fenced and
+  inline code, has a DSML marker (`<｜DSML｜`, `<|DSML|`), `<invoke` with
+  `<parameter`, `<function_calls>`, `<tool_call>` or `<|tool▁calls▁begin|>`.
+  Prose that explains the tags in backticks is not a call.
+- **Respond.** onIdle answers first with one `[automatic] your last reply had
+  a tool call written as text (…)` note and the turn goes on; at most 2 a
+  turn, then the turn ends as before (with its usual turn-end check). The
+  note is inside the current turn, not a new one: it is not an automatic turn
+  and not under the unrequested-turn budget.
+- **Plan arguments.** A plan tool call with the markup in any string argument
+  is refused with the same guidance: plan text is shown to the person and in
+  the turn-end check. File contents are not checked.
+- **Display.** The TUI fences the markup span before rendering, so it shows
+  raw as a code block. The app (mobile/web) draws HTML nodes as their text
+  and was not changed.
+- corrallm may repair this upstream (parse the markup into tool_calls); this
+  guard stays as the fallback.
+
 ## Release updates
 
 - **para shares dun's signing key (Carl, 2026-11-10); manifests are bound to

@@ -96,6 +96,11 @@ const idleRearm = "You %s after the last check: check the requirements again aga
 // one Session.Turn call, which a retry starts again; the turn's own count
 // (idleState.n) is what bounds it.
 func (h *Harness) onIdle(_ context.Context, rounds, _ int) string {
+	// A tool call written as text first: the check would read a turn whose
+	// work never ran (textcall.go).
+	if note := h.textCallCheck(); note != "" {
+		return note
+	}
 	asks := h.idle.count()
 	if asks >= idleChecksMax {
 		return ""
@@ -164,12 +169,25 @@ type idleState struct {
 	n       int      // checks given in this turn
 	paths   []string // file_edit and file_write paths, in order, once each
 	plan    planRev  // the plan as the last check read it, in any turn
+	text    int      // tool calls written as text corrected in this turn (textcall.go)
 }
 
 func (s *idleState) reset() {
 	s.mu.Lock()
-	s.checked, s.paths, s.n = false, nil, 0
+	s.checked, s.paths, s.n, s.text = false, nil, 0, 0
 	s.mu.Unlock()
+}
+
+// textCallTake spends one of the turn's textCallsMax corrections; false
+// with none left.
+func (s *idleState) textCallTake() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.text >= textCallsMax {
+		return false
+	}
+	s.text++
+	return true
 }
 
 // mark records a check: changes count from here.
