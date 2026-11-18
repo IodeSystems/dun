@@ -1583,6 +1583,9 @@ type AgentInfo struct {
 	Prompt  string `json:"prompt"`
 	Tokens  int    `json:"tokens"`
 	Seconds int    `json:"seconds"`
+	// Dir is the tree an isolated child works in, or the spawn's dir; ""
+	// is its parent's tree. dun ps matches processes against it.
+	Dir string `json:"dir,omitempty"`
 }
 
 // Agents is every child of this session, oldest first.
@@ -1594,6 +1597,7 @@ func (h *Harness) Agents() []AgentInfo {
 		out = append(out, AgentInfo{
 			ID: sa.num, Model: sa.where(), State: string(state), Status: status,
 			Prompt: sa.prompt, Tokens: sa.spent(), Seconds: int(since.Seconds()),
+			Dir: sa.iso.workspace(),
 		})
 	}
 	return out

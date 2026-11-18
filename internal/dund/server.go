@@ -388,6 +388,8 @@ func (c *conn) handle(cmd proto.Command) {
 			err = svc.UpgradeNow()
 		}
 		c.ack(cmd, "", err)
+	case *proto.Procs:
+		c.reply(cmd, "", svc.Procs(c.who))
 	case *proto.JobUsageReq:
 		c.reply(cmd, cmd.Session, svc.JobUsage(c.who, cmd.Session, p.Job))
 	case *proto.Persist:
