@@ -83,7 +83,13 @@ func (h *Harness) suggestDoneScope(ctx context.Context) (planTurnMark, taskgraph
 	if err != nil {
 		return m, taskgraph.Graph{}, false
 	}
-	if len(g.Nodes) == 0 && (h.store == nil || h.store.toolCallsNow() == m.calls) {
+	work := 0 // the nodes that are not asks (asks.go): one for each message
+	for _, n := range g.Nodes {
+		if !h.isAskNode(n.ID) {
+			work++
+		}
+	}
+	if work == 0 && (h.store == nil || h.store.toolCallsNow() == m.calls) {
 		return m, taskgraph.Graph{}, false // a plain chat: nothing to record
 	}
 	return m, g, true
@@ -206,6 +212,9 @@ func (h *Harness) addSuggestDone(ctx context.Context, m planTurnMark, items []su
 		for k, v := range prev {
 			by[k] = v
 		}
+		// The turn's ledger entry is the ask (or turn) entry that turn's
+		// facts went to (asks.go): the node names the turn.
+		account := fmt.Sprintf("recorded after turn %d by the idle suggestion call", h.asksTurnNow())
 		for _, it := range items {
 			if len(ids) == suggestDoneMax {
 				break
@@ -223,7 +232,7 @@ func (h *Harness) addSuggestDone(ctx context.Context, m planTurnMark, items []su
 			g.Seq++
 			id := strconv.Itoa(g.Seq)
 			g.Nodes = append(g.Nodes, &taskgraph.Node{ID: id, Title: title, Status: taskgraph.Done, Needs: needs,
-				DoneWhen: "the last turn did it", Account: "recorded after the turn by the idle suggestion call"})
+				DoneWhen: "the last turn did it", Account: account})
 			by[id] = planBySuggest
 			ids = append(ids, id)
 		}

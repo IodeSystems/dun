@@ -243,7 +243,18 @@ func (s *subAgent) settleThen(state agentState, before func()) {
 	if s.ended.IsZero() {
 		s.ended = time.Now()
 	}
+	closed, final := s.closed, s.final
 	s.mu.Unlock()
+	if !closed && s.parent != nil { // the turn ledger (ledger.go)
+		outcome := "done"
+		switch {
+		case state == agentDismissed:
+			outcome = "dismissed"
+		case strings.HasPrefix(final, "FAILED"):
+			outcome = "failed"
+		}
+		s.parent.ledgerAgent(s.num, headLine(s.prompt, 80), "finished", outcome)
+	}
 	// Saved before the run is over to a waiter: one that resumes the
 	// session right after reads the state this run ended in.
 	s.saveState()
@@ -652,6 +663,7 @@ func (h *Harness) spawnAgentFor(ctx context.Context, prompt, provider, model, ef
 	}
 	h.agentsChanged()
 
+	h.ledgerAgent(num, headLine(prompt, 80), "started", "") // the turn ledger (ledger.go)
 	go sa.run(runCtx, prompt+iso.brief())
 	go sa.heartbeat()
 	return sa, nil

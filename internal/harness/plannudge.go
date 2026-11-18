@@ -136,7 +136,7 @@ func (h *Harness) planNudgeOK() bool {
 		return false
 	}
 	g, err := planStore{h}.View(context.Background())
-	return err == nil && g.Open() == 0
+	return err == nil && h.openWork(g) == 0 // an ask is not a plan (asks.go)
 }
 
 // hasTool reports whether name is in the tool set as of the last rebuild.
@@ -189,7 +189,7 @@ func (h *Harness) planStallRound() {
 	}
 	var open []*taskgraph.Node
 	for _, nd := range g.Nodes {
-		if planOpen(nd) {
+		if planOpen(nd) && !h.isAskNode(nd.ID) { // an ask is not a plan (asks.go)
 			open = append(open, nd)
 		}
 	}
@@ -320,7 +320,7 @@ func (h *Harness) planForceOpts(tools []llm.ToolDef, opts *llm.ChatOpts) *llm.Ch
 // invent a node, so the model reads the plan and then updates it, as the
 // aside says.
 func (h *Harness) planForceTool() string {
-	if g, err := (planStore{h}).View(context.Background()); err == nil && g.Open() > 0 {
+	if g, err := (planStore{h}).View(context.Background()); err == nil && h.openWork(g) > 0 { // an ask is not a plan (asks.go)
 		return taskgraph.ToolShow
 	}
 	return taskgraph.ToolAdd

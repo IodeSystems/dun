@@ -327,6 +327,7 @@ func (j *bgJob) finish(res ExecResult) {
 	if !bg {
 		return
 	}
+	j.h.ragRoot().ledgerJobEnd(j.h, j.id, j.command, res, j.ended.Sub(j.started)) // the turn ledger (ledger.go)
 	j.h.bgMu.Lock()
 	j.h.bgRun--
 	j.h.bgMu.Unlock()

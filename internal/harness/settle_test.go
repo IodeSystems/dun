@@ -22,7 +22,7 @@ func startSettle(t *testing.T, r *scriptRunner, sessionFile string, mut func(*Co
 	if sessionFile == "" {
 		sessionFile = filepath.Join(dir, "s.jsonl")
 	}
-	cfg := Config{Workspace: dir, Servers: []mcpserver.Server{}, Client: r, SessionFile: sessionFile, SettleDelay: testSettle}
+	cfg := Config{Workspace: dir, Servers: []mcpserver.Server{}, Client: r, SessionFile: sessionFile, SettleDelay: testSettle, NoAsks: true}
 	if mut != nil {
 		mut(&cfg)
 	}

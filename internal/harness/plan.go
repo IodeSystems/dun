@@ -227,6 +227,13 @@ func (s *planMemStore) Update(_ context.Context, fn func(g *taskgraph.Graph) err
 	return nil
 }
 
+// full is the whole graph, archived nodes too.
+func (s *planMemStore) full() taskgraph.Graph {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.g.Clone()
+}
+
 // planStore is the tool's Store: the session's plan, wherever the session
 // file now is, and a word to the UI after every change.
 type planStore struct{ h *Harness }
@@ -298,7 +305,8 @@ func withPlan(inner agent.ToolDispatcher, tg *taskgraph.Tools, onCall func(strin
 func (h *Harness) planTools() *taskgraph.Tools {
 	return taskgraph.New(planStore{h}, "",
 		taskgraph.WithOnChange(func(_ context.Context, _ string, cs []taskgraph.Change) {
-			h.planMoved(cs) // the stall window (plannudge.go)
+			h.planMoved(cs)     // the stall window (plannudge.go)
+			h.ledgerTouched(cs) // which ask the turn worked on (asks.go)
 			h.planTell(cs, "the main agent", "")
 		}))
 }
@@ -1081,6 +1089,7 @@ func (h *Harness) planFromChild(num int, cs []taskgraph.Change) {
 			ready = append(ready, c.ID)
 		}
 	}
+	h.ledgerTouched(cs)
 	who := fmt.Sprintf("agent #%d", num)
 	if len(published) == 0 {
 		h.planTell(cs, who, "") // the board says it; a child's change is not news

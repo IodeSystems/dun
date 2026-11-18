@@ -82,7 +82,7 @@ func startScripted(t *testing.T, r *scriptRunner) *Harness {
 	dir := t.TempDir()
 	h, err := Start(context.Background(), Config{
 		Workspace: dir, Servers: []mcpserver.Server{}, Client: r,
-		SessionFile: filepath.Join(dir, "s.jsonl"),
+		SessionFile: filepath.Join(dir, "s.jsonl"), NoAsks: true,
 	})
 	if err != nil {
 		t.Fatal(err)

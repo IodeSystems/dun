@@ -39,7 +39,7 @@ func TestAgentCall_EventsAndHistoryNameTheChild(t *testing.T) {
 		ClientFor: func(string, string) (ChildClient, error) {
 			return ChildClient{Runner: &scriptRunner{rounds: []roundFn{textRound("child done")}}}, nil
 		},
-		SessionFile: file,
+		SessionFile: file, NoAsks: true,
 		OnToolStart: func(s ToolStart) { mu.Lock(); starts[s.CallID] = s; mu.Unlock() },
 		OnToolEnd:   func(e ToolEnd) { mu.Lock(); ends[e.CallID] = e; mu.Unlock() },
 	})

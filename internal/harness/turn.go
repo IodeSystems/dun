@@ -164,9 +164,12 @@ func (h *Harness) Continue(ctx context.Context) (agent.TurnResult, error) {
 		h.settleEnd(false, st, nil)
 		return agent.TurnResult{}, nil
 	}
+	h.ledgerBegin()
 	res, err := h.turnThenTriggers(ctx)
 	h.settleEnd(false, st, err)
-	return h.finishInterrupt(ctx, res, err)
+	res, err = h.finishInterrupt(ctx, res, err)
+	h.ledgerEnd(ctx, err)
+	return res, err
 }
 
 // prepareTurn readies the store for a turn (or a retry of one).
