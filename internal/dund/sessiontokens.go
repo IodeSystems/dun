@@ -35,6 +35,10 @@ type signIn struct {
 	Email     string    `json:"email"`
 	Expires   time.Time `json:"expires"`
 	From      string    `json:"from,omitempty"`
+	// Host, for a browser session, is the host it was made on (the name
+	// the browser was looking at, with its port): it is good there only
+	// (CheckSessionAt), never as a bearer.
+	Host string `json:"host,omitempty"`
 }
 
 type signIns struct{ path string }
@@ -88,6 +92,21 @@ func (s *Service) MintSignIn(principal, email string, ttl time.Duration) (string
 // MintSignInFrom is MintSignIn for a token that lives only while from does
 // (TokenSource's name for the bearer it was made from; "" for none).
 func (s *Service) MintSignInFrom(principal, email, from string, ttl time.Duration) (string, error) {
+	return s.mint(signIn{Principal: principal, Email: email, From: from}, ttl)
+}
+
+// MintSessionAt is MintSignInFrom for a browser session on host: it is
+// accepted only by CheckSessionAt with the same host, so a cookie made for
+// one name is refused when it arrives under another (another port on
+// 127.0.0.1, another name for the machine).
+func (s *Service) MintSessionAt(principal, email, from, host string, ttl time.Duration) (string, error) {
+	if host == "" {
+		return "", errors.New("dund: a browser session needs its host")
+	}
+	return s.mint(signIn{Principal: principal, Email: email, From: from, Host: strings.ToLower(host)}, ttl)
+}
+
+func (s *Service) mint(v signIn, ttl time.Duration) (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
@@ -100,12 +119,26 @@ func (s *Service) MintSignInFrom(principal, email, from string, ttl time.Duratio
 	if err != nil {
 		return "", err
 	}
-	m[hashToken(tok)] = signIn{Principal: principal, Email: email, Expires: time.Now().Add(ttl), From: from}
+	v.Expires = time.Now().Add(ttl)
+	m[hashToken(tok)] = v
 	return tok, t.save(m)
 }
 
-// CheckSignIn is the principal a live sign-in token stands for.
-func (s *Service) CheckSignIn(tok string) (string, bool) {
+// CheckSignIn is the principal a live sign-in token stands for. A browser
+// session (MintSessionAt) is not a bearer: it is refused here.
+func (s *Service) CheckSignIn(tok string) (string, bool) { return s.checkSignIn(tok, "", false) }
+
+// CheckSessionAt is the principal a live browser session made on host
+// stands for; a session made on another host, or a sign-in token with no
+// host, is refused.
+func (s *Service) CheckSessionAt(tok, host string) (string, bool) {
+	if host == "" {
+		return "", false
+	}
+	return s.checkSignIn(tok, strings.ToLower(host), true)
+}
+
+func (s *Service) checkSignIn(tok, host string, session bool) (string, bool) {
 	if len(tok) <= len(signInPrefix) || tok[:len(signInPrefix)] != signInPrefix {
 		return "", false
 	}
@@ -117,7 +150,8 @@ func (s *Service) CheckSignIn(tok string) (string, bool) {
 		return "", false
 	}
 	v, ok := m[hashToken(tok)]
-	if !ok || time.Now().After(v.Expires) || !s.fromLive(m, v.From, 0) {
+	if !ok || time.Now().After(v.Expires) || !s.fromLive(m, v.From, 0) ||
+		subtle.ConstantTimeCompare([]byte(v.Host), []byte(host)) != 1 || (v.Host != "") != session {
 		return "", false
 	}
 	return v.Principal, true

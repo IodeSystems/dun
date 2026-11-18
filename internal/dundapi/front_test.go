@@ -27,7 +27,7 @@ func signedIn(t *testing.T, srv *httptest.Server, tok string) *http.Client {
 	t.Helper()
 	jar, _ := cookiejar.New(nil)
 	c := &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	resp, err := c.PostForm(srv.URL+"/auth/signin", url.Values{"token": {tok}, "return": {"/"}})
+	resp, err := c.PostForm(dl(srv)+"/auth/signin", url.Values{"token": {tok}, "return": {"/"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func signedIn(t *testing.T, srv *httptest.Server, tok string) *http.Client {
 	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/" {
 		t.Fatalf("sign-in: %d %s", resp.StatusCode, resp.Header.Get("Location"))
 	}
-	u, _ := url.Parse(srv.URL)
+	u, _ := url.Parse(dl(srv))
 	var ck *http.Cookie
 	for _, k := range jar.Cookies(u) {
 		if k.Name == "dun_session" {
@@ -92,45 +92,45 @@ func setupFront(t *testing.T) front {
 // choice cookie naming anything else is not followed.
 func TestChooser(t *testing.T) {
 	f := setupFront(t)
-	if code, loc, _ := get(t, noRedirect(), f.srv.URL+"/"); code != http.StatusFound || loc != "/auth/signin?return=%2F" {
+	if code, loc, _ := get(t, noRedirect(), dl(f.srv)+"/"); code != http.StatusFound || loc != "/auth/signin?return=%2F" {
 		t.Fatalf("signed out: %d %s", code, loc)
 	}
 	c := signedIn(t, f.srv, f.tok)
-	code, _, body := get(t, c, f.srv.URL+"/")
+	code, _, body := get(t, c, dl(f.srv)+"/")
 	if code != 200 || !strings.Contains(body, "/choose/web") || !strings.Contains(body, "experimental") || strings.Contains(body, "/choose/tui") {
 		t.Fatalf("chooser with the tui off: %d %s", code, body)
 	}
-	if code, _, _ := get(t, c, f.srv.URL+"/choose/tui"); code != 404 {
+	if code, _, _ := get(t, c, dl(f.srv)+"/choose/tui"); code != 404 {
 		t.Errorf("choose tui while off: %d", code)
 	}
 	f.tuiOn.Store(true)
-	if _, _, body := get(t, c, f.srv.URL+"/"); !strings.Contains(body, "/choose/tui") {
+	if _, _, body := get(t, c, dl(f.srv)+"/"); !strings.Contains(body, "/choose/tui") {
 		t.Errorf("chooser with the tui on: %s", body)
 	}
-	if code, loc, _ := get(t, c, f.srv.URL+"/choose/web"); code != http.StatusFound || loc != "/web/" {
+	if code, loc, _ := get(t, c, dl(f.srv)+"/choose/web"); code != http.StatusFound || loc != "/web/" {
 		t.Fatalf("choose web: %d %s", code, loc)
 	}
-	if code, loc, _ := get(t, c, f.srv.URL+"/"); code != http.StatusFound || loc != "/web/" {
+	if code, loc, _ := get(t, c, dl(f.srv)+"/"); code != http.StatusFound || loc != "/web/" {
 		t.Errorf("remembered: %d %s", code, loc)
 	}
-	if code, _, body := get(t, c, f.srv.URL+"/?choose=1"); code != 200 || !strings.Contains(body, "/choose/web") {
+	if code, _, body := get(t, c, dl(f.srv)+"/?choose=1"); code != 200 || !strings.Contains(body, "/choose/web") {
 		t.Errorf("choose again: %d", code)
 	}
-	if code, loc, _ := get(t, c, f.srv.URL+"/choose/tui"); code != http.StatusFound || loc != "/tui/" {
+	if code, loc, _ := get(t, c, dl(f.srv)+"/choose/tui"); code != http.StatusFound || loc != "/tui/" {
 		t.Errorf("choose tui: %d %s", code, loc)
 	}
-	if code, _, _ := get(t, c, f.srv.URL+"/choose/https:%2F%2Fevil.example"); code != 404 {
+	if code, _, _ := get(t, c, dl(f.srv)+"/choose/https:%2F%2Fevil.example"); code != 404 {
 		t.Errorf("choose elsewhere: %d", code)
 	}
 	// Not an open redirect: a forged choice is ignored.
-	u, _ := url.Parse(f.srv.URL)
+	u, _ := url.Parse(dl(f.srv))
 	c.Jar.SetCookies(u, []*http.Cookie{{Name: "dun_choice", Value: "https://evil.example/", Path: "/"}})
-	if code, loc, _ := get(t, c, f.srv.URL+"/"); code != 200 || loc != "" {
+	if code, loc, _ := get(t, c, dl(f.srv)+"/"); code != 200 || loc != "" {
 		t.Errorf("forged choice: %d %s", code, loc)
 	}
 	// Nor is a sign-in's return.
 	for _, bad := range []string{"https://evil.example/", "//evil.example/", "dun://auth"} {
-		resp, _ := noRedirect().PostForm(f.srv.URL+"/auth/signin", url.Values{"token": {f.tok}, "return": {bad}})
+		resp, _ := noRedirect().PostForm(dl(f.srv)+"/auth/signin", url.Values{"token": {f.tok}, "return": {bad}})
 		if loc := resp.Header.Get("Location"); loc != "/" {
 			t.Errorf("sign-in return %q went to %q", bad, loc)
 		}
@@ -142,25 +142,25 @@ func TestChooser(t *testing.T) {
 func TestTUIBehindSignIn(t *testing.T) {
 	f := setupFront(t)
 	c := signedIn(t, f.srv, f.tok)
-	if code, _, _ := get(t, c, f.srv.URL+"/tui/"); code != 404 {
+	if code, _, _ := get(t, c, dl(f.srv)+"/tui/"); code != 404 {
 		t.Fatalf("tui off: %d", code)
 	}
 	f.tuiOn.Store(true)
-	if code, loc, _ := get(t, c, f.srv.URL+"/tui"); code != http.StatusMovedPermanently || loc != "/tui/" {
+	if code, loc, _ := get(t, c, dl(f.srv)+"/tui"); code != http.StatusMovedPermanently || loc != "/tui/" {
 		t.Errorf("/tui: %d %s", code, loc)
 	}
-	if code, _, body := get(t, c, f.srv.URL+"/tui/"); code != 200 || !strings.Contains(body, "xterm") || !strings.Contains(body, `href="/?choose=1"`) {
+	if code, _, body := get(t, c, dl(f.srv)+"/tui/"); code != 200 || !strings.Contains(body, "xterm") || !strings.Contains(body, `href="/?choose=1"`) {
 		t.Errorf("page: %d", code)
 	}
-	if code, _, _ := get(t, c, f.srv.URL+"/tui/static/xterm.js"); code != 200 {
+	if code, _, _ := get(t, c, dl(f.srv)+"/tui/static/xterm.js"); code != 200 {
 		t.Errorf("assets: %d", code)
 	}
-	if code, loc, _ := get(t, noRedirect(), f.srv.URL+"/tui/"); code != http.StatusFound || !strings.HasPrefix(loc, "/auth/signin") {
+	if code, loc, _ := get(t, noRedirect(), dl(f.srv)+"/tui/"); code != http.StatusFound || !strings.HasPrefix(loc, "/auth/signin") {
 		t.Errorf("signed out: %d %s", code, loc)
 	}
 
-	ws := "ws" + strings.TrimPrefix(f.srv.URL, "http") + "/tui/ws"
-	u, _ := url.Parse(f.srv.URL)
+	ws := "ws" + strings.TrimPrefix(dl(f.srv), "http") + "/tui/ws"
+	u, _ := url.Parse(dl(f.srv))
 	cookie := ""
 	for _, k := range c.Jar.Cookies(u) {
 		cookie += k.Name + "=" + k.Value + "; "
@@ -179,13 +179,13 @@ func TestTUIBehindSignIn(t *testing.T) {
 		}
 		return conn, 101
 	}
-	if _, code := dial(f.srv.URL, ""); code != http.StatusUnauthorized {
+	if _, code := dial(dl(f.srv), ""); code != http.StatusUnauthorized {
 		t.Errorf("no cookie: %d", code)
 	}
 	if _, code := dial("https://evil.example", cookie); code != http.StatusForbidden {
 		t.Errorf("foreign origin: %d", code)
 	}
-	conn, code := dial(f.srv.URL, cookie)
+	conn, code := dial(dl(f.srv), cookie)
 	if code != 101 {
 		t.Fatalf("signed in, same origin: %d", code)
 	}
@@ -200,7 +200,7 @@ func TestTUIBehindSignIn(t *testing.T) {
 	}
 	// Off again: the page goes.
 	f.tuiOn.Store(false)
-	if code, _, _ := get(t, c, f.srv.URL+"/tui/"); code != 404 {
+	if code, _, _ := get(t, c, dl(f.srv)+"/tui/"); code != 404 {
 		t.Errorf("tui off again: %d", code)
 	}
 }
@@ -211,20 +211,20 @@ func TestTUIBehindSignIn(t *testing.T) {
 func TestSessionCookie(t *testing.T) {
 	f := setupFront(t)
 	c := signedIn(t, f.srv, f.tok)
-	if code, _, _ := get(t, c, f.srv.URL+"/api/v1/sessions"); code != 200 {
+	if code, _, _ := get(t, c, dl(f.srv)+"/api/v1/sessions"); code != 200 {
 		t.Errorf("api on the cookie: %d", code)
 	}
-	req, _ := http.NewRequest("POST", f.srv.URL+"/api/v1/sessions", strings.NewReader(`{"workspace":"/tmp"}`))
+	req, _ := http.NewRequest("POST", dl(f.srv)+"/api/v1/sessions", strings.NewReader(`{"workspace":"/tmp"}`))
 	req.Header.Set("Origin", "https://evil.example")
 	req.Header.Set("Content-Type", "application/json")
 	if resp, err := c.Do(req); err != nil || resp.StatusCode != http.StatusForbidden {
 		t.Errorf("cross-site change: %v %v", resp.StatusCode, err)
 	}
-	resp, _ := noRedirect().PostForm(f.srv.URL+"/auth/signin", url.Values{"token": {"dun_wrong"}, "return": {"/tui/"}})
+	resp, _ := noRedirect().PostForm(dl(f.srv)+"/auth/signin", url.Values{"token": {"dun_wrong"}, "return": {"/tui/"}})
 	if loc := resp.Header.Get("Location"); !strings.Contains(loc, "error=") || len(resp.Cookies()) != 0 {
 		t.Errorf("bad token: %s %v", loc, resp.Cookies())
 	}
-	req, _ = http.NewRequest("POST", f.srv.URL+"/auth/signin", strings.NewReader(url.Values{"token": {f.tok}}.Encode()))
+	req, _ = http.NewRequest("POST", dl(f.srv)+"/auth/signin", strings.NewReader(url.Values{"token": {f.tok}}.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Origin", "https://evil.example")
 	if resp, _ := noRedirect().Do(req); resp.StatusCode != http.StatusForbidden || len(resp.Cookies()) != 0 {
@@ -233,15 +233,15 @@ func TestSessionCookie(t *testing.T) {
 	if _, err := dund.NewToken(f.dir); err != nil { // the token is replaced
 		t.Fatal(err)
 	}
-	if code, loc, _ := get(t, c, f.srv.URL+"/"); code != http.StatusFound || !strings.HasPrefix(loc, "/auth/signin") {
+	if code, loc, _ := get(t, c, dl(f.srv)+"/"); code != http.StatusFound || !strings.HasPrefix(loc, "/auth/signin") {
 		t.Errorf("after the token is replaced: %d %s", code, loc)
 	}
-	if code, _, _ := get(t, c, f.srv.URL+"/api/v1/sessions"); code != 401 {
+	if code, _, _ := get(t, c, dl(f.srv)+"/api/v1/sessions"); code != 401 {
 		t.Errorf("api after the token is replaced: %d", code)
 	}
 	// Open without a sign-in: hello, healthz, the sign-in page.
 	for _, p := range []string{"/api/v1/hello", "/healthz", "/auth/signin"} {
-		if code, _, _ := get(t, noRedirect(), f.srv.URL+p); code != 200 {
+		if code, _, _ := get(t, noRedirect(), dl(f.srv)+p); code != 200 {
 			t.Errorf("%s: %d", p, code)
 		}
 	}
@@ -253,7 +253,7 @@ func TestDotDotPathsDoNotSkipSignIn(t *testing.T) {
 	f := setupFront(t)
 	f.tuiOn.Store(true)
 	for _, p := range []string{"/auth/../tui/ws", "/auth/%2e%2e/tui/ws", "/auth/%2E%2E/tui/", "/auth/.%2e/web/", "/releases/../api/v1/sessions"} {
-		c, err := net.Dial("tcp", strings.TrimPrefix(f.srv.URL, "http://"))
+		c, err := net.Dial("tcp", strings.TrimPrefix(dl(f.srv), "http://"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -274,18 +274,18 @@ func TestDotDotPathsDoNotSkipSignIn(t *testing.T) {
 func TestReturnIsNotAnOpenRedirect(t *testing.T) {
 	f := setupFront(t)
 	for _, bad := range []string{"/\t/evil.example", "/\n/evil.example", "/\x7f/evil.example", "//evil.example", "/\\evil.example"} {
-		resp, _ := noRedirect().PostForm(f.srv.URL+"/auth/signin", url.Values{"token": {f.tok}, "return": {bad}})
+		resp, _ := noRedirect().PostForm(dl(f.srv)+"/auth/signin", url.Values{"token": {f.tok}, "return": {bad}})
 		if loc := resp.Header.Get("Location"); loc != "/" {
 			t.Errorf("sign-in return %q went to %q", bad, loc)
 		}
-		if code, _, body := get(t, noRedirect(), f.srv.URL+"/auth/signin?return="+url.QueryEscape(bad)); code != 200 || strings.Contains(body, "evil") {
+		if code, _, body := get(t, noRedirect(), dl(f.srv)+"/auth/signin?return="+url.QueryEscape(bad)); code != 200 || strings.Contains(body, "evil") {
 			t.Errorf("sign-in page return %q: %d", bad, code)
 		}
 	}
 	idp := newIdP(t)
 	srv := ssoServer(t, idp)
 	for _, bad := range []string{"/%09/evil.com", "/%0a/evil.com", "/%7f/evil.com"} {
-		resp, _ := noRedirect().Get(srv.URL + "/auth/login?return=" + bad)
+		resp, _ := noRedirect().Get(dl(srv) + "/auth/login?return=" + bad)
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("login return %s: %d", bad, resp.StatusCode)
 		}
@@ -297,22 +297,22 @@ func TestReturnIsNotAnOpenRedirect(t *testing.T) {
 func TestSignOutRevokesTheSession(t *testing.T) {
 	f := setupFront(t)
 	c := signedIn(t, f.srv, f.tok)
-	u, _ := url.Parse(f.srv.URL)
+	u, _ := url.Parse(dl(f.srv))
 	var session string
 	for _, k := range c.Jar.Cookies(u) {
 		if k.Name == "dun_session" {
 			session = k.Value
 		}
 	}
-	resp, err := c.PostForm(f.srv.URL+"/auth/signout", nil)
+	resp, err := c.PostForm(dl(f.srv)+"/auth/signout", nil)
 	if err != nil || resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("sign-out: %v %v", resp, err)
 	}
-	if code, loc, _ := get(t, c, f.srv.URL+"/"); code != http.StatusFound || !strings.HasPrefix(loc, "/auth/signin") {
+	if code, loc, _ := get(t, c, dl(f.srv)+"/"); code != http.StatusFound || !strings.HasPrefix(loc, "/auth/signin") {
 		t.Errorf("after sign-out: %d %s", code, loc)
 	}
 	// The old cookie value, replayed, is dead too.
-	req, _ := http.NewRequest("GET", f.srv.URL+"/api/v1/sessions", nil)
+	req, _ := http.NewRequest("GET", dl(f.srv)+"/api/v1/sessions", nil)
 	req.AddCookie(&http.Cookie{Name: "dun_session", Value: session})
 	if resp, _ := noRedirect().Do(req); resp.StatusCode != 401 {
 		t.Errorf("replayed cookie after sign-out: %d", resp.StatusCode)

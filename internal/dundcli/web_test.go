@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -108,13 +109,13 @@ func TestWebListenerAtRuntime(t *testing.T) {
 		t.Fatal("web.json written with no flag and no change")
 	}
 	out, err := set(t, l, proto.WebSet{Enable: ptr(true), Addr: a1})
-	if err != nil || !strings.Contains(out, "open http://"+a1+"/") || !serving(a1) {
+	if err != nil || !strings.Contains(out, "open "+dl(a1)+"/") || !serving(a1) {
 		t.Fatalf("enable: %v %q", err, out)
 	}
 	if out, err := set(t, l, proto.WebSet{TUI: ptr(true)}); err != nil || !strings.Contains(out, "tui on") {
 		t.Fatalf("enable tui: %v %q", err, out)
 	}
-	if st := saved(t, home); st != (webState{Enabled: true, Addr: a1, TUI: true}) {
+	if st := saved(t, home); !reflect.DeepEqual(st, webState{Enabled: true, Addr: a1, TUI: true}) {
 		t.Fatalf("saved %+v", st)
 	}
 	if info, _ := os.Stat(webStatePath(home)); info.Mode().Perm() != 0o600 {
@@ -170,7 +171,7 @@ func TestWebFlagOnlySeeds(t *testing.T) {
 	l := &loader{home: home}
 	a1, a2 := freeAddr(t), freeAddr(t)
 	stop := runDund(t, l, a1)
-	if !serving(a1) || saved(t, home) != (webState{Enabled: true, Addr: a1}) {
+	if !serving(a1) || !reflect.DeepEqual(saved(t, home), webState{Enabled: true, Addr: a1}) {
 		t.Fatalf("seed: serving %v", serving(a1))
 	}
 	if _, err := set(t, l, proto.WebSet{Enable: ptr(false)}); err != nil || serving(a1) {

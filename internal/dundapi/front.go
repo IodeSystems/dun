@@ -6,8 +6,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/iodesystems/dun/internal/webterm"
 )
 
 // The browser's way in (USER 2026-11-17): one listener serves
@@ -58,35 +56,78 @@ func dotDot(p string) bool {
 	return false
 }
 
-// secure: the browser reached dund over TLS (directly, or through hz).
-func secure(r *http.Request) bool {
-	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+// secure: the browser reached dund over TLS (directly, or through a
+// trusted proxy: proxy.go).
+func (s *Server) secure(r *http.Request) bool { return overTLS(r, s.trust) }
+
+// host is the host the browser is looking at (proxy.go).
+func (s *Server) host(r *http.Request) string { return EffectiveHost(r, s.trust) }
+
+// sessionName is the session cookie's name: over https it carries the
+// __Host- prefix, which a browser accepts only with Secure, Path=/ and no
+// Domain, so no other name or plain-http page can set or shadow it.
+func (s *Server) sessionName(r *http.Request) string {
+	if s.secure(r) {
+		return "__Host-" + sessionCookie
+	}
+	return sessionCookie
 }
 
 // cookieSession is the sign-in token in the session cookie, "" for none.
-func cookieSession(r *http.Request) string {
-	c, err := r.Cookie(sessionCookie)
+func (s *Server) cookieSession(r *http.Request) string {
+	c, err := r.Cookie(s.sessionName(r))
 	if err != nil {
 		return ""
 	}
 	return c.Value
 }
 
-// startSession mints a session from the bearer `from` names and sets its
-// cookie.
+// startSession mints a session from the bearer `from` names, bound to the
+// host the browser is looking at, and sets its cookie: host-only (no Domain),
+// so it goes back to that name alone.
 func (s *Server) startSession(w http.ResponseWriter, r *http.Request, principal, email, from string) error {
-	tok, err := s.svc.MintSignInFrom(principal, email, from, sessionTTL)
+	tok, err := s.svc.MintSessionAt(principal, email, from, s.host(r), sessionTTL)
 	if err != nil {
 		return err
 	}
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: tok, Path: "/", HttpOnly: true,
-		SameSite: http.SameSiteStrictMode, Secure: secure(r), MaxAge: int(sessionTTL / time.Second)})
+	http.SetCookie(w, &http.Cookie{Name: s.sessionName(r), Value: tok, Path: "/", HttpOnly: true,
+		SameSite: http.SameSiteStrictMode, Secure: s.secure(r), MaxAge: int(sessionTTL / time.Second)})
 	return nil
 }
 
-func clearCookie(w http.ResponseWriter, r *http.Request, name string) {
-	http.SetCookie(w, &http.Cookie{Name: name, Value: "", Path: "/", HttpOnly: true,
-		SameSite: http.SameSiteStrictMode, Secure: secure(r), MaxAge: -1})
+func (s *Server) clearSession(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{Name: s.sessionName(r), Value: "", Path: "/", HttpOnly: true,
+		SameSite: http.SameSiteStrictMode, Secure: s.secure(r), MaxAge: -1})
+}
+
+// ipWarning is the page's warning when the browser is on a bare IP over
+// plain http, "" otherwise.
+func (s *Server) ipWarning(r *http.Request) string {
+	if s.secure(r) {
+		return ""
+	}
+	if ip := bareIP(s.host(r)); ip != "" {
+		return `<p class="err">` + html.EscapeString(SharedIPWarning(ip)) + `</p>`
+	}
+	return ""
+}
+
+// toOwnLoopback sends a browser on a shared loopback name over plain http
+// (localhost, 127.0.0.1, ::1) to dun.localhost before it signs in: other
+// local servers on that name, whatever their port, would get the cookie.
+// The API, /healthz and the releases are left alone (bearer clients).
+func (s *Server) toOwnLoopback(w http.ResponseWriter, r *http.Request) bool {
+	p := r.URL.Path
+	if (r.Method != http.MethodGet && r.Method != http.MethodHead) || strings.HasPrefix(p, "/api/") ||
+		p == "/healthz" || p == apkPath || strings.HasPrefix(p, releasesPath+"/") || isUpgrade(r) || s.secure(r) {
+		return false
+	}
+	h := s.host(r)
+	if !sharedLoopback(h) {
+		return false
+	}
+	http.Redirect(w, r, "http://"+ownLoopback(h)+r.URL.RequestURI(), http.StatusFound)
+	return true
 }
 
 // pathReturn is safeReturn without the app's scheme: where a browser sign-in
@@ -159,7 +200,7 @@ func (s *Server) chooser(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	b := `<h1>dun</h1>`
+	b := `<h1>dun</h1>` + s.ipWarning(r)
 	if s.tuiOn() {
 		b += `<a class="choice" href="/choose/tui"><b>Terminal</b><br><span class="muted">the dun TUI, in this tab</span></a>`
 	}
@@ -177,7 +218,7 @@ func (s *Server) choose(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: choiceCookie, Value: to, Path: "/", HttpOnly: true,
-		SameSite: http.SameSiteLaxMode, Secure: secure(r), MaxAge: 365 * 24 * 3600})
+		SameSite: http.SameSiteLaxMode, Secure: s.secure(r), MaxAge: 365 * 24 * 3600})
 	http.Redirect(w, r, "/"+to+"/", http.StatusFound)
 }
 
@@ -185,7 +226,7 @@ func (s *Server) choose(w http.ResponseWriter, r *http.Request) {
 // identity provider when it is set up.
 func (s *Server) signinPage(w http.ResponseWriter, r *http.Request) {
 	ret := pathReturn(r.URL.Query().Get("return"))
-	b := `<h1>Sign in to dund</h1>`
+	b := `<h1>Sign in to dund</h1>` + s.ipWarning(r)
 	if why := r.URL.Query().Get("error"); why != "" {
 		b += `<p class="err">` + html.EscapeString(why) + `</p>`
 	}
@@ -204,8 +245,12 @@ func (s *Server) signinPage(w http.ResponseWriter, r *http.Request) {
 // signin takes the token from the form and, when it is live, starts a
 // session tied to it.
 func (s *Server) signin(w http.ResponseWriter, r *http.Request) {
-	if !sameSiteForm(r) {
-		http.Error(w, "sign-in from another site", http.StatusForbidden)
+	if !s.sameSiteForm(r) {
+		http.Error(w, "sign-in from another site (Origin "+r.Header.Get("Origin")+", host "+s.host(r)+")", http.StatusForbidden)
+		return
+	}
+	if h := s.host(r); !s.secure(r) && sharedLoopback(h) {
+		http.Error(w, "sign in at http://"+ownLoopback(h)+"/ — every local server shares "+hostName(h), http.StatusBadRequest)
 		return
 	}
 	_ = r.ParseForm()
@@ -225,21 +270,22 @@ func (s *Server) signin(w http.ResponseWriter, r *http.Request) {
 
 // signout ends the session and clears its cookie.
 func (s *Server) signout(w http.ResponseWriter, r *http.Request) {
-	if !sameSiteForm(r) {
+	if !s.sameSiteForm(r) {
 		http.Error(w, "sign-out from another site", http.StatusForbidden)
 		return
 	}
-	if tok := cookieSession(r); tok != "" {
+	if tok := s.cookieSession(r); tok != "" {
 		_ = s.svc.RevokeSignIn(tok)
 	}
-	clearCookie(w, r, sessionCookie)
+	s.clearSession(w, r)
 	http.Redirect(w, r, signinPath, http.StatusSeeOther)
 }
 
-// sameSiteForm: a form post from this site, or from no page at all. A
-// browser names the page's origin on a POST; another site's is refused.
-func sameSiteForm(r *http.Request) bool {
-	return r.Header.Get("Origin") == "" || webterm.SameOrigin(r)
+// sameSiteForm: a form post from this site (the effective host), or from no
+// page at all. A browser names the page's origin on a POST; another site's
+// is refused.
+func (s *Server) sameSiteForm(r *http.Request) bool {
+	return r.Header.Get("Origin") == "" || OriginCheck(s.trust)(r)
 }
 
 // tui is /tui/..., the TUI in a pty, when it is on.

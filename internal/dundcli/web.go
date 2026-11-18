@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,6 +38,26 @@ type webState struct {
 	Enabled bool   `json:"enabled"`
 	Addr    string `json:"addr"`
 	TUI     bool   `json:"tui"`
+	// TrustedProxies are the peers besides loopback whose X-Forwarded-Proto
+	// and -Host are believed (dundapi proxy.go): CIDRs or addresses.
+	TrustedProxies []string `json:"trusted_proxies,omitempty"`
+}
+
+// parseTrust reads trusted proxies: a CIDR, or one address.
+func parseTrust(list []string) ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for _, s := range list {
+		if p, err := netip.ParsePrefix(s); err == nil {
+			out = append(out, p.Masked())
+			continue
+		}
+		a, err := netip.ParseAddr(s)
+		if err != nil {
+			return nil, fmt.Errorf("trusted proxy %q: want a CIDR (10.0.0.0/8) or an address", s)
+		}
+		out = append(out, netip.PrefixFrom(a.Unmap(), a.Unmap().BitLen()))
+	}
+	return out, nil
 }
 
 func webStatePath(home string) string { return filepath.Join(home, "dund", "web.json") }
@@ -101,17 +122,27 @@ func webURL(addr string) string {
 	if err != nil {
 		return "http://" + addr + "/"
 	}
-	if host == "" || host == "0.0.0.0" || host == "::" {
-		host = "127.0.0.1"
+	// dund's own loopback name: a browser on 127.0.0.1 or localhost is sent
+	// there anyway, so the sign-in cookie is not shared with other local
+	// servers (dundapi proxy.go).
+	if ip, err := netip.ParseAddr(host); host == "" || host == "localhost" || err == nil && (ip.IsLoopback() || ip.IsUnspecified()) {
+		host = "dun.localhost"
 	}
 	return "http://" + net.JoinHostPort(host, port) + "/"
 }
 
 func tuiWarning(st webState) string {
-	if st.Enabled && st.TUI && !loopbackOnly(st.Addr) {
-		return "the TUI is served on " + st.Addr + ", which is not loopback-only: anyone who reaches it and signs in gets a shell as this user"
+	if !st.Enabled || !st.TUI || loopbackOnly(st.Addr) {
+		return ""
 	}
-	return ""
+	w := "the TUI is served on " + st.Addr + ", which is not loopback-only: anyone who reaches it and signs in gets a shell as this user"
+	host, _, _ := net.SplitHostPort(st.Addr)
+	if ip, err := netip.ParseAddr(host); err == nil && !ip.IsUnspecified() {
+		w += "; reached as http://" + st.Addr + "/, " + dundapi.SharedIPWarning(host)
+	} else {
+		w += "; reached by a bare IP over http, other servers on that IP receive this sign-in: use a host name, or https through a proxy"
+	}
+	return w
 }
 
 // webCtl owns the listener: one handler, built at start, served by a new
@@ -121,6 +152,7 @@ type webCtl struct {
 	h     http.Handler
 	term  *webterm.Handler
 	tuiOn atomic.Bool
+	trust atomic.Pointer[[]netip.Prefix]
 
 	mu      sync.Mutex
 	st      webState
@@ -134,6 +166,8 @@ type webCtl struct {
 // through DUN_HOME; /resume opens its session picker).
 func newWebCtl(home, bin string, svc *dund.Service, o dundapi.Options) (*webCtl, error) {
 	c := &webCtl{home: home}
+	c.trust.Store(&[]netip.Prefix{})
+	trust := func() []netip.Prefix { return *c.trust.Load() }
 	userHome, _ := os.UserHomeDir()
 	c.term = webterm.New(webterm.Config{
 		Bin:  bin,
@@ -144,9 +178,12 @@ func newWebCtl(home, bin string, svc *dund.Service, o dundapi.Options) (*webCtl,
 		// Checked again as each pty registers: a socket that got past
 		// /tui's check just before `disable tui` is killed, not missed.
 		Allow: c.tuiOn.Load,
+		// The browser's Origin against the host it is looking at, which a
+		// trusted proxy names in X-Forwarded-Host.
+		CheckOrigin: dundapi.OriginCheck(trust),
 	})
 	o.Owner = dundapi.Owner(os.Getuid())
-	o.Term, o.TUIOn = c.term, c.tuiOn.Load
+	o.Term, o.TUIOn, o.TrustedProxies = c.term, c.tuiOn.Load, trust
 	h, err := dundapi.Handler(svc, o)
 	if err != nil {
 		return nil, err
@@ -193,8 +230,16 @@ func (c *webCtl) apply(st webState) error {
 			return fmt.Errorf("listen %s: %w", st.Addr, err)
 		}
 	}
+	trust, err := parseTrust(st.TrustedProxies)
+	if err != nil {
+		if ln != nil {
+			ln.Close()
+		}
+		return err
+	}
 	// Only now, with nothing left to fail: a refused change must not leave
 	// /tui on while c.st and web.json say off.
+	c.trust.Store(&trust)
 	c.tuiOn.Store(st.TUI)
 	if !st.TUI {
 		c.term.KillAll()
@@ -257,7 +302,7 @@ func (c *webCtl) stop() {
 func (c *webCtl) set(ws proto.WebSet) (proto.WebState, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if ws == (proto.WebSet{}) { // a question: nothing changes, nothing is saved
+	if ws.Enable == nil && ws.Addr == "" && ws.TUI == nil && ws.TrustProxies == nil { // a question: nothing changes, nothing is saved
 		return c.state(), nil
 	}
 	if c.stopped { // a listener bound now would outlive the handover's exit
@@ -282,7 +327,8 @@ func (c *webCtl) state() proto.WebState {
 }
 
 func wireState(st webState, listening bool) proto.WebState {
-	out := proto.WebState{Enabled: st.Enabled, Addr: st.Addr, TUI: st.TUI, Listening: listening, Warning: tuiWarning(st)}
+	out := proto.WebState{Enabled: st.Enabled, Addr: st.Addr, TUI: st.TUI, Listening: listening, Warning: tuiWarning(st),
+		TrustProxies: st.TrustedProxies}
 	if listening {
 		out.URL = webURL(st.Addr)
 	}
@@ -302,6 +348,12 @@ func applyWebSet(st webState, ws proto.WebSet) (webState, error) {
 	}
 	if ws.TUI != nil {
 		st.TUI = *ws.TUI
+	}
+	if ws.TrustProxies != nil {
+		if _, err := parseTrust(ws.TrustProxies); err != nil {
+			return st, err
+		}
+		st.TrustedProxies = append([]string{}, ws.TrustProxies...)
 	}
 	if st.Addr == "" {
 		st.Addr = defaultWebAddr

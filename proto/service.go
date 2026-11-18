@@ -43,10 +43,15 @@ func init() {
 // (<home>/dund/web.json) and applies at every later start. Answered with
 // WebState, or an ack with the error (a port that cannot be bound: the
 // listener stays as it was).
+//
+// TrustProxies, when not nil, replaces the proxies (CIDRs or addresses)
+// whose X-Forwarded-Proto and -Host dund believes, besides loopback; an
+// empty list clears them.
 type WebSet struct {
-	Enable *bool  `json:"enable,omitempty"`
-	Addr   string `json:"addr,omitempty"`
-	TUI    *bool  `json:"tui,omitempty"`
+	Enable       *bool    `json:"enable,omitempty"`
+	Addr         string   `json:"addr,omitempty"`
+	TUI          *bool    `json:"tui,omitempty"`
+	TrustProxies []string `json:"trust_proxies"` // null: unchanged; []: none
 }
 
 // WebState is dund's HTTP listener after a WebSet. Listening: it is serving
@@ -57,8 +62,10 @@ type WebState struct {
 	Addr      string `json:"addr"`
 	TUI       bool   `json:"tui"`
 	Listening bool   `json:"listening,omitempty"`
-	URL       string `json:"url,omitempty"`
-	Warning   string `json:"warning,omitempty"`
+	// TrustProxies are the trusted proxies besides loopback.
+	TrustProxies []string `json:"trust_proxies,omitempty"`
+	URL          string   `json:"url,omitempty"`
+	Warning      string   `json:"warning,omitempty"`
 }
 
 // ServiceNotice is dund's word to a session's engine about the service

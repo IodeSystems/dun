@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -110,7 +111,7 @@ func TestUnitWebAddr(t *testing.T) {
 	if err := webSet(l, io.Discard, proto.WebSet{TUI: ptr(true)}); err != nil {
 		t.Fatal(err)
 	}
-	if st, _, _ := loadWebState(dunHome); st != (webState{Enabled: true, Addr: "192.168.1.76:20003", TUI: true}) {
+	if st, _, _ := loadWebState(dunHome); !reflect.DeepEqual(st, webState{Enabled: true, Addr: "192.168.1.76:20003", TUI: true}) {
 		t.Errorf("offline change did not seed from the unit: %+v", st)
 	}
 }

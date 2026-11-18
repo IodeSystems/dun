@@ -153,9 +153,11 @@ func (h *Handler) Close() {
 	h.KillAll()
 }
 
-// SameOrigin reports whether r's Origin names the host r was sent to (or,
-// behind a proxy, the X-Forwarded-Host it names). A request with no Origin is
-// refused: every browser sends one on a WebSocket.
+// SameOrigin reports whether r's Origin names the host r was sent to. A
+// request with no Origin is refused: every browser sends one on a
+// WebSocket. Behind a proxy the caller passes its own check
+// (dundapi.OriginCheck, which believes X-Forwarded-Host from trusted peers
+// only).
 func SameOrigin(r *http.Request) bool {
 	o := r.Header.Get("Origin")
 	if o == "" {
@@ -165,11 +167,7 @@ func SameOrigin(r *http.Request) bool {
 	if err != nil || u.Host == "" {
 		return false
 	}
-	if strings.EqualFold(u.Host, r.Host) {
-		return true
-	}
-	fh := r.Header.Get("X-Forwarded-Host")
-	return fh != "" && strings.EqualFold(u.Host, fh)
+	return strings.EqualFold(u.Host, r.Host)
 }
 
 // CleanEnv is env without what belongs to the server's own terminal or

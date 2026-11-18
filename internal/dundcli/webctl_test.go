@@ -3,6 +3,7 @@
 package dundcli
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"net/http/cookiejar"
@@ -46,14 +47,28 @@ func ctlFixture(t *testing.T) (*webCtl, string, *http.Client) {
 		t.Fatal(err)
 	}
 	jar, _ := cookiejar.New(nil)
-	b := &http.Client{Jar: jar, Timeout: 5 * time.Second,
+	b := &http.Client{Jar: jar, Timeout: 5 * time.Second, Transport: &http.Transport{DialContext: pin},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	resp, err := b.PostForm("http://"+a1+"/auth/signin", url.Values{"token": {tok}})
+	resp, err := b.PostForm(dl(a1)+"/auth/signin", url.Values{"token": {tok}})
 	if err != nil || resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("sign-in: %v %v", resp, err)
 	}
 	resp.Body.Close()
 	return c, a1, b
+}
+
+// The browser is on dun.localhost (dundapi sends shared loopback names
+// there); pin dials it as 127.0.0.1 whatever the resolver says.
+func dl(addr string) string {
+	_, port, _ := net.SplitHostPort(addr)
+	return "http://dun.localhost:" + port
+}
+
+func pin(ctx context.Context, network, addr string) (net.Conn, error) {
+	if rest, ok := strings.CutPrefix(addr, "dun.localhost:"); ok {
+		addr = "127.0.0.1:" + rest
+	}
+	return (&net.Dialer{}).DialContext(ctx, network, addr)
 }
 
 func status(t *testing.T, b *http.Client, u string) int {
@@ -77,7 +92,7 @@ func TestRefusedChangeLeavesTheTUIOff(t *testing.T) {
 	if _, err := c.set(proto.WebSet{Addr: busy.Addr().String(), TUI: ptr(true)}); err == nil {
 		t.Fatal("a busy port was taken")
 	}
-	if code := status(t, b, "http://"+a1+"/tui/"); code != 404 {
+	if code := status(t, b, dl(a1)+"/tui/"); code != 404 {
 		t.Errorf("/tui after a refused change: %d", code)
 	}
 	if c.st.TUI || c.tuiOn.Load() {
@@ -91,12 +106,12 @@ func TestDisableTUIKillsAnOpenSocket(t *testing.T) {
 	if _, err := c.set(proto.WebSet{TUI: ptr(true)}); err != nil {
 		t.Fatal(err)
 	}
-	u, _ := url.Parse("http://" + a1)
-	h := http.Header{"Origin": {"http://" + a1}}
+	u, _ := url.Parse(dl(a1))
+	h := http.Header{"Origin": {dl(a1)}}
 	for _, k := range b.Jar.Cookies(u) {
 		h.Add("Cookie", k.Name+"="+k.Value)
 	}
-	conn, _, err := websocket.DefaultDialer.Dial("ws://"+a1+"/tui/ws", h)
+	conn, _, err := (&websocket.Dialer{NetDialContext: pin}).Dial("ws"+strings.TrimPrefix(dl(a1), "http")+"/tui/ws", h)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,5 +149,29 @@ func TestDisableTUIKillsAnOpenSocket(t *testing.T) {
 	}
 	if status := func() error { _, err := net.DialTimeout("tcp", a1, time.Second); return err }(); status == nil {
 		t.Error("still listening after stop")
+	}
+}
+
+// --trust-proxy is saved in web.json and applied; a bad entry changes nothing.
+func TestTrustProxies(t *testing.T) {
+	c, _, _ := ctlFixture(t)
+	if _, err := c.set(proto.WebSet{TrustProxies: []string{"not-a-cidr"}}); err == nil {
+		t.Fatal("a bad proxy was taken")
+	}
+	st, err := c.set(proto.WebSet{TrustProxies: []string{"10.0.0.0/8", "192.0.2.1"}})
+	if err != nil || strings.Join(st.TrustProxies, ",") != "10.0.0.0/8,192.0.2.1" {
+		t.Fatalf("set: %v %+v", err, st)
+	}
+	if got := *c.trust.Load(); len(got) != 2 || got[1].String() != "192.0.2.1/32" {
+		t.Errorf("applied: %v", got)
+	}
+	if saved, _, _ := loadWebState(c.home); strings.Join(saved.TrustedProxies, ",") != "10.0.0.0/8,192.0.2.1" {
+		t.Errorf("saved: %+v", saved)
+	}
+	if _, err := c.set(proto.WebSet{TrustProxies: []string{}}); err != nil || len(*c.trust.Load()) != 0 {
+		t.Errorf("clear: %v %v", err, *c.trust.Load())
+	}
+	if w := tuiWarning(webState{Enabled: true, TUI: true, Addr: "192.168.1.76:20003"}); !strings.Contains(w, "other servers on 192.168.1.76 receive this sign-in") {
+		t.Errorf("LAN IP warning: %q", w)
 	}
 }

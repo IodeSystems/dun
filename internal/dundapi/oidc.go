@@ -50,7 +50,7 @@ type OIDC struct {
 	// Allow is the emails that may sign in.
 	Allow []string
 	// Redirect overrides the callback URL; default: /auth/callback on the
-	// address the browser used (X-Forwarded-Proto/-Host behind hz).
+	// address the browser used (X-Forwarded-Proto/-Host from a trusted proxy).
 	Redirect string
 }
 
@@ -65,6 +65,8 @@ type sso struct {
 	cfg   OIDC
 	svc   *dund.Service
 	owner string
+
+	trust TrustFunc // proxy.go
 
 	// session sets a browser's session cookie (Server.startSession).
 	session func(w http.ResponseWriter, r *http.Request, principal, from string) error
@@ -115,18 +117,11 @@ func (s *sso) redirectFor(r *http.Request) string {
 	if s.cfg.Redirect != "" {
 		return s.cfg.Redirect
 	}
-	proto := r.Header.Get("X-Forwarded-Proto")
-	if proto == "" {
-		proto = "http"
-		if r.TLS != nil {
-			proto = "https"
-		}
+	proto := "http"
+	if overTLS(r, s.trust) {
+		proto = "https"
 	}
-	host := r.Header.Get("X-Forwarded-Host")
-	if host == "" {
-		host = r.Host
-	}
-	return proto + "://" + host + callbackRP
+	return proto + "://" + EffectiveHost(r, s.trust) + callbackRP
 }
 
 // safeReturn accepts where a sign-in may land: a path on this site or the

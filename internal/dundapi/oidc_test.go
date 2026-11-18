@@ -114,12 +114,12 @@ func ssoServer(t *testing.T, idp *fakeIdP) *httptest.Server {
 func signIn(t *testing.T, srv *httptest.Server, idp *fakeIdP, ret, code string) string {
 	t.Helper()
 	c := noRedirect()
-	resp, err := c.Get(srv.URL + "/auth/login?return=" + url.QueryEscape(ret))
+	resp, err := c.Get(dl(srv) + "/auth/login?return=" + url.QueryEscape(ret))
 	if err != nil || resp.StatusCode != http.StatusFound {
 		t.Fatalf("login: %v %v", resp.Status, err)
 	}
 	state := idp.approve(t, resp.Header.Get("Location"), code)
-	resp, err = c.Get(srv.URL + "/auth/callback?code=" + code + "&state=" + url.QueryEscape(state))
+	resp, err = c.Get(dl(srv) + "/auth/callback?code=" + code + "&state=" + url.QueryEscape(state))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,20 +204,20 @@ func TestSignInRefusals(t *testing.T) {
 	// A state is good once.
 	idp.verified = true
 	c := noRedirect()
-	resp, _ := c.Get(srv.URL + "/auth/login?return=/web/")
+	resp, _ := c.Get(dl(srv) + "/auth/login?return=/web/")
 	state := idp.approve(t, resp.Header.Get("Location"), "c3")
-	resp, _ = c.Get(srv.URL + "/auth/callback?code=c3&state=" + url.QueryEscape(state))
+	resp, _ = c.Get(dl(srv) + "/auth/callback?code=c3&state=" + url.QueryEscape(state))
 	if fragment(t, next(t, resp)).Get("token") == "" {
 		t.Fatal("first use refused")
 	}
-	resp, _ = c.Get(srv.URL + "/auth/callback?code=c3&state=" + url.QueryEscape(state))
+	resp, _ = c.Get(dl(srv) + "/auth/callback?code=c3&state=" + url.QueryEscape(state))
 	if fragment(t, next(t, resp)).Get("token") != "" {
 		t.Error("a state was used twice")
 	}
 
 	// Not an open redirect.
 	for _, bad := range []string{"https://evil.example/", "//evil.example/x", "javascript:alert(1)"} {
-		resp, _ := c.Get(srv.URL + "/auth/login?return=" + url.QueryEscape(bad))
+		resp, _ := c.Get(dl(srv) + "/auth/login?return=" + url.QueryEscape(bad))
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("return %q: %d", bad, resp.StatusCode)
 		}

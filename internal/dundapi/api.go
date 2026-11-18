@@ -68,6 +68,7 @@ type Server struct {
 	// term is /tui (Options.Term); tuiEnabled says whether it is on now.
 	term       http.Handler
 	tuiEnabled func() bool
+	trust      TrustFunc // proxies whose X-Forwarded-* are believed (proxy.go)
 }
 
 // Options are what the HTTP surface serves besides the API.
@@ -90,6 +91,9 @@ type Options struct {
 	// at /tui while TUIOn says so (`dun dund enable tui`); else /tui is 404.
 	Term  http.Handler
 	TUIOn func() bool
+	// TrustedProxies are the peers besides loopback whose X-Forwarded-Proto
+	// and -Host are believed (web.json's trusted_proxies); nil: loopback only.
+	TrustedProxies TrustFunc
 }
 
 // Handler is the whole HTTP surface.
@@ -147,9 +151,10 @@ func SDL() (string, error) {
 
 func newRouter(svc *dund.Service, o Options, auth bool) (http.Handler, error) {
 	r := chi.NewRouter()
-	s := &Server{svc: svc, owner: o.Owner, signer: newSigner(), releases: o.Releases, term: o.Term, tuiEnabled: o.TUIOn}
+	s := &Server{svc: svc, owner: o.Owner, signer: newSigner(), releases: o.Releases, term: o.Term, tuiEnabled: o.TUIOn, trust: o.TrustedProxies}
 	if o.OIDC.on() {
 		s.sso = newSSO(o.OIDC, svc, o.Owner)
+		s.sso.trust = o.TrustedProxies
 		s.sso.session = func(w http.ResponseWriter, r *http.Request, principal, from string) error {
 			return s.startSession(w, r, principal, "", from)
 		}
@@ -225,6 +230,9 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			http.Error(w, "bad path", http.StatusBadRequest)
 			return
 		}
+		if s.toOwnLoopback(w, r) {
+			return
+		}
 		if openPath(path.Clean("/"+r.URL.Path)) || isUpgrade(r) {
 			next.ServeHTTP(w, r)
 			return
@@ -234,16 +242,18 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		who, ok := s.principalFor(tok)
 		byCookie := false
 		if !ok && tok == "" {
-			if tok = cookieSession(r); tok != "" {
-				who, ok = s.svc.CheckSignIn(tok)
+			if tok = s.cookieSession(r); tok != "" {
+				// Bound to the host it was made on: a cookie that arrives
+				// under another name (another port on 127.0.0.1) is refused.
+				who, ok = s.svc.CheckSessionAt(tok, s.host(r))
 				byCookie = true
 			}
 		}
 		if !ok {
 			api := strings.HasPrefix(r.URL.Path, "/api/")
 			if !api && r.Method == http.MethodGet && !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
-				if cookieSession(r) != "" {
-					clearCookie(w, r, sessionCookie) // ended: its bearer was replaced or revoked
+				if s.cookieSession(r) != "" {
+					s.clearSession(w, r) // ended, or made for another host
 				}
 				http.Redirect(w, r, signinURL(pathReturn(r.URL.RequestURI()), ""), http.StatusFound)
 				return
@@ -253,7 +263,7 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			_, _ = w.Write([]byte(`{"title":"Unauthorized","status":401,"detail":"a valid bearer token or sign-in is required"}`))
 			return
 		}
-		if byCookie && r.Method != http.MethodGet && r.Method != http.MethodHead && !sameSiteForm(r) {
+		if byCookie && r.Method != http.MethodGet && r.Method != http.MethodHead && !s.sameSiteForm(r) {
 			http.Error(w, "a request from another site", http.StatusForbidden)
 			return
 		}

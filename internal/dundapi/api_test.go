@@ -44,7 +44,7 @@ func call(t *testing.T, srv *httptest.Server, tok, method, path string, body any
 		b, _ := json.Marshal(body)
 		rd = bytes.NewReader(b)
 	}
-	req, _ := http.NewRequest(method, srv.URL+path, rd)
+	req, _ := http.NewRequest(method, dl(srv)+path, rd)
 	if tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
@@ -63,7 +63,7 @@ func call(t *testing.T, srv *httptest.Server, tok, method, path string, body any
 
 func TestHealthzNeedsNoToken(t *testing.T) {
 	srv, _, _ := setup(t)
-	resp, err := http.Get(srv.URL + "/healthz")
+	resp, err := http.Get(dl(srv) + "/healthz")
 	if err != nil || resp.StatusCode != 200 {
 		t.Fatalf("healthz: %v %v", resp, err)
 	}
@@ -143,7 +143,7 @@ func TestUnknownSessionIs404(t *testing.T) {
 // The same operations are GraphQL, through gat.
 func TestGraphQLSchemaCarriesTheOperations(t *testing.T) {
 	srv, tok, _ := setup(t)
-	req, _ := http.NewRequest("GET", srv.URL+"/api/schema/graphql", nil)
+	req, _ := http.NewRequest("GET", dl(srv)+"/api/schema/graphql", nil)
 	req.Header.Set("Authorization", "Bearer "+tok)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -163,7 +163,7 @@ func TestGraphQLSchemaCarriesTheOperations(t *testing.T) {
 func gql(t *testing.T, srv *httptest.Server, tok, query string) string {
 	t.Helper()
 	b, _ := json.Marshal(map[string]string{"query": query})
-	req, _ := http.NewRequest("POST", srv.URL+"/api/graphql", bytes.NewReader(b))
+	req, _ := http.NewRequest("POST", dl(srv)+"/api/graphql", bytes.NewReader(b))
 	req.Header.Set("Content-Type", "application/json")
 	if tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
@@ -198,7 +198,7 @@ func TestGraphQLRunsTheOperations(t *testing.T) {
 // renders neither).
 func TestPageWithoutTheAppSaysWhereItIs(t *testing.T) {
 	srv, tok, _ := setup(t)
-	resp, err := signedIn(t, srv, tok).Get(srv.URL + "/web/")
+	resp, err := signedIn(t, srv, tok).Get(dl(srv) + "/web/")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestWebRootServesTheClient(t *testing.T) {
 	tok, _ := dund.NewToken(dir)
 	c := signedIn(t, srv, tok)
 	for path, want := range map[string]string{"/web/": "app shell", "/web/session/abc": "app shell", "/web/_expo/app.js": "js"} {
-		resp, err := c.Get(srv.URL + path)
+		resp, err := c.Get(dl(srv) + path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -239,7 +239,7 @@ func TestWebRootServesTheClient(t *testing.T) {
 		}
 	}
 	for _, path := range []string{"/web/_expo/x.js", "/web/_expo/static/js/web/missing-deadbeef.js", "/web/foo.png", "/web/assets/y", "/web/a/b.json", "/_expo/app.js"} {
-		resp, err := c.Get(srv.URL + path)
+		resp, err := c.Get(dl(srv) + path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -248,17 +248,17 @@ func TestWebRootServesTheClient(t *testing.T) {
 			t.Errorf("missing %s: %d, want 404", path, resp.StatusCode)
 		}
 	}
-	if code, loc, _ := get(t, c, srv.URL+"/web"); code != http.StatusMovedPermanently || loc != "/web/" {
+	if code, loc, _ := get(t, c, dl(srv)+"/web"); code != http.StatusMovedPermanently || loc != "/web/" {
 		t.Errorf("/web: %d %s", code, loc)
 	}
-	if resp, _ := c.Get(srv.URL + "/web/signin"); resp.StatusCode != 200 {
+	if resp, _ := c.Get(dl(srv) + "/web/signin"); resp.StatusCode != 200 {
 		t.Errorf("/web/signin: %d", resp.StatusCode)
 	}
-	resp, _ := noRedirect().Get(srv.URL + "/web/session/abc")
+	resp, _ := noRedirect().Get(dl(srv) + "/web/session/abc")
 	if loc := resp.Header.Get("Location"); resp.StatusCode != http.StatusFound || loc != "/auth/signin?return=%2Fweb%2Fsession%2Fabc" {
 		t.Errorf("signed out: %d %s", resp.StatusCode, loc)
 	}
-	if resp, _ := http.Get(srv.URL + "/api/v1/sessions"); resp.StatusCode != 401 {
+	if resp, _ := http.Get(dl(srv) + "/api/v1/sessions"); resp.StatusCode != 401 {
 		t.Errorf("api without token: %d", resp.StatusCode)
 	}
 	if _, err := dundapi.Handler(svc, dundapi.Options{Owner: "unix:1000", WebRoot: t.TempDir()}); err == nil {
@@ -282,7 +282,7 @@ func TestAndroidReleases(t *testing.T) {
 	}
 	srv := httptest.NewServer(h)
 	defer srv.Close()
-	resp, _ := http.Get(srv.URL + "/api/v1/hello")
+	resp, _ := http.Get(dl(srv) + "/api/v1/hello")
 	var hello struct {
 		Android struct {
 			VersionCode int    `json:"version_code"`
@@ -293,7 +293,7 @@ func TestAndroidReleases(t *testing.T) {
 	if hello.Android.VersionCode != 7 || hello.Android.APKPath != "/releases/android/dun-7.apk" {
 		t.Fatalf("hello: %+v", hello.Android)
 	}
-	resp, err = http.Get(srv.URL + "/dun.apk") // follows the redirect
+	resp, err = http.Get(dl(srv) + "/dun.apk") // follows the redirect
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,7 +301,7 @@ func TestAndroidReleases(t *testing.T) {
 	if resp.StatusCode != 200 || string(b) != "PK apk" || resp.Header.Get("Content-Type") != "application/vnd.android.package-archive" {
 		t.Fatalf("apk: %d %q %s", resp.StatusCode, b, resp.Header.Get("Content-Type"))
 	}
-	if resp, _ := http.Get(srv.URL + "/releases/android/"); resp.StatusCode != 404 {
+	if resp, _ := http.Get(dl(srv) + "/releases/android/"); resp.StatusCode != 404 {
 		t.Errorf("listing: %d", resp.StatusCode)
 	}
 }

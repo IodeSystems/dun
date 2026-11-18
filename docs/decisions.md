@@ -817,6 +817,15 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   with a page of its own (`hop`). Open: `/auth/*`, hello, `/healthz` and the
   releases (the app opens `/dun.apk` with `Linking.openURL`, which carries
   no credentials). A cookie request that changes state must be same-origin.
+- **The cookie belongs to one host name, never a configured domain**
+  (USER 2026-11-17). A cookie is sent to every port on its host, so: no
+  Domain attribute; each session is bound to the host it was made on, and
+  is refused under another (no replay through 127.0.0.1); `__Host-` and
+  Secure over https. `X-Forwarded-Proto`/`-Host` are believed only from
+  loopback (hz, cloudflared) or `web.json`'s `trusted_proxies`. Plain http
+  on a shared loopback name goes to `dun.localhost` before sign-in; a bare
+  LAN IP is allowed with a warning. See sessions-and-dund.md, "Reaching the
+  web listener".
 - **The pty WebSocket checks the cookie and the Origin.** `CheckOrigin`
   returning true (the old `--web-tui`) let any page the user visited open a
   shell. It is a second realtime endpoint beside RT-1's `/api/graphql`: a

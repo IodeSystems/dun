@@ -530,6 +530,30 @@ func TestSignInFromABearerEndsWithIt(t *testing.T) {
 	}
 }
 
+// A browser session is good on its host only, and never as a bearer.
+func TestSessionAtItsHost(t *testing.T) {
+	svc, _, _ := newSvc(t)
+	tok, err := svc.MintSessionAt(alice, "", "", "Dun.LAN:20003", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, ok := svc.CheckSessionAt(tok, "dun.lan:20003"); !ok || p != alice {
+		t.Fatalf("its host: %q %v", p, ok)
+	}
+	for _, h := range []string{"dun.lan:20004", "127.0.0.1:20003", ""} {
+		if _, ok := svc.CheckSessionAt(tok, h); ok {
+			t.Errorf("host %q accepted", h)
+		}
+	}
+	if _, ok := svc.CheckSignIn(tok); ok {
+		t.Error("a browser session works as a bearer")
+	}
+	bearer, _ := svc.MintSignIn(alice, "", time.Hour)
+	if _, ok := svc.CheckSessionAt(bearer, "dun.lan:20003"); ok {
+		t.Error("a bearer sign-in works as a session cookie")
+	}
+}
+
 // After a restart the session's log is new: its seqs start from 1 again
 // and may already have passed the seq a client resumes from. A seq from
 // another epoch gets a snapshot, never a replay from the middle of the new

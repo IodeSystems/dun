@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -19,6 +20,7 @@ import (
 func enableCmd(l *loader) *cobra.Command {
 	c := &cobra.Command{Use: "enable", Short: "turn on the web listener (web) or the TUI in the browser (tui)"}
 	var addr string
+	var trust []string
 	web := &cobra.Command{
 		Use:   "web",
 		Short: "serve the chooser, the web app (experimental) and the HTTP API",
@@ -27,10 +29,20 @@ func enableCmd(l *loader) *cobra.Command {
 			"identity provider. Default address " + defaultWebAddr + ".",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return webSet(l, cmd.OutOrStdout(), proto.WebSet{Enable: ptr(true), Addr: addr})
+			ws := proto.WebSet{Enable: ptr(true), Addr: addr}
+			if cmd.Flags().Changed("trust-proxy") {
+				ws.TrustProxies = []string{} // --trust-proxy= alone clears the list
+				for _, p := range trust {
+					if p = strings.TrimSpace(p); p != "" {
+						ws.TrustProxies = append(ws.TrustProxies, p)
+					}
+				}
+			}
+			return webSet(l, cmd.OutOrStdout(), ws)
 		},
 	}
 	web.Flags().StringVar(&addr, "addr", "", "host:port to listen on (default: the saved one, else "+defaultWebAddr+")")
+	web.Flags().StringArrayVar(&trust, "trust-proxy", nil, "a reverse proxy (CIDR or address) whose X-Forwarded-Proto/-Host to believe, besides loopback (repeatable; replaces the saved list; --trust-proxy= clears it)")
 	tui := &cobra.Command{
 		Use:   "tui",
 		Short: "serve the dun TUI in the browser at /tui, on the web listener",
@@ -149,6 +161,9 @@ func printWeb(out io.Writer, st proto.WebState) {
 		fmt.Fprintf(out, "web: on at %s (tui %s)\n  open %s and sign in with a token (dun dund token)\n", st.Addr, tui, st.URL)
 	default:
 		fmt.Fprintf(out, "web: on at %s (tui %s)\n", st.Addr, tui)
+	}
+	if len(st.TrustProxies) > 0 {
+		fmt.Fprintf(out, "  trusted proxies (besides loopback): %s\n", strings.Join(st.TrustProxies, ", "))
 	}
 	if st.Warning != "" {
 		fmt.Fprintln(os.Stderr, "warning:", st.Warning)
