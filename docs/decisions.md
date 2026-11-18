@@ -860,8 +860,10 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   moved to `--engine`. Bare words are only subcommands: `dun "fix it"` is
   refused with the `dun -p` spelling, so a typo in a subcommand cannot start a
   paid run. A dund from before the rename still spawns `dun -p` with no task;
-  under `DUN_DUND` that stays the engine (cli.go), so an upgrade does not turn
-  its sessions into headless runs that read their JSON as a task.
+  exactly that spawn (argv `-p --workspace …`, `DUN_CHILD=1`, `DUN_DUND=1`,
+  stdin a pipe) stays the engine (cli.go `oldDundSpawn`), so an upgrade does
+  not turn its sessions into headless runs that read their JSON as a task.
+  Remove it one release after the rename.
 - **A recorded session is the reproduction.** `DUN_TRACE` records engine events
   with offsets; `--replay` drives the real TUI from them. Built after three
   perf findings in a row had to be inferred from after-the-fact benchmarks.

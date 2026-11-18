@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/iodesystems/dun"
 )
@@ -33,7 +34,10 @@ func TestCompletion_Scripts(t *testing.T) {
 				t.Errorf("%s: no flag %s", sh, f)
 			}
 		}
-		if !strings.Contains(out, "dun __complete sessions") {
+		if !strings.Contains(out, "bash zsh fish") {
+			t.Errorf("%s: dun completion <tab> offers no shells", sh)
+		}
+		if !strings.Contains(out, "dun __complete sessions --workspace") {
 			t.Errorf("%s: --resume does not complete sessions", sh)
 		}
 		if strings.Contains(out, "ship") {
@@ -67,5 +71,12 @@ func TestCompletion_Sessions(t *testing.T) {
 	want := strings.Join(dun.ListSessions(ws), "\n")
 	if got := strings.TrimSpace(out.String()); got != want || !strings.Contains(got, id) {
 		t.Errorf("got %q, want %q (with %s)", got, want, id)
+	}
+}
+
+func TestFirstClause_Runes(t *testing.T) {
+	got := firstClause(strings.Repeat("é", 70))
+	if !strings.HasSuffix(got, "...") || len([]rune(got)) != 60 || !utf8.ValidString(got) {
+		t.Errorf("%q", got)
 	}
 }

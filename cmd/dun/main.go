@@ -256,6 +256,19 @@ func main() {
 		}
 	}
 
+	// The mode and the task, before anything reads *prog (the Docker re-exec,
+	// the ship warning): -p from an old dund is the engine (cli.go).
+	tty := stdinIsTTY()
+	cl := cmdLine{stdin: os.Stdin, tty: tty, oldDund: oldDundSpawn(os.Args, os.Getenv, tty), afterDash: dashBeforeArgs(os.Args, flag.Args())}
+	if stderrIsTTY() {
+		cl.notice = os.Stderr
+	}
+	firstTask, answerMode, err := headlessTask(flag.Args(), *headless, prog, cl)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "dun:", err)
+		os.Exit(2)
+	}
+
 	// Full Docker mode: when --docker is set and we are NOT already inside a
 	// container, re-exec the ENTIRE process (agent + MCP servers) inside one.
 	// This eliminates the split-brain where node_edit writes on the host but
@@ -313,6 +326,9 @@ func main() {
 			args = append(args, dockerImg, dunInContainer)
 		}
 		args = append(args, dockerReexecArgs()...)
+		if answerMode && flag.NArg() == 0 {
+			args = append(args, "--", firstTask) // read from stdin here; the container's stdin is spent
+		}
 		cmd := exec.CommandContext(context.Background(), "docker", args...)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
@@ -327,11 +343,6 @@ func main() {
 	}
 	if !*prog {
 		warnShipRemoved()
-	}
-	firstTask, answerMode, err := headlessTask(flag.Args(), *headless, prog, os.Stdin, stdinIsTTY(), os.Getenv("DUN_DUND") != "")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "dun:", err)
-		os.Exit(2)
 	}
 
 	if len(media) > 0 && (*prog || firstTask == "" || *tuiFlag || *serve) {

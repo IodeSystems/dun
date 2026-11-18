@@ -55,7 +55,7 @@ func completeHelper(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	ws := "."
-	if len(args) == 3 && args[1] == "--workspace" {
+	if len(args) == 3 && args[1] == "--workspace" && args[2] != "" {
 		ws = args[2]
 	}
 	abs, err := filepath.Abs(ws)
@@ -105,8 +105,8 @@ func firstClause(s string) string {
 		s = s[:i]
 	}
 	s = strings.TrimSpace(s)
-	if len(s) > 60 {
-		s = s[:57] + "..."
+	if r := []rune(s); len(r) > 60 {
+		s = string(r[:57]) + "..."
 	}
 	return s
 }
@@ -136,9 +136,16 @@ var completionScripts = map[string]func([]complFlag) string{
 func bashCompletion(fl []complFlag) string {
 	return `# dun completion for bash: source <(dun completion bash)
 _dun() {
-  local cur="${COMP_WORDS[COMP_CWORD]}" prev="${COMP_WORDS[COMP_CWORD-1]}"
+  local cur="${COMP_WORDS[COMP_CWORD]}" prev="${COMP_WORDS[COMP_CWORD-1]}" ws="" i
+  for ((i = 1; i < COMP_CWORD; i++)); do
+    [[ ${COMP_WORDS[i]} == --workspace ]] && ws="${COMP_WORDS[i+1]}"
+  done
+  if [[ $COMP_CWORD -eq 2 && ${COMP_WORDS[1]} == completion ]]; then
+    COMPREPLY=($(compgen -W "bash zsh fish" -- "$cur"))
+    return
+  fi
   case "$prev" in
-    --resume) COMPREPLY=($(compgen -W "$(dun __complete sessions 2>/dev/null)" -- "$cur")); return ;;
+    --resume) COMPREPLY=($(compgen -W "$(dun __complete sessions --workspace "$ws" 2>/dev/null)" -- "$cur")); return ;;
     --workspace) COMPREPLY=($(compgen -d -- "$cur")); return ;;
     --media|--replay) COMPREPLY=($(compgen -f -- "$cur")); return ;;
   esac
@@ -159,10 +166,16 @@ func zshCompletion(fl []complFlag) string {
 # dun completion for zsh: source <(dun completion zsh)
 _dun() {
   local -a subs flags
+  local ws="" i=${words[(I)--workspace]}
+  (( i > 0 && i < CURRENT - 1 )) && ws=${words[i+1]}
+  if (( CURRENT == 3 )) && [[ ${words[2]} == completion ]]; then
+    compadd -- bash zsh fish
+    return
+  fi
   subs=(` + subcommandNames() + `)
   flags=(` + flagNames(fl) + `)
   case ${words[CURRENT-1]} in
-    --resume) compadd -- ${(f)"$(dun __complete sessions 2>/dev/null)"}; return ;;
+    --resume) compadd -- ${(f)"$(dun __complete sessions --workspace "$ws" 2>/dev/null)"}; return ;;
     --workspace) _files -/; return ;;
     --media|--replay) _files; return ;;
   esac
@@ -184,7 +197,20 @@ func fishCompletion(fl []complFlag) string {
 		return "'" + strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), "'", `\'`) + "'"
 	}
 	var b strings.Builder
-	b.WriteString("# dun completion for fish: dun completion fish | source\ncomplete -c dun -f\n")
+	b.WriteString(`# dun completion for fish: dun completion fish | source
+function __dun_sessions
+    set -l words (commandline -opc)
+    set -l ws ""
+    for i in (seq (count $words))
+        if test "$words[$i]" = --workspace; and test $i -lt (count $words)
+            set ws $words[(math $i + 1)]
+        end
+    end
+    dun __complete sessions --workspace "$ws" 2>/dev/null
+end
+complete -c dun -f
+complete -c dun -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish'
+`)
 	for _, c := range subcommands {
 		fmt.Fprintf(&b, "complete -c dun -n 'test (count (commandline -opc)) -eq 1' -a %s -d %s\n", c.name, q(c.help))
 	}
@@ -195,7 +221,7 @@ func fishCompletion(fl []complFlag) string {
 		}
 		switch {
 		case f.name == "--resume":
-			opt += " -x -a '(dun __complete sessions 2>/dev/null)'"
+			opt += " -x -a '(__dun_sessions)'"
 		case f.name == "--workspace":
 			opt += " -x -a '(__fish_complete_directories)'"
 		case f.name == "--media" || f.name == "--replay":

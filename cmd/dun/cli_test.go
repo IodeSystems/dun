@@ -20,6 +20,7 @@ func TestHeadlessTask(t *testing.T) {
 		headless, eng  bool
 		stdin          string
 		tty, dund      bool
+		dash           bool
 		task           string
 		answer, engine bool
 		err            string
@@ -32,6 +33,7 @@ func TestHeadlessTask(t *testing.T) {
 		{name: "-p empty stdin", headless: true, err: "no task from stdin"},
 		{name: "-p at a terminal", headless: true, tty: true, err: `-p needs a task`},
 		{name: "-p from an older dund", headless: true, dund: true, engine: true},
+		{name: "-- doctor", args: []string{"doctor"}, dash: true, err: `"doctor" after -- is not a task either — for a headless task: dun -p "doctor"`},
 		{name: "--engine", eng: true, engine: true},
 		{name: "--engine with a first task", args: []string{"go"}, eng: true, task: "go", engine: true},
 		{name: "both", headless: true, eng: true, err: "two modes"},
@@ -39,7 +41,8 @@ func TestHeadlessTask(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			eng := c.eng
-			task, answer, err := headlessTask(c.args, c.headless, &eng, strings.NewReader(c.stdin), c.tty, c.dund)
+			cl := cmdLine{stdin: strings.NewReader(c.stdin), tty: c.tty, oldDund: c.dund, afterDash: c.dash}
+			task, answer, err := headlessTask(c.args, c.headless, &eng, cl)
 			if c.err != "" {
 				if err == nil || !strings.Contains(err.Error(), c.err) {
 					t.Fatalf("err = %v, want %q", err, c.err)
@@ -86,7 +89,7 @@ func runDun(t *testing.T, stdin string, env []string, args ...string) (string, s
 	t.Helper()
 	cmd := exec.Command(testDun(t), args...)
 	cmd.Dir = t.TempDir()
-	cmd.Env = append(os.Environ(), "DUN_NO_SELFUPDATE=1", "DUN_URL=", "DUN_MODEL=", "DUN_LLM_KEY=", "DUN_DUND=")
+	cmd.Env = append(os.Environ(), "DUN_NO_SELFUPDATE=1", "DUN_URL=", "DUN_MODEL=", "DUN_LLM_KEY=", "DUN_DUND=", "DUN_CHILD=")
 	cmd.Env = append(cmd.Env, env...)
 	cmd.Stdin = strings.NewReader(stdin)
 	var out, errb strings.Builder
@@ -116,15 +119,15 @@ func TestCLI_PIsHeadless(t *testing.T) {
 	}
 }
 
-// --engine speaks JSON events, and so does `-p` with no task from a dund
-// that predates --engine (DUN_DUND set).
+// --engine speaks JSON events, and so does `-p` spawned exactly as a dund
+// that predates --engine spawned it.
 func TestCLI_EngineEmitsJSON(t *testing.T) {
 	for _, c := range []struct {
 		env  []string
 		args []string
 	}{
 		{nil, []string{"--engine", "--no-tools"}},
-		{[]string{"DUN_DUND=1"}, []string{"-p", "--no-tools"}},
+		{[]string{"DUN_DUND=1", "DUN_CHILD=1"}, []string{"-p", "--workspace", ".", "--no-tools"}},
 	} {
 		stdout, stderr, _ := runDun(t, `{"type":"stop"}`+"\n", c.env, c.args...)
 		sawSession := false
@@ -142,5 +145,31 @@ func TestCLI_EngineEmitsJSON(t *testing.T) {
 		if !sawSession {
 			t.Errorf("%v: no session event\nstdout: %s\nstderr: %s", c.args, stdout, stderr)
 		}
+	}
+}
+
+// Only the exact old-dund spawn is the engine: a task on stdin under dund's
+// environment, or another argv shape, is still the headless run.
+func TestOldDundSpawn(t *testing.T) {
+	env := func(k string) string { return map[string]string{"DUN_DUND": "1", "DUN_CHILD": "1"}[k] }
+	none := func(string) string { return "" }
+	old := []string{"dun", "-p", "--workspace", "/ws"}
+	if !oldDundSpawn(old, env, false) {
+		t.Error("the old spawn is not recognised")
+	}
+	if oldDundSpawn(old, env, true) || oldDundSpawn(old, none, false) ||
+		oldDundSpawn([]string{"dun", "--workspace", "/ws", "-p"}, env, false) || oldDundSpawn([]string{"dun", "-p"}, env, false) {
+		t.Error("a different spawn counts as the old dund's")
+	}
+	_, stderr, code := runDun(t, "fix it\n", []string{"DUN_DUND=1", "DUN_CHILD=1"}, "-p", "--no-tools")
+	if code != 2 || !strings.Contains(stderr, "so the task cannot run") {
+		t.Errorf("a stdin task under dund's env: exit %d: %s", code, stderr)
+	}
+}
+
+func TestDashBeforeArgs(t *testing.T) {
+	if !dashBeforeArgs([]string{"dun", "--", "doctor"}, []string{"doctor"}) || dashBeforeArgs([]string{"dun", "doctor"}, []string{"doctor"}) ||
+		dashBeforeArgs([]string{"dun", "--"}, nil) {
+		t.Error("dashBeforeArgs")
 	}
 }
