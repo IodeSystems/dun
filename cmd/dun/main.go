@@ -96,6 +96,11 @@ func main() {
 		dundcli.Version = buildinfo.Version
 		os.Exit(dundcli.Main(os.Args[2:]))
 	}
+	// `dun ps`: every process dun runs, by session (dun dund ps; procps).
+	if len(os.Args) > 1 && os.Args[1] == "ps" {
+		dundcli.Version = buildinfo.Version
+		os.Exit(dundcli.Main(os.Args[1:]))
+	}
 	// The registry's manifests, presets and pins, as cached (registry.go):
 	// before anything reads a manifest.
 	useRegistry()

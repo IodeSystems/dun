@@ -93,6 +93,9 @@ type session struct {
 	restoredEvs []proto.Event
 	jobs        []proto.JobInfo   // the running ones
 	agents      []proto.AgentInfo // the running ones
+	// agentDirs are the live (running or idle) sub-agents that work in a
+	// tree of their own, for dun ps (procs.go).
+	agentDirs []proto.ProcAgent
 	// resume is the message a restart left for this session's agent: it was
 	// working when dund stopped, and is woken with it on the next start
 	// (persisted in the registry). Guarded by actMu, a leaf lock.
@@ -167,16 +170,20 @@ func (s *session) track(ev proto.Event) {
 			}
 		}
 	case *proto.Agents:
-		s.agents = nil
+		s.agents, s.agentDirs = nil, nil
 		for _, a := range p.Agents {
 			if a.State == "running" {
 				s.agents = append(s.agents, a)
+			}
+			if (a.State == "running" || a.State == "idle") && a.Dir != "" {
+				s.agentDirs = append(s.agentDirs, proto.ProcAgent{ID: a.ID, Dir: a.Dir})
 			}
 		}
 	case *proto.EngineState:
 		if p.State != "started" {
 			// The next engine says again whether it sends turn_state.
 			s.inTurn, s.asking, s.ask, s.jobs, s.agents, s.turnStated = false, false, nil, nil, nil, false
+			s.agentDirs = nil
 		}
 	}
 }

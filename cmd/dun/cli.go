@@ -26,6 +26,7 @@ var subcommands = []subcommand{
 	{"msg", "message dun sessions from a shell"},
 	{"session", "what dun is in a session, as JSON"},
 	{"spend", "what dun has spent"},
+	{"ps", "every process dun runs, by session: CPU, memory, IO"},
 	{"oauth", "an OAuth MCP server's bearer token"},
 	{"dund", "the session service"},
 	{"completion", "the shell completion script: bash, zsh or fish"},

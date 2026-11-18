@@ -407,6 +407,8 @@ func (c *conn) handle(cmd proto.Command) {
 			}
 			c.reply(cmd, "", &st)
 		}()
+	case *proto.Procs:
+		c.reply(cmd, "", svc.Procs(c.who))
 	case *proto.JobUsageReq:
 		c.reply(cmd, cmd.Session, svc.JobUsage(c.who, cmd.Session, p.Job))
 	case *proto.Persist:
