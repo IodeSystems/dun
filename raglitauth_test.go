@@ -97,6 +97,9 @@ func TestRaglitAuth_NeedsLoginThenMintsOneSessionKey(t *testing.T) {
 	if len(mints) != 1 || mints[0].args[3] != "s" {
 		t.Errorf("session mints %v, want one for session s", mints)
 	}
+	if a := mints[0].args; len(a) < 6 || a[4] != "--project" || a[5] == "" {
+		t.Errorf("session mint %v must name the project (the daemon refuses a mint without one)", a)
+	}
 	if got := h.raglitEnv(); len(got) != 1 || got[0] != "RAGLIT_TOKEN=key-session" {
 		t.Errorf("CLI env %v", got)
 	}

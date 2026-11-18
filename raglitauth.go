@@ -163,7 +163,9 @@ func (h *Harness) raglitSessionKey(ctx context.Context, command string) (string,
 		return "", errRaglitLogin
 	}
 	out, _, err := runRaglit(ctx, command, r.cfg.Workspace, []string{"RAGLIT_TOKEN=" + token}, "",
-		"key", "mint", "--session", session, "--label", "dun session "+session)
+		// The project names the shared daemon's namespace; without it a
+		// directory with no .raglit/config.json is refused ("no project name").
+		"key", "mint", "--session", session, "--project", raglitProject(r.cfg.Workspace), "--label", "dun session "+session)
 	if err != nil {
 		return "", fmt.Errorf("%w — /rag login again if dun's token was revoked", err)
 	}
