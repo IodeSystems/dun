@@ -281,7 +281,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// from within a child's conversation is not "one level out" by any
 			// reading, and it was what esc did.
 			if m.scopeAgent != 0 {
-				return m, m.leaveAgentScope()
+				return m, m.backOutOfAgent()
 			}
 			// Nothing else wanted it, and a turn runs: esc stops the turn.
 			if m.turnRunning() {
@@ -645,7 +645,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// CHILD's, the next level out is the session itself. That is what
 				// the status bar promises, and until now nothing delivered it.
 				if m.scopeAgent != 0 {
-					return m, m.leaveAgentScope()
+					return m, m.backOutOfAgent()
 				}
 				// Nothing to ascend out of: the edge. ← stops here rather than
 				// moving to another zone (USER 2026-10-23, see the → case).
@@ -658,7 +658,7 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Outside a scope the front of the input is an edge and ← stops.
 			if m.input.Position() == 0 {
 				if m.scopeAgent != 0 {
-					return m, m.leaveAgentScope()
+					return m, m.backOutOfAgent()
 				}
 				return m, nil
 			}

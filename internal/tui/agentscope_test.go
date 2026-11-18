@@ -217,3 +217,62 @@ func TestAgentScope_TypingTellsTheChild(t *testing.T) {
 		t.Errorf("the draft must stay, with why: %q / %q", m.input.Value(), m.flashText)
 	}
 }
+
+// Leaving a child that was opened from the activity strip comes back to the
+// strip's table with that child still selected, as ← out of a job's view
+// comes back to the job (TestJobView_LeftExits). It used to land on the
+// input with the table folded: the parent's selection was gone (USER
+// 2026-11-18: "from inspecting a job, hitting left arrow exits the jobs
+// selection in parent pane").
+func TestAgentScope_LeavingReturnsToTheStripSelection(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		keys []tea.KeyPressMsg
+	}{
+		{"left from the input", []tea.KeyPressMsg{kLeft}},
+		{"esc from the input", []tea.KeyPressMsg{kEsc}},
+		{"left from the conversation", []tea.KeyPressMsg{kTab, kLeft}},
+		{"left in the strip", []tea.KeyPressMsg{kTab, kTab, kLeft}},
+		{"enter on the parent row", []tea.KeyPressMsg{kTab, kTab, kEnter}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := withActivity(t)
+			m = key(m, kTab)
+			m = key(m, kTab)
+			if m.focus != focusActivity {
+				t.Fatalf("tab twice should reach the strip, focus=%d", m.focus)
+			}
+			// Agent #2, whichever row the table opened on: the selection
+			// must be the one the person made, not the table's default.
+			want := actKey{agent: true, id: 2}
+			for range m.actRows() {
+				if m.actSel == want {
+					break
+				}
+				m = key(m, kDown)
+			}
+			if m.actSel != want {
+				t.Fatalf("↓ should reach agent #2, got %+v", m.actSel)
+			}
+			m = key(m, kRight)
+			if m.scopeAgent != want.id {
+				t.Fatalf("→ should open agent #%d, scope=%d", want.id, m.scopeAgent)
+			}
+			for _, k := range tc.keys {
+				m = key(m, k)
+			}
+			if m.scopeAgent != 0 {
+				t.Fatalf("%s did not leave the child", tc.name)
+			}
+			if m.focus != focusActivity || m.actLevel != actList {
+				t.Errorf("back in the parent the strip should have the keys, its table open: focus=%d level=%d", m.focus, m.actLevel)
+			}
+			if m.actSel != want {
+				t.Errorf("the child should still be selected: got %+v, want %+v", m.actSel, want)
+			}
+			if d, _ := m.baseDivider(); !strings.Contains(ansi.Strip(d), "[jobs]") {
+				t.Errorf("the strip's label should be the focused one: %q", ansi.Strip(d))
+			}
+		})
+	}
+}

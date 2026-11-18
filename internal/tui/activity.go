@@ -778,7 +778,7 @@ func (m *tuiModel) actKeys(key string) (tea.Cmd, bool) {
 			}
 		}
 		if m.scopeAgent != 0 {
-			return m.leaveAgentScope(), true
+			return m.backOutOfAgent(), true
 		}
 		return nil, true
 	case "esc":
@@ -796,14 +796,19 @@ func (m *tuiModel) actDescend() tea.Cmd {
 		return nil
 	}
 	if row.key == parentKey {
-		return m.leaveAgentScope()
+		return m.backOutOfAgent()
 	}
 	if row.key == stackKey {
 		m.actStackOpen = !m.actStackOpen
 		return nil
 	}
 	if row.key.agent {
-		return m.enterAgentScope(row.key.id)
+		cmd := m.enterAgentScope(row.key.id)
+		if m.scopeAgent == row.key.id {
+			from := row.key
+			m.scopeFrom = &from // the way back comes back to this row
+		}
+		return cmd
 	}
 	// A job opens in its own view, in the conversation pane's place: the
 	// command on top, the log as a tail panel under it (jobview.go).
@@ -885,6 +890,7 @@ func (m *tuiModel) enterAgentScope(id int) tea.Cmd {
 		m.proc.agentCmd(m.scopeAgent, "leave", "")
 	}
 	m.scopeAgent = id
+	m.scopeFrom = nil
 	m.putView(convoView{sel: -1, pinned: true, task: a.prompt})
 	m.dropHold() // a different conversation: no hold from the root's
 	m.actLevel = actCollapsed
@@ -903,7 +909,7 @@ func (m *tuiModel) leaveAgentScope() tea.Cmd {
 		return nil
 	}
 	m.proc.agentCmd(m.scopeAgent, "leave", "")
-	m.scopeAgent = 0
+	m.scopeAgent, m.scopeFrom = 0, nil
 	m.putView(m.rootView)
 	m.rootView = convoView{}
 	m.actLevel = actCollapsed
@@ -915,6 +921,33 @@ func (m *tuiModel) leaveAgentScope() tea.Cmd {
 		m.vp.SetYOffset(yoff) // a reader who had scrolled up is put back there
 	}
 	return textinput.Blink
+}
+
+// backOutOfAgent is the person's way back out of a child (←, esc, the parent
+// row): the root's conversation, and the keys where the descent was made. A
+// child opened from the strip comes back to the strip's table with its row
+// selected, as ← out of a job's view comes back to the job (USER 2026-11-18:
+// "hitting left arrow exits the jobs selection in parent pane"). Opened from
+// elsewhere (/plan), it is the input, as leaveAgentScope leaves it. A scope
+// ended by an event (a question, a mount) is leaveAgentScope's alone.
+func (m *tuiModel) backOutOfAgent() tea.Cmd {
+	from := m.scopeFrom
+	cmd := m.leaveAgentScope()
+	if from == nil || len(m.actRows()) == 0 {
+		return cmd
+	}
+	m.setFocus(focusActivity)
+	for _, r := range m.actRows() {
+		if r.key == *from { // gone (dismissed, folded in the stack): the table's own pick
+			m.actSel = r.key
+		}
+	}
+	yoff, pinned := m.vp.YOffset, m.scrollPinned
+	m.refresh()
+	if !pinned {
+		m.vp.SetYOffset(yoff)
+	}
+	return nil
 }
 
 // scopeRows is the activity strip inside agent scope: the way back, and
