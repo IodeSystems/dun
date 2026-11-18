@@ -206,13 +206,28 @@ and named `__Host-dun_session`.
   server on that IP gets the cookie. Use a host name (a DNS or
   `/etc/hosts` name only dund serves), or https through a proxy.
 - **hz or any reverse proxy on the box**: it connects from loopback, so
-  dund believes its `X-Forwarded-Proto` and `X-Forwarded-Host`. Nothing to
-  configure.
+  dund believes its `X-Forwarded-Proto` (https). It does NOT believe
+  `X-Forwarded-Host` from loopback: cloudflared also connects from
+  loopback and passes a client's own `X-Forwarded-Host` through. A proxy
+  that keeps the browser's `Host` needs nothing; one that rewrites `Host`
+  and names the real one in `X-Forwarded-Host` (or `Forwarded: host=`)
+  needs `--trust-proxy 127.0.0.1`. With several values, the last (the
+  closest proxy's) is taken. A loopback request that names a client
+  (`X-Forwarded-For`, `CF-Connecting-IP`, `Forwarded`) is not sent to
+  `dun.localhost`: that browser is on another machine.
 - **A proxy on another machine**: `dun dund enable web --trust-proxy
   10.0.0.5` (or a CIDR; repeatable; it replaces the saved list, and
   `--trust-proxy=` clears it). Saved in `web.json` as `trusted_proxies`.
   From any other peer, `X-Forwarded-*` is ignored: a client cannot claim
   https or another host.
+- **Origin checks compare scheme and host**: a page on `http://H` is not
+  `https://H`, although some browsers treat the two as one site.
+- **The limit of `dun.localhost`**: it keeps the cookie from ordinary
+  local servers on `localhost`/`127.0.0.1`. It does not protect against a
+  hostile local process: that process can send the browser to itself on
+  `dun.localhost` as well, or replay a cookie with a forged `Host`. Real
+  isolation from other local processes needs https and the `__Host-`
+  cookie.
 - **cloudflared** (on the box, so from loopback): by default it passes the
   public hostname as `Host` and sends no `X-Forwarded-Host`; Cloudflare
   sets `X-Forwarded-Proto` and `CF-Visitor`, which dund reads as https.

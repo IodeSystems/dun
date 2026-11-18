@@ -158,13 +158,62 @@ func TestBareIPWarns(t *testing.T) {
 // The Origin is checked against the host the browser is looking at: a
 // trusted proxy's X-Forwarded-Host, else Host.
 func TestOriginAgainstTheEffectiveHost(t *testing.T) {
-	g := newRig(t)
+	g := newRig(t, "192.0.2.0/24")
 	form := url.Values{"token": {g.tok}}.Encode()
+	// cloudflared: from loopback, the public name as Host, https in XFP.
+	cf := map[string]string{"X-Forwarded-Proto": "https", "X-Forwarded-For": "203.0.113.4", "Origin": "https://dun.example.com"}
+	if w := g.req("POST", "/auth/signin", "127.0.0.1:5000", "dun.example.com", cf, form); w.Code != http.StatusSeeOther {
+		t.Errorf("cloudflared: %d %s", w.Code, w.Body.String())
+	}
+	// X-Forwarded-Host from loopback is a client's (cloudflared passes it
+	// through): ignored.
 	via := map[string]string{"X-Forwarded-Proto": "https", "X-Forwarded-Host": "dun.example.com", "Origin": "https://dun.example.com"}
-	if w := g.req("POST", "/auth/signin", "127.0.0.1:5000", "127.0.0.1:20003", via, form); w.Code != http.StatusSeeOther {
-		t.Errorf("through the proxy: %d %s", w.Code, w.Body.String())
+	if w := g.req("POST", "/auth/signin", "127.0.0.1:5000", "127.0.0.1:20003", via, form); w.Code != http.StatusForbidden {
+		t.Errorf("X-Forwarded-Host from loopback believed: %d", w.Code)
 	}
 	if w := g.req("POST", "/auth/signin", "198.51.100.9:5000", "198.51.100.1:20003", via, form); w.Code != http.StatusForbidden {
 		t.Errorf("an untrusted peer claiming the proxy's host: %d", w.Code)
+	}
+	// A listed proxy: its X-Forwarded-Host, the last value (its own).
+	if w := g.req("POST", "/auth/signin", "192.0.2.7:5000", "10.0.0.1:20003", via, form); w.Code != http.StatusSeeOther {
+		t.Errorf("listed proxy: %d %s", w.Code, w.Body.String())
+	}
+	last := map[string]string{"X-Forwarded-Proto": "https", "X-Forwarded-Host": "evil.example, dun.example.com", "Origin": "https://dun.example.com"}
+	if w := g.req("POST", "/auth/signin", "192.0.2.7:5000", "10.0.0.1:20003", last, form); w.Code != http.StatusSeeOther {
+		t.Errorf("last X-Forwarded-Host: %d %s", w.Code, w.Body.String())
+	}
+	fwd := map[string]string{"Forwarded": `for=203.0.113.4;proto=https;host="dun.example.com"`, "X-Forwarded-Proto": "https", "Origin": "https://dun.example.com"}
+	if w := g.req("POST", "/auth/signin", "192.0.2.7:5000", "10.0.0.1:20003", fwd, form); w.Code != http.StatusSeeOther {
+		t.Errorf("Forwarded host=: %d %s", w.Code, w.Body.String())
+	}
+	// The scheme counts: a page on http://H is not https://H.
+	plain := map[string]string{"X-Forwarded-Proto": "https", "X-Forwarded-For": "203.0.113.4", "Origin": "http://dun.example.com"}
+	if w := g.req("POST", "/auth/signin", "127.0.0.1:5000", "dun.example.com", plain, form); w.Code != http.StatusForbidden {
+		t.Errorf("http origin for an https dund: %d", w.Code)
+	}
+}
+
+// A trailing dot is the same name; 0.0.0.0 is a loopback name too; a
+// request a proxy on the box forwarded is not sent to dun.localhost.
+func TestHostSpellingsAndProxiedLoopback(t *testing.T) {
+	g := newRig(t)
+	for _, host := range []string{"localhost.:20003", "0.0.0.0:20003", "[::]:20003", "dun.localhost.:20003"} {
+		w := g.req("GET", "/auth/signin", "127.0.0.1:5000", host, nil, "")
+		redirected := w.Code == http.StatusFound && w.Header().Get("Location") == "http://dun.localhost:20003/auth/signin"
+		if redirected != (host != "dun.localhost.:20003") {
+			t.Errorf("%s: %d %s", host, w.Code, w.Header().Get("Location"))
+		}
+	}
+	c := g.signin("192.0.2.5:5000", "Dun.Lan.:20003", nil)
+	ck := map[string]string{"Cookie": c.Name + "=" + c.Value}
+	if w := g.req("GET", "/api/v1/sessions", "192.0.2.5:5000", "dun.lan:20003", ck, ""); w.Code != 200 {
+		t.Errorf("dun.lan. and dun.lan: %d", w.Code)
+	}
+	xff := map[string]string{"X-Forwarded-For": "203.0.113.4"}
+	if w := g.req("GET", "/auth/signin", "127.0.0.1:5000", "127.0.0.1:20003", xff, ""); w.Code != 200 {
+		t.Errorf("proxied, no X-Forwarded-Proto: %d %s", w.Code, w.Header().Get("Location"))
+	}
+	if c := g.signin("127.0.0.1:5000", "127.0.0.1:20003", xff); c == nil {
+		t.Error("proxied sign-in refused")
 	}
 }

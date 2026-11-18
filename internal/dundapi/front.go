@@ -115,11 +115,18 @@ func (s *Server) ipWarning(r *http.Request) string {
 // toOwnLoopback sends a browser on a shared loopback name over plain http
 // (localhost, 127.0.0.1, ::1) to dun.localhost before it signs in: other
 // local servers on that name, whatever their port, would get the cookie.
-// The API, /healthz and the releases are left alone (bearer clients).
+// The API, /healthz and the releases are left alone (bearer clients), and
+// so is a request a proxy on the box forwarded (proxied): its browser is on
+// another machine, where dun.localhost is that machine's own loopback.
+//
+// This keeps the cookie from ordinary local servers on the shared name. It
+// does not stop a hostile local process: it can send the browser to itself
+// on dun.localhost too, or replay a cookie with a forged Host. Isolation
+// from such a process needs https and the __Host- cookie.
 func (s *Server) toOwnLoopback(w http.ResponseWriter, r *http.Request) bool {
 	p := r.URL.Path
 	if (r.Method != http.MethodGet && r.Method != http.MethodHead) || strings.HasPrefix(p, "/api/") ||
-		p == "/healthz" || p == apkPath || strings.HasPrefix(p, releasesPath+"/") || isUpgrade(r) || s.secure(r) {
+		p == "/healthz" || p == apkPath || strings.HasPrefix(p, releasesPath+"/") || isUpgrade(r) || s.secure(r) || proxied(r) {
 		return false
 	}
 	h := s.host(r)
@@ -249,7 +256,7 @@ func (s *Server) signin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "sign-in from another site (Origin "+r.Header.Get("Origin")+", host "+s.host(r)+")", http.StatusForbidden)
 		return
 	}
-	if h := s.host(r); !s.secure(r) && sharedLoopback(h) {
+	if h := s.host(r); !s.secure(r) && !proxied(r) && sharedLoopback(h) {
 		http.Error(w, "sign in at http://"+ownLoopback(h)+"/ — every local server shares "+hostName(h), http.StatusBadRequest)
 		return
 	}
