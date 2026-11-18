@@ -124,6 +124,7 @@ func newRoot() *cobra.Command {
 	root.PersistentFlags().StringVar(&l.home, "home", "", "state directory (default $DUN_HOME, else ~/.dun)")
 	root.PersistentFlags().StringVar(&l.sock, "socket", "", "unix socket (default <home>/dund.sock)")
 	root.AddCommand(serveCmd(l), sessionsCmd(l), tokenCmd(l), serviceCmd(l), schemaCmd(), ragCmd(l))
+	addPS(root, l)
 	return root
 }
 

@@ -44,6 +44,7 @@ var helpStart = [][2]string{
 	{"dun mcp", "dun's sessions as an MCP server on stdio, for another agent (dun mcp --help)"},
 	{"dun watch <session>", "a line each time a session ends a turn or asks (dun watch --help)"},
 	{"dun msg", "message dun sessions and listen for messages from a shell (dun msg --help)"},
+	{"dun ps [--watch]", "every process dun runs, by session: CPU, memory, IO; SESSION (none) is a leak (dun ps --help)"},
 	{"dun --engine", "engine mode: line-delimited JSON events on stdin/stdout (what dund runs)"},
 	{"dun dund …", "the session service (dun dund --help)"},
 	{"dun completion [shell]", "shell completion: source <(dun completion bash), or zsh, fish"},
