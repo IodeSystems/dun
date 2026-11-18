@@ -101,7 +101,7 @@ export default function SignIn() {
 
   async function withProvider() {
     if (Platform.OS === 'web') {
-      window.location.href = base + '/auth/login?return=' + encodeURIComponent('/');
+      window.location.href = base + '/auth/login?return=' + encodeURIComponent('/web/');
       return;
     }
     const r = await WebBrowser.openAuthSessionAsync(

@@ -3,12 +3,12 @@
   "name": "dun",
   "description": "dun sessions: follow and drive them from anywhere",
   "icons": [
-    { "src": "/favicon.ico", "sizes": "48x48", "type": "image/x-icon" },
-    { "src": "/logo192.png", "type": "image/png", "sizes": "192x192", "purpose": "any maskable" },
-    { "src": "/logo512.png", "type": "image/png", "sizes": "512x512", "purpose": "any maskable" }
+    { "src": "/web/favicon.ico", "sizes": "48x48", "type": "image/x-icon" },
+    { "src": "/web/logo192.png", "type": "image/png", "sizes": "192x192", "purpose": "any maskable" },
+    { "src": "/web/logo512.png", "type": "image/png", "sizes": "512x512", "purpose": "any maskable" }
   ],
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "/web/",
+  "scope": "/web/",
   "display": "standalone",
   "theme_color": "#161615",
   "background_color": "#161615"
