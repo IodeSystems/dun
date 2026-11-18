@@ -94,32 +94,16 @@ func (h *Harness) fileTools() *filetools.Toolset {
 	return ts
 }
 
-// tmpRoots are the directories read, grep and list may also look in by
-// absolute path: scratch output, a test's log, a command's dump all land there,
-// and refusing the path exec just printed sends the model back to cat (USER
-// 2026-10-23). Reads only — a change to /tmp still goes through exec.
-var tmpRoots = func() []string { // a var: a test whose dirs are in /tmp turns it off
-	roots := []string{"/tmp"}
-	if d := os.TempDir(); filepath.Clean(d) != "/tmp" {
-		roots = append(roots, d)
-	}
-	var out []string
-	for _, r := range roots {
-		if real, err := filepath.EvalSymlinks(r); err == nil {
-			out = append(out, real)
-		}
-	}
-	return out
-}
-
-// tmpReaders is a read-only toolset per root (the tmp roots, then extra),
-// configured like ts (same caps and prefix). Resolve keeps the path as the
-// model wrote it, so a read's header says /tmp/x.log, not x.log. A root is
-// real (symlinks resolved) and the path is resolved to match: on macOS the
-// temp dir is /var/folders/…, a link to /private/var/folders/….
-func tmpReaders(cfg filetools.Config, extra ...string) []*filetools.Toolset {
+// tmpReaders is a read-only toolset per root (sessionReadDirs), configured
+// like cfg (same caps and prefix). Resolve keeps the path as the model wrote
+// it, so a read's header says /tmp/dun-<id>/job-1.log, not job-1.log. A root
+// is real (symlinks resolved) and the path is resolved to match: on macOS the
+// temp dir is /var/folders/…, a link to /private/var/folders/…. The whole temp
+// dir is not a root (USER 2026-11-18): another path there asks, as any path
+// outside the workspace does (fileaccess.go).
+func tmpReaders(cfg filetools.Config, roots ...string) []*filetools.Toolset {
 	var out []*filetools.Toolset
-	for _, root := range append(tmpRoots(), extra...) {
+	for _, root := range roots {
 		c := cfg
 		c.Root, c.ReadOnly, c.ExtraIgnore = root, true, nil
 		c.Resolve = func(rel string) (string, error) { return filetools.Under(root, realAbs(rel)) }
@@ -198,7 +182,7 @@ func realAbs(p string) string {
 }
 
 // tmpReader is the tmp toolset for a read, grep or list call whose path is
-// absolute, outside the working tree, and under a tmp root; nil otherwise.
+// absolute, outside the working tree, and under a session dir; nil otherwise.
 func tmpReader(ts *filetools.Toolset, tmp []*filetools.Toolset, name, args string) *filetools.Toolset {
 	switch ts.Bare(name) {
 	case filetools.Read, filetools.Grep, filetools.List:

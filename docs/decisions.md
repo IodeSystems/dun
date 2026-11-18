@@ -1154,9 +1154,15 @@ exec edits followed an "outside the root" refusal. `internal/harness/fileaccess.
   tmp (`dun-<id>`, job logs, clipped output), the shell's overflow dir, and
   a sub-agent's ancestors' are open to read, grep and list with no question
   (`sessionReadDirs`, files.go); writes ask as above. Another session's
-  `dun-*` is not among them (the temp dir as a whole is still read-open,
-  USER 2026-10-23). Paths are resolved before the tmp check: macOS's
-  `/var/folders` link made the job log dun cited "outside this workspace".
+  `dun-*` is not among them, and neither is the rest of the temp dir: it
+  was read-open to read, grep and list since USER 2026-10-23 (scratch
+  output, a test's log, a command's dump that exec just printed; commit
+  4b54c0c), which let a session read other sessions' `dun-*` dirs. (USER
+  2026-11-18: narrowed to the session's own dirs; other temp paths ask.)
+  A path such as `/tmp/x.log` now asks like any path outside the
+  workspace, and with nobody to ask is refused with `/file add`. Paths are
+  resolved before the tmp check: macOS's `/var/folders` link made the job
+  log dun cited "outside this workspace".
 - **A file's mode is its own.** A directory's grants used to share one
   mode, so one file open for writing opened its read-only neighbours;
   each file now keeps its own (`addedSets.writable`).

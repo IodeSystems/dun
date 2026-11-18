@@ -628,9 +628,10 @@ Next: run the MCP servers inside the container too.
 
 `file_read`, `file_edit` and `file_write` are built in (agentkit's `files`
 package), rooted at the session's working tree — the worktree when there is
-one. A path that climbs out, by `..`, an absolute path or a symlink, is refused
-— except that `file_read` also takes an absolute path under `/tmp` (and
-`$TMPDIR`), read only. Reads are line-numbered and capped (8KB with no range,
+one. A path that climbs out, by `..`, an absolute path or a symlink, asks the
+person first (`/file`, docs/mcp-and-tools.md) — except the files dun saved for this session
+(job logs, clipped output), which `file_read` reads by absolute path with no
+question. Reads are line-numbered and capped (8KB with no range,
 64KB with one, and the result says how to page); a read of a directory lists
 it, and a read with `grep` searches a file or a tree (respecting `.gitignore`,
 with `rg` when it is on PATH). A head or tail read of a file of 64KB or more
