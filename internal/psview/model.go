@@ -27,10 +27,13 @@ var sortNames = [nSorts]string{"CPU", "MEM", "IO", "AGE"}
 type itemKind int
 
 const (
-	kGroup   itemKind = iota // a session's header: fold, totals
-	kProc                    // a process
-	kRoot                    // a root the poly-lsp daemon holds
-	kRootErr                 // why the daemon's roots are missing
+	kGroup    itemKind = iota // a session's header: fold, totals
+	kProc                     // a process
+	kRoot                     // a root the poly-lsp daemon holds
+	kRootErr                  // why the daemon's roots are missing
+	kRagEmbed                 // the embed backend of retrieval in a process (dund)
+	kRag                      // an active index of retrieval in a process
+	kRagIdle                  // the idle indexes, folded into one line
 )
 
 // item is one line of the list.
@@ -40,22 +43,27 @@ type item struct {
 	row   *procps.Row // kProc, kRoot, kRootErr: the process (the daemon for a root)
 	root  procps.Root
 	name  string // kRoot: the root's short name
+	rag   procps.RagIndex
 }
 
-func (it item) selectable() bool { return it.kind == kGroup || it.kind == kProc }
+func (it item) selectable() bool { return it.kind == kGroup || it.kind == kProc || it.kind == kRag }
 
 // key is an item's identity: rows are rebuilt on every reading, so the
 // selection is kept by what it is, not where it was.
 func (it item) key() selKey {
-	if it.kind == kGroup {
+	switch it.kind {
+	case kGroup:
 		return selKey{group: it.group.Group}
+	case kRag:
+		return selKey{group: it.group.Group, pid: it.row.PID, rag: it.rag.Name}
 	}
 	return selKey{group: it.group.Group, pid: it.row.PID}
 }
 
 type selKey struct {
 	group string
-	pid   int // 0: the group's header
+	pid   int    // 0: the group's header
+	rag   string // an index's name: its line under the process
 }
 
 // confirm is a y/n question in the footer; yes is what y does.
@@ -315,6 +323,17 @@ func (m *model) items() []item {
 			if r.RootsErr != "" {
 				out = append(out, item{kind: kRootErr, group: g, row: r})
 			}
+			if r.RagEmbed != nil {
+				if len(r.Rag) > 0 || r.RagEmbed.InFlight > 0 {
+					out = append(out, item{kind: kRagEmbed, group: g, row: r})
+				}
+				for _, ix := range r.Rag {
+					out = append(out, item{kind: kRag, group: g, row: r, rag: ix})
+				}
+				if len(r.RagIdle) > 0 {
+					out = append(out, item{kind: kRagIdle, group: g, row: r})
+				}
+			}
 		}
 	}
 	return out
@@ -487,7 +506,7 @@ func (m *model) key(k string) tea.Cmd {
 			m.toggle(it.group.Group)
 		case k == "enter":
 			m.details = !m.details
-			if m.details {
+			if m.details && it.kind == kProc {
 				m.detCwd = m.cwd(it.row.PID)
 			}
 			m.follow()

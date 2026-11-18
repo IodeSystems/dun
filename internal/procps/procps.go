@@ -100,6 +100,12 @@ type Row struct {
 	// RootsErr says why they are missing.
 	Roots    []Root `json:"roots,omitempty"`
 	RootsErr string `json:"roots_error,omitempty"`
+	// Rag is retrieval in this process (dund's, rag.go): its embed backend,
+	// its active indexes, and the ones idle RagIdleAfter, which the table
+	// folds into one line.
+	RagEmbed *proto.ProcRagEmbed `json:"rag_embed,omitempty"`
+	Rag      []RagIndex          `json:"rag,omitempty"`
+	RagIdle  []RagIndex          `json:"rag_idle,omitempty"`
 
 	CPU     float64 `json:"cpu"` // percent of one core; -1 before a rate
 	RSS     int64   `json:"rss"`

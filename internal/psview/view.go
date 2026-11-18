@@ -232,6 +232,18 @@ func (m *model) itemLine(it item, sel bool, c cols, w int) string {
 	case kRootErr:
 		s = procps.Fit(pad("", wPID+gap)+"  "+it.row.RootsErr, max(0, w-wGutter))
 		return "  " + tui.SecondaryStyle().Render(s)
+	case kRagEmbed:
+		s = procps.Fit(pad("", wPID+gap)+"  "+procps.RagEmbedLine(*it.row.RagEmbed), max(0, w-wGutter))
+		return "  " + tui.SecondaryStyle().Render(s)
+	case kRag:
+		s = procps.Fit(pad("", wPID+gap)+"  ↳ "+procps.RagSession(it.rag)+"  "+procps.RagLine(it.rag), max(0, w-wGutter))
+		if sel {
+			return tui.AccentStyle().Render("▎ " + s)
+		}
+		return "  " + tui.SecondaryStyle().Render(s)
+	case kRagIdle:
+		s = procps.Fit(pad("", wPID+gap)+"  "+procps.RagIdleLine(len(it.row.RagIdle)), max(0, w-wGutter))
+		return "  " + tui.SecondaryStyle().Render(s)
 	}
 	return ""
 }
@@ -243,8 +255,11 @@ func (m *model) detailLines() []string {
 		return nil
 	}
 	it, ok := m.selected()
-	if !ok || it.kind != kProc {
+	if !ok || it.kind != kProc && it.kind != kRag {
 		return nil
+	}
+	if it.kind == kRag {
+		return m.ragDetails(it)
 	}
 	w := max(1, m.w)
 	r := it.row
@@ -279,16 +294,73 @@ func (m *model) detailLines() []string {
 	for i, root := range r.Roots {
 		kv(map[bool]string{true: "roots", false: ""}[i == 0], root.Session+"  "+procps.RootLine(root, names[i]))
 	}
+	if r.RagEmbed != nil {
+		kv("rag", fmt.Sprintf("%s  %s active, %d idle", procps.RagEmbedLine(*r.RagEmbed),
+			plural(len(r.Rag), "index", "indexes"), len(r.RagIdle)))
+	}
 	if chain := m.parents(r.PPID); chain != "" {
 		kv("parents", chain)
 	}
+	return m.pane("─ details "+fmt.Sprint(r.PID)+" ", body)
+}
+
+// pane is the details pane: the divider, labelled, then body cut to the
+// pane's height.
+func (m *model) pane(label string, body []string) []string {
+	w := max(1, m.w)
 	h := min(maxDetails, max(3, m.h/2))
 	if len(body) > h-1 {
 		body = append(body[:h-2], procps.Fit(fmt.Sprintf("… %d more lines", len(body)-(h-2)), w))
 	}
-	label := "─ details " + fmt.Sprint(r.PID) + " "
 	div := tui.StDim.Render(procps.Fit(label+strings.Repeat("─", max(0, w-len([]rune(label)))), w))
 	return append([]string{div}, body...)
+}
+
+// ragDetails is the details pane of an index: its counters.
+func (m *model) ragDetails(it item) []string {
+	w := max(1, m.w)
+	x := it.rag
+	var body []string
+	kv := func(k, v string) {
+		body = append(body, procps.Fit(pad(k, 10)+v, w))
+	}
+	branch := ""
+	if x.Branch != "" {
+		branch = "  branch " + x.Branch
+	}
+	kv("index", x.Name+"  "+x.State+"  session "+procps.RagSession(x)+branch)
+	queue := fmt.Sprint(x.Queue)
+	if x.QueueCapped {
+		queue += "+"
+	}
+	kv("queue", fmt.Sprintf("%s pending  %d running  %d embeds in flight", queue, x.Running, x.EmbedInFlight))
+	kv("last min", fmt.Sprintf("%d files  %d chunks  %d embeds  %s embedding  ~%d tokens",
+		x.FilesMin, x.ChunksMin, x.EmbedsMin, ms(x.EmbedMsMin), x.TokensMin))
+	kv("total", fmt.Sprintf("%d files  %d chunks  %d embeds  %s embedding  ~%d tokens",
+		x.Files, x.Chunks, x.Embeds, ms(x.EmbedMs), x.Tokens))
+	if e := it.row.RagEmbed; e != nil {
+		kv("embed", procps.RagEmbedLine(*e))
+	}
+	if x.IdleSec >= 0 {
+		kv("active", procps.Age(x.IdleSec)+" ago")
+	} else {
+		kv("active", "not since dund started")
+	}
+	if x.LastErr != "" {
+		kv("last err", procps.Age(x.ErrAgeSec)+" ago  "+x.LastErr)
+	}
+	return m.pane("─ rag "+x.Name+" ", body)
+}
+
+// ms is milliseconds the short way: 840ms, 12.4s, 3m.
+func ms(n int64) string {
+	if n < 1000 {
+		return fmt.Sprintf("%dms", n)
+	}
+	if n < 60000 {
+		return fmt.Sprintf("%.1fs", float64(n)/1000)
+	}
+	return procps.Age(n / 1000)
 }
 
 // parents is the chain from ppid up to pid 1, each "pid name".

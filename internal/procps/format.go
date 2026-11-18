@@ -90,6 +90,10 @@ func Table(gs []Group, width int) string {
 				wSes = max(wSes, runeLen(root.Session))
 				wRoot = max(wRoot, runeLen("  "+RootLine(root, names[i])))
 			}
+			for _, l := range RagLines(r) {
+				wSes = max(wSes, runeLen(l[0]))
+				wRoot = max(wRoot, runeLen(l[1]))
+			}
 		}
 		wJob = max(wJob, runeLen(totalLabel(g)))
 	}
@@ -120,6 +124,9 @@ func Table(gs []Group, width int) string {
 			names := RootNames(r.Roots)
 			for i, root := range r.Roots {
 				line("", root.Session, "  "+RootLine(root, names[i]), "", "", "", "")
+			}
+			for _, l := range RagLines(r) {
+				line("", l[0], l[1], "", "", "", "")
 			}
 			if r.RootsErr != "" {
 				msg := "  " + r.RootsErr

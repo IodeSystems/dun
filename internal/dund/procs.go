@@ -3,6 +3,9 @@ package dund
 import (
 	"os"
 	"sort"
+	"sync"
+
+	"github.com/iodesystems/dun/internal/harness"
 
 	"github.com/iodesystems/dun/proto"
 )
@@ -40,7 +43,7 @@ func (s *Service) Procs(principal string) *proto.ProcsList {
 		if !running || eng == nil {
 			continue
 		}
-		ps := proto.ProcSession{ID: ses.id, Workspace: ses.workspace}
+		ps := proto.ProcSession{ID: ses.id, Workspace: ses.workspace, Project: projectSlug(ses.workspace)}
 		if p, ok := eng.(pider); ok {
 			ps.EnginePID = p.PID()
 		}
@@ -55,4 +58,22 @@ func (s *Service) Procs(principal string) *proto.ProcsList {
 	}
 	sort.Slice(out.Sessions, func(i, j int) bool { return out.Sessions[i].ID < out.Sessions[j].ID })
 	return out
+}
+
+// projectSlugs caches harness.ProjectSlug by workspace: it runs git, and
+// dun ps --watch asks every interval.
+var projectSlugs sync.Map
+
+// projectSlug is the rag project slug of workspace (the key of its indexes
+// in ragd), for dun ps to give a session its project's indexes.
+func projectSlug(workspace string) string {
+	if workspace == "" {
+		return ""
+	}
+	if v, ok := projectSlugs.Load(workspace); ok {
+		return v.(string)
+	}
+	slug := harness.ProjectSlug(workspace)
+	projectSlugs.Store(workspace, slug)
+	return slug
 }

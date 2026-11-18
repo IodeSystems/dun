@@ -262,6 +262,9 @@ func (h *Host) walk(st, parent *raglit.Store, root, main string, files []string,
 			out.Queued++
 		}
 	}
+	if len(items) > 0 || out.Removed > 0 {
+		h.touch(st)
+	}
 	if have != runtime {
 		if err := st.SetMeta(segmenterKey, runtime, time.Now().Unix()); err != nil {
 			return nil, fmt.Errorf("record the segmenter: %w", err)

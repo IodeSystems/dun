@@ -147,6 +147,7 @@ func (h *Host) openBranch(name, root, main string) (*raglit.Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("rag: open branch %s: %w", name, err)
 	}
+	h.meterLocked(name, st)
 	h.attachEmbed(name, st)
 	st.SetIdentifier(h.ident)
 	h.stores[name] = st

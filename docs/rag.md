@@ -607,6 +607,47 @@ USER 2026-11-09: worktrees are raglit branches. Code: `internal/ragd/branch.go`,
   (62 code and 5 docs files queued, 766 current, 1 removed); its jobs done
   5.6 s after; 6.4 s in all. The main checkout's jobs took 70 s.
 
+## Built: rag in dun ps
+
+USER 2026-11-17: `dun ps` must cover rag activity. Ingest and embedding run
+in the dund process, so the process table shows them as dund's CPU only.
+Code: `internal/ragd/meter.go`, `proto/procs.go` (`ProcRag`),
+`internal/procps/rag.go`, `internal/psview`. Tests: `internal/ragd/meter_test.go`,
+`internal/procps/rag_test.go`, `internal/psview/rag_test.go`,
+`internal/dund/procs_rag_test.go`.
+
+- **Meters.** One per open index (a branch its own), counted at dund's seams
+  into raglit, not inside it: the job's fetch (`Worker.Fetcher` set in
+  `NewWorker`: one file per job taken), the index's embed client (a
+  `meteredVector` over the Host's `embedRoute`, one `Embedder` per index and
+  kept, as raglit compares an index's embedder by identity: one embed
+  request, its inputs the chunks, tokens estimated as characters/4, as
+  raglit's usage hook does), and `ingestText` (a file of one chunk). A
+  search's query embedding is counted in flight only. Totals are atomics;
+  the last minute is 12 buckets of 5 s under the meter's mutex, one add per
+  event, no allocation. A call cut off by a stop is not an error.
+- **Queue.** Read from the index's job table when dun ps asks (`poll`): the
+  pending jobs (a page of 1000; more reads as `1000+`), the running ones,
+  and the newest failed job. At most every 2 s, and every 60 s for an index
+  idle 10 minutes with nothing queued.
+- **State.** backed-off (work, and the embed model's admission channel cools
+  down after a 429: raglit `Channels.Stats`), embedding (a request in
+  flight), ingesting (jobs queued or running, or an event in the last 5 s),
+  error (the last error is newer than the last success and under 10 minutes
+  old), else idle.
+- **Answer.** `procs` gains `rag {embed, indexes}` (dund's Server adds it to
+  `Service.Procs`) and each session its `project` (`harness.ProjectSlug`,
+  cached per workspace). Every index is listed: the indexes are dund's, not
+  a principal's.
+- **Table.** Under dund's row: the embed backend, one line per index active
+  in the last 10 minutes, in the SESSION column the session(s) whose
+  project it is (`+N` more; `(global)`, `(none)`), then `N idle indexes`.
+  `--json` has every index (`rag`, `rag_idle`). In `--watch`, an index's
+  line is selectable and enter shows its counters.
+- **raglit daemon.** `procps.RaglitIndexes` is the hook for the indexes
+  under the raglit daemon's row, from `raglit status --json --all`, which
+  raglit does not have yet. nil: not read.
+
 ## Slices
 
 1. raglit: split attest into types and service; semver tags (raglit's call).

@@ -408,7 +408,11 @@ func (c *conn) handle(cmd proto.Command) {
 			c.reply(cmd, "", &st)
 		}()
 	case *proto.Procs:
-		c.reply(cmd, "", svc.Procs(c.who))
+		list := svc.Procs(c.who)
+		if c.srv.rag != nil {
+			list.Rag = c.srv.rag.Status()
+		}
+		c.reply(cmd, "", list)
 	case *proto.JobUsageReq:
 		c.reply(cmd, cmd.Session, svc.JobUsage(c.who, cmd.Session, p.Job))
 	case *proto.Persist:

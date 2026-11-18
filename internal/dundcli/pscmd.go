@@ -45,6 +45,13 @@ engine and what it runs (its shell, poly-lsp proxy, tool servers, background
 jobs), the language servers of the shared poly-lsp-mcp daemon by the session
 whose tree is their root, and dun's processes left to pid 1.
 
+Under dund's row: retrieval inside dund (its indexes' ingest and
+embedding run in the dund process). The embed backend, then one line per
+active index, "rag <project> <kind>  state  queue N  files/min  embeds/min
+err", by the session whose workspace is that project; indexes idle for
+10 minutes fold into one "N idle indexes" line. --json has every index
+with its counters.
+
 CPU% and IO are measured over one second, not averaged over the process's
 life. SESSION (none) is a process no live session owns: an orphan, or a
 language server for a root no session works in.
@@ -141,6 +148,18 @@ func sample(l *loader, prev procps.Snapshot, rc *rootsCache) (PSView, procps.Sna
 	if d := procps.PolyDaemon(cur); d != nil {
 		roots, rerr := rc.get(d, cur.At)
 		procps.AttachRoots(rows, d.PID, roots, rerr, list)
+	}
+	var sessions []proto.ProcSession
+	if list != nil {
+		sessions = list.Sessions
+		procps.AttachRag(rows, list.DundPID, list.Rag, sessions, cur.At)
+	}
+	// The raglit daemon's indexes: a hook until raglit answers
+	// `raglit status --json --all` (procps.RaglitIndexes).
+	if d := procps.RaglitDaemon(cur); d != nil && procps.RaglitIndexes != nil {
+		if rag, err := procps.RaglitIndexes(d); err == nil {
+			procps.AttachRag(rows, d.PID, rag, sessions, cur.At)
+		}
 	}
 	v := PSView{At: cur.At, Window: cur.At.Sub(prev.At).Seconds(), Groups: procps.Groups(rows), List: list}
 	if list != nil {

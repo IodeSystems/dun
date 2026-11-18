@@ -34,6 +34,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/iodesystems/raglit"
@@ -100,6 +101,12 @@ type Host struct {
 	filling map[string]bool          // index → a backfill runs
 	trees   map[string]string        // canonical root → its main checkout; "" not a worktree (Worktree)
 	closed  bool
+
+	// The rag meters (meter.go): by index key, and by open store.
+	meters        map[string]*meter
+	meterOf       map[*raglit.Store]*meter
+	embedInFlight atomic.Int64 // embed requests in flight, every index's and searches'
+	now           func() time.Time
 }
 
 // metaEmbedDim is raglit's index_meta key of the vectors' dimension. raglit
@@ -123,7 +130,8 @@ func Open(root string, r Roles, logf func(string, ...any)) (*Host, error) {
 		m.Channels = raglit.NewChannels()
 	}
 	h := &Host{root: root, models: m, code: newCodeSeg(), logf: logf, stores: map[string]*raglit.Store{},
-		stale: map[string]string{}, filling: map[string]bool{}, trees: map[string]string{}}
+		stale: map[string]string{}, filling: map[string]bool{}, trees: map[string]string{},
+		meters: map[string]*meter{}, meterOf: map[*raglit.Store]*meter{}, now: time.Now}
 	h.bg, h.stopBg = context.WithCancel(context.Background())
 	if m.Embed.Model != "" {
 		h.embed = newEmbedder(m)
@@ -158,7 +166,7 @@ func Open(root string, r Roles, logf func(string, ...any)) (*Host, error) {
 		r := &raglit.Runner{
 			Stores: storeSubset{h, set.indexes},
 			NewWorker: func(s *raglit.Store) (*raglit.Worker, error) {
-				return raglit.NewWorker(s, set.models, nil), nil
+				return h.meteredWorker(s, set.models), nil
 			},
 			Runners: set.runners,
 			Logf:    logf,
@@ -316,6 +324,7 @@ func (h *Host) openLocked(name string) (*raglit.Store, error) {
 	}
 	// Both before the runner can see the store: search embeds queries through
 	// the embedder, and the caption queue drains only where an identifier is.
+	h.meterLocked(name, st)
 	h.attachEmbed(name, st)
 	st.SetIdentifier(h.ident)
 	h.stores[name] = st
@@ -351,7 +360,7 @@ func (h *Host) attachEmbed(name string, st *raglit.Store) {
 	} else if dropped {
 		h.logf("dund: rag: %s: dropped vectors of another dimension than %s%s", name, h.embed.Model, dimSaid(h.dim))
 	}
-	st.SetEmbedder(h.embed)
+	st.SetEmbedder(h.embedFor(name))
 	h.backfillLocked(name, st)
 }
 
@@ -439,7 +448,7 @@ func (h *Host) Reembed(q proto.RagReembed) (*proto.RagReembedding, error) {
 		return nil, err
 	}
 	delete(h.stale, name)
-	st.SetEmbedder(h.embed)
+	st.SetEmbedder(h.embedFor(name))
 	missing, err := st.MissingVectors()
 	if err != nil {
 		return nil, err
@@ -548,7 +557,7 @@ func (h *Host) Ingest(q proto.RagIngest) (*proto.RagIngested, error) {
 		if q.Path == "" {
 			return nil, errors.New("rag: text is ingested under a path, not a URL")
 		}
-		if err := ingestText(st, src, q.Title, q.Text, q.Tags); err != nil {
+		if err := h.ingestText(st, src, q.Title, q.Text, q.Tags); err != nil {
 			return nil, err
 		}
 		return &proto.RagIngested{URL: src}, nil
@@ -557,6 +566,7 @@ func (h *Host) Ingest(q proto.RagIngest) (*proto.RagIngested, error) {
 	if err != nil {
 		return nil, err
 	}
+	h.touch(st)
 	return &proto.RagIngested{Job: id, URL: src}, nil
 }
 
@@ -568,6 +578,15 @@ func textHashKey(src string) string { return "dund_text_sha256 " + src }
 func textHash(text string) string {
 	sum := sha256.Sum256([]byte(text))
 	return hex.EncodeToString(sum[:])
+}
+
+// ingestText is ingestText counted on st's meter.
+func (h *Host) ingestText(st *raglit.Store, src, title, text string, tags []string) error {
+	err := ingestText(st, src, title, text, tags)
+	if m := h.meterFor(st); m != nil {
+		m.ingested(err)
+	}
+	return err
 }
 
 // ingestText indexes text as the one fragment of the document src, now, with
@@ -758,7 +777,7 @@ func (h *Host) Sync(q proto.RagSync) (*proto.RagSynced, error) {
 			continue
 		}
 		if f.Text != "" {
-			err = ingestText(st, src, f.Title, f.Text, f.Tags)
+			err = h.ingestText(st, src, f.Title, f.Text, f.Tags)
 		} else {
 			_, err = enqueue(st, src, f.Title, f.Tags)
 		}
@@ -779,6 +798,9 @@ func (h *Host) Sync(q proto.RagSync) (*proto.RagSynced, error) {
 			return nil, err
 		}
 		out.Removed++
+	}
+	if out.Queued > 0 || out.Removed > 0 {
+		h.touch(st)
 	}
 	return out, nil
 }
