@@ -1014,6 +1014,57 @@ From the 2026-11-18 inventory of model calls nobody typed for.
   rate when it waits on a job: the finish wakes it, and reports are for
   progress it must act on before the end.
 
+## Unrequested turns: budget, no questions, bounded checks (USER 2026-11-18)
+
+"Don't stop work on asks; stop senseless unrequested work; auto done
+limited." `internal/harness/autoturn.go` unless named; docs/attention.md,
+"Unrequested turns".
+
+- **The automatic-turn budget.** A turn's origin is the person's, user-set
+  (a `[loop …]` / `[scheduled …]` firing) or automatic (job finish or
+  report, heartbeat escalation, child report, server wake, peer wake, the
+  settle, the upgrade's `[automatic]` continue). While an ask node is open
+  (todo or doing) automatic turns run as before. With none open, at most 3
+  start per rolling hour; past that the wake's news is written into the
+  conversation and claimed (`Continue` returns `ErrTurnHeld`, the engine
+  sends done `held`), counted as notes, and shown `idle: N notes waiting`
+  (turn_state `notes_waiting`; TUI status line, web header, `dun ps` row).
+  The person's next message (`AskAs`, `SayAs`, a `dun msg` from a shell)
+  resets the count; the notes are in its context. Only where asks are kept
+  (root, interactive, plan tools, not `NoAsks`).
+- **Loops and schedules: chosen exempt.** The person set them, so a firing is
+  never held and not counted; but it is not their message now: not an ask
+  (asks.go: `[loop`/`[scheduled` prefixes, which the bracket-tag rule missed
+  because of the `,` and `:` in them), it arms no settle, it does not reset
+  the budget, and it does not count as the person for the job-report cap
+  (`personMsgs`) or the idle suggestion.
+- **No ask_user in a round dun added**: after the turn-end check, the round
+  right after a plan nudge or stall, and an automatic turn with no open ask.
+  Refused with a tool error (block the ask with the question as the reason),
+  not withheld: a tool set that changes per round re-reads the prompt. A
+  blocked ask is not open for the budget nor the check; the plan views show
+  its `why`.
+- **Turn-end check** (idlecheck.go): skipped in an automatic turn with no
+  tool call; blocked nodes not listed; the open nodes not listed while the
+  plan's revision equals the last check's (any turn); the count is the
+  turn's (`turnBegin`), not agentkit's per `Session.Turn` call, which a retry
+  (retry.go) started again. Known effect: an interactive turn whose plan did
+  not move gets no second check after a file edit.
+- **Done nodes from the idle call** (suggestdone.go): at most 3 per idle, and
+  one batch per set of open asks (`doneAsks`): a second idle with the same
+  asks open adds none. In memory, not persisted.
+- **Settle** (settle.go): armed by the person's turn only.
+- **Idle suggestion** (suggest.go `IdleSuggestions`): one call per idle in the
+  engine, whichever client asks (a mutex over the call; a later ask gets the
+  same answer); none after a turn the person did not start until a presence
+  ping.
+- **Peers** (dund peer.go): 20 wakes an hour per (sender, target), as a
+  server's (serverwake.go); and the reply that closes A → B → A, with no
+  person's message in A or B since A's (dund counts user echoes that pass
+  `harness.PersonText`), is delivered with wake false. Past either, delivered
+  quiet with `PeerReply.Unwoken` saying why. Chosen literally: the reply
+  itself is quiet, so A reads B's answer at its next turn.
+
 ## Release updates
 
 - **para shares dun's signing key (Carl, 2026-11-10); manifests are bound to

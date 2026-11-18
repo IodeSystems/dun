@@ -130,6 +130,39 @@ trigger on an error line; the pattern filter was removed in the jobs rework, and
   TB2.1 trial stop while it admitted a failing requirement.
 - Both modes, main agent: open plan items at the end of a turn get one note.
 - Interactive: no checklist.
+- Bounds (USER 2026-11-18): no check in an automatic turn that made no tool
+  call; a blocked node is not listed; the open nodes are not listed again
+  while the plan (ask nodes included) is unchanged since the last check, in
+  this turn or an earlier one; the count is the turn's, not the attempt's, so
+  a retried turn gets no new checks.
+
+### Unrequested turns (`internal/harness/autoturn.go`; USER 2026-11-18)
+
+- **Origin.** Each turn is the person's (a message they typed, or one typed
+  mid-turn that a Continue carries, or a `dun msg` from a shell), user-set (a
+  `[loop …]` or `[scheduled …]` firing) or automatic (a job's finish or
+  report, an escalated heartbeat, a child's report, a server's or a peer's
+  wake, the settle, dund's `[automatic]` continue).
+- **Budget.** While an ask is open (todo or doing), automatic turns run as
+  before. With none open (a blocked ask is not open), at most 3 automatic
+  turns start in a rolling hour. Past that a wake starts no turn: what it
+  brought is written into the conversation (claimed, so nothing is pending),
+  counted, and shown as `idle: N notes waiting` (turn_state's
+  `notes_waiting`: TUI status line, web header, `dun ps` session row). The
+  person's next message resets the count and reads the notes. User-set
+  firings are not counted and never held; they open no ask and arm no settle.
+- **No questions in rounds dun added.** After the turn-end check, the round
+  right after a plan nudge or stall, and every round of an automatic turn
+  with no open ask: `ask_user` returns a tool error that says to block the ask
+  (`plan_close` outcome `block`, the question as the reason). The tool stays
+  in the set (a set that changes per round re-reads the prompt). The blocked
+  node shows its question (`why`) in the TUI and web plan views.
+- **Idle suggestion once per idle.** The engine makes the call once between
+  two turns, whichever client asks; a later ask gets the same answer. After a
+  turn the person did not start, none until a presence ping.
+- **Peers** (dund `peer.go`). 20 wakes an hour per sender → target; and when
+  A woke B, B's reply to A is delivered with wake false unless a person wrote
+  in A or B since. The sender's tool result says why it did not wake.
 
 ### Other session messages
 
@@ -170,6 +203,8 @@ When a turn that used tools ends, a settle timer starts (proposed: 2 minutes).
 - The timer does not wait for jobs or children. Long-running work is normal, and
   "waiting on" covers it.
 - **Once per user message.** The settle turn never schedules another one.
+  Only the person's message arms it: not a `[scheduled]`, `[loop]`,
+  `[automatic]` or other dun-sent message (USER 2026-11-18).
 - **Head chop.** If the user writes during the settle turn, it is cut at the next
   tool boundary (the interrupt that exists). Its work stays in the history. The
   settle prompt is turn-scoped and is dropped.
