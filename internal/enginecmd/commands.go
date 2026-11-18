@@ -200,7 +200,7 @@ func OwnCommands(iso string) []proto.CommandSpec {
 				"view", "one task's events: inputs, tool calls, recaps, notes", "write", "the model writes a closed task's account to a file"),
 			Description: "this session's tasks: alone, the tree with times and outcomes"},
 		{Name: "journal", Usage: "[view <n> | now]", Group: "session",
-			Choices: choices("view", "one entry's text", "now", "the model writes an entry for everything since the last one: one side call"),
+			Choices:     choices("view", "one entry's text", "now", "the model writes an entry for everything since the last one: one side call"),
 			Description: "what the agent did, in time order: folds, /journal now entries and /worklog accounts; alone, the list, newest first"},
 		{Name: "plan", Usage: "[mode on|off | approve | edit <id> title|details <text> | drop <id> [why] | clear | unarchive | summary]", Group: "session",
 			Choices: choices("mode", "on or off: while on, the model's tools that change files or run commands are refused until you approve",

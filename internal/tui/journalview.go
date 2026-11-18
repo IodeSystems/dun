@@ -1,12 +1,19 @@
 package tui
 
 import (
+	"fmt"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-
-	"github.com/iodesystems/dun/internal/textfmt"
 )
+
+// entryCount is "1 entry", "3 entries".
+func entryCount(n int) string {
+	if n == 1 {
+		return "1 entry"
+	}
+	return fmt.Sprintf("%d entries", n)
+}
 
 // /journal in the TUI: a screen (panes.go) with a status pane over the
 // entries, newest first: time, kind (fold, now, worklog), title, tokens.
@@ -29,7 +36,7 @@ type journalView struct {
 }
 
 func (v *journalView) lines(_ *tuiModel, w int) []string {
-	return wrapToRows(stHeader.Render("/journal")+StDim.Render(" · ")+textfmt.Plural(len(v.items), "entry"), w)
+	return wrapToRows(stHeader.Render("/journal")+StDim.Render(" · ")+entryCount(len(v.items)), w)
 }
 
 func (v *journalView) page() pageDoc {
@@ -45,7 +52,7 @@ func (v *journalView) page() pageDoc {
 	if len(nodes) == 0 {
 		nodes = append(nodes, pageNode{body: "The journal is empty. Each fold adds an entry, /worklog write adds its account, and n (/journal now) writes one."})
 	}
-	return pageDoc{title: textfmt.Plural(len(v.items), "entry"), nodes: nodes}
+	return pageDoc{title: entryCount(len(v.items)), nodes: nodes}
 }
 
 func (v *journalView) hint() string {
