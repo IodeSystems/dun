@@ -1065,6 +1065,47 @@ limited." `internal/harness/autoturn.go` unless named; docs/attention.md,
   quiet with `PeerReply.Unwoken` saying why. Chosen literally: the reply
   itself is quiet, so A reads B's answer at its next turn.
 
+## Continue when the network returns (USER 2026-11-18)
+
+A laptop loses and regains network while dun works. Before, a provider
+outage past the retry budget (request scope 5m, then the turn scope,
+retry.go) ended the turn, and nothing ran again when the network came
+back. `internal/harness/netwait.go`.
+
+- **Only a network fault.** `NetworkDown`: refused, reset, DNS failure,
+  timeout, no route, network down, the client's "of transport failures"
+  give-up. Not a 4xx, a 402 budget, a 429, a 5xx or "no backend" (the
+  provider answered), not the turn's own deadline, not a model error.
+  Classified on the turn's final error, not on a `giveup` note: with
+  `DUN_TURN_RETRY_BUDGET=0` the turn ends with no note.
+- **Only with an ask open** (todo or doing), only where asks are kept
+  (`asksOn`) and with `Endpoint.URL` to probe.
+- **The probe** is an HTTP GET of `<base>/v1/models` (5 s timeout): any
+  response, a 401 included, is the network back. No tokens. Through
+  `http.DefaultClient`, so a proxy from the environment is used. Backoff
+  5 s doubling to 60 s. No OS network-change hint: not portable cheaply.
+- **One continue per give-up**: a notification `[automatic] the network
+  was down from 14:02 to 14:19; continue: <ask title>` (asks joined by
+  `; `) and a wake. It is ask work: the automatic-turn budget allows it.
+  "Down from" is the first transport or interrupted retry note since the
+  last success (the request's own elapsed time subtracted), else the
+  give-up. A resumed turn that fails the same way waits again.
+- **Cap**: 12 resumes per ask in a rolling 24 hours. With every open ask at
+  the cap the wait does not start; a turn-scope `giveup` retry note says
+  so ("send a message to continue").
+- **Cancelled** by the person's message (`AskAs`, or a `Continue` the
+  person's queued message makes theirs) and by any turn that succeeds.
+- **Persisted** in `<session>.netwait.json` (waiting, since, resume
+  times): a restarted engine with the flag and an ask still open waits
+  again (end of `Start`). dund's restart does not touch the wait: the
+  engine runs on (engine adoption).
+- **Shown** as turn_state `net_wait {since, next}` (Unix ms), kept across
+  the turn's edges like `notes_waiting`; TUI idle status `waiting for
+  network · since 14:02 · next try 30s`, web/app header the same, `dun ps`
+  row `(waiting for network since 14:02)` (ProcSession `net_wait_since`).
+- `/retry` settings still apply: an unbounded budget never gives up, so
+  this path is not reached.
+
 ## Release updates
 
 - **para shares dun's signing key (Carl, 2026-11-10); manifests are bound to

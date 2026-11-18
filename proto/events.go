@@ -834,6 +834,17 @@ type TurnState struct {
 	// autoturn.go). The person's next message reads them. Clients show
 	// "idle: N notes waiting".
 	NotesWaiting int `json:"notes_waiting,omitempty"`
+	// NetWait: a turn ended on a network fault with an ask open, and the
+	// engine waits for the network to continue it (harness netwait.go).
+	// Clients show "waiting for network · since 14:02 · next try 30s".
+	NetWait *NetWait `json:"net_wait,omitempty"`
+}
+
+// NetWait is the wait for the network: since when it is down and when the
+// next probe is (Unix ms). The person's message ends it.
+type NetWait struct {
+	Since int64 `json:"since"`
+	Next  int64 `json:"next"`
 }
 
 // The phases of a TurnState.

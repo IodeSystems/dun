@@ -115,6 +115,8 @@ export type Turn = {
   queued: { id: string; text: string }[];
   /** News that came while idle and started no turn (no ask open, the hour's automatic turns used). */
   notes?: number;
+  /** Waiting for the network to continue an ask (dun harness netwait.go): since and next probe, ms. */
+  net?: { since: number; next: number };
 };
 
 export type AgentView = { id: number; prompt: string; loaded: boolean; view: View };
@@ -263,6 +265,8 @@ function applyTurnState(v: View, ev: Ev): View {
     queued,
     notes: Number(ev.notes_waiting ?? 0),
   };
+  const nw = (ev.net_wait ?? null) as Ev | null;
+  if (nw) turn.net = { since: Number(nw.since ?? 0), next: Number(nw.next ?? 0) };
   const status =
     phase === 'interrupting'
       ? 'interrupting…'

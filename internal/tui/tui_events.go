@@ -1029,6 +1029,9 @@ func (m tuiModel) queuedHint() string {
 // and started no turn (no ask open, the hour's automatic turns used; harness
 // autoturn.go). The next message reads it.
 func (m tuiModel) readyWord() string {
+	if !m.netSince.IsZero() {
+		return netWaitWord(m.netSince, m.netNext, time.Now())
+	}
 	switch m.notesWaiting {
 	case 0:
 		return "ready"
@@ -1036,6 +1039,19 @@ func (m tuiModel) readyWord() string {
 		return "idle: 1 note waiting"
 	}
 	return fmt.Sprintf("idle: %d notes waiting", m.notesWaiting)
+}
+
+// netWaitWord is the idle status while the engine waits for the network
+// to continue an ask (harness netwait.go): "waiting for network · since
+// 14:02 · next try 30s". The spinner's tick redraws the countdown.
+func netWaitWord(since, next, now time.Time) string {
+	s := "waiting for network · since " + since.Local().Format("15:04")
+	if left := next.Sub(now).Round(time.Second); left > 0 {
+		s += " · next try " + left.String()
+	} else {
+		s += " · trying now"
+	}
+	return s
 }
 
 // exitHint is the status-bar exit prompt — "/exit to exit" when ctrl+c is

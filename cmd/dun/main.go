@@ -769,6 +769,7 @@ func main() {
 	if *prog {
 		em = &emitter{}
 		em.turn = newTurnTracker(em, func() *harness.Harness { h, _ := started.Load().(*harness.Harness); return h })
+		cfg.OnNetWait = em.turn.netWaitChanged
 		in = newInputStream()
 		if link != nil {
 			em.w = link
@@ -1027,6 +1028,9 @@ func main() {
 	if h != nil {
 		started.Store(h)
 		enginecmd.EngineHarness.Store(h)
+		if em != nil {
+			em.turn.netWaitChanged() // a wait resumed in Start, before h was known
+		}
 		// The budget's two marks (turnclock.go): tell the model, then cut.
 		budgetHooks.Store(&budgetMarks{
 			spent: func(budget, grace time.Duration) {

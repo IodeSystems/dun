@@ -70,6 +70,7 @@ func (t *turnTracker) change(queue bool, f func(*proto.TurnState)) {
 		if h := t.h(); h != nil {
 			t.st.Queued = queuedProto(h.QueuedUser())
 			t.st.NotesWaiting = h.NotesWaiting()
+			t.st.NetWait = netWaitProto(h.NetWait())
 		}
 	}
 	if turnStateEqual(before, t.st) {
@@ -94,6 +95,28 @@ func affectsTurn(payload any) (queue, ok bool) {
 	return false, false
 }
 
+// netWaitChanged sends the state again: the wait for the network started,
+// moved its next probe, or ended (harness OnNetWait).
+func (t *turnTracker) netWaitChanged() {
+	if t != nil {
+		t.change(true, func(*proto.TurnState) {})
+	}
+}
+
+func netWaitProto(w harness.NetWaitInfo) *proto.NetWait {
+	if !w.Waiting() {
+		return nil
+	}
+	return &proto.NetWait{Since: w.Since.UnixMilli(), Next: w.Next.UnixMilli()}
+}
+
+func netWaitEqual(a, b *proto.NetWait) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
 func queuedProto(qs []harness.QueuedMsg) []proto.QueuedMsg {
 	out := make([]proto.QueuedMsg, 0, len(qs))
 	for _, q := range qs {
@@ -112,7 +135,7 @@ func cloneTurnState(s proto.TurnState) proto.TurnState {
 func turnStateEqual(a, b proto.TurnState) bool {
 	if a.Phase != b.Phase || a.Since != b.Since || a.Tool != b.Tool || a.CallID != b.CallID ||
 		a.Ask != b.Ask || a.Mount != b.Mount || a.Retry != b.Retry || a.Discard != b.Discard ||
-		a.NotesWaiting != b.NotesWaiting || len(a.Queued) != len(b.Queued) {
+		a.NotesWaiting != b.NotesWaiting || !netWaitEqual(a.NetWait, b.NetWait) || len(a.Queued) != len(b.Queued) {
 		return false
 	}
 	for i := range a.Queued {

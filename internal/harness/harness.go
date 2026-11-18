@@ -271,6 +271,9 @@ type Config struct {
 	// wait is invisible: the retries are logged, and a TUI's logs are not on
 	// screen. See RetryNote.
 	OnRetry func(RetryNote)
+	// OnNetWait fires when the wait for the network (netwait.go) starts,
+	// moves its next probe, or ends: NetWait has the state.
+	OnNetWait func()
 	// Peers reaches the other live dun sessions through dund (peers.go). nil
 	// — no dund on the other end of the engine's stdio — leaves dun_list and
 	// dun_msg out of the tool set.
@@ -390,15 +393,16 @@ type Harness struct {
 	rounds     roundStats
 	agents     map[int]*subAgent
 	ownsMgr    bool
-	parent     *Harness    // nil for a root
-	agentID    int         // this harness's id within its parent; 0 for a root
-	self       *subAgent   // this harness's own record IN its parent; nil for a root
-	turnRounds turnRounds  // this turn's tool-call rounds, for the turn limit
-	nudge      planNudge   // this turn's plan nudge (plannudge.go)
-	idle       idleState   // changes since this turn's last check (idlecheck.go)
-	learn      learnState  // resolved churn waiting for its lesson (learn.go)
-	settle     settleState // the delayed end-of-turn report (settle.go)
-	auto       autoState   // turn origins and the automatic-turn budget (autoturn.go)
+	parent     *Harness     // nil for a root
+	agentID    int          // this harness's id within its parent; 0 for a root
+	self       *subAgent    // this harness's own record IN its parent; nil for a root
+	turnRounds turnRounds   // this turn's tool-call rounds, for the turn limit
+	nudge      planNudge    // this turn's plan nudge (plannudge.go)
+	idle       idleState    // changes since this turn's last check (idlecheck.go)
+	learn      learnState   // resolved churn waiting for its lesson (learn.go)
+	settle     settleState  // the delayed end-of-turn report (settle.go)
+	auto       autoState    // turn origins and the automatic-turn budget (autoturn.go)
+	netWait    netWaitState // waiting for the network after a turn gave up (netwait.go)
 	noteMu     sync.Mutex
 	queue      []queued // messages not yet delivered to the model
 	// lifted are the person's messages the next stored tool result carries
@@ -812,7 +816,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// Carry the client's own retry narration out to the UI. Without this the
 	// waiting is only ever logged, and a TUI's log is not on screen.
 	applyRetryPolicy(cfg.Client)
-	wireRetry(cfg.Client, cfg.OnRetry, h.noteTicket)
+	wireRetry(cfg.Client, h.noteRetry, h.noteTicket)
 
 	// The window is subtracted from all session long: the prompt's budget on
 	// every build, the response's cap on every round. It is ASKED for here and,
@@ -952,6 +956,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// Not on a goroutine: a write landing after the caller closed the session
 	// (a test's temp dir removed) fails its cleanup.
 	h.writeHarnessInfo()
+	h.netWaitResume() // a wait for the network the last engine left on (netwait.go)
 	return h, nil
 }
 
@@ -985,6 +990,7 @@ func (h *Harness) AskAs(ctx context.Context, id, task string) (agent.TurnResult,
 	h.clearBudgetNotes()
 	if person {
 		h.personMsgs.Add(1)
+		h.netWaitCancel() // their message runs; it is not waited on (netwait.go)
 	}
 	st := h.settleBegin(person)
 	h.turnBegin(origin)
@@ -1002,6 +1008,7 @@ func (h *Harness) AskAs(ctx context.Context, id, task string) (agent.TurnResult,
 	h.settleEnd(person, st, err)
 	res, err = h.finishInterrupt(ctx, res, err)
 	h.ledgerEnd(ctx, err)
+	h.netWaitAfter(err)
 	return res, err
 }
 
@@ -1043,6 +1050,7 @@ func (h *Harness) turnThenTriggers(ctx context.Context) (agent.TurnResult, error
 func (h *Harness) Close() {
 	h.markClosed()
 	h.settleClose()
+	h.netWaitClose()
 	h.asksSessionEnd() // the asks still open get their entry (asks.go)
 	h.closeAgents()
 	// A sync of folded history in flight gets a moment, so a one-shot run

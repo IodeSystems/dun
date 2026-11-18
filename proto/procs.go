@@ -91,7 +91,10 @@ type ProcSession struct {
 	Blocked string `json:"blocked,omitempty"`
 	// NotesWaiting: idle, with news that started no turn (no ask open, the
 	// hour's automatic turns used): turn_state's notes_waiting.
-	NotesWaiting int         `json:"notes_waiting,omitempty"`
+	NotesWaiting int `json:"notes_waiting,omitempty"`
+	// NetWaitSince: waiting for the network since then (Unix ms):
+	// turn_state's net_wait.
+	NetWaitSince int64       `json:"net_wait_since,omitempty"`
 	Agents       []ProcAgent `json:"agents,omitempty"`
 	Jobs         []ProcJob   `json:"jobs,omitempty"`
 }

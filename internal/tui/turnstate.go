@@ -25,6 +25,10 @@ func (m tuiModel) applyTurnState(ev evMsg) tuiModel {
 	queued, _ := ev["queued"].([]any)
 	m.queuedMsgs = len(queued)
 	m.notesWaiting = int(evNum(ev["notes_waiting"]))
+	m.netSince, m.netNext = time.Time{}, time.Time{}
+	if w, ok := ev["net_wait"].(map[string]any); ok {
+		m.netSince, m.netNext = time.UnixMilli(int64(evNum(w["since"]))), time.UnixMilli(int64(evNum(w["next"])))
+	}
 	m.reconcileQueued(queued)
 	// The question: a client that arrived after it was asked (a snapshot
 	// past the replay window) opens it from here; one still showing a
