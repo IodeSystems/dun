@@ -213,15 +213,37 @@ const anyRootMarker = "a root outside --allow is admitted"
 // rebuilt binary is asked again, an unchanged one is not.
 var indexProbes sync.Map // key → IndexSupport
 
-// indexProbeTimeout bounds the `mcp --help` IndexProtocol runs.
+// indexProbeTimeout bounds each help run of mcpHelp.
 const indexProbeTimeout = 5 * time.Second
+
+// mcpHelp is the help text of `bin mcp`, rare flags too: v0.5.3 lists
+// --index-budget and --index-anyway only under --help-all, so that is asked
+// first. A build with no --help-all refuses the flag, and --help is the
+// text. A read: LSP_REBUILD_DONE stops a dev build's self-update.
+func mcpHelp(bin string) (string, error) {
+	var out []byte
+	var runErr error
+	for _, flag := range []string{"--help-all", "--help"} {
+		ctx, cancel := context.WithTimeout(context.Background(), indexProbeTimeout)
+		cmd := exec.CommandContext(ctx, bin, "mcp", flag)
+		cmd.Env = append(os.Environ(), "LSP_REBUILD_DONE=1")
+		out, runErr = cmd.CombinedOutput()
+		cancel()
+		if runErr == nil && len(out) > 0 {
+			return string(out), nil
+		}
+	}
+	if len(out) == 0 && runErr != nil {
+		return "", fmt.Errorf("%s mcp --help: %w", bin, runErr)
+	}
+	return string(out), nil
+}
 
 // IndexProtocol reports what the poly-lsp-mcp named by command (a path, or a
 // name looked up on PATH) takes of the index protocol: its initialize
 // answers before the index is built, the build's end is a notification, and
-// it takes --exclude; with Budget, --index-budget too. It runs `<command>
-// mcp --help` — a read: LSP_REBUILD_DONE stops a dev build's self-update —
-// and looks for --index-budget, or the intermediate build's
+// it takes --exclude; with Budget, --index-budget too. It reads `<command>
+// mcp --help-all`, else `--help` (mcpHelp), and looks for --index-budget, or the intermediate build's
 // --index-max-files. resolved is the binary that was asked.
 func IndexProtocol(command string) (sup IndexSupport, resolved string, err error) {
 	resolved, err = exec.LookPath(command)
@@ -239,15 +261,10 @@ func IndexProtocol(command string) (sup IndexSupport, resolved string, err error
 	if v, hit := indexProbes.Load(key); hit {
 		return v.(IndexSupport), resolved, nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), indexProbeTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, resolved, "mcp", "--help")
-	cmd.Env = append(os.Environ(), "LSP_REBUILD_DONE=1")
-	out, runErr := cmd.CombinedOutput()
-	if len(out) == 0 && runErr != nil {
-		return sup, resolved, fmt.Errorf("%s mcp --help: %w", resolved, runErr)
+	help, err := mcpHelp(resolved)
+	if err != nil {
+		return sup, resolved, err
 	}
-	help := string(out)
 	sup.Budget = strings.Contains(help, "--index-budget")
 	sup.Anyway = strings.Contains(help, "--index-anyway")
 	sup.Daemon = strings.Contains(help, daemonMarker)

@@ -290,6 +290,26 @@ func TestIndex_OldBinary(t *testing.T) {
 	}
 }
 
+// v0.5.3 lists --index-budget and --index-anyway under `mcp --help-all`
+// only; an older build has no --help-all and its --help lists them.
+func TestIndexProtocol_ReadsHelpAll(t *testing.T) {
+	both := []string{fakeIndexEnv + "=budget", fakeAnywayEnv + "=1"}
+	for name, c := range map[string]struct {
+		env  []string
+		want bool
+	}{
+		"only in --help-all":    {append([]string{fakeHelpAllEnv + "=1"}, both...), true},
+		"older: --help only":    {append([]string{fakeNoHelpAllEnv + "=1"}, both...), true},
+		"older, no index flags": {[]string{fakeNoHelpAllEnv + "=1"}, false},
+	} {
+		lsp, _ := fakeBin(t, "poly-lsp-mcp", "poly-lsp", c.env...)
+		sup, _, err := IndexProtocol(lsp)
+		if err != nil || sup.Budget != c.want || sup.Protocol != c.want || sup.Anyway != c.want {
+			t.Errorf("%s: %+v %v", name, sup, err)
+		}
+	}
+}
+
 // While it builds, a running server says indexing.
 func TestIndex_BuildingState(t *testing.T) {
 	h := &Harness{}
