@@ -905,8 +905,10 @@ var execGraceMax = 5 * time.Minute
 // execToolDef is the tool the model calls to run commands.
 //
 // person says whether someone may write while a command runs: not a
-// sub-agent, a --non-interactive run or an MCP worker.
-func execToolDef(person bool) llm.ToolDef {
+// sub-agent, a --non-interactive run or an MCP worker. b is the backend the
+// commands run in: its start dir is named (execWhere). The tool set is rebuilt
+// when the backend changes (Rehoist), so the named dir follows a worktree.
+func execToolDef(person bool, b ExecBackend) llm.ToolDef {
 	var td llm.ToolDef
 	td.Type = "function"
 	td.Function.Name = "exec"
@@ -914,8 +916,7 @@ func execToolDef(person bool) llm.ToolDef {
 	if person {
 		waitNote = "If the user writes while you wait, it becomes a job at once and their message is in the result. The same happens when"
 	}
-	td.Function.Description = "Run a shell command (build, test, git, …) in the project root. Each call starts " +
-		"there; a variable you `export` persists into the next call. Returns stdout and stderr together; a " +
+	td.Function.Description = "Run a shell command (build, test, git, …). " + execWhere(b) + " Returns stdout and stderr together; a " +
 		"non-zero exit is shown as [exit: …].\n" +
 		"A command still running after `timeout` (30s) is not killed: it becomes background job #N and you " +
 		"are notified when it finishes: do not sleep or poll for it. " + waitNote +
@@ -931,6 +932,25 @@ func execToolDef(person bool) llm.ToolDef {
 		"required": []string{"command"},
 	}
 	return td
+}
+
+// execWhere is the description's sentence on where a command starts and what
+// carries over. Only the persistent shell keeps an `export`: HostExec and
+// DockerExec start a fresh process (a fresh container) per call.
+func execWhere(b ExecBackend) string {
+	dir := execStartDir(b)
+	if dir == "" {
+		dir = "the project root"
+	}
+	s := "Each call starts in " + dir + " and a `cd` does not carry over to the next call: do not prefix " +
+		"`cd` to that dir; for a subdirectory, use `cd sub && …`."
+	if _, ok := b.(DockerExec); ok {
+		return s
+	}
+	if _, ok := b.(HostExec); ok {
+		return s
+	}
+	return s + " A variable you `export` persists into the next call."
 }
 
 // withExec wraps a dispatcher so the built-in "exec" tool is handled locally.

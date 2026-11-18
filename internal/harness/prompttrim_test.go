@@ -113,10 +113,10 @@ func TestChild_PromptAndTools(t *testing.T) {
 }
 
 func TestExecToolDef_PersonNote(t *testing.T) {
-	if d := execToolDef(true).Function.Description; !strings.Contains(d, "If the user writes while you wait") {
+	if d := execToolDef(true, nil).Function.Description; !strings.Contains(d, "If the user writes while you wait") {
 		t.Errorf("with a person: %s", d)
 	}
-	d := execToolDef(false).Function.Description
+	d := execToolDef(false, nil).Function.Description
 	if strings.Contains(d, "user") || !strings.Contains(d, "do not sleep or poll") || !strings.Contains(d, "sub-agent finishes while you wait") {
 		t.Errorf("without a person: %s", d)
 	}
