@@ -780,6 +780,12 @@ func continueTurn(ctx context.Context, h *harness.Harness, em *emitter) bool {
 	turnActive.Store(true)
 	res, err := h.Continue(tctx)
 	turnActive.Store(false)
+	if errors.Is(err, harness.ErrTurnHeld) {
+		// No ask open, the hour's automatic turns used: the news is a note
+		// (turn_state's notes_waiting), and no turn ran.
+		em.emit(&proto.Done{Reason: "held"})
+		return true
+	}
 	// turnErr first: a budget cut arrives as an interrupt, and is an error.
 	err = turnErr(tctx, err)
 	if errors.Is(err, harness.ErrInterrupted) {
@@ -958,6 +964,10 @@ func turn(ctx context.Context, h *harness.Harness, em *emitter, task string, img
 
 // endTurn reports how a user turn ended (see turn).
 func endTurn(ctx, tctx context.Context, h *harness.Harness, em *emitter, res agent.TurnResult, err error) bool {
+	if errors.Is(err, harness.ErrTurnHeld) { // an automatic message, held (continueTurn)
+		em.emit(&proto.Done{Reason: "held"})
+		return true
+	}
 	// turnErr first: a budget cut arrives as an interrupt, and is an error.
 	err = turnErr(tctx, err)
 	if errors.Is(err, harness.ErrInterrupted) {

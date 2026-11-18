@@ -69,6 +69,7 @@ func (t *turnTracker) change(queue bool, f func(*proto.TurnState)) {
 	if queue && t.h != nil {
 		if h := t.h(); h != nil {
 			t.st.Queued = queuedProto(h.QueuedUser())
+			t.st.NotesWaiting = h.NotesWaiting()
 		}
 	}
 	if turnStateEqual(before, t.st) {
@@ -111,7 +112,7 @@ func cloneTurnState(s proto.TurnState) proto.TurnState {
 func turnStateEqual(a, b proto.TurnState) bool {
 	if a.Phase != b.Phase || a.Since != b.Since || a.Tool != b.Tool || a.CallID != b.CallID ||
 		a.Ask != b.Ask || a.Mount != b.Mount || a.Retry != b.Retry || a.Discard != b.Discard ||
-		len(a.Queued) != len(b.Queued) {
+		a.NotesWaiting != b.NotesWaiting || len(a.Queued) != len(b.Queued) {
 		return false
 	}
 	for i := range a.Queued {

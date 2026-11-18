@@ -59,6 +59,9 @@ type queued struct {
 	// tag marks the history entry it becomes, so it can be dropped later
 	// (settle.go).
 	tag string
+	// person: a person wrote it though it is not queuedUser (a `dun msg`
+	// from a shell): the turn it starts is theirs (autoturn.go).
+	person bool
 }
 
 // queuedPolicy is everything the drains need to know about a kind.
@@ -147,8 +150,11 @@ func (h *Harness) Say(text string) { h.SayAs(NewMessageID(), text) }
 // SayAs is Say for a message whose id the caller gave out already (the user
 // event's): delivered and withdrawn name it.
 func (h *Harness) SayAs(id, text string) {
-	h.settleCancel() // the user answered: no settle (settle.go)
-	h.personMsgs.Add(1)
+	if PersonText(text) {
+		h.settleCancel() // the user answered: no settle (settle.go)
+		h.personMsgs.Add(1)
+		h.autoPersonReset() // the automatic-turn budget (autoturn.go)
+	}
 	h.workInput(text)
 	// A message typed mid-turn is its own ask; the open one stays open. The
 	// board is queued again, so the model reads the new node with the message.

@@ -225,7 +225,7 @@ func peerIn(link *peerLink, h *harness.Harness, em *emitter) func(typ string, li
 			if m.Human && m.Wake && wakeHold.Load() {
 				wakePass.Store(true) // a person's message starts now, held or not
 			}
-			h.PeerMessage(m.From, m.FromName, m.Text, m.Wake)
+			h.PeerMessageAs(m.From, m.FromName, m.Text, m.Wake, m.Human)
 		case "service_notice":
 			// dund about the service itself: an upgrade to wrap up for, or done.
 			var n proto.ServiceNotice

@@ -59,6 +59,7 @@ func (s *Service) Procs(principal string) *proto.ProcsList {
 		}
 		ses.actMu.Lock()
 		ps.Worktree = ses.worktree
+		ps.NotesWaiting = ses.notes
 		ps.Agents = append(ps.Agents, ses.agentDirs...)
 		for _, j := range ses.jobs {
 			ps.Jobs = append(ps.Jobs, proto.ProcJob{ID: j.ID, Command: j.Command, PGID: j.PGID})

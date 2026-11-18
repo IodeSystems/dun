@@ -113,6 +113,8 @@ export type Turn = {
   /** The provider wait's line, '' when none. */
   retry: string;
   queued: { id: string; text: string }[];
+  /** News that came while idle and started no turn (no ask open, the hour's automatic turns used). */
+  notes?: number;
 };
 
 export type AgentView = { id: number; prompt: string; loaded: boolean; view: View };
@@ -254,7 +256,13 @@ function applyTurnState(v: View, ev: Ev): View {
     id: str(q.id),
     text: str(q.text),
   }));
-  const turn: Turn = { phase, since: Number(ev.since ?? 0), retry: r ? str(r.text) || 'retrying…' : '', queued };
+  const turn: Turn = {
+    phase,
+    since: Number(ev.since ?? 0),
+    retry: r ? str(r.text) || 'retrying…' : '',
+    queued,
+    notes: Number(ev.notes_waiting ?? 0),
+  };
   const status =
     phase === 'interrupting'
       ? 'interrupting…'

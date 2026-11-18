@@ -88,9 +88,12 @@ type ProcSession struct {
 	// Blocked: EnginePID is an engine from before dund's restart that was
 	// not adopted and may still run; the session starts no engine until it
 	// is gone. Why it was not adopted.
-	Blocked string      `json:"blocked,omitempty"`
-	Agents  []ProcAgent `json:"agents,omitempty"`
-	Jobs    []ProcJob   `json:"jobs,omitempty"`
+	Blocked string `json:"blocked,omitempty"`
+	// NotesWaiting: idle, with news that started no turn (no ask open, the
+	// hour's automatic turns used): turn_state's notes_waiting.
+	NotesWaiting int         `json:"notes_waiting,omitempty"`
+	Agents       []ProcAgent `json:"agents,omitempty"`
+	Jobs         []ProcJob   `json:"jobs,omitempty"`
 }
 
 // ProcAgent is a live sub-agent that works in a tree of its own.

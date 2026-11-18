@@ -666,7 +666,7 @@ func (m tuiModel) drawView() string {
 		}
 		// Four hints at most: the rest are in /help. The way out is never
 		// the one a narrow row drops (fitHints).
-		status = m.spendStatus(time.Now()) + StDim.Render("ready"+m.serversStartingTail()+"  ·  "+m.composeHint()+m.exitHint())
+		status = m.spendStatus(time.Now()) + StDim.Render(m.readyWord()+m.serversStartingTail()+"  ·  "+m.composeHint()+m.exitHint())
 	}
 	// The header row shows the off-screen user message when scrolled up, or the
 	// normal dun title bar when at the bottom — convoHeight() budgeted for it.

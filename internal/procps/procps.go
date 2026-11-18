@@ -210,6 +210,9 @@ func (a *attributor) walkSession(s proto.ProcSession) {
 	if s.Blocked != "" {
 		label += " (not adopted after dund's restart: " + s.Blocked + "; kill it to go on)"
 	}
+	if s.NotesWaiting > 0 {
+		label += " (idle: " + strconv.Itoa(s.NotesWaiting) + " notes waiting)"
+	}
 	jobs := map[int]proto.ProcJob{}
 	for _, j := range s.Jobs {
 		if j.PGID != 0 {

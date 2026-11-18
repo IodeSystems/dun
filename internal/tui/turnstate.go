@@ -24,6 +24,7 @@ func (m tuiModel) applyTurnState(ev evMsg) tuiModel {
 	}
 	queued, _ := ev["queued"].([]any)
 	m.queuedMsgs = len(queued)
+	m.notesWaiting = int(evNum(ev["notes_waiting"]))
 	m.reconcileQueued(queued)
 	// The question: a client that arrived after it was asked (a snapshot
 	// past the replay window) opens it from here; one still showing a

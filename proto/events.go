@@ -123,8 +123,9 @@ type ToolResult struct {
 	Agent int `json:"agent,omitempty"`
 }
 
-// Done ends a turn. Reason is empty for a turn that finished, and
-// "interrupted" for one the user stopped (see Interrupt). Detail, on an
+// Done ends a turn. Reason is empty for a turn that finished,
+// "interrupted" for one the user stopped (see Interrupt), and "held" for an
+// automatic one that did not start (turn_state's notes_waiting). Detail, on an
 // interrupted turn, lists the jobs it started that are still running and how
 // to stop them ("still running: #3 go test ./... (2m) — /jobs kill 3 …").
 type Done struct {
@@ -828,6 +829,11 @@ type TurnState struct {
 	Discard bool        `json:"discard,omitempty"`
 	Tool    string      `json:"tool,omitempty"`
 	CallID  string      `json:"call_id,omitempty"`
+	// NotesWaiting is the news that came while idle and started no turn:
+	// no ask was open and the hour's automatic turns were used (harness
+	// autoturn.go). The person's next message reads them. Clients show
+	// "idle: N notes waiting".
+	NotesWaiting int `json:"notes_waiting,omitempty"`
 }
 
 // The phases of a TurnState.

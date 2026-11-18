@@ -31,8 +31,10 @@ import (
 // only the main agent, only interactive.
 //
 // Rules the code keeps:
-//   - Only a user turn (Ask) arms. The settle turn is a Continue, so it can
-//     never arm another: once per user message, by construction.
+//   - Only the person's turn (Ask with their message; not a [scheduled],
+//     [loop] or [automatic] one: USER 2026-11-18) arms. The settle turn is
+//     a Continue, so it can never arm another: once per user message, by
+//     construction.
 //   - The timer never starts a turn on top of a running one. If it runs out
 //     during a turn (a job's wake turn), it starts again: the turn that ends
 //     is when the person could first have read, so the delay is counted anew.

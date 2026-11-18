@@ -391,6 +391,7 @@ type Harness struct {
 	idle       idleState   // changes since this turn's last check (idlecheck.go)
 	learn      learnState  // resolved churn waiting for its lesson (learn.go)
 	settle     settleState // the delayed end-of-turn report (settle.go)
+	auto       autoState   // turn origins and the automatic-turn budget (autoturn.go)
 	noteMu     sync.Mutex
 	queue      []queued // messages not yet delivered to the model
 	// lifted are the person's messages the next stored tool result carries
@@ -961,11 +962,25 @@ func (h *Harness) Ask(ctx context.Context, task string) (agent.TurnResult, error
 // AskAs is Ask for a message whose id the caller gave out already (the user
 // event's): the entry it becomes keeps it, so history names it the same.
 func (h *Harness) AskAs(ctx context.Context, id, task string) (agent.TurnResult, error) {
+	// A message dun or dund sent in the person's place ("[automatic] …")
+	// is an automatic turn: under the budget (autoturn.go). Held, it is a
+	// note for the next turn. A [loop] or [scheduled] firing is the
+	// person's earlier word: never held, but no ask and no settle.
+	origin := textOrigin(task)
+	if origin == originAuto && !h.autoAllow() {
+		h.store.appendSilent(agent.Entry{ID: id, Kind: agent.KindNotification, Content: task, CreatedAt: time.Now().UnixNano()})
+		h.autoHold(1)
+		return agent.TurnResult{}, ErrTurnHeld
+	}
+	person := origin == originPerson
 	ctx, end := h.interruptible(ctx)
 	defer end()
 	h.clearBudgetNotes()
-	h.personMsgs.Add(1)
-	h.settleBegin(true)
+	if person {
+		h.personMsgs.Add(1)
+	}
+	st := h.settleBegin(person)
+	h.turnBegin(origin)
 	h.planAutoArchive(ctx)
 	// Before prepareTurn: the turn's plan mark (suggestdone.go) and its
 	// plan line include the ask.
@@ -977,7 +992,7 @@ func (h *Harness) AskAs(ctx context.Context, id, task string) (agent.TurnResult,
 		ID: id, Kind: agent.KindUser, Content: task, CreatedAt: time.Now().UnixNano(),
 	})
 	res, err := h.turnThenTriggers(ctx)
-	h.settleEnd(true, false, err)
+	h.settleEnd(person, st, err)
 	res, err = h.finishInterrupt(ctx, res, err)
 	h.ledgerEnd(ctx, err)
 	return res, err

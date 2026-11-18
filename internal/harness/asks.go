@@ -151,11 +151,9 @@ func (h *Harness) asksSaveLocked() {
 // autoTag is a message dun or dund sent in the person's place.
 var autoTag = regexp.MustCompile(`^\[[a-z][a-z0-9/_ .-]*\]`)
 
-// personAsk reports whether text is a message the person typed.
-func personAsk(text string) bool {
-	t := strings.TrimSpace(text)
-	return t != "" && !autoTag.MatchString(t)
-}
+// personAsk reports whether text is a message the person typed (a [loop]
+// or [scheduled] firing is not an ask: USER 2026-11-18).
+func personAsk(text string) bool { return PersonText(text) }
 
 func interruptedErr(err error) bool { return errors.Is(err, ErrInterrupted) }
 

@@ -448,6 +448,7 @@ type tuiModel struct {
 	retryDue          time.Time // when the next attempt is due, for the countdown
 	retrySeen         int       // retries this outage; the first one also lands in scrollback
 	queuedMsgs        int       // messages typed mid-turn, buffered for the running turn
+	notesWaiting      int       // news held while idle, no ask open (turn_state's notes_waiting)
 	w, h              int
 	fatalErr          string
 	scrollPinned      bool // true when viewport should auto-follow (at bottom)

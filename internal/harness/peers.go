@@ -171,12 +171,23 @@ func PeerLabel(fromID, fromName, text string) string {
 // channel alone, and a lifted message travels in a tool result, after the
 // question's own.
 func (h *Harness) PeerMessage(fromID, fromName, text string, wake bool) {
+	h.PeerMessageAs(fromID, fromName, text, wake, false)
+}
+
+// PeerMessageAs is PeerMessage with whether a person sent it (`dun msg`
+// from a shell: proto.PeerMsg.Human). A person's wakes the session as the
+// person's own message does: its turn is not an automatic one
+// (autoturn.go).
+func (h *Harness) PeerMessageAs(fromID, fromName, text string, wake, human bool) {
 	kind := queuedPeer
 	if !wake {
 		kind = queuedPeerQuiet
 	}
+	if human && wake {
+		h.autoPersonReset()
+	}
 	h.noteMu.Lock()
-	h.queue = append(h.queue, queued{kind: kind, text: PeerLabel(fromID, fromName, text)})
+	h.queue = append(h.queue, queued{kind: kind, text: PeerLabel(fromID, fromName, text), person: human && wake})
 	if wake && h.userWaitCh != nil {
 		close(h.userWaitCh)
 		h.userWaitCh = nil

@@ -152,6 +152,12 @@ func (h *Harness) Continue(ctx context.Context) (agent.TurnResult, error) {
 	ctx, end := h.interruptible(ctx)
 	defer end()
 	h.clearBudgetNotes()
+	// The person's message typed mid-turn makes this their turn; anything
+	// else is automatic (autoturn.go). Read before prepareTurn flushes it.
+	origin := originAuto
+	if h.queuedPerson() {
+		origin = originPerson
+	}
 	st := h.settleBegin(false)
 	// Publish anything a tool result did not already carry (and pair off any
 	// interrupted tool call), so the turn below has it — and so several jobs
@@ -164,6 +170,14 @@ func (h *Harness) Continue(ctx context.Context) (agent.TurnResult, error) {
 		h.settleEnd(false, st, nil)
 		return agent.TurnResult{}, nil
 	}
+	// No ask open and the hour's automatic turns used: what came is in the
+	// conversation now, as notes the next turn reads; no turn runs for it.
+	if origin == originAuto && !h.autoAllow() {
+		h.holdPending()
+		h.settleEnd(false, st, ErrTurnHeld)
+		return agent.TurnResult{}, ErrTurnHeld
+	}
+	h.turnBegin(origin)
 	h.ledgerBegin()
 	res, err := h.turnThenTriggers(ctx)
 	h.settleEnd(false, st, err)

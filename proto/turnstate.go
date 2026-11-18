@@ -6,7 +6,7 @@ import "time"
 // rule (cmd/dun turnstate.go), here so a test can play the engine. The queue
 // is the harness's and is not touched.
 func StepTurnState(st *TurnState, payload any, now time.Time) {
-	idle := func() { *st = TurnState{Phase: PhaseIdle, Queued: st.Queued} }
+	idle := func() { *st = TurnState{Phase: PhaseIdle, Queued: st.Queued, NotesWaiting: st.NotesWaiting} }
 	working := func() {
 		if st.Phase == PhaseIdle {
 			st.Since = now.UnixMilli()

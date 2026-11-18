@@ -129,6 +129,11 @@ type session struct {
 	worktree string
 	branch   string
 	lastUser string
+	// personSeq counts the messages the person typed (user echoes that are
+	// not dun's or dund's own, harness.PersonText): a peer ping-pong ends at
+	// one (peer.go). notes is turn_state's notes_waiting, for dun ps.
+	personSeq uint64
+	notes     int
 
 	// Engine adoption (adopt.go, docs/engine-adoption.md), under actMu.
 	// stale: this engine was adopted and is to move to a new engine at its
@@ -157,6 +162,7 @@ func (s *session) track(ev proto.Event) {
 	case *proto.TurnState:
 		s.turnStated = true
 		s.inTurn = p.Phase != proto.PhaseIdle
+		s.notes = p.NotesWaiting
 		s.asking = p.Ask != nil || p.Mount != nil
 		s.ask = nil
 		if p.Ask != nil {

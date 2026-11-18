@@ -16,11 +16,19 @@ export type TurnState = {
   tool: string;
   interrupting: boolean;
   retry: string;
+  /** turn_state's notes_waiting: news held while idle (dun harness autoturn.go). */
+  notes: number;
 };
 
 export function turnState(v: View): TurnState {
   const t = v.turn;
-  const base = { since: t?.since ?? 0, tool: v.bg.activeTool, interrupting: false, retry: t?.retry ?? '' };
+  const base = {
+    since: t?.since ?? 0,
+    tool: v.bg.activeTool,
+    interrupting: false,
+    retry: t?.retry ?? '',
+    notes: t?.notes ?? 0,
+  };
   switch (t?.phase) {
     case 'waiting_answer':
       return { ...base, state: 'ask' };
@@ -56,6 +64,8 @@ export function statusText(t: TurnState, now: number): string {
       if (t.interrupting) return 'interrupting…' + elapsed(t.since, now);
       return 'working…' + (t.tool ? ' ' + t.tool : '') + elapsed(t.since, now);
   }
+  if (t.notes === 1) return 'idle: 1 note waiting';
+  if (t.notes > 1) return `idle: ${t.notes} notes waiting`;
   return 'ready';
 }
 

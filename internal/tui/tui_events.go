@@ -1025,6 +1025,19 @@ func (m tuiModel) queuedHint() string {
 	return fmt.Sprintf(" (%d messages queued for this turn)", m.queuedMsgs)
 }
 
+// readyWord is the idle status: "ready", or the news that came while idle
+// and started no turn (no ask open, the hour's automatic turns used; harness
+// autoturn.go). The next message reads it.
+func (m tuiModel) readyWord() string {
+	switch m.notesWaiting {
+	case 0:
+		return "ready"
+	case 1:
+		return "idle: 1 note waiting"
+	}
+	return fmt.Sprintf("idle: %d notes waiting", m.notesWaiting)
+}
+
 // exitHint is the status-bar exit prompt — "/exit to exit" when ctrl+c is
 // disabled (--disable-exit), else the usual "ctrl+c quit".
 func (m tuiModel) exitHint() string {
