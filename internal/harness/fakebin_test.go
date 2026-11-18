@@ -54,6 +54,12 @@ const (
 	// fakeLifecycleEnv makes the fake's `mcp --help` list the child-LSP
 	// lifecycle flags dun passes safe values to (lspsafe.go).
 	fakeLifecycleEnv = "DUN_FAKE_LIFECYCLE"
+	// fakeHelpAllEnv makes the fake like v0.5.3: its rare flags are in
+	// `mcp --help-all` only, and `--help` leaves them out.
+	fakeHelpAllEnv = "DUN_FAKE_HELP_ALL"
+	// fakeNoHelpAllEnv makes the fake an older build: --help-all is an
+	// unknown flag (exit 1).
+	fakeNoHelpAllEnv = "DUN_FAKE_NO_HELP_ALL"
 )
 
 // fakeBin writes dir/name, a wrapper that runs this test binary as persona,
@@ -110,8 +116,15 @@ func fakeBinMain(persona string) {
 		}
 		serveFake(raglitFakeTools)
 	case "poly-lsp":
-		if slices.Contains(args, "--help") {
+		if slices.Contains(args, "--help-all") && os.Getenv(fakeNoHelpAllEnv) != "" {
+			fmt.Println("Error: unknown flag: --help-all")
+			os.Exit(1)
+		}
+		if slices.Contains(args, "--help") || slices.Contains(args, "--help-all") {
 			fmt.Println("Usage:\n  poly-lsp-mcp mcp [flags]\n\nFlags:\n      --root string")
+			if os.Getenv(fakeHelpAllEnv) != "" && !slices.Contains(args, "--help-all") {
+				return
+			}
 			switch mode := os.Getenv(fakeIndexEnv); {
 			case strings.HasPrefix(mode, "limit"): // the interim build
 				fmt.Println("      --exclude stringArray\n      --index-max-files int   (default 100000)")
