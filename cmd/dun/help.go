@@ -26,11 +26,11 @@ var flagGroups = []struct {
 	title string
 	names []string
 }{
-	{"start and sessions", []string{"setup", "continue", "resume", "new", "sessions", "tui", "web-tui", "addr", "p", "version"}},
+	{"start and sessions", []string{"setup", "continue", "resume", "new", "sessions", "tui", "p", "version"}},
 	{"model and provider", []string{"url", "model", "key", "child-model", "child-provider", "child-effort", "timeout", "timeout-grace", "no-suggest", "rephrase", "bare"}},
 	{"workspace and isolation", []string{"workspace", "no-dir", "worktree", "docker", "docker-network", "rag", "lsp", "no-tools", "media"}},
 	{"experimental", []string{"exp-iterm-tabcontrol"}},
-	{"advanced", []string{"engine", "persist", "disable-exit", "replay", "replay-speed", "input-delay", "max-gap"}},
+	{"advanced", []string{"engine", "persist", "disable-exit", "pick", "replay", "replay-speed", "input-delay", "max-gap"}},
 }
 
 // helpStart is the "start:" block: a command and what it does.

@@ -49,6 +49,7 @@ type TuiOpts struct {
 	Worktree                           bool
 	Cont                               bool   // --continue: resume the latest session
 	Resume                             string // --resume <id>: resume a specific session
+	Pick                               bool   // --pick: open the session picker first; choosing resumes, dismissing starts a new session
 	DisableExit                        bool   // --disable-exit: ctrl+c/esc don't quit (use /exit)
 	Suggest                            bool   // --no-suggest=false: engine emits suggestions after each turn
 	// Rag/lsp are --rag/--lsp as typed: "" (unset, use the saved setting),
@@ -105,6 +106,10 @@ func RunTUI(o TuiOpts) error {
 	}
 	m.disableExit = o.DisableExit
 	m.opts = o // for respawning the engine (see eofMsg)
+	if o.Pick {
+		resumeSlash(&m, nil)
+		m.pickAtStart = m.picking // no saved sessions: attach as usual
+	}
 	m.checkUpdates = true
 	// The window and tab marks (tmux.go, iterm.go). Unset at exit, and on a
 	// panic through here by the defer.
@@ -303,6 +308,7 @@ type tuiModel struct {
 	switchNote  string
 	quietReplay bool
 	hintShown   bool
+	pickAtStart bool          // --pick: the picker is open and no session is attached yet
 	disableExit bool          // --disable-exit: ctrl+c/esc don't quit (use /exit)
 	reloadReq   bool          // /reload requested → runTUI re-execs after quit
 	upgrade     *upgradeState // a pending dund upgrade (upgrade.go); nil = none
@@ -490,6 +496,8 @@ func (m tuiModel) Init() tea.Cmd {
 	}
 	if m.proc != nil {
 		cmds = append(cmds, waitEvent(m.proc))
+	} else if m.pickAtStart {
+		// --pick: attach once the picker is answered (updatePicking).
 	} else {
 		// No session yet: attach from here, behind the first frame (runTUI).
 		cmds = append(cmds, restartEngine(m.opts, "", false, resumeAt{}))

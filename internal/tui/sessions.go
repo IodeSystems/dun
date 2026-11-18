@@ -125,6 +125,10 @@ func (m tuiModel) updatePicking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.picking = false
 		m.input.Focus()
 		m.refresh()
+		if m.pickAtStart { // --pick dismissed: a new session in the workspace given
+			m.pickAtStart = false
+			return m, restartEngine(m.opts, "", false, resumeAt{})
+		}
 		return m, nil
 	case "up", "k":
 		if m.pickSel > 0 {
@@ -143,8 +147,11 @@ func (m tuiModel) updatePicking(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.pickSel >= 0 && m.pickSel < len(m.sessions) {
 			id = m.sessions[m.pickSel].ID
 		}
-		m.picking = false
+		m.picking, m.pickAtStart = false, false
 		m.input.Focus()
+		if id == "" && m.proc == nil {
+			return m, restartEngine(m.opts, "", false, resumeAt{})
+		}
 		return m, m.switchSession(id)
 	}
 	return m, nil

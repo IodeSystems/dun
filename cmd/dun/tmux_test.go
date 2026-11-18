@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/iodesystems/dun/internal/webterm"
 )
 
 func TestTmuxCmd(t *testing.T) {
@@ -40,7 +42,7 @@ func TestTmuxCmd(t *testing.T) {
 }
 
 func TestWebEnvDropsTerminal(t *testing.T) {
-	got := webEnv([]string{"PATH=/bin", "TMUX=/tmp/s,1,0", "TMUX_PANE=%1", "TERM_PROGRAM=iTerm.app", "LC_TERMINAL=iTerm2", "HOME=/h"})
+	got := webterm.CleanEnv([]string{"PATH=/bin", "TMUX=/tmp/s,1,0", "TMUX_PANE=%1", "TERM_PROGRAM=iTerm.app", "LC_TERMINAL=iTerm2", "HOME=/h"})
 	if !slices.Equal(got, []string{"PATH=/bin", "HOME=/h"}) {
 		t.Fatalf("%v", got)
 	}

@@ -173,3 +173,15 @@ func TestDashBeforeArgs(t *testing.T) {
 		t.Error("dashBeforeArgs")
 	}
 }
+
+// --web-tui moved into dund: exit 2 with where it went, and --help leaves it out.
+func TestCLI_WebTuiMovedIntoDund(t *testing.T) {
+	_, stderr, code := runDun(t, "", nil, "--web-tui")
+	if code != 2 || !strings.Contains(stderr, "--web-tui moved into dund: dun dund enable web && dun dund enable tui, then open the address it prints") {
+		t.Errorf("exit %d: %s", code, stderr)
+	}
+	_, help, _ := runDun(t, "", nil, "--help-all")
+	if strings.Contains(help, "web-tui") || strings.Contains(help, "--addr") {
+		t.Errorf("help lists the removed flag:\n%s", help)
+	}
+}

@@ -121,3 +121,22 @@ func TestStaleEOF_IsNotACrash(t *testing.T) {
 		t.Error("the live engine's EOF should still be handled")
 	}
 }
+
+// --pick: the picker is open at start, no session is attached until it is
+// answered; esc starts a new session, enter resumes the chosen one.
+func TestPick_OpensPickerAtStart(t *testing.T) {
+	m := pickerModel(t, dun.SessionInfo{ID: "a"}, dun.SessionInfo{ID: "b"})
+	m.pickAtStart = true
+	nm, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = nm.(tuiModel)
+	if m.picking || m.pickAtStart || cmd == nil {
+		t.Errorf("esc should close the picker and attach a new session: picking=%v pickAtStart=%v cmd=%v", m.picking, m.pickAtStart, cmd != nil)
+	}
+	m = pickerModel(t, dun.SessionInfo{ID: "a"}, dun.SessionInfo{ID: "b"})
+	m.pickAtStart = true
+	nm, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = nm.(tuiModel)
+	if m.picking || m.pickAtStart || cmd == nil || m.sessionID != "a" {
+		t.Errorf("enter should resume the selected session: picking=%v session=%q", m.picking, m.sessionID)
+	}
+}

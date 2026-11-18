@@ -74,7 +74,7 @@ func checkDockerFlag(image string) error {
 // removedFlags are flags that no longer do anything. They stay accepted
 // because an older TUI or dund passes them to a newer engine and a script may
 // too; --help does not list them.
-var removedFlags = map[string]bool{"ship": true, "no-ship": true, "pr": true}
+var removedFlags = map[string]bool{"ship": true, "no-ship": true, "pr": true, "web-tui": true, "addr": true}
 
 // warnShipRemoved prints one line to stderr when a removed ship flag was given
 // on a direct command line.
@@ -200,12 +200,10 @@ func main() {
 	// model, not to a person, and no other session reaches it.
 	workerFlag := flag.Bool("worker", false, "with --engine, set by dun_start: a worker for an MCP client. The prompt leaves out the person-facing parts (answer formatting, thinking headings) and the peer and loop tools")
 	tuiFlag := flag.Bool("tui", false, "launch the interactive Bubble Tea UI")
-	// --web-tui: this terminal TUI in a browser tab, byte for byte through a
-	// pty (serveterm.go). Not dund's web app (dund --web-experimental), which is its own
-	// client of the same sessions; this is the passthrough (USER 2026-10-28:
-	// "the web terminal should be --web-tui").
-	serve := flag.Bool("web-tui", false, "the terminal TUI in a browser tab (xterm.js over a pty) at --addr")
-	addr := flag.String("addr", "127.0.0.1:8734", "web-tui: HTTP listen address")
+	// --web-tui moved into dund (/tui); accepted only to say so.
+	serve := flag.Bool("web-tui", false, "moved into dund: dun dund enable web && dun dund enable tui")
+	flag.String("addr", "", "removed with --web-tui")
+	pick := flag.Bool("pick", false, "TUI: start with the session picker open (choose to resume; esc starts a new session)")
 	disableExit := flag.Bool("disable-exit", false, "TUI: ctrl+c / esc don't quit (exit via /exit)")
 	noSuggest := flag.Bool("no-suggest", false, "disable next-message suggestions (on by default)")
 	// A TUI flag: it changes only this client's terminal, so procArgs does
@@ -237,6 +235,10 @@ func main() {
 		os.Exit(completionCmd(os.Args[1:], flag.CommandLine, os.Stdout, os.Stderr))
 	}
 	flag.Parse()
+	if *serve {
+		fmt.Fprintln(os.Stderr, "--web-tui moved into dund: dun dund enable web && dun dund enable tui, then open the address it prints")
+		os.Exit(2)
+	}
 	if *helpAll {
 		writeUsage(os.Stderr, flag.CommandLine, helpWidth(), true)
 		return
@@ -447,16 +449,8 @@ func main() {
 	// made the interactive UI — the thing you want nine times out of ten — the
 	// one mode you had to ask for. `dun -p "task"` runs headless: that is the
 	// scripting path and scripts must not suddenly open a UI.
-	if *tuiFlag || (firstTask == "" && !*prog && !*serve) {
-		if err := tui.RunTUI(tui.TuiOpts{Workspace: absWS, Model: *model, Url: *url, Key: effKey, Docker: resolveDockerImage(*docker), DockerNetwork: *dockerNetwork, Worktree: *worktree, Cont: *cont, Resume: *resume, DisableExit: *disableExit, Suggest: !*noSuggest, Rag: ragFlag.String(), Lsp: lspFlag.String(), Rephrase: *rephrase, Fresh: *fresh, NoDir: *noDir, NoTools: *noTools, ItermTabs: *itermTabs, Flags: modelFlags}); err != nil {
-			fatal(err)
-		}
-		return
-	}
-
-	// Serve mode: the TUI over xterm.js; each browser tab spawns a web session.
-	if *serve {
-		if err := runServe(tui.TuiOpts{Workspace: absWS, Model: *model, Url: *url, Key: effKey, Docker: resolveDockerImage(*docker), DockerNetwork: *dockerNetwork, Worktree: *worktree, Cont: *cont, Resume: *resume, DisableExit: *disableExit, Suggest: !*noSuggest, Rag: ragFlag.String(), Lsp: lspFlag.String(), Rephrase: *rephrase, Fresh: *fresh, NoDir: *noDir, NoTools: *noTools, Flags: modelFlags}, *addr); err != nil {
+	if *tuiFlag || (firstTask == "" && !*prog) {
+		if err := tui.RunTUI(tui.TuiOpts{Workspace: absWS, Model: *model, Url: *url, Key: effKey, Docker: resolveDockerImage(*docker), DockerNetwork: *dockerNetwork, Worktree: *worktree, Cont: *cont, Resume: *resume, DisableExit: *disableExit, Pick: *pick, Suggest: !*noSuggest, Rag: ragFlag.String(), Lsp: lspFlag.String(), Rephrase: *rephrase, Fresh: *fresh, NoDir: *noDir, NoTools: *noTools, ItermTabs: *itermTabs, Flags: modelFlags}); err != nil {
 			fatal(err)
 		}
 		return

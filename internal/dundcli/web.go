@@ -171,7 +171,7 @@ func newWebCtl(home, bin string, svc *dund.Service, o dundapi.Options) (*webCtl,
 	userHome, _ := os.UserHomeDir()
 	c.term = webterm.New(webterm.Config{
 		Bin:  bin,
-		Args: []string{"--tui", "--workspace", userHome, "--disable-exit"},
+		Args: tuiArgs(userHome),
 		Env:  tuiEnv(os.Environ(), home),
 		Dir:  userHome,
 		Back: "/?choose=1",
@@ -359,4 +359,10 @@ func applyWebSet(st webState, ws proto.WebSet) (webState, error) {
 		st.Addr = defaultWebAddr
 	}
 	return st, nil
+}
+
+// tuiArgs is the argv of the TUI at /tui: dund's session picker first
+// (--pick), then the chosen session in its own workspace, or a new one in dir.
+func tuiArgs(dir string) []string {
+	return []string{"--tui", "--workspace", dir, "--disable-exit", "--pick"}
 }
