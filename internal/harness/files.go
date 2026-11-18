@@ -55,7 +55,10 @@ func filesToolset(c *mcpserver.FilesConfig, root string) (filetools.Config, bool
 	if c.Tools != nil {
 		cfg.Tools = c.Tools
 	}
-	cfg.ReadOnly = c.ReadOnly != nil && *c.ReadOnly
+	// read_only does not reach agentkit: its ReadOnly drops edit and write
+	// from the list, and a model without them edited through exec. The
+	// workspace's mode (workspaceWrite, read_only included) is withFiles'
+	// to refuse, with the command that changes it.
 	cfg.ReadMax, cfg.UnrangedMax = c.ReadMax, c.UnrangedMax
 	cfg.GrepMax, cfg.ListMax = c.GrepMax, c.ListMax
 	cfg.ExtraIgnore = c.Ignore
@@ -73,13 +76,10 @@ func (h *Harness) fileTools() *filetools.Toolset {
 		h.files, h.filesKey = nil, ""
 		return nil
 	}
-	write, _ := h.workspaceWrite() // the /file table's workspace row (fileadd.go)
-	cfg.ReadOnly = !write
 	key, _ := json.Marshal(struct {
-		Root  string
-		Cfg   *mcpserver.FilesConfig
-		Write bool
-	}{h.cfg.Workspace, h.cfg.Files, write})
+		Root string
+		Cfg  *mcpserver.FilesConfig
+	}{h.cfg.Workspace, h.cfg.Files})
 	if h.files != nil && h.filesKey == string(key) {
 		return h.files
 	}
@@ -171,30 +171,45 @@ func tmpReader(ts *filetools.Toolset, tmp []*filetools.Toolset, name, args strin
 type wholeReader func(ctx context.Context, route *filetools.Toolset, name, args, id string) string
 
 // withFiles routes the file tools to the toolset and reports each call.
-// whole, when set, answers a read that asks for all of a file.
-func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, tmp []*filetools.Toolset, grants func() ([]*filetools.Toolset, map[*filetools.Toolset]bool), whole wholeReader, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
+// whole, when set, answers a read that asks for all of a file. A path
+// outside the workspace that is not open is the person's to open, asked in
+// the turn (fileaccess.go).
+func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, tmp []*filetools.Toolset, h *Harness, whole wholeReader, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		if !ts.Handles(tc.Function.Name) {
 			return inner(ctx, tc)
 		}
-		added, readOnly := grants() // read per call: see Harness.added
+		var out string
+		asked := tc.Function.Arguments // tmp is read by an absolute path, not one fileAccess resolved
+		tc.Function.Arguments, out = h.fileAccess(ctx, ts, tmp, tc.Function.Name, tc.Function.Arguments)
+		added, readOnly := h.addedNow() // read per call (and after a grant): see Harness.added
 		route := ts
-		out := ""
-		if t := tmpReader(ts, tmp, tc.Function.Name, tc.Function.Arguments); t != nil {
-			route = t
-		} else if t := addedRoute(ts, added, tc.Function.Arguments); t != nil {
-			route = t // a path the person added (/file add, fileadd.go)
-		} else if args, t := addedViaLink(ts, added, tc.Function.Arguments); t != nil {
-			// The same, named through a symlink: an added path is kept
-			// resolved, and the model writes the path the person typed.
-			route, tc.Function.Arguments = t, args
-		} else if hint := outsideHint(ts, tc.Function.Name, tc.Function.Arguments); hint != "" {
-			out = hint
+		writes := writesFiles(ts, tc.Function.Name)
+		if out == "" {
+			if t := tmpReader(ts, tmp, tc.Function.Name, asked); t != nil {
+				route = t
+			} else if t := addedRoute(ts, added, tc.Function.Arguments); t != nil {
+				route = t // a path the person added (/file add, fileadd.go)
+			} else if args, t := addedViaLink(ts, added, tc.Function.Arguments); t != nil {
+				// The same, named through a symlink: an added path is kept
+				// resolved, and the model writes the path the person typed.
+				route, tc.Function.Arguments = t, args
+			} else if hint := outsideHint(ts, tc.Function.Name, outsidePath(ts, tc.Function.Arguments)); hint != "" {
+				out = hint
+			}
 		}
 		// A path open for reading only (/file, mode read): no edit, no write.
-		if out == "" && readOnly[route] && (tc.Function.Name == ts.Name(filetools.Edit) || tc.Function.Name == ts.Name(filetools.Write)) {
+		if out == "" && writes && readOnly[route] {
 			out = fmt.Sprintf("ERROR: %s is open to dun for reading only. To change it the user runs /file mode %s write "+
 				"(the path, or the directory added). Do not work around this with exec.", route.Root(), route.Root())
+		}
+		// The workspace read only: the tools stay listed and say so, where
+		// a list without them sent the model to exec.
+		if out == "" && writes && route == ts {
+			if write, _ := h.workspaceWrite(); !write {
+				out = fmt.Sprintf("ERROR: this workspace (%s) is open to dun for reading only. To change it the user runs "+
+					"/file mode . write. Do not work around this with exec.", ts.Root())
+			}
 		}
 		if out == "" && whole != nil && ts.Bare(tc.Function.Name) == filetools.Read && wantsWhole(tc.Function.Arguments) {
 			out = whole(ctx, route, tc.Function.Name, tc.Function.Arguments, tc.ID)
@@ -219,12 +234,17 @@ func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, tmp []*filetoo
 // model ran cat 179 times, sed 111 and grep 106 beside 190 file_reads. What
 // it says is the one reason that holds: sed -i says nothing when its pattern
 // misses (exit 0), file_edit refuses (20% vs 10% failed, and sed's count
-// misses the silent ones).
+// misses the silent ones). And the shape of a change (USER 2026-11-18): 18
+// exec edits were python or sed making several replacements and running go
+// build in the same call; file_edit takes several edits, and the build is a
+// call of its own.
 func systemFiles(ts *filetools.Toolset) string {
 	if ts == nil || !ts.Handles(ts.Name(filetools.Edit)) {
 		return ""
 	}
-	return "\n\nEdit files with " + ts.Name(filetools.Edit) + ": it says when the text did not match; sed -i does not."
+	return "\n\nEdit files with " + ts.Name(filetools.Edit) + ": it says when the text did not match; sed -i does not. " +
+		"Several changes to one file go in one " + ts.Name(filetools.Edit) + " call (edits: [{old, new}, …]), not a sed or " +
+		"python script; run builds and tests in an exec call of their own."
 }
 
 // addedRoute is the added path's toolset for a call whose path is absolute

@@ -63,9 +63,12 @@ func TestFileTools_Config(t *testing.T) {
 			[]string{"Edit files with file_edit: it says when the text did not match; sed -i does not."},
 			[]string{"file_grep", "file_list", "not cat", "also open", "absolute path under /tmp"}},
 		{"off", &mcpserver.FilesConfig{Tools: []string{}}, nil, nil, []string{"file_read"}},
+		// Read only keeps the edit tools listed; they refuse
+		// (TestFileTools_ReadOnlyRefuses). Without them the model edited
+		// through exec (USER 2026-11-18).
 		{"read-only", &mcpserver.FilesConfig{ReadOnly: &yes},
-			[]string{"file_read"},
-			nil, []string{"Edit files with", "file_edit"}},
+			[]string{"file_edit", "file_read", "file_write"},
+			[]string{"Edit files with file_edit"}, nil},
 		{"read-only false is the default", &mcpserver.FilesConfig{ReadOnly: &no},
 			[]string{"file_edit", "file_read", "file_write"}, nil, nil},
 		{"a config that names grep and list gets them", &mcpserver.FilesConfig{Tools: []string{"read", "edit", "write", "grep", "list"}},
@@ -73,7 +76,7 @@ func TestFileTools_Config(t *testing.T) {
 			[]string{"Edit files with file_edit"},
 			[]string{"file_read with grep", "not grep/rg/find"}},
 		{"read-only with grep named", &mcpserver.FilesConfig{Tools: []string{"read", "grep", "edit"}, ReadOnly: &yes},
-			[]string{"file_grep", "file_read"}, nil, []string{"file_edit"}},
+			[]string{"file_edit", "file_grep", "file_read"}, nil, nil},
 		{"delete and move opt in", &mcpserver.FilesConfig{Tools: []string{"read", "delete", "move"}},
 			[]string{"file_delete", "file_move", "file_read"}, nil, []string{"file_grep"}},
 		{"unknown tool turns them off, not the session", &mcpserver.FilesConfig{Tools: []string{"chmod"}}, nil, nil, []string{"file_read"}},

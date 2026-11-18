@@ -23,7 +23,8 @@ type FilesConfig struct {
 	// file tools off.
 	// No omitempty: null inherits and [] is off, and both must round-trip.
 	Tools []string `json:"tools"`
-	// ReadOnly keeps read, grep and list only (of those enabled). A pointer so a higher layer can
+	// ReadOnly makes the workspace read only: the tools that change files stay
+	// listed and refuse (harness withFiles). A pointer so a higher layer can
 	// say false.
 	ReadOnly *bool `json:"read_only,omitempty"`
 	// Caps; 0 inherits agentkit's defaults (64KB ranged read, 8KB unranged,

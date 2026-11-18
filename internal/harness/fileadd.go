@@ -567,39 +567,6 @@ func (h *Harness) addedWriters() (out []*filetools.Toolset, readOnly map[*fileto
 	return out, readOnly
 }
 
-// outsideHint is the answer to a file call for an absolute path dun has not
-// been given: the model is to ask the person for it, with the command.
-func outsideHint(ts *filetools.Toolset, name, args string) string {
-	var a struct {
-		Path string `json:"path"`
-	}
-	if json.Unmarshal([]byte(args), &a) != nil || !filepath.IsAbs(strings.TrimSpace(a.Path)) {
-		return ""
-	}
-	p := filepath.Clean(strings.TrimSpace(a.Path))
-	if _, err := filetools.Under(ts.Root(), p); err == nil {
-		return ""
-	}
-	dir := filepath.Dir(p)
-	if st, err := os.Stat(p); err == nil && st.IsDir() {
-		dir = p
-	}
-	// A write or an edit needs the path open for writing: the command
-	// says so, or the person adds it read only and the call is refused
-	// again.
-	write := ""
-	if name == ts.Name(filetools.Edit) || name == ts.Name(filetools.Write) {
-		write = " --write"
-	}
-	if dir == p {
-		return fmt.Sprintf("ERROR: %s is outside this workspace (%s), and the user has not added it. "+
-			"Ask the user to add it: /file add %s%s. Do not work around this with exec.", p, ts.Root(), p, write)
-	}
-	return fmt.Sprintf("ERROR: %s is outside this workspace (%s), and the user has not added it. "+
-		"Ask the user to add it: /file add %s%s (or /file add %s%s for its directory). Do not work around this with exec.",
-		p, ts.Root(), p, write, dir, write)
-}
-
 // pathsSwitchKind is /file's table: every path a scope names, on, off or
 // unset at each scope; its mode and index in the row.
 func (h *Harness) pathsSwitchKind() switchKind {
