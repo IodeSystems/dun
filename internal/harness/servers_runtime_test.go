@@ -176,11 +176,21 @@ func haveBinary(name string) bool {
 // ($DUN_<TOOL>: dun does not look on PATH for them), or skips the test.
 func toolFromPath(t *testing.T, name string) {
 	t.Helper()
-	p, err := exec.LookPath(name)
-	if err != nil {
+	if !useToolOnPath(t, name) {
 		t.Skip(name + " not on PATH")
 	}
+}
+
+// useToolOnPath is toolFromPath for a test that does not skip: false when
+// name is not on PATH.
+func useToolOnPath(t *testing.T, name string) bool {
+	t.Helper()
+	p, err := exec.LookPath(name)
+	if err != nil {
+		return false
+	}
 	t.Setenv(mcpserver.ToolEnv(name), p)
+	return true
 }
 
 func serverState(h *Harness, id string) (ServerState, bool) {
