@@ -1108,6 +1108,9 @@ func (h *Harness) resumeAgent(sa *subAgent) string {
 
 // closeAgents stops every child. Called before the parent's servers go, because
 // a child left running against closed tools is worse than a stopped one.
+// agentCloseGrace bounds how long Close waits for a cancelled child to settle.
+const agentCloseGrace = 5 * time.Second
+
 func (h *Harness) closeAgents() {
 	h.agMu.Lock()
 	agents := make([]*subAgent, 0, len(h.agents))
@@ -1121,6 +1124,14 @@ func (h *Harness) closeAgents() {
 		sa.closed = true
 		sa.mu.Unlock()
 		sa.stop()
+		// The run goroutine writes the child's transcript and sidecars until
+		// it settles. Closing without waiting let it write after the caller
+		// returned (a TempDir removed under it). Bounded: a wedged child
+		// must not hang Close.
+		select {
+		case <-sa.waitCh():
+		case <-time.After(agentCloseGrace):
+		}
 		sa.mu.Lock()
 		child := sa.h
 		sa.h = nil
