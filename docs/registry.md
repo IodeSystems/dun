@@ -61,8 +61,10 @@ key (`release/minisign.pub`, with the updater's key rotation).
   is used: dun works offline and as shipped.
 - **Presets:** the entries for this dun replace the built-in list.
 - **Tool pins:** an entry for this dun raises Min and Recommended above the
-  built-in ones (never lowers them); `dun doctor --fix` downloads from its
-  files, sha256 checked, as from deps.json now. `/upgrade` (USER
+  built-in ones (never lowers them); `dun doctor --fix`, and a session that
+  first needs the tool, download from its
+  files into `$DUN_HOME/tools/<tool>/<version>/<goos>-<goarch>/`, sha256 checked, as from
+  deps.json. `/upgrade` (USER
   2026-11-04) lists each tool against its pin through `dun tools`, which
   fetches the index first; `/upgrade now` runs `dun tools --upgrade` (the
   same downloads and go installs as `--fix`, and only to the pin, never a

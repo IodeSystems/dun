@@ -53,6 +53,8 @@ jobs:
             echo "$sum  $RUNNER_TEMP/$t.tar.gz" | sha256sum -c -
             mkdir -p "$RUNNER_TEMP/$t" && tar -xzf "$RUNNER_TEMP/$t.tar.gz" -C "$RUNNER_TEMP/$t"
             install -m 0755 "$RUNNER_TEMP/$t/$t" "$RUNNER_TEMP/bin/$t"
+            # dun does not look on PATH for its own tools: DUN_<TOOL> points at them.
+            echo "DUN_$(echo "$t" | tr a-z- A-Z_)=$RUNNER_TEMP/bin/$t" >> "$GITHUB_ENV"
           done
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
       - name: test

@@ -16,8 +16,6 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/sys/unix"
-
 	"github.com/spf13/cobra"
 
 	"github.com/iodesystems/dun/internal/buildinfo"
@@ -34,24 +32,24 @@ import (
 
 // `dun doctor` checks what dun needs, read-only, and says how to fix what is
 // wrong: the providers (logged in, a model, each one's model list with the
-// real reason it fails), the tools the engines run (on this PATH and on the
-// service's, which is where launchd differs from a login shell), dund (its
+// real reason it fails), the tools the engines run (git on this PATH and on
+// the service's, which is where launchd differs from a login shell; dun's
+// own tools as the engines resolve them, mcpserver/tools.go), dund (its
 // socket answers this user — the peer-credential check), the service, and a
 // self-updating build's source tree and Go. Exit 1 when anything fails.
 //
-// `dun doctor --fix` installs a missing mcpshell or poly-lsp-mcp (owner,
-// item 49): a release build downloads it from the release the build was made
-// with, checked against the sha256 pinned in the build (release.Deps); any
-// other build, or a tool the release pins nothing for, runs `go install
+// `dun doctor --fix` installs a missing tool into $DUN_HOME/tools/<tool>/
+// <version>/<goos>-<goarch>/ (owner, item 49; USER 2026-11-18): a release build downloads
+// it from the release the build was made with, checked against the sha256
+// pinned in the build (release.Deps, mcpserver.FetchPinned: the same code a
+// session's first need runs); any other build runs `go install
 // <module>@<the version this dun supports>` (release.Supported; built from
-// source, checked against the Go checksum database) when Go is on PATH,
-// beside dun when that directory is writable — where the engine looks after
-// PATH (harness.FindCommand). Nothing is downloaded from anywhere else.
+// source, checked against the Go checksum database) for mcpshell and
+// poly-lsp-mcp when Go is on PATH. Nothing is downloaded from anywhere else.
 //
 // Each binary's origin is said too (release, go install, a checkout), read
-// from its build info: it decides how that binary updates. A tool older
-// than this dun supports is updated the same way it was installed
-// (toolver.go).
+// from its build info, and whether it is dun's pinned copy or the person's
+// build (toolver.go).
 
 type finding struct {
 	level, area, detail, fix string // level: ok, warn, fail
@@ -75,7 +73,8 @@ func doctorCmd() *cobra.Command {
 		Use:   "dun doctor",
 		Short: "check providers, tools, dund and the service; say how to fix what is wrong",
 		Long: "Checks what dun needs, read-only: the providers and their models, the tools the\n" +
-			"engines run (on your PATH and the service's), dund and its build, the service,\n" +
+			"engines run (dun's own under $DUN_HOME/tools, or your build; git on your PATH and\n" +
+			"the service's), dund and its build, the service,\n" +
 			"and a self-updating build's source and Go. Exits 1 when a check fails.\n\n" +
 			"--fix runs the fixes that are one command, saying each before it runs, then\n" +
 			"checks again:\n  " + strings.Join(fixNames(), "\n  ") + "\n" +
@@ -97,7 +96,7 @@ func doctorCmd() *cobra.Command {
 
 // fixableNames are the fixes --fix runs, for --help.
 var fixableNames = []string{
-	"mcpshell, poly-lsp-mcp missing or behind this dun: go install the version it supports (when Go is here)",
+	"mcpshell, poly-lsp-mcp missing or a kept copy behind this dun: go install the version it pins into $DUN_HOME/tools (when Go is here)",
 	"a config file others can read: chmod 600",
 	"a service on another build: dun dund service restart",
 }
@@ -107,7 +106,7 @@ func fixNames() []string {
 	if !buildinfo.IsRelease() {
 		return fixableNames
 	}
-	return append([]string{"mcpshell, poly-lsp-mcp missing, or a release download behind: download the release this build pins (sha256 in the build)"}, fixableNames...)
+	return append([]string{"mcpshell, poly-lsp-mcp, raglit missing, or a kept copy behind: download the release this build pins into $DUN_HOME/tools (sha256 in the build)"}, fixableNames...)
 }
 
 // fixable is the action that applies f's fix, or nil when the fix needs the
@@ -247,58 +246,122 @@ var doctorTools = []struct{ name, level, need string }{
 	{"raglit", "warn", "/rag"},
 }
 
-// fixTools are the tools --fix installs: both build with Go alone. raglit
-// is opt-in and needs more than its binary (an embedder).
+// fixTools are the tools a non-release --fix go-installs: both build with
+// Go alone. raglit is opt-in and needs more than its binary (an embedder).
+// A release build's --fix downloads every tool its manifest pins.
 var fixTools = map[string]bool{"mcpshell": true, "poly-lsp-mcp": true}
 
-// goInstall installs a module with the go command into dir, or, with dir
-// "", beside dun when dun's directory is writable, else go's own bin
-// directory (a test replaces it). It returns where it went ("" for go's).
+// goInstall installs a module with the go command into dir (a test
+// replaces it). It returns dir.
 var goInstall = func(module, dir string) (string, error) {
 	cmd := exec.Command("go", "install", module)
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
-	if exe, err := os.Executable(); dir == "" && err == nil && unix.Access(filepath.Dir(exe), unix.W_OK) == nil {
-		dir = filepath.Dir(exe)
-	}
-	if dir != "" {
-		cmd.Env = append(os.Environ(), "GOBIN="+dir)
-	}
+	cmd.Env = append(os.Environ(), "GOBIN="+dir)
 	return dir, cmd.Run()
 }
 
 func (d *doctor) tools() {
-	svcPATH, svcHasPATH := dundcli.ServicePATH(dundcli.ServiceUnit)
-	_, svcInstalled := dundcli.ServiceFile(dundcli.ServiceUnit)
 	for _, t := range doctorTools {
-		level := t.level
-		p, err := mcpserver.FindCommand(t.name)
-		if err != nil {
-			p, err = d.install(t.name)
-		}
-		if err != nil {
-			what := "not installed (not on PATH or beside dun)"
-			if t.need != "" {
-				what += ", needed only for " + t.need
-			} else if inst, ok := mcpserver.ToolInstall[t.name]; ok {
-				what += ": " + inst.Lost
-			}
-			d.add(level, "tool", t.name+": "+what, toolFix(t.name, err))
-			continue
-		}
-		if svcInstalled && svcHasPATH && lookIn(svcPATH, t.name) == "" && !besideDun(p) {
-			d.add(level, "tool", t.name+": "+p+", but not on the service's PATH",
-				"reinstall the service from this shell to capture its PATH: dun dund service install -- <flags>")
+		if mcpserver.IsManaged(t.name) {
+			d.managedTool(t.name, t.level, t.need)
 		} else {
-			d.add("ok", "tool", t.name+": "+p, "")
-		}
-		if t.name != "git" {
-			d.toolOrigin(t.name, p)
+			d.pathTool(t.name, t.level)
 		}
 	}
 }
 
-// install runs --fix's install of name, or says why it did not. A release
-// build installs what its pinned manifest has, and go-installs the rest.
+// pathTool is a tool dun takes from PATH (git): found here, and on the
+// service's PATH, which is where launchd differs from a login shell.
+func (d *doctor) pathTool(name, level string) {
+	p, err := mcpserver.FindCommand(name)
+	if err != nil {
+		d.add(level, "tool", name+": not installed (not on PATH or beside dun)", "install it, or put its directory on PATH")
+		return
+	}
+	svcPATH, svcHasPATH := dundcli.ServicePATH(dundcli.ServiceUnit)
+	if _, svcInstalled := dundcli.ServiceFile(dundcli.ServiceUnit); svcInstalled && svcHasPATH && lookIn(svcPATH, name) == "" {
+		d.add(level, "tool", name+": "+p+", but not on the service's PATH",
+			"reinstall the service from this shell to capture its PATH: dun dund service install -- <flags>")
+		return
+	}
+	d.add("ok", "tool", name+": "+p, "")
+}
+
+// managedTool is a tool dun runs its own copy of (mcpserver/tools.go): the
+// pinned copy, the person's build (an override), or not installed, which
+// --fix installs; then its origin, and the copies dun no longer uses. The
+// service's PATH does not matter for these: dund and its engines resolve
+// them the same way, under DUN_HOME.
+func (d *doctor) managedTool(name, level, need string) {
+	r := mcpserver.ResolveTool(name)
+	var err error
+	if r.Source == mcpserver.SourceMissing && r.Via == "" {
+		if _, err = d.install(name); err == nil {
+			r = mcpserver.ResolveTool(name)
+		}
+	}
+	switch r.Source {
+	case mcpserver.SourceMissing:
+		what := "not installed (dun looks in " + filepath.Dir(mcpserver.PinnedPath(name, r.Pin)) + ")"
+		fix := toolFix(name, err)
+		if r.Via != "" {
+			what, fix = "not installed: "+r.Why, "point it at a build of "+name+", or "+undoOverride(name, r)+" to run the pinned "+r.Pin
+		}
+		if need != "" {
+			what += ", needed only for " + need
+		} else if inst, ok := mcpserver.ToolInstall[name]; ok {
+			what += ": " + inst.Lost
+		}
+		d.add(level, "tool", name+": "+what, fix)
+	case mcpserver.SourceOverride:
+		fix := ""
+		if strings.HasPrefix(r.Via, "$") {
+			fix = "dund's engines see " + r.Via + " only when dund was started with it; tools." + name + ".path in " +
+				mcpserver.UserServersFile() + " reaches them all"
+		}
+		d.add("ok", "tool", name+": your build at "+r.Path+" (from "+r.Via+")", fix)
+		d.toolOrigin(name, r)
+	default:
+		d.add("ok", "tool", name+": pinned "+r.Version+" at "+r.Path, "")
+		d.toolOrigin(name, r)
+	}
+	d.unused(name, r)
+}
+
+// unused names each copy of name on PATH or in dun's directory that dun
+// does not run (doctor --fix put tools beside dun before they moved under
+// DUN_HOME, 2026-11-18): left where it is, with the rm, and how to keep
+// using it.
+func (d *doctor) unused(name string, r mcpserver.Resolved) {
+	uses := r.Path
+	if uses == "" {
+		uses = mcpserver.PinnedPath(name, r.Pin) + ", not installed yet"
+	}
+	var seen []os.FileInfo
+	if st, err := os.Stat(r.Path); r.Path != "" && err == nil {
+		seen = append(seen, st)
+	}
+	var cands []string
+	if p, err := exec.LookPath(name); err == nil {
+		cands = append(cands, p)
+	}
+	if exe, err := buildinfo.SelfExe(); err == nil {
+		cands = append(cands, filepath.Join(filepath.Dir(exe), name))
+	}
+	for _, p := range cands {
+		st, err := os.Stat(p)
+		if err != nil || st.IsDir() || st.Mode()&0o111 == 0 || slices.ContainsFunc(seen, func(o os.FileInfo) bool { return os.SameFile(o, st) }) {
+			continue
+		}
+		seen = append(seen, st)
+		d.add("ok", "tool", name+": "+p+" is unused (dun uses "+uses+")",
+			"rm "+p+" — or, to keep using it, set tools."+name+".path to it in "+mcpserver.UserServersFile())
+	}
+}
+
+// install runs --fix's install of name into its managed directory, or says
+// why it did not. A release build downloads what its pinned manifest has,
+// and go-installs the rest.
 func (d *doctor) install(name string) (string, error) {
 	if !d.fix {
 		return "", errNotFixed
@@ -317,18 +380,9 @@ func (d *doctor) install(name string) (string, error) {
 	if _, err := exec.LookPath("go"); err != nil {
 		return "", errNoGo
 	}
-	mod := installModule(name)
-	fmt.Fprintf(os.Stderr, "installing %s: go install %s\n", name, mod)
+	s, _ := mcpserver.SupportedTool(name)
 	d.applied++
-	dir, err := goInstall(mod, "")
-	if err != nil {
-		return "", fmt.Errorf("go install %s: %w", mod, err)
-	}
-	p, err := mcpserver.FindCommand(name)
-	if err != nil && dir == "" {
-		return "", fmt.Errorf("installed into go's bin directory (go env GOBIN, else $(go env GOPATH)/bin), which is not on PATH: put it on PATH")
-	}
-	return p, err
+	return goInstallPinned(name, s.Module, s.Recommended)
 }
 
 var (
@@ -336,20 +390,19 @@ var (
 	errNoGo     = errors.New("go is not on PATH")
 )
 
-// toolFix is the install step for a tool that is not there.
+// toolFix is the install step for a managed tool that is not there.
 func toolFix(name string, err error) string {
-	inst, ok := mcpserver.ToolInstall[name]
+	inst := mcpserver.ToolInstall[name]
 	if a, _, pinned := pinnedTool(name); pinned && errors.Is(err, errNotFixed) {
-		return "dun doctor --fix (downloads " + name + " " + a.Version + " from its release; the sha256 is pinned in this build)"
+		return "dun doctor --fix (downloads " + name + " " + a.Version + " from its release; the sha256 is pinned in this build), or a session fetches it when it first needs it"
 	}
+	dir := filepath.Dir(mcpserver.PinnedPath(name, mcpserver.PinVersion(name)))
 	switch {
-	case !ok:
-		return "install it, or put its directory on PATH"
 	case !fixTools[name]:
-		return "go install " + inst.Module + " (needs Go), then put it on PATH or beside dun"
+		return "GOBIN=" + dir + " go install " + installModule(name) + " (needs Go), or point " + mcpserver.ToolEnv(name) + " at a build of it"
 	case errors.Is(err, errNotFixed):
 		if _, gerr := exec.LookPath("go"); gerr == nil {
-			return "dun doctor --fix (runs go install " + installModule(name) + ")"
+			return "dun doctor --fix (runs go install " + installModule(name) + " into " + dir + ")"
 		}
 		return "install Go (go.dev/dl), then dun doctor --fix — or " + putBinary(name, inst.Module)
 	case errors.Is(err, errNoGo):
@@ -362,34 +415,24 @@ func toolFix(name string, err error) string {
 // in place by hand (a build that is not a release carries no download
 // location).
 func putBinary(name, module string) string {
-	return "put a release build of " + name + " from " + repoURL(module) + "/releases on PATH or beside dun"
+	return "put a release build of " + name + " from " + repoURL(module) + "/releases at " +
+		mcpserver.PinnedPath(name, mcpserver.PinVersion(name)) + ", or point " + mcpserver.ToolEnv(name) + " at it"
 }
 
-// besideDun reports whether p is in dun's own directory: the engine finds it
-// there whatever the service's PATH is.
-func besideDun(p string) bool {
-	exe, err := os.Executable()
-	return err == nil && filepath.Dir(p) == filepath.Dir(exe)
-}
-
-// polyLSP names the poly-lsp-mcp the engines run — the one on the
-// service's PATH when the service sets one, else this shell's — and whether
-// it speaks the index protocol (harness.IndexProtocol): an initialize that
-// answers before the index is built, and --exclude. An older build makes the
-// code server "starting" for as long as its index takes.
+// polyLSP names the poly-lsp-mcp the engines run — dun's pinned copy or the
+// person's build, resolved as the engines resolve it (mcpserver/tools.go),
+// the service's PATH aside — and whether it speaks the index protocol
+// (harness.IndexProtocol): an initialize that answers before the index is
+// built, and --exclude. An older build makes the code server "starting" for
+// as long as its index takes.
 func (d *doctor) polyLSP() {
-	const name = "poly-lsp-mcp"
-	bin, where := "", "this PATH"
-	if _, svc := dundcli.ServiceFile(dundcli.ServiceUnit); svc {
-		if p, ok := dundcli.ServicePATH(dundcli.ServiceUnit); ok {
-			bin, where = lookIn(p, name), "the service's PATH"
-		}
-	}
-	if bin == "" && where == "this PATH" {
-		bin, _ = exec.LookPath(name)
-	}
-	if bin == "" {
+	r := mcpserver.ResolveTool("poly-lsp-mcp")
+	if r.Path == "" {
 		return // tools() said it is missing
+	}
+	bin, where := r.Path, "dun's pinned copy"
+	if r.Source == mcpserver.SourceOverride {
+		where = "your build"
 	}
 	d.polyLSPAt(bin, where)
 	d.polyLSPLanguages(bin)
@@ -563,20 +606,20 @@ func (d *doctor) addRaglit(rep harness.RaglitDoctor) {
 	}
 }
 
-// polyLSPAt is polyLSP's finding for the binary bin, found on where.
+// polyLSPAt is polyLSP's finding for the binary bin, where (whose copy it is).
 func (d *doctor) polyLSPAt(bin, where string) {
 	sup, resolved, err := harness.IndexProtocol(bin)
 	switch {
 	case err != nil:
-		d.add("warn", "poly-lsp", resolved+" (on "+where+"): could not ask it: "+textfmt.OneLine(err.Error()), "update it (poly-lsp: make install)")
+		d.add("warn", "poly-lsp", resolved+" ("+where+"): could not ask it: "+textfmt.OneLine(err.Error()), "update it (poly-lsp: make install)")
 	case !sup.Protocol:
-		d.add("warn", "poly-lsp", resolved+" (on "+where+") is an older build: startup waits for its index",
+		d.add("warn", "poly-lsp", resolved+" ("+where+") is an older build: startup waits for its index",
 			"update it (poly-lsp: make install)")
 	case !sup.Budget:
-		d.add("warn", "poly-lsp", resolved+" (on "+where+"): indexes in the background, but caps files instead of a startup budget (an interim build)",
+		d.add("warn", "poly-lsp", resolved+" ("+where+"): indexes in the background, but caps files instead of a startup budget (an interim build)",
 			"update it (poly-lsp: make install)")
 	default:
-		d.add("ok", "poly-lsp", resolved+" (on "+where+"): indexes in the background; takes --exclude and --index-budget", "")
+		d.add("ok", "poly-lsp", resolved+" ("+where+"): indexes in the background; takes --exclude and --index-budget", "")
 	}
 }
 

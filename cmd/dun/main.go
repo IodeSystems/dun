@@ -862,18 +862,27 @@ func main() {
 				em.emit(ev)
 			}
 		}
-		// An install hint, once (dun/setupstate.go): said as a quiet line.
-		// It is said once, so a Harness not yet stored is waited for.
-		cfg.OnServerSetup = func(id, msg string) {
-			go func() {
+		// An install hint, once (dun/setupstate.go), and a tool fetch's
+		// "fetching …" and its outcome (mcpserver.EnsureCommand): said as
+		// quiet lines, in order. Each is said once, so a Harness not yet
+		// stored is waited for.
+		setupLines := make(chan [2]string, 32)
+		go func() {
+			for l := range setupLines {
 				for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
 					if h, _ := started.Load().(*harness.Harness); h != nil {
-						em.emit(&proto.ServerEvent{ID: id, Action: "setup", Message: msg,
+						em.emit(&proto.ServerEvent{ID: l[0], Action: "setup", Message: l[1],
 							Servers: enginecmd.ServersProto(h.Servers()), Tools: h.ToolNames(), Background: true})
-						return
+						break
 					}
 				}
-			}()
+			}
+		}()
+		cfg.OnServerSetup = func(id, msg string) {
+			select {
+			case setupLines <- [2]string{id, msg}:
+			default: // a stuck emitter drops a hint rather than a server start
+			}
 		}
 		cfg.OnToolStart = func(c harness.ToolStart) {
 			em.emit(&proto.ToolCall{CallID: c.CallID, Tool: c.Tool, Args: c.Args, Agent: c.Agent})

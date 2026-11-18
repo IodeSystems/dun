@@ -124,7 +124,7 @@ func (h *Harness) shareHosted(ctx context.Context, shell string, phase *startPha
 		command := s.Command
 		if command != "" {
 			var err error
-			if command, err = mcpserver.FindCommand(command); err != nil {
+			if command, err = mcpserver.FindCommandContext(ctx, command); err != nil {
 				continue // the shell says it did not connect
 			}
 		}

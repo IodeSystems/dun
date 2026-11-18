@@ -49,6 +49,9 @@ type Tool struct {
 	Pin     string `json:"pin,omitempty"`     // the version this dun pins for it
 	Release bool   `json:"release,omitempty"` // it is a release build
 	Missing bool   `json:"missing,omitempty"`
+	// Source is where dun takes it from: "pinned" (its copy under
+	// $DUN_HOME/tools), "override" (the person's build) or "missing".
+	Source string `json:"source,omitempty"`
 }
 
 // Line is the tool's version line: "mcpshell v0.12.0 at /p (release); pinned
@@ -72,6 +75,9 @@ func (t Tool) Line() string {
 		s += " (release)"
 	case t.Origin != "":
 		s += " (" + t.Origin + ")"
+	}
+	if t.Source == "override" {
+		s += ", your build"
 	}
 	s += pin
 	var marks []string

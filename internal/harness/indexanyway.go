@@ -137,7 +137,7 @@ func (h *Harness) SetIndexAnyway(ctx context.Context, id string, on bool) (strin
 		return "", false, nil
 	}
 	if on {
-		command, err := mcpserver.FindCommand(s.Command)
+		command, err := mcpserver.FindCommandContext(ctx, s.Command)
 		if err != nil {
 			return "", false, err
 		}

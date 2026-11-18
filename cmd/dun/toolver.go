@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
-	"golang.org/x/sys/unix"
 
 	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/textfmt"
@@ -19,22 +19,23 @@ import (
 	"github.com/iodesystems/dun/release"
 )
 
-// A tool's version, against what this dun supports (release.Supported):
-// older than Min is a warn (too old for this dun), older than Recommended an
-// ok with a note (an update is available). The version is read from the
-// binary's build info, without running it. How it updates follows how the
-// TOOL was built, not dun (owner, item 49):
+// A tool's version, against what this dun supports (release.Supported). dun
+// runs its own pinned copy of each tool, under $DUN_HOME/tools (USER
+// 2026-11-18, mcpserver/tools.go), or the person's override:
 //
-//	tool from a release   → the release this dun pins (a release dun's --fix downloads it)
-//	tool from go install  → go install <module>@<recommended> (--fix runs it)
-//	tool from a checkout  → rebuild it in that checkout (said, never run)
+//	pinned copy   the pinned version by construction; a kept older copy
+//	              (the pin's is not there yet) is updated by --fix: the
+//	              release download on a release build, go install
+//	              <module>@<pin> into its directory on any other
+//	your build    an override ($DUN_<TOOL>, tools.<name>.path): run
+//	              whatever its version; older than Min is a warn, and dun
+//	              never updates it
 //
-// --fix never downgrades and never touches a checkout. A modified checkout
-// is compared by the version its build info gives (v0.7.2-0.<ts>-<sha>+dirty
-// is v0.7.2's pseudo-version, valid semver): a Mac ran such a build, far
-// below Min, for weeks while doctor said ok. Only a build whose version says
-// nothing (a plain go build, "(devel)") is not compared: one ok line says
-// so, with no update to nag about.
+// The version is read from the binary's build info, without running it. A
+// modified checkout is compared by the version its build info gives
+// (v0.7.2-0.<ts>-<sha>+dirty is v0.7.2's pseudo-version, valid semver); a
+// build whose version says nothing (a plain go build, "(devel)", v0.0.0-…)
+// is not compared.
 
 // Fix actions planTool can name.
 const (
@@ -44,10 +45,8 @@ const (
 
 // toolEnv is what planTool needs from this dun and machine.
 type toolEnv struct {
-	pinned   string // the version this release build pins for the tool; "" on other builds
-	beside   bool   // the tool is in dun's directory, where a download goes
-	haveGo   bool   // go is on PATH
-	writable bool   // the tool's directory is writable (go install replaces it there)
+	release bool // this release build has the pin's download
+	haveGo  bool // go is on PATH
 }
 
 // toolPlan is doctor's line on an installed tool's version, and the update
@@ -57,157 +56,125 @@ type toolPlan struct {
 	act, target        string // target: the version act installs
 }
 
-// planTool decides it for name at p, built as o.
-func planTool(name, p string, o update.Origin, s release.Tool, env toolEnv) toolPlan {
-	pl := toolPlan{level: "ok", detail: name + ": " + o.String()}
-	v := o.Version
-	if !semver.IsValid(v) || o.Kind == update.GoBuild || isUnstamped(v) {
-		if o.Kind != update.Release && o.Kind != update.GoInstall {
-			pl.detail += "; unknown version, can't compare it with " + s.Recommended + " (this dun's)"
+// planTool decides it for name resolved as r, built as o.
+func planTool(name string, r mcpserver.Resolved, o update.Origin, s release.Tool, env toolEnv) toolPlan {
+	if r.Source == mcpserver.SourceOverride {
+		pl := toolPlan{level: "ok", detail: name + ": your build, " + o.String()}
+		switch {
+		case !comparable(o):
+			pl.detail += "; unknown version, can't compare it with " + s.Min + " (the oldest this dun runs)"
+		case semver.Compare(o.Version, s.Min) < 0:
+			pl.level = "warn"
+			pl.detail += "; too old for this dun (it needs " + s.Min + " or newer)"
+			pl.fix = "update it, or " + undoOverride(name, r) + " to run the pinned " + r.Pin
 		}
 		return pl
 	}
-	target := s.Recommended
-	if o.Kind == update.Release && env.pinned != "" {
-		target = env.pinned
+	pl := toolPlan{level: "ok", detail: name + ": pinned " + r.Version + ", " + o.String()}
+	if !r.Stale() {
+		return pl
 	}
-	old, behind := semver.Compare(v, s.Min) < 0, semver.Compare(v, target) < 0
+	pl.detail += "; a kept copy: this dun pins " + r.Pin
+	pl.target = r.Pin
 	switch {
-	case old:
-		pl.level = "warn"
-		pl.detail += "; too old for this dun (it needs " + s.Min + " or newer)"
-	case behind:
-		pl.detail += "; an update is available: " + target + " (tested with this dun)"
-		if o.Kind == update.Checkout && o.Modified {
-			pl.level = "warn" // unreleased code, and behind what this dun was tested with
-		}
+	case env.release:
+		pl.act, pl.fix = actDownload, "dun doctor --fix (downloads "+name+" "+r.Pin+" from its release; the sha256 is pinned in this build)"
+	case env.haveGo:
+		pl.act, pl.fix = actGoInstall, "dun doctor --fix (runs go install "+s.Module+"@"+r.Pin+")"
 	default:
-		return pl
-	}
-	if semver.Compare(target, v) <= 0 {
-		return pl // never a downgrade (the minimum is past what this dun installs)
-	}
-	pl.target = target
-	switch o.Kind {
-	case update.Release:
-		switch {
-		case env.pinned == "":
-			pl.fix = "download " + target + " or newer from " + repoURL(s.Module) + "/releases"
-		case env.beside:
-			pl.act = actDownload
-			pl.fix = "dun doctor --fix (downloads " + name + " " + target + " from its release; the sha256 is pinned in this build)"
-		default:
-			pl.fix = "remove " + p + ", then dun doctor --fix downloads " + name + " " + target + " beside dun"
-		}
-	case update.GoInstall:
-		mod := s.Module + "@" + target
-		switch {
-		case !env.haveGo:
-			pl.fix = "go install " + mod + " (needs Go: go.dev/dl)"
-		case !env.writable:
-			pl.fix = "go install " + mod + ", as a user who can write " + filepath.Dir(p)
-		default:
-			pl.act = actGoInstall
-			pl.fix = "dun doctor --fix (runs go install " + mod + ")"
-		}
-	case update.Checkout:
-		pl.fix = "rebuild it from its checkout (make install)"
-		if o.SrcDir != "" {
-			pl.fix = "rebuild it in " + o.SrcDir + " (make install)"
-		}
-		if o.Modified {
-			pl.detail = name + ": a modified checkout of " + v + " (at " + o.Revision + ")" + strings.TrimPrefix(pl.detail, name+": "+o.String())
-			where := "its checkout"
-			if o.SrcDir != "" {
-				where = o.SrcDir
-			}
-			pl.fix = "rebuild it in " + where + " from a current tag (make install), or remove " + p +
-				" and run dun doctor --fix to get the pinned release"
-		}
+		pl.fix = "install Go (go.dev/dl), then dun doctor --fix"
 	}
 	return pl
 }
 
-// toolOrigin is doctor's line on how a tool at p was built, and on a
-// supported tool its version against this dun's; with --fix, a release or
-// go install update is applied.
-func (d *doctor) toolOrigin(name, p string) {
-	o, err := update.OfFile(p)
+// comparable is a build whose version says how old it is.
+func comparable(o update.Origin) bool {
+	return semver.IsValid(o.Version) && o.Kind != update.GoBuild && !isUnstamped(o.Version)
+}
+
+// undoOverride is how to stop using r's override.
+func undoOverride(name string, r mcpserver.Resolved) string {
+	if env, ok := strings.CutPrefix(r.Via, "$"); ok {
+		return "unset " + env
+	}
+	return "remove tools." + name + ".path from " + mcpserver.UserServersFile()
+}
+
+// toolOrigin is doctor's line on how the tool r names was built, and its
+// version against this dun's; with --fix, a kept copy is updated to the pin.
+func (d *doctor) toolOrigin(name string, r mcpserver.Resolved) {
+	o, err := update.OfFile(r.Path)
 	if err != nil {
 		return // a script, or a binary without build info
 	}
-	s, ok := supportedTool(name)
+	s, ok := mcpserver.SupportedTool(name)
 	if !ok {
-		fix := ""
-		if o.Kind == update.GoInstall {
-			fix = "to update: go install " + o.Module + "@latest"
-			if inst, ok := mcpserver.ToolInstall[name]; ok {
-				fix = "to update: go install " + inst.Module
-			}
-		}
-		d.add("ok", "origin", name+": "+o.String()+originNote(name, o), fix)
+		d.add("ok", "origin", name+": "+o.String()+originNote(name, o), "")
 		return
 	}
-	pl := planTool(name, p, o, s, d.toolEnv(name, p))
+	pl := planTool(name, r, o, s, d.toolEnv(name))
 	if d.fix && pl.act != "" {
-		if err := d.update(name, p, s, pl); err != nil {
+		if err := d.update(name, s, pl); err != nil {
 			pl.fix = "--fix failed: " + textfmt.OneLine(err.Error())
-		} else if o, err = update.OfFile(p); err == nil {
-			pl = planTool(name, p, o, s, d.toolEnv(name, p))
+		} else if r = mcpserver.ResolveTool(name); r.Path != "" {
+			if o, err = update.OfFile(r.Path); err == nil {
+				pl = planTool(name, r, o, s, d.toolEnv(name))
+			}
 		}
 	}
 	d.add(pl.level, "origin", pl.detail+originNote(name, o), pl.fix)
 }
 
-// toolEnv is planTool's view of this dun and machine for the tool at p.
-func (d *doctor) toolEnv(name, p string) toolEnv {
-	env := toolEnv{beside: besideDun(p), writable: unix.Access(filepath.Dir(p), unix.W_OK) == nil}
-	if a, _, ok := pinnedTool(name); ok {
-		env.pinned = a.Version
-	}
+// toolEnv is planTool's view of this dun and machine for name.
+func (d *doctor) toolEnv(name string) toolEnv {
+	_, _, rel := pinnedTool(name)
 	_, err := exec.LookPath("go")
-	env.haveGo = err == nil
-	return env
+	return toolEnv{release: rel, haveGo: err == nil}
 }
 
 // update runs pl's action, saying it first.
-func (d *doctor) update(name, p string, s release.Tool, pl toolPlan) error {
+func (d *doctor) update(name string, s release.Tool, pl toolPlan) error {
 	d.applied++
 	switch pl.act {
 	case actDownload:
 		_, err := installPinned(name)
 		return err
 	case actGoInstall:
-		mod := s.Module + "@" + pl.target
-		fmt.Fprintf(os.Stderr, "updating %s: go install %s (into %s)\n", name, mod, filepath.Dir(p))
-		_, err := goInstall(mod, filepath.Dir(p))
+		_, err := goInstallPinned(name, s.Module, pl.target)
 		return err
 	}
 	return errors.New("no update to run")
 }
 
-// supportedTool is name's entry in release.Supported, its Min and
-// Recommended raised by the registry's pin for this dun (never lowered).
-func supportedTool(name string) (release.Tool, bool) {
-	s, ok := release.SupportedTool(name)
-	if !ok {
-		return s, false
+// goInstallPinned builds module@version with go install into name's managed
+// directory, $DUN_HOME/tools/<name>/<version>/: into a temp GOBIN beside
+// it, then renamed into place, so a session starting meanwhile never runs
+// half a binary.
+func goInstallPinned(name, module, version string) (string, error) {
+	dst := mcpserver.PinnedPath(name, version)
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return "", err
 	}
-	if t, rok := mcpserver.RegistryTool(name); rok {
-		if semver.Compare(t.Min, s.Min) > 0 {
-			s.Min = t.Min
-		}
-		if semver.Compare(t.Recommended, s.Recommended) > 0 {
-			s.Recommended = t.Recommended
-		}
+	tmp, err := os.MkdirTemp(filepath.Dir(filepath.Dir(dst)), ".go-install-*")
+	if err != nil {
+		return "", err
 	}
-	return s, true
+	defer os.RemoveAll(tmp)
+	mod := module + "@" + version
+	fmt.Fprintf(os.Stderr, "installing %s: go install %s (into %s)\n", name, mod, filepath.Dir(dst))
+	if _, err := goInstall(mod, tmp); err != nil {
+		return "", fmt.Errorf("go install %s: %w", mod, err)
+	}
+	if err := os.Rename(filepath.Join(tmp, path.Base(module)), dst); err != nil {
+		return "", fmt.Errorf("go install %s: %w", mod, err)
+	}
+	return dst, nil
 }
 
 // installModule is what go install builds for a missing name: the version
 // this dun supports, else the module's latest.
 func installModule(name string) string {
-	if s, ok := supportedTool(name); ok {
+	if s, ok := mcpserver.SupportedTool(name); ok {
 		return s.Module + "@" + s.Recommended
 	}
 	return mcpserver.ToolInstall[name].Module
@@ -273,49 +240,50 @@ func originNote(name string, o update.Origin) string {
 // (Ready's hint): each one older than the version this dun pins, by
 // path and version, with the version dun pins and the fix. A Mac ran a
 // modified mcpshell checkout from ~/.local/bin, found on PATH first, with
-// no word from dun until it crashed. Build info only: no tool is run.
+
+// toolWarnings are the session's start lines on the tools the engine runs
+// (Ready's hint): an override older than this dun's Min, or a kept copy
+// older than the pin on a build that does not fetch, by path and version,
+// with the fix. A Mac ran a modified mcpshell checkout from ~/.local/bin,
+// found on PATH first, with no word from dun until it crashed. Build info
+// only: no tool is run.
 func toolWarnings() []string {
 	d := &doctor{}
 	var out []string
 	for _, t := range release.Supported {
-		p, err := mcpserver.FindCommand(t.Name)
-		if err != nil {
+		r := mcpserver.ResolveTool(t.Name)
+		if r.Path == "" {
 			continue // missing: the server's own start says so
 		}
-		o, err := update.OfFile(p)
+		o, err := update.OfFile(r.Path)
 		if err != nil {
 			continue
 		}
-		s, _ := supportedTool(t.Name)
-		if w := toolWarning(t.Name, p, o, s, d.toolEnv(t.Name, p)); w != "" {
+		s, _ := mcpserver.SupportedTool(t.Name)
+		if w := toolWarning(t.Name, r, o, s, d.toolEnv(t.Name)); w != "" {
 			out = append(out, w)
 		}
 	}
 	return out
 }
 
-// toolWarning is toolWarnings' line for name at p, or "". A build with no
-// version ("(devel)", a plain go build) is not compared, as in doctor.
-func toolWarning(name, p string, o update.Origin, s release.Tool, env toolEnv) string {
-	v := o.Version
-	if !semver.IsValid(v) || o.Kind == update.GoBuild || isUnstamped(v) {
+// toolWarning is toolWarnings' line for name resolved as r, or "". A build
+// with no version ("(devel)", a plain go build) is not compared, as in
+// doctor. A release build fetches the pin itself, so its kept copy is not
+// warned about.
+func toolWarning(name string, r mcpserver.Resolved, o update.Origin, s release.Tool, env toolEnv) string {
+	if !comparable(o) {
 		return ""
 	}
-	pin := s.Recommended
-	if env.pinned != "" {
-		pin = env.pinned
+	pl := planTool(name, r, o, s, env)
+	switch {
+	case r.Source == mcpserver.SourceOverride && pl.level == "warn":
+		return fmt.Sprintf("%s: your build at %s (%s) is %s, older than the %s this dun needs. Fix: %s",
+			name, r.Path, r.Via, o.Version, s.Min, pl.fix)
+	case r.Stale() && !env.release:
+		return fmt.Sprintf("%s: running the kept %s at %s; this dun pins %s. Fix: %s", name, r.Version, r.Path, r.Pin, pl.fix)
 	}
-	// Semver orders a pseudo-version (v0.12.2-0.<time>-<hash>) after the tag
-	// it follows, and ignores +dirty: at or past the pin is fine.
-	if semver.Compare(v, pin) >= 0 {
-		return ""
-	}
-	pl := planTool(name, p, o, s, env)
-	fix := pl.fix
-	if fix == "" {
-		fix = "remove " + p + " and run dun doctor --fix to get the pinned release"
-	}
-	return fmt.Sprintf("%s: %s is %s, older than the %s this dun pins. Fix: %s", name, p, v, pin, fix)
+	return ""
 }
 
 // isUnstamped is a version Go gives a build with no VCS stamp: v0.0.0-<time>-<hash>.

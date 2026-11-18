@@ -41,7 +41,7 @@ type raglitIndexRow struct {
 
 // listIndexes runs the search extension's index CLI for every index.
 var listIndexes = func(ctx context.Context, cli, dir string, env []string) ([]raglitIndexRow, error) {
-	p, err := mcpserver.FindCommand(cli)
+	p, err := mcpserver.FindCommandContext(ctx, cli)
 	if err != nil {
 		return nil, err
 	}

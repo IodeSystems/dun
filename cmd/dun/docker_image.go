@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // ensureDunImage checks if the "dun:local" Docker image exists and builds it
@@ -43,13 +45,14 @@ func buildDunImage() error {
 		return fmt.Errorf("dockerfile not found — place one next to the dun binary or run tools/build-docker.sh")
 	}
 
-	// Find the required binaries on PATH
+	// The required binaries: dun on PATH, its tools as the engines resolve
+	// them (mcpserver/tools.go)
 	bins := []string{"dun", "poly-lsp-mcp", "mcpshell", "raglit"}
 	binPaths := make(map[string]string)
 	for _, bin := range bins {
-		p, err := exec.LookPath(bin)
+		p, err := mcpserver.FindCommand(bin)
 		if err != nil {
-			return fmt.Errorf("%s not found on PATH", bin)
+			return fmt.Errorf("%s not found: %w", bin, err)
 		}
 		binPaths[bin] = p
 	}

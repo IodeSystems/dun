@@ -25,6 +25,7 @@ import (
 // requests carry it.
 func TestOAuth_DiscoveryLoginThroughTheHarness(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
+	useToolOnPath(t, "mcpshell") // a remote server is hosted in mcpshell
 	w := oauthtest.NewWorld(t)
 	b := &oauthtest.Browser{}
 	h := newNoteHarness(t)
@@ -110,6 +111,7 @@ func TestOAuth_DiscoveryLoginThroughTheHarness(t *testing.T) {
 // decode error.
 func TestStartServer_GateExplained(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
+	useToolOnPath(t, "mcpshell") // a remote server is hosted in mcpshell
 	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		http.Redirect(rw, r, "https://corp.cloudflareaccess.com/cdn-cgi/access/login/x", http.StatusFound)
 	}))
@@ -142,6 +144,7 @@ func brokerHarness(t *testing.T, b *oauth.Broker, br *oauthtest.Browser) *Harnes
 // it, two engines share one login, and a 401 makes the broker refresh.
 func TestOAuthBroker_EnginesShareOneLogin(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
+	useToolOnPath(t, "mcpshell") // a remote server is hosted in mcpshell
 	w := oauthtest.NewWorld(t)
 	br := &oauthtest.Browser{}
 	b := oauth.NewBroker(nil)

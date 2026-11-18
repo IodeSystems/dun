@@ -14,7 +14,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/iodesystems/dun/internal/dunhome"
 	"github.com/iodesystems/dun/internal/fsutil"
@@ -207,7 +206,7 @@ func registerProject(source string) (id string, minted bool, err error) {
 	if err := os.MkdirAll(dunHome(), 0o700); err != nil {
 		return "", false, fmt.Errorf("dun: create %s: %w", dunHome(), err)
 	}
-	unlock, err := lockFile(registryFile() + ".lock")
+	unlock, err := fsutil.LockFile(registryFile() + ".lock")
 	if err != nil {
 		return "", false, err
 	}
@@ -268,24 +267,6 @@ func readRegistry() (*registry, error) {
 func mustJSON(v any) []byte {
 	b, _ := json.MarshalIndent(v, "", "  ")
 	return append(b, '\n')
-}
-
-// lockFile takes an exclusive flock on path, creating it; the returned func
-// releases it. flock rather than an O_EXCL marker: the kernel drops it when a
-// process dies, so a crash cannot leave the registry locked.
-func lockFile(path string) (func(), error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return nil, fmt.Errorf("dun: lock %s: %w", path, err)
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		f.Close()
-		return nil, fmt.Errorf("dun: lock %s: %w", path, err)
-	}
-	return func() {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-		f.Close()
-	}, nil
 }
 
 func randomHex(n int) string {

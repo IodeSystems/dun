@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,67 +15,57 @@ import (
 	"github.com/iodesystems/dun/release"
 )
 
-// The decision table: the tool's origin × its version against this dun's ×
-// what this dun and machine can do. Each row is the line, the fix, and
-// what --fix runs.
+// The decision table: where the tool comes from (pinned, a kept older
+// copy, your build) × its version against this dun's × what this dun and
+// machine can do. Each row is the line, the fix, and what --fix runs.
 func TestPlanTool(t *testing.T) {
 	s := release.Tool{Name: "t", Module: "github.com/x/t/cmd/t", Min: "v0.2.0", Recommended: "v0.3.0"}
 	gi := func(v string) update.Origin { return update.Origin{Kind: update.GoInstall, Version: v} }
 	rel := func(v string) update.Origin { return update.Origin{Kind: update.Release, Version: v} }
-	co := func(v, src string, mod bool) update.Origin {
-		return update.Origin{Kind: update.Checkout, Version: v, Revision: "abc1234", SrcDir: src, Modified: mod}
+	co := func(v string, mod bool) update.Origin {
+		return update.Origin{Kind: update.Checkout, Version: v, Revision: "abc1234", Modified: mod}
 	}
-	goOK := toolEnv{haveGo: true, writable: true}
+	pinned := func(v string) mcpserver.Resolved {
+		return mcpserver.Resolved{Name: "t", Source: mcpserver.SourcePinned, Path: "/h/tools/t/" + v + "/t", Pin: "v0.3.0", Version: v}
+	}
+	env := mcpserver.Resolved{Name: "t", Source: mcpserver.SourceOverride, Path: "/src/t", Via: "$DUN_T", Pin: "v0.3.0"}
+	cfg := mcpserver.Resolved{Name: "t", Source: mcpserver.SourceOverride, Path: "/src/t", Via: "tools.t.path in /h/mcp.json", Pin: "v0.3.0"}
+	goOK, rl := toolEnv{haveGo: true}, toolEnv{release: true}
 	for i, c := range []struct {
+		r                       mcpserver.Resolved
 		o                       update.Origin
 		env                     toolEnv
 		level, detail, fix, act string
 	}{
-		// go install
-		{gi("v0.3.0"), goOK, "ok", "t: go install v0.3.0", "", ""},
-		{gi("v0.4.0"), goOK, "ok", "t: go install v0.4.0", "", ""}, // newer: never a downgrade
-		{gi("v0.2.5"), goOK, "ok", "t: go install v0.2.5; an update is available: v0.3.0 (tested with this dun)",
-			"dun doctor --fix (runs go install github.com/x/t/cmd/t@v0.3.0)", actGoInstall},
-		{gi("v0.1.0"), goOK, "warn", "t: go install v0.1.0; too old for this dun (it needs v0.2.0 or newer)",
-			"dun doctor --fix (runs go install github.com/x/t/cmd/t@v0.3.0)", actGoInstall},
-		{gi("v0.1.0"), toolEnv{writable: true}, "warn", "t: go install v0.1.0; too old for this dun (it needs v0.2.0 or newer)",
-			"go install github.com/x/t/cmd/t@v0.3.0 (needs Go: go.dev/dl)", ""},
-		{gi("v0.2.5"), toolEnv{haveGo: true}, "ok", "t: go install v0.2.5; an update is available: v0.3.0 (tested with this dun)",
-			"go install github.com/x/t/cmd/t@v0.3.0, as a user who can write /bin", ""},
-		{gi("v0.3.0-0.20261001000000-abcdefabcdef"), goOK, "ok", // a pseudo-version before v0.3.0
-			"t: go install v0.3.0-0.20261001000000-abcdefabcdef; an update is available: v0.3.0 (tested with this dun)",
-			"dun doctor --fix (runs go install github.com/x/t/cmd/t@v0.3.0)", actGoInstall},
-		// release: the release dun's pin, beside dun or not; a dun with no pin
-		{rel("v0.2.5"), toolEnv{pinned: "v0.3.0", beside: true}, "ok", "t: release v0.2.5; an update is available: v0.3.0 (tested with this dun)",
+		// the pin's copy: nothing to do, whatever its origin says
+		{pinned("v0.3.0"), rel("v0.3.0"), rl, "ok", "t: pinned v0.3.0, release v0.3.0", "", ""},
+		{pinned("v0.3.0"), gi("v0.3.0"), goOK, "ok", "t: pinned v0.3.0, go install v0.3.0", "", ""},
+		// a kept older copy: --fix gets the pin's
+		{pinned("v0.2.5"), rel("v0.2.5"), rl, "ok", "t: pinned v0.2.5, release v0.2.5; a kept copy: this dun pins v0.3.0",
 			"dun doctor --fix (downloads t v0.3.0 from its release; the sha256 is pinned in this build)", actDownload},
-		{rel("v0.1.0"), toolEnv{pinned: "v0.3.0"}, "warn", "t: release v0.1.0; too old for this dun (it needs v0.2.0 or newer)",
-			"remove /bin/t, then dun doctor --fix downloads t v0.3.0 beside dun", ""},
-		{rel("v0.2.5"), goOK, "ok", "t: release v0.2.5; an update is available: v0.3.0 (tested with this dun)",
-			"download v0.3.0 or newer from https://github.com/x/t/releases", ""},
-		{rel("v0.3.0"), toolEnv{pinned: "v0.3.0", beside: true}, "ok", "t: release v0.3.0", "", ""},
-		{rel("(devel)"), toolEnv{pinned: "v0.3.0", beside: true}, "ok", "t: release (devel)", "", ""},
-		// checkout: said, never run
-		{co("v0.0.0-20260101000000-abc123456789", "/src/t", false), goOK, "ok", // no tag in the build info: unknown, not old
-			"t: built from a checkout at abc1234; unknown version, can't compare it with v0.3.0 (this dun's)", "", ""},
-		{co("v0.2.1-0.20260101000000-abc123456789", "", false), goOK, "ok",
-			"t: built from a checkout at abc1234; an update is available: v0.3.0 (tested with this dun)", "rebuild it from its checkout (make install)", ""},
-		{co("v0.3.1-0.20261101000000-abc123456789", "/src/t", false), goOK, "ok", "t: built from a checkout at abc1234", "", ""},
+		{pinned("v0.2.5"), gi("v0.2.5"), goOK, "ok", "t: pinned v0.2.5, go install v0.2.5; a kept copy: this dun pins v0.3.0",
+			"dun doctor --fix (runs go install github.com/x/t/cmd/t@v0.3.0)", actGoInstall},
+		{pinned("v0.2.5"), gi("v0.2.5"), toolEnv{}, "ok", "t: pinned v0.2.5, go install v0.2.5; a kept copy: this dun pins v0.3.0",
+			"install Go (go.dev/dl), then dun doctor --fix", ""},
+		// your build: run whatever its version; below Min is a warn, never updated
+		{env, gi("v0.3.0"), goOK, "ok", "t: your build, go install v0.3.0", "", ""},
+		{env, gi("v0.2.5"), goOK, "ok", "t: your build, go install v0.2.5", "", ""},
+		{env, gi("v0.1.0"), goOK, "warn", "t: your build, go install v0.1.0; too old for this dun (it needs v0.2.0 or newer)",
+			"update it, or unset DUN_T to run the pinned v0.3.0", ""},
+		{cfg, rel("v0.1.0"), rl, "warn", "t: your build, release v0.1.0; too old for this dun (it needs v0.2.0 or newer)",
+			"update it, or remove tools.t.path from " + mcpserver.UserServersFile() + " to run the pinned v0.3.0", ""},
 		// a modified checkout: compared by its build info's version (Carl's Mac, 2026-11-09)
-		{co("v0.0.0-20260101000000-abc123456789+dirty", "/src/t", true), goOK, "ok",
-			"t: built from a checkout at abc1234, modified; unknown version, can't compare it with v0.3.0 (this dun's)", "", ""},
-		{co("v0.1.2-0.20261030062958-886d6f12c3e4+dirty", "", true), goOK, "warn",
-			"t: a modified checkout of v0.1.2-0.20261030062958-886d6f12c3e4+dirty (at abc1234); too old for this dun (it needs v0.2.0 or newer)",
-			"rebuild it in its checkout from a current tag (make install), or remove /bin/t and run dun doctor --fix to get the pinned release", ""},
-		{co("v0.2.5-0.20261030062958-886d6f12c3e4+dirty", "", true), goOK, "warn", // modified and behind
-			"t: a modified checkout of v0.2.5-0.20261030062958-886d6f12c3e4+dirty (at abc1234); an update is available: v0.3.0 (tested with this dun)",
-			"rebuild it in its checkout from a current tag (make install), or remove /bin/t and run dun doctor --fix to get the pinned release", ""},
-		{co("v0.3.1-0.20261030062958-886d6f12c3e4+dirty", "", true), goOK, "ok", "t: built from a checkout at abc1234, modified", "", ""},
-		{co("(devel)", "/src/t", false), goOK, "ok", "t: built from a checkout at abc1234; unknown version, can't compare it with v0.3.0 (this dun's)", "", ""},
-		// a plain go build
-		{update.Origin{Kind: update.GoBuild, Version: "(devel)"}, goOK, "ok",
-			"t: a plain go build, outside version control; unknown version, can't compare it with v0.3.0 (this dun's)", "", ""},
+		{env, co("v0.1.2-0.20261030062958-886d6f12c3e4+dirty", true), goOK, "warn",
+			"t: your build, built from a checkout at abc1234, modified; too old for this dun (it needs v0.2.0 or newer)",
+			"update it, or unset DUN_T to run the pinned v0.3.0", ""},
+		{env, co("v0.3.1-0.20261030062958-886d6f12c3e4+dirty", true), goOK, "ok", "t: your build, built from a checkout at abc1234, modified", "", ""},
+		// no version to compare
+		{env, co("v0.0.0-20260101000000-abc123456789", false), goOK, "ok",
+			"t: your build, built from a checkout at abc1234; unknown version, can't compare it with v0.2.0 (the oldest this dun runs)", "", ""},
+		{env, update.Origin{Kind: update.GoBuild, Version: "(devel)"}, goOK, "ok",
+			"t: your build, a plain go build, outside version control; unknown version, can't compare it with v0.2.0 (the oldest this dun runs)", "", ""},
 	} {
-		pl := planTool("t", "/bin/t", c.o, s, c.env)
+		pl := planTool("t", c.r, c.o, s, c.env)
 		if pl.level != c.level || pl.detail != c.detail || pl.fix != c.fix || pl.act != c.act {
 			t.Errorf("row %d: got\n  %s | %s | %s | %s\nwant\n  %s | %s | %s | %s", i,
 				pl.level, pl.detail, pl.fix, pl.act, c.level, c.detail, c.fix, c.act)
@@ -117,11 +106,11 @@ func TestPolyUpdate(t *testing.T) {
 	}
 }
 
-// Real binaries: a go install build at a module version (from a proxy in a
-// temp dir, no network) and a make install build from a checkout, read by
-// toolOrigin from their build info. --fix go-installs the recommended
-// version into the tool's own directory, never downgrades, and never
-// touches a checkout's build.
+// Real binaries: go install builds at a module version (from a proxy in a
+// temp dir, no network), read by toolOrigin from their build info. Your
+// build below Min is a warn and never touched; a kept older copy is
+// updated by --fix with go install module@pin into the pin's directory
+// under DUN_HOME.
 func TestToolOrigin_RealBinaries(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("no go")
@@ -131,28 +120,29 @@ func TestToolOrigin_RealBinaries(t *testing.T) {
 	}
 	const mod = "example.com/faketool"
 	proxy := t.TempDir()
-	for _, v := range []string{"v0.1.0", "v0.3.0"} {
+	for _, v := range []string{"v0.1.0", "v0.2.5", "v0.3.0"} {
 		fakeModule(t, proxy, mod, v)
 	}
-	install := func(v string) string {
+	gobin := func(dir string) []string {
+		return append(os.Environ(), "GOPROXY=file://"+filepath.ToSlash(proxy), "GOSUMDB=off", "GOFLAGS=-modcacherw",
+			"GOMODCACHE="+filepath.Join(t.TempDir(), "mod"), "GOBIN="+dir, "GOWORK=off", "GOTOOLCHAIN=local", "CGO_ENABLED=0")
+	}
+	install := func(v, dir string) string {
 		t.Helper()
-		dir := t.TempDir()
 		cmd := exec.Command("go", "install", mod+"@"+v)
 		cmd.Dir = t.TempDir()
-		cmd.Env = append(os.Environ(), "GOPROXY=file://"+filepath.ToSlash(proxy), "GOSUMDB=off", "GOFLAGS=-modcacherw",
-			"GOMODCACHE="+filepath.Join(t.TempDir(), "mod"), "GOBIN="+dir, "GOWORK=off", "GOTOOLCHAIN=local", "CGO_ENABLED=0")
+		cmd.Env = gobin(dir)
 		if b, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("go install %s@%s: %v\n%s", mod, v, err, b)
 		}
 		return filepath.Join(dir, "faketool")
 	}
-	old, cur := install("v0.1.0"), install("v0.3.0")
-
-	defer func(s []release.Tool, g func(string, string) (string, error), p func(string) (update.Artifact, update.File, bool)) {
-		release.Supported, goInstall, pinnedTool = s, g, p
-	}(release.Supported, goInstall, pinnedTool)
+	t.Setenv("DUN_HOME", t.TempDir())
+	t.Setenv("DUN_FAKETOOL", "")
+	defer func(s []release.Tool, g func(string, string) (string, error)) {
+		release.Supported, goInstall = s, g
+	}(release.Supported, goInstall)
 	release.Supported = []release.Tool{{Name: "faketool", Module: mod, Min: "v0.2.0", Recommended: "v0.3.0"}}
-	pinnedTool = func(string) (update.Artifact, update.File, bool) { return update.Artifact{}, update.File{}, false }
 
 	line := func(d *doctor) finding {
 		t.Helper()
@@ -161,70 +151,47 @@ func TestToolOrigin_RealBinaries(t *testing.T) {
 		}
 		return d.found[0]
 	}
-	// Without --fix: too old, and the fix says the command.
-	d := &doctor{}
-	d.toolOrigin("faketool", old)
-	if f := line(d); f.level != "warn" || f.detail != "faketool: go install v0.1.0; too old for this dun (it needs v0.2.0 or newer)" ||
-		f.fix != "dun doctor --fix (runs go install example.com/faketool@v0.3.0)" {
-		t.Errorf("old: %+v", f)
-	}
-	// --fix: go install module@recommended into the tool's directory; the
-	// line after is the new build's.
-	var ran []string
-	goInstall = func(module, dir string) (string, error) {
-		ran = append(ran, module+" "+dir)
-		b, err := os.ReadFile(cur)
-		if err != nil {
-			return "", err
-		}
-		return dir, os.WriteFile(filepath.Join(dir, "faketool"), b, 0o755)
-	}
-	d = &doctor{fix: true}
-	d.toolOrigin("faketool", old)
-	if f := line(d); f.level != "ok" || f.detail != "faketool: go install v0.3.0" || f.fix != "" ||
-		len(ran) != 1 || ran[0] != mod+"@v0.3.0 "+filepath.Dir(old) || d.applied != 1 {
-		t.Errorf("--fix: %+v ran %q", f, ran)
-	}
-	// Current, and newer than recommended: nothing to run.
-	release.Supported[0].Recommended, release.Supported[0].Min = "v0.2.0", "v0.1.0"
-	ran = nil
-	d = &doctor{fix: true}
-	d.toolOrigin("faketool", cur)
-	if f := line(d); f.level != "ok" || f.detail != "faketool: go install v0.3.0" || len(ran) != 0 {
-		t.Errorf("no downgrade: %+v ran %q", f, ran)
+	// Your build, too old: said, never updated.
+	old := install("v0.1.0", t.TempDir())
+	t.Setenv("DUN_FAKETOOL", old)
+	goInstall = func(string, string) (string, error) { t.Error("go install for your build"); return "", nil }
+	d := &doctor{fix: true}
+	d.toolOrigin("faketool", mcpserver.ResolveTool("faketool"))
+	if f := line(d); f.level != "warn" || f.detail != "faketool: your build, go install v0.1.0; too old for this dun (it needs v0.2.0 or newer)" ||
+		f.fix != "update it, or unset DUN_FAKETOOL to run the pinned v0.3.0" {
+		t.Errorf("your build: %+v", f)
 	}
 
-	// A make install build from a checkout: said, never rebuilt.
-	if _, err := exec.LookPath("git"); err != nil {
-		return
+	// A kept v0.2.5 copy: --fix go-installs v0.3.0 into its own directory.
+	t.Setenv("DUN_FAKETOOL", "")
+	install("v0.2.5", filepath.Dir(mcpserver.PinnedPath("faketool", "v0.2.5")))
+	r := mcpserver.ResolveTool("faketool")
+	if !r.Stale() || r.Version != "v0.2.5" {
+		t.Fatalf("kept: %+v", r)
 	}
-	release.Supported[0].Recommended, release.Supported[0].Min = "v0.3.0", "v0.2.0"
-	src := t.TempDir()
-	os.WriteFile(filepath.Join(src, "go.mod"), []byte("module "+mod+"\n\ngo 1.22\n"), 0o644)
-	os.WriteFile(filepath.Join(src, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644)
-	for _, args := range [][]string{{"init", "-q"}, {"add", "."}, {"commit", "-qm", "x"}} {
-		cmd := exec.Command("git", append([]string{"-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"}, args...)...)
-		cmd.Dir = src
-		if b, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, b)
+	var ran []string
+	goInstall = func(module, dir string) (string, error) {
+		ran = append(ran, module)
+		cmd := exec.Command("go", "install", module)
+		cmd.Dir = t.TempDir()
+		cmd.Env = gobin(dir)
+		b, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Logf("%s", b)
 		}
-	}
-	co := filepath.Join(t.TempDir(), "faketool")
-	cmd := exec.Command("go", "build", "-o", co, "-ldflags", "-X main.srcDir="+src, ".")
-	cmd.Dir = src
-	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOFLAGS=", "GOWORK=off")
-	if b, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("go build: %v\n%s", err, b)
-	}
-	goInstall = func(string, string) (string, error) {
-		t.Error("go install for a checkout's build")
-		return "", errors.New("no")
+		return dir, err
 	}
 	d = &doctor{fix: true}
-	d.toolOrigin("faketool", co)
-	if f := line(d); f.level != "ok" || !strings.HasPrefix(f.detail, "faketool: built from a checkout at ") ||
-		!strings.HasSuffix(f.detail, "; unknown version, can't compare it with v0.3.0 (this dun's)") || f.fix != "" {
-		t.Errorf("checkout: %+v", f)
+	d.toolOrigin("faketool", r)
+	if f := line(d); f.level != "ok" || f.detail != "faketool: pinned v0.3.0, go install v0.3.0" || f.fix != "" ||
+		len(ran) != 1 || ran[0] != mod+"@v0.3.0" || d.applied != 1 {
+		t.Errorf("--fix: %+v ran %q", f, ran)
+	}
+	if r := mcpserver.ResolveTool("faketool"); r.Path != mcpserver.PinnedPath("faketool", "v0.3.0") || r.Stale() {
+		t.Errorf("after --fix: %+v", r)
+	}
+	if _, err := os.Stat(mcpserver.PinnedPath("faketool", "v0.2.5")); err != nil {
+		t.Error("the old version directory is kept")
 	}
 }
 
@@ -265,48 +232,39 @@ func TestToolInstallIsPinned(t *testing.T) {
 	}
 }
 
-// The session-start warning: a tool older than the pin says so, with the
-// path, version, pin and fix. At or past the pin (a release, a pseudo-version
-// after the tag, +dirty) it says nothing; a version with no tag is unknown,
-// not old, and doctor alone reports it.
+// The session-start warning: your build below Min says so, with the path,
+// version and fix; at or past Min it says nothing (it is yours). A kept
+// copy behind the pin says so on a build that does not fetch; a release
+// build fetches the pin itself. A version with no tag is unknown, not old.
 func TestToolWarning(t *testing.T) {
 	s, _ := release.SupportedTool("mcpshell")
 	const p = "/home/u/.local/bin/mcpshell"
-	env := toolEnv{pinned: s.Recommended}
-	const old = "v0.7.2-0.20261030062958-886d6f12c3e4"
+	mine := mcpserver.Resolved{Name: "mcpshell", Source: mcpserver.SourceOverride, Path: p, Via: "$DUN_MCPSHELL", Pin: s.Recommended}
+	const old = "v0.1.2-0.20261030062958-886d6f12c3e4"
 	carl := update.Origin{Kind: update.Checkout, Version: old + "+dirty", Revision: "886d6f1", Modified: true}
-	want := "mcpshell: " + p + " is " + old + "+dirty, older than the " + s.Recommended + " this dun pins" +
-		". Fix: rebuild it in its checkout from a current tag (make install), or remove " + p +
-		" and run dun doctor --fix to get the pinned release"
-	if got := toolWarning("mcpshell", p, carl, s, env); got != want {
+	want := "mcpshell: your build at " + p + " ($DUN_MCPSHELL) is " + old + "+dirty, older than the " + s.Min +
+		" this dun needs. Fix: update it, or unset DUN_MCPSHELL to run the pinned " + s.Recommended
+	if got := toolWarning("mcpshell", mine, carl, s, toolEnv{}); got != want {
 		t.Errorf("old modified checkout:\n got %q\nwant %q", got, want)
 	}
 	for _, o := range []update.Origin{
-		{Kind: update.Release, Version: "v0.1.0"},
-		{Kind: update.GoInstall, Version: old},
-		{Kind: update.Checkout, Version: old, Revision: "886d6f1"},
-	} {
-		if got := toolWarning("mcpshell", p, o, s, env); !strings.Contains(got, "is "+o.Version+", older than the "+s.Recommended+" this dun pins") {
-			t.Errorf("%+v: %q", o, got)
-		}
-	}
-	for _, o := range []update.Origin{
-		{Kind: update.Release, Version: s.Recommended},
-		{Kind: update.Release, Version: "v99.0.0"},
-		{Kind: update.GoInstall, Version: s.Recommended},
-		{Kind: update.GoInstall, Version: "v99.0.1-0.20261111161500-ca705850cc73"},
+		{Kind: update.Release, Version: s.Min},
+		{Kind: update.GoInstall, Version: "v0.7.2"}, // behind the pin, past Min: yours
 		{Kind: update.Checkout, Version: "v99.0.1-0.20261111161500-ca705850cc73+dirty", Revision: "ca70585", Modified: true},
 		{Kind: update.Checkout, Version: "(devel)", Revision: "abc1234", Modified: true},
 		{Kind: update.GoBuild, Version: "(devel)"},
 		{Kind: update.Checkout, Version: "v0.0.0-20261101000000-abcdefabcdef", Revision: "abc1234"},
 	} {
-		if got := toolWarning("mcpshell", p, o, s, env); got != "" {
+		if got := toolWarning("mcpshell", mine, o, s, toolEnv{}); got != "" {
 			t.Errorf("%+v: %q", o, got)
 		}
 	}
-	// doctor reports a tagless version as unknown.
-	u := update.Origin{Kind: update.Checkout, Version: "v0.0.0-20261101000000-abcdefabcdef", Revision: "abc1234"}
-	if pl := planTool("mcpshell", p, u, s, env); pl.level != "ok" || !strings.Contains(pl.detail, "unknown version") {
-		t.Errorf("doctor on v0.0.0-: %s %q", pl.level, pl.detail)
+	kept := mcpserver.Resolved{Name: "mcpshell", Source: mcpserver.SourcePinned, Path: "/h/tools/mcpshell/v0.7.2/mcpshell", Pin: s.Recommended, Version: "v0.7.2"}
+	o := update.Origin{Kind: update.Release, Version: "v0.7.2"}
+	if got := toolWarning("mcpshell", kept, o, s, toolEnv{haveGo: true}); !strings.Contains(got, "running the kept v0.7.2 at "+kept.Path+"; this dun pins "+s.Recommended) {
+		t.Errorf("kept, non-release: %q", got)
+	}
+	if got := toolWarning("mcpshell", kept, o, s, toolEnv{release: true}); got != "" {
+		t.Errorf("kept, release: %q", got)
 	}
 }

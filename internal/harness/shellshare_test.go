@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"slices"
 	"strings"
 	"testing"
@@ -69,9 +68,7 @@ func TestShellConfig_SharedHostedIsTheGateway(t *testing.T) {
 
 // The real mcpshell reaches a shared server through the gateway.
 func TestShell_SharedHostedLive(t *testing.T) {
-	if _, err := exec.LookPath("mcpshell"); err != nil {
-		t.Skip("no mcpshell on PATH")
-	}
+	toolFromPath(t, "mcpshell")
 	t.Setenv("DUN_HOME", t.TempDir())
 	ts, inits := countingMCP(t)
 	g := newGateway(t)

@@ -134,9 +134,7 @@ func TestToolSetDelta(t *testing.T) {
 // End to end: turning a server on mid-session leaves an aside waiting, and
 // still nothing for a driver to run a turn about.
 func TestStartServer_QueuesAnAsideNotATurn(t *testing.T) {
-	if !haveBinary("mcpshell") {
-		t.Skip("mcpshell not on PATH")
-	}
+	toolFromPath(t, "mcpshell")
 	dir := t.TempDir()
 	h, err := Start(context.Background(), Config{
 		Workspace: dir,

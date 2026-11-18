@@ -4,6 +4,22 @@ Why the tool-server layer is built the way it is. Short rules on startup,
 rebuilds and config files: "Tool servers and extensions" in `decisions.md`.
 Switch scopes (session, project, global): `internal/mcpserver/scope.go` (resolution), `internal/harness/mcpscope.go` (setters, follow).
 
+**Where dun's tools come from** (USER 2026-11-18, `decisions.md` "dun
+manages its tools under DUN_HOME"; `internal/mcpserver/tools.go`). mcpshell,
+poly-lsp-mcp and raglit are resolved, in order:
+
+| source | where |
+|---|---|
+| override | `$DUN_MCPSHELL`, `$DUN_POLY_LSP_MCP`, `$DUN_RAGLIT`; else `"tools": {"<name>": {"path": "…"}}` in `$DUN_HOME/mcp.json` (env wins); a server entry whose `command` is a path is used as it is |
+| pinned | `$DUN_HOME/tools/<tool>/<version>/<goos>-<goarch>/<tool>`, the version this dun pins; else the newest kept copy at or past Min |
+| missing | the server is off, with the `dun doctor` hint |
+
+PATH and dun's own directory are not searched for these. A release build
+fetches a missing pinned copy when a session first starts the tool (one
+quiet "fetching …" line, then the outcome); any other build does not, and
+`dun doctor --fix` go-installs it into the same directory. `dun doctor`,
+`dun tools` and `dun ps` show each tool's source and path.
+
 `/rag` (USER 2026-10-28; it was `/raglit`) is the search indexes as a switch
 table: every index raglit lists (`raglit index --list --json`), each on, off
 or unset at the global, project and session scopes, the nearest scope that
@@ -164,7 +180,8 @@ only by the default is allowed and leaves it standalone.
 `/mcp add` with an id that exists replaces its definition and keeps its mode
 and instance when the new entry names none.
 
-**The key** is the spec as the engine resolves it: the command found on PATH,
+**The key** is the spec as the engine resolves it: the command as resolved (dun's
+pinned copy or an override for its own tools, PATH for others),
 args (placeholders expanded, so a `{{workspace}}` server is per workspace),
 env with `$NAME` values read, url, headers and bearer resolved, the oauth
 block, the timeout. dund starts engines in its own directory, so a stdio

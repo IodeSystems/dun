@@ -57,8 +57,15 @@ var ragSetupOrder = []string{"embed", "identity", "vision", "segment", "audio"}
 // "" is a chat model.
 var ragRoleKind = map[string]string{"embed": "embeddings", "identity": "", "vision": "images", "segment": "", "audio": "speech"}
 
-// RaglitBin finds the raglit the engine runs. A variable for tests.
-var RaglitBin = func() (string, error) { return mcpserver.FindCommand("raglit") }
+// RaglitBin finds the raglit the engine runs (mcpserver.ResolveTool),
+// without fetching it: a session that starts raglit fetches it, and says
+// so. A variable for tests.
+var RaglitBin = func() (string, error) {
+	if r := mcpserver.ResolveTool("raglit"); r.Path != "" {
+		return r.Path, nil
+	}
+	return "", &mcpserver.MissingError{Command: "raglit"}
+}
 
 // raglitRoot is where the shared daemon keeps its config.json, as raglit
 // resolves it (raglit.DefaultRoot).

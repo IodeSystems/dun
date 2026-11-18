@@ -2,16 +2,9 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
-	"runtime"
-	"time"
 
-	"golang.org/x/mod/semver"
-
-	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/textfmt"
@@ -32,47 +25,18 @@ import (
 // channel is "release" in a release build, stamped by make release.
 var channel = ""
 
-// pinnedTool is name's download for this platform in the tools manifest
-// this release build was made with; false on any other build. A variable
-// for the tests.
-var pinnedTool = func(name string) (update.Artifact, update.File, bool) {
-	if !buildinfo.IsRelease() {
-		return update.Artifact{}, update.File{}, false
-	}
-	plat := update.Platform(runtime.GOOS, runtime.GOARCH)
-	m, err := update.ParseManifest(release.Deps)
-	if err != nil {
-		return update.Artifact{}, update.File{}, false
-	}
-	a, f, ok := m.File(name, plat)
-	// A newer pin in the registry (signed by the same key) wins, when it has
-	// this platform's file: a tool's point release without a dun release.
-	if t, rok := mcpserver.RegistryTool(name); rok {
-		if rf, fok := t.Files[plat]; fok && (!ok || semver.Compare(t.Recommended, a.Version) > 0) {
-			return update.Artifact{Version: t.Recommended, Files: t.Files}, rf, true
-		}
-	}
-	return a, f, ok
-}
+// pinnedTool is name's download for this platform: the tools manifest this
+// release build was made with, or the registry's newer pin
+// (mcpserver.PinnedDownload); false on any other build. A variable for the
+// tests.
+var pinnedTool = mcpserver.PinnedDownload
 
-// installPinned installs name from the pinned manifest beside dun, where
-// the engine looks after PATH (harness.FindCommand). A variable for the tests.
+// installPinned downloads name's pinned release into its managed directory,
+// $DUN_HOME/tools/<name>/<version>/<goos>-<goarch>/ (mcpserver.FetchPinned: the same code a
+// session's first need runs). A variable for the tests.
 var installPinned = func(name string) (string, error) {
-	a, f, ok := pinnedTool(name)
-	if !ok {
-		return "", errNotPinned
-	}
-	exe, err := buildinfo.SelfExe()
-	if err != nil {
-		return "", err
-	}
-	fmt.Fprintf(os.Stderr, "installing %s %s from its release (the checksum is pinned in this build): %s\n", name, a.Version, f.URL)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-	return (&update.Fetcher{}).Install(ctx, f, name, filepath.Join(filepath.Dir(exe), name))
+	return mcpserver.FetchPinned(context.Background(), name, func(s string) { fmt.Fprintln(os.Stderr, s) })
 }
-
-var errNotPinned = errors.New("not in this release's tools manifest")
 
 // releaseBuild is doctor's line on a release build's updates.
 func (d *doctor) releaseBuild() {

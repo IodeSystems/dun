@@ -37,12 +37,13 @@ type toolState struct {
 	Missing bool   `json:"missing"`
 	Pin     string `json:"pin"`
 	Release bool   `json:"release"`
+	Source  string `json:"source"`
 }
 
 // dep is the row as /version shows it.
 func (r toolState) dep() depver.Tool {
 	return depver.Tool{Name: r.Name, Path: r.Path, Version: r.Version, Origin: r.Origin,
-		Pin: r.Pin, Release: r.Release, Missing: r.Missing}
+		Pin: r.Pin, Release: r.Release, Missing: r.Missing, Source: r.Source}
 }
 
 // toolsMsg is `dun tools`'s answer; upgrade: it was --upgrade (/upgrade now).

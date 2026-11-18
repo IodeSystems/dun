@@ -54,8 +54,13 @@ func UseRegistry(ix *dunreg.Index, dunVersion string) {
 // extension, from its build info ("" when it is not installed or says
 // nothing).
 var toolVersion = func(command string) string {
-	p, err := FindCommand(command)
-	if err != nil {
+	p, err := "", error(nil)
+	if IsManaged(command) {
+		p = ResolveTool(command).Path // never a fetch: a manifest is only read
+	} else {
+		p, err = FindCommand(command)
+	}
+	if err != nil || p == "" {
 		return ""
 	}
 	o, err := update.OfFile(p)

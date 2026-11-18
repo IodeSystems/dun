@@ -17,6 +17,12 @@ COPY dun /usr/local/bin/dun
 COPY poly-lsp-mcp /usr/local/bin/poly-lsp-mcp
 COPY mcpshell /usr/local/bin/mcpshell
 COPY raglit /usr/local/bin/raglit
+# dun runs its own copy of each tool from $DUN_HOME/tools, never PATH's
+# (docs/decisions.md "dun manages its tools under DUN_HOME"); these point it
+# at the ones above.
+ENV DUN_MCPSHELL=/usr/local/bin/mcpshell \
+    DUN_POLY_LSP_MCP=/usr/local/bin/poly-lsp-mcp \
+    DUN_RAGLIT=/usr/local/bin/raglit
 
 WORKDIR /work
 

@@ -353,6 +353,10 @@ type ConfigFile struct {
 	// ViaDirect (standalone), or ViaShell (scripted). Read from
 	// $DUN_HOME/mcp.json only (LoadDefaultVia); a project file's is ignored.
 	DefaultVia string `json:"default_via,omitempty"`
+	// Tools overrides where dun's own tools come from: tools.<name>.path is
+	// the binary run instead of the pinned copy (tools.go). Read from
+	// $DUN_HOME/mcp.json only; a project file's is ignored.
+	Tools map[string]ToolConfig `json:"tools,omitempty"`
 }
 
 // LoadDefaultVia is the global default mode for a server with no mode at any

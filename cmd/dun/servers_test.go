@@ -216,9 +216,7 @@ func TestServerListing_ShowsEveryServerNotJustRunningOnes(t *testing.T) {
 // are opt-in by design (see harness.DefaultServers), so silently starting one that
 // this session left off would cost a spawn and an index build nobody asked for.
 func TestRunAllServersCmd_RestartsRunningOnesAndSkipsTheRest(t *testing.T) {
-	if !haveBin("mcpshell") {
-		t.Skip("mcpshell not on PATH")
-	}
+	toolFromPath(t, "mcpshell")
 	ctx := context.Background()
 	dir := t.TempDir()
 	h, err := harness.Start(ctx, harness.Config{
@@ -261,9 +259,7 @@ func TestRunAllServersCmd_RestartsRunningOnesAndSkipsTheRest(t *testing.T) {
 // refused — and the message has to say which happened, because "restarted" and
 // "started" mean different things about what you were just looking at.
 func TestRunServerCmd_RestartNamedStartsAStoppedServer(t *testing.T) {
-	if !haveBin("mcpshell") {
-		t.Skip("mcpshell not on PATH")
-	}
+	toolFromPath(t, "mcpshell")
 	ctx := context.Background()
 	dir := t.TempDir()
 	h, err := harness.Start(ctx, harness.Config{
@@ -295,9 +291,15 @@ func TestRunServerCmd_UnknownActionListsRestart(t *testing.T) {
 	}
 }
 
-func haveBin(name string) bool {
-	_, err := exec.LookPath(name)
-	return err == nil
+// toolFromPath points dun at the PATH's copy of one of its own tools
+// ($DUN_<TOOL>: dun does not look on PATH for them), or skips the test.
+func toolFromPath(t *testing.T, name string) {
+	t.Helper()
+	p, err := exec.LookPath(name)
+	if err != nil {
+		t.Skip(name + " not on PATH")
+	}
+	t.Setenv(mcpserver.ToolEnv(name), p)
 }
 
 func runGit(t *testing.T, dir string, args ...string) {
