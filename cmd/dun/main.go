@@ -13,7 +13,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -72,26 +71,6 @@ func checkDockerFlag(image string) error {
 		"To run commands in your own image, start dun without --docker and use: /isolate docker image %s", image, image)
 }
 
-// usage prints what dun is and how to start, then the flags by group, as
-// --long-flags.
-//
-// Go's flag package accepts -tui and --tui identically but PRINTS the first,
-// and `-tui` reads like the three short flags -t -u -i. Only genuinely
-// single-letter flags keep one dash.
-func usage() { writeUsage(os.Stderr, flag.CommandLine) }
-
-// flagGroups orders --help; a flag in none of them is listed under the last.
-var flagGroups = []struct {
-	title string
-	names []string
-}{
-	{"start and sessions", []string{"setup", "continue", "resume", "new", "sessions", "tui", "web-tui", "addr", "p", "version"}},
-	{"model and provider", []string{"url", "model", "key", "child-model", "timeout", "timeout-grace", "no-suggest", "rephrase", "bare"}},
-	{"workspace and isolation", []string{"workspace", "worktree", "docker", "docker-network", "rag", "lsp", "no-rag", "no-lsp", "no-tools", "media"}},
-	{"experimental", []string{"exp-iterm-tabcontrol"}},
-	{"advanced", []string{"engine", "persist", "disable-exit", "replay", "replay-speed", "input-delay", "max-gap"}},
-}
-
 // removedFlags are flags that no longer do anything. They stay accepted
 // because an older TUI or dund passes them to a newer engine and a script may
 // too; --help does not list them.
@@ -108,74 +87,6 @@ func warnShipRemoved() {
 	})
 	if given {
 		fmt.Fprintln(os.Stderr, "dun: ship was removed; --ship, --pr and --no-ship do nothing. The repo's own rules for shipping apply.")
-	}
-}
-func writeUsage(w io.Writer, fs *flag.FlagSet) {
-	fmt.Fprint(w, `dun — a coding assistant in your terminal: it works a task in your project.
-
-start:
-  cd your-project && dun     open dun there, then /login (enter on the empty prompt
-                             opens it) to connect an AI service, and ask
-  dun -p "fix the test"      run one task headless: the answer on stdout, the work and diff on stderr
-  dun --continue             reopen the most recent session for this workspace
-  dun doctor [--fix]         check providers, tools, dund and the service; --fix runs what it can
-  dun tools [--upgrade]      the tools against the versions this dun pins; --upgrade installs them (dun tools --help)
-  dun tmux                   the tmux.conf lines that show dun's state in the window list
-  dun mcp                    dun's sessions as an MCP server on stdio, for another agent (dun mcp --help)
-  dun watch <session>        a line each time a session ends a turn or asks (dun watch --help)
-  dun msg                    message dun sessions and listen for messages from a shell (dun msg --help)
-  dun --engine               engine mode: line-delimited JSON events on stdin/stdout (what dund runs)
-  dun dund …                 the session service (dun dund --help)
-  dun completion [shell]     shell completion: source <(dun completion bash), or zsh, fish
-
-  DUN_URL, DUN_MODEL, DUN_LLM_KEY in the environment set the provider without
-  /login (--url, --model, --key for one run).
-`)
-	line := func(f *flag.Flag) {
-		dash := "--"
-		if len(f.Name) == 1 {
-			dash = "-"
-		}
-		name, help := flag.UnquoteUsage(f)
-		head := "  " + dash + f.Name
-		if name != "" {
-			head += " " + name
-		}
-		if f.DefValue != "" && f.DefValue != "false" && f.DefValue != "0s" {
-			help += " (default " + f.DefValue + ")"
-		}
-		fmt.Fprintf(w, "%-24s %s\n", head, help)
-	}
-	grouped := map[string]bool{}
-	for n := range removedFlags {
-		grouped[n] = true // accepted, hidden
-	}
-	for _, g := range flagGroups {
-		for _, n := range g.names {
-			grouped[n] = true
-		}
-	}
-	for i, g := range flagGroups {
-		var fl []*flag.Flag
-		for _, n := range g.names {
-			if f := fs.Lookup(n); f != nil {
-				fl = append(fl, f)
-			}
-		}
-		if i == len(flagGroups)-1 {
-			fs.VisitAll(func(f *flag.Flag) {
-				if !grouped[f.Name] {
-					fl = append(fl, f)
-				}
-			})
-		}
-		if len(fl) == 0 {
-			continue
-		}
-		fmt.Fprintf(w, "\n%s:\n", g.title)
-		for _, f := range fl {
-			line(f)
-		}
 	}
 }
 func main() {
@@ -239,6 +150,7 @@ func main() {
 		os.Exit(tmuxCmd(os.Stdout, os.Getenv("TMUX") != "", os.Getenv("LC_TERMINAL") == "iTerm2", execTmuxQuery))
 	}
 	flag.Usage = usage
+	helpAll := flag.Bool("help-all", false, "every flag, the advanced ones too")
 	ver := flag.Bool("version", false, "print version and exit")
 	setup := flag.Bool("setup", false, "run the interactive setup wizard (LLM url/model/key) and exit")
 	// The model flags default to empty: after parse, each role resolves
@@ -275,7 +187,7 @@ func main() {
 	// -p is the headless run for a person or a script; --engine is the JSON
 	// protocol that dund and the TUI drive (USER 2026-11-17). headless and
 	// prog are the two; *prog below always means the engine.
-	headless := flag.Bool("p", false, "run one task headless: the work on stderr, the answer on stdout, then exit (the task from stdin when none is given)")
+	headless := flag.Bool("p", false, "run one task headless and exit: the answer on stdout, the work and the diff on stderr; with no task, the task is read from stdin")
 	prog := flag.Bool("engine", false, "engine mode: line-delimited JSON events on stdin/stdout (what dund runs)")
 	asideEscalateMS := flag.Int("aside-escalate-ms", 0, "how long a heartbeat about a silent background job or child waits for a turn to carry it before it wakes the agent (0: DUN_ASIDE_ESCALATE_MS, else 5000)")
 	turnLimit := flag.Int("tool-call-turn-limit", 0, "the most tool-call rounds one turn may make (0: DUN_MAX_TURNS, else 400); the model is told it, and warned at 80%")
@@ -310,14 +222,14 @@ func main() {
 	// Tri-state: unset means "whatever /rag auto or /lsp auto saved", which a
 	// plain bool cannot express (its zero value would silently mean "off").
 	var ragFlag, lspFlag tristate
-	flag.Var(&ragFlag, "rag", "start the docs server (raglit) this run: --rag or --rag=false (default: the saved setting)")
-	flag.Var(&lspFlag, "lsp", "start the code server (poly-lsp-mcp) this run: --lsp or --lsp=false (default: the saved setting)")
+	flag.Var(&ragFlag, "rag", "start the docs server (raglit) this run, or not: --no-rag, the same as --rag=false (default: the saved setting)")
+	flag.Var(&lspFlag, "lsp", "start the code server (poly-lsp-mcp) this run, or not: --no-lsp, the same as --lsp=false (default: the saved setting)")
 	// --no-rag and --no-lsp are --rag=false and --lsp=false (noAutostart).
 	noRag := flag.Bool("no-rag", false, "do not start the docs server (raglit) this run; same as --rag=false")
 	noLsp := flag.Bool("no-lsp", false, "do not start the code server (poly-lsp-mcp) this run; same as --lsp=false")
 	noTools := flag.Bool("no-tools", false, "a plain chat: the model gets no tools at all, and no tool server starts")
 	var media mediaFlag
-	flag.Var(&media, "media", "attach an image (png, jpeg, gif, webp) to the task's first message; repeat for more: dun --media shot.png -p \"what is wrong here\"")
+	flag.Var(&media, "media", "attach the image `file` (png, jpeg, gif, webp) to the task's first message; repeat for more: dun --media shot.png -p \"what is wrong here\"")
 	// `dun completion [shell]` and its `dun __complete sessions`: after the
 	// flags are defined (the script lists them), before any server, session
 	// or LLM (completion.go).
@@ -325,6 +237,10 @@ func main() {
 		os.Exit(completionCmd(os.Args[1:], flag.CommandLine, os.Stdout, os.Stderr))
 	}
 	flag.Parse()
+	if *helpAll {
+		writeUsage(os.Stderr, flag.CommandLine, helpWidth(), true)
+		return
+	}
 	if err := noAutostart(&ragFlag, *noRag, "rag"); err != nil {
 		fatal(err)
 	}
