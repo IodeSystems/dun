@@ -131,7 +131,7 @@ var Supported = []Tool{
 	// it), a runaway-root back-off, --version; help goes to stdout with
 	// rare flags under --help-all. `mcp --root`, `daemon --restart` and the
 	// `mcp --help` marker phrases dun probes are unchanged.
-	{Name: "poly-lsp-mcp", Module: "github.com/iodesystems/lsp-mcp",
+	{Name: "poly-lsp-mcp", Module: "github.com/iodesystems/poly-lsp-mcp",
 		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.5.3"},
 	// Min 5d24299 (main, 2026-10-24): the raglit/setup notification, doctor
 	// --json and provider keys by api_key_file, which /rag setup and
