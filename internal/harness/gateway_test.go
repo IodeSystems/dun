@@ -14,6 +14,8 @@ import (
 
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/oauth"
+	"github.com/iodesystems/dun/internal/oauth/oauthtest"
 )
 
 // gwLink is an engine's way to the gateway, as dund's peer op is.
@@ -75,7 +77,7 @@ func countingMCP(t *testing.T) (*httptest.Server, *atomic.Int64) {
 }
 
 func newGateway(t *testing.T) *Gateway {
-	g := NewGateway(NewOAuthBroker(nil))
+	g := NewGateway(oauth.NewBroker(nil))
 	t.Cleanup(g.Close)
 	return g
 }
@@ -263,9 +265,9 @@ func TestShareRequest_Key(t *testing.T) {
 // and no engine runs a login of its own.
 func TestGateway_OAuthLogsInOnce(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	w := newOAuthWorld(t)
-	br := &browser{}
-	g := NewGateway(NewOAuthBroker(nil))
+	w := oauthtest.NewWorld(t)
+	br := &oauthtest.Browser{}
+	g := NewGateway(oauth.NewBroker(nil))
 	t.Cleanup(g.Close)
 	var mu sync.Mutex
 	shown := map[string]int{}
@@ -274,17 +276,17 @@ func TestGateway_OAuthLogsInOnce(t *testing.T) {
 			mu.Lock()
 			shown[session]++
 			mu.Unlock()
-			br.notify(id, url)
+			br.Notify(id, url)
 		}
 	}
-	spec := ServerSpec{ID: "snow", URL: w.mcpURL(), OAuth: &OAuthSpec{ClientID: w.clientID, RedirectPort: freePort(t)}}
+	spec := ServerSpec{ID: "snow", URL: w.MCPURL(), OAuth: &oauth.Spec{ClientID: w.ClientID, RedirectPort: oauthtest.FreePort(t)}}
 	ctx := context.Background()
 	for _, s := range []string{"s1", "s2"} {
 		h := gatewayHarness(t, g, s, login(s))
 		h.cfg.OnLogin = func(string, string) { t.Error("the engine showed a login: the gateway's to show") }
-		h.cfg.OAuthBroker = func(context.Context, OAuthRequest) (OAuthResult, error) {
+		h.cfg.OAuthBroker = func(context.Context, oauth.Request) (oauth.Result, error) {
 			t.Error("the engine asked for a token: the gateway's upstream holds it")
-			return OAuthResult{}, nil
+			return oauth.Result{}, nil
 		}
 		if _, err := h.AddServer(ctx, spec); err != nil {
 			t.Fatal(err)
@@ -293,8 +295,8 @@ func TestGateway_OAuthLogsInOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if br.count() != 1 || g.Starts() != 1 {
-		t.Errorf("logins %d, starts %d: want one each", br.count(), g.Starts())
+	if br.Count() != 1 || g.Starts() != 1 {
+		t.Errorf("logins %d, starts %d: want one each", br.Count(), g.Starts())
 	}
 	mu.Lock()
 	defer mu.Unlock()

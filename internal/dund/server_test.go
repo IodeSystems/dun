@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/oauth"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -288,7 +288,7 @@ func TestServerLeavesTheViewsOfAClientThatWent(t *testing.T) {
 }
 
 // `dun oauth token` reaches the broker over the socket; an engine's peer
-// request reaches the same one (dun/oauthbroker.go).
+// request reaches the same one (internal/oauth/oauthbroker.go).
 func TestServerOAuthCommand(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	svc, sp, _ := newSvc(t)
@@ -301,11 +301,11 @@ func TestServerOAuthCommand(t *testing.T) {
 	go NewServer(svc, UnixPeer).Serve(ln)
 
 	a := dial(t, sock)
-	spec := harness.MarshalOAuthSpec(harness.OAuthSpec{ClientID: "c"})
+	spec := oauth.MarshalSpec(oauth.Spec{ClientID: "c"})
 	a.send("o1", "", &proto.OAuthCmd{OAuthReq: proto.OAuthReq{Op: "status", ID: "eleven", URL: "https://x.example/mcp", Spec: spec}})
 	ev := a.until(func(ev proto.Event) bool { return ev.Re == "o1" })
 	r, ok := ev.Payload.(*proto.OAuthResult)
-	if !ok || r.Error != "" || harness.UnmarshalOAuthStatus(r.Status).LoggedIn {
+	if !ok || r.Error != "" || oauth.UnmarshalStatus(r.Status).LoggedIn {
 		t.Fatalf("status: %+v", ev.Payload)
 	}
 	a.send("o2", "nope", &proto.OAuthCmd{OAuthReq: proto.OAuthReq{Op: "status", ID: "eleven", URL: "https://x.example/mcp", Spec: spec}})

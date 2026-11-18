@@ -1,4 +1,4 @@
-package harness
+package oauth
 
 import (
 	"encoding/json"
@@ -27,7 +27,7 @@ func TestClientMetadataDocument(t *testing.T) {
 	if d.ClientID != "https://dun.iodesystems.com/oauth/client.json" {
 		t.Errorf("client_id %q is not the document's own URL", d.ClientID)
 	}
-	want := fmt.Sprintf("http://127.0.0.1:%d/oauth/callback", DefaultOAuthRedirectPort)
+	want := fmt.Sprintf("http://127.0.0.1:%d/oauth/callback", DefaultRedirectPort)
 	if !slices.Contains(d.RedirectURIs, want) {
 		t.Errorf("redirect_uris %v lacks %s", d.RedirectURIs, want)
 	}

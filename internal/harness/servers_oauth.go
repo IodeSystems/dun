@@ -4,22 +4,24 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"reflect"
 	"strings"
 	"time"
 
 	"github.com/iodesystems/agentkit/mcpmgr"
 	"github.com/iodesystems/agentkit/mcpmgr/mcpauth"
+	"github.com/iodesystems/dun/internal/oauth"
 )
 
-// The harness side of OAuth servers: one oauthClient per server, the
+// The harness side of OAuth servers: one oauth.Client per server, the
 // /mcp login and /mcp logout commands, and the auth column of /mcp.
 
 // oauthFor is s's login, or nil when s does not log in with OAuth: dund's
-// (Config.OAuthBroker, oauthbroker.go) when the engine runs under it, else
+// (Config.OAuthBroker, internal/oauth/oauthbroker.go) when the engine runs under it, else
 // the engine's own client. It is kept across restarts; a changed oauth
 // block replaces it.
-func (h *Harness) oauthFor(s Server) oauthSource {
+func (h *Harness) oauthFor(s Server) oauth.Source {
 	if s.OAuth == nil || s.URL == "" {
 		return nil
 	}
@@ -31,12 +33,14 @@ func (h *Harness) oauthFor(s Server) oauthSource {
 	if h.oauth == nil {
 		h.oauth = map[string]oauthEntry{}
 	}
-	var src oauthSource
+	var src oauth.Source
 	if h.cfg.OAuthBroker != nil {
-		src = newBrokered(s, h.cfg.OAuthBroker)
+		spec := *s.OAuth
+		spec.ClientSecret = oauth.ClientSecret(spec) // resolved here, where the env is
+		src = oauth.NewBrokered(s.ID, s.URL, spec, h.cfg.OAuthBroker)
 	} else {
-		oc := newOAuthClient(s, h.cfg.OnLogin, h.cfg.OpenBrowser)
-		oc.ended = h.cfg.OnLoginEnd
+		oc := oauth.NewClient(s.ID, s.URL, *s.OAuth, h.cfg.OnLogin, h.cfg.OpenBrowser)
+		oc.Ended = h.cfg.OnLoginEnd
 		src = oc
 	}
 	h.oauth[s.ID] = oauthEntry{url: s.URL, spec: *s.OAuth, src: src}
@@ -46,8 +50,8 @@ func (h *Harness) oauthFor(s Server) oauthSource {
 // oauthEntry is a server's login and the config it was made for.
 type oauthEntry struct {
 	url  string
-	spec OAuthSpec
-	src  oauthSource
+	spec oauth.Spec
+	src  oauth.Source
 }
 
 // HasOAuth reports whether server id logs in with OAuth — whose start may
@@ -71,7 +75,7 @@ func (h *Harness) authState(s Server) string {
 	case s.URL == "":
 		return ""
 	case s.OAuth != nil:
-		return h.oauthFor(s).status().String()
+		return h.oauthFor(s).Status().String()
 	case s.Bearer != "":
 		return "static bearer"
 	}
@@ -108,7 +112,7 @@ func (h *Harness) LoginServer(ctx context.Context, id string) (string, error) {
 		if err := oc.Login(ctx, ""); err != nil {
 			return "", err
 		}
-		msg = oc.status().String()
+		msg = oc.Status().String()
 	}
 	if h.mgr.ServerStarted(id) {
 		return msg, nil // its next request sends the new token
@@ -160,7 +164,7 @@ func (h *Harness) LogoutServer(ctx context.Context, id string) (string, error) {
 }
 
 // explainStartErr turns a remote server's failed start into what to do about
-// it: a login gate in front of it (mcpgate.go), or a server that wants an
+// it: a login gate in front of it (internal/oauth/mcpgate.go), or a server that wants an
 // OAuth login and has none configured.
 func explainStartErr(ctx context.Context, s Server, err error) error {
 	if s.URL == "" {
@@ -179,8 +183,28 @@ func explainStartErr(ctx context.Context, s Server, err error) error {
 	}
 	pctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 	defer cancel()
-	if p, perr := probeMCP(pctx, s.URL); perr == nil && p.gate != "" {
-		return fmt.Errorf("%s is %s", s.ID, p.gate)
+	if p, perr := oauth.Probe(pctx, s.URL); perr == nil && p.Gate != "" {
+		return fmt.Errorf("%s is %s", s.ID, p.Gate)
 	}
 	return err
+}
+
+// wantsOAuth reports whether a remote server with no credentials of its
+// own answers an unauthenticated initialize with a 401 Bearer challenge
+// naming its protected-resource metadata (RFC 9728): the MCP OAuth flow.
+func wantsOAuth(ctx context.Context, s ServerSpec) bool {
+	if s.URL == "" || s.Bearer != "" {
+		return false
+	}
+	for k := range s.Headers {
+		if strings.EqualFold(k, "Authorization") {
+			return false
+		}
+	}
+	p, err := oauth.Probe(ctx, s.URL)
+	if err != nil || p.Status != http.StatusUnauthorized {
+		return false
+	}
+	ch, ok := mcpauth.BearerChallenge(p.WWW)
+	return ok && ch.Params["resource_metadata"] != ""
 }

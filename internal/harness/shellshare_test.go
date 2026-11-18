@@ -8,6 +8,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/iodesystems/dun/internal/oauth"
+	"github.com/iodesystems/dun/internal/oauth/oauthtest"
 )
 
 // A scripted server that is shared: its shell-mcp.json entry is the
@@ -16,14 +19,14 @@ import (
 func TestShellConfig_SharedHostedIsTheGateway(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	ts, _ := countingMCP(t)
-	w := newOAuthWorld(t)
+	w := oauthtest.NewWorld(t)
 	g := newGateway(t)
 	shell := Server{ID: ServerShell, Command: "mcpshell", Args: []string{"mcp"}}
 	h := gatewayHarness(t, g, "s1", nil,
 		shell,
 		Server{ID: "ctr", URL: ts.URL, Via: ViaShell, Autostart: true, Instance: InstanceShared},
 		Server{ID: "own", URL: ts.URL + "/own", Via: ViaShell, Autostart: true, Instance: InstanceSession,
-			OAuth: &OAuthSpec{ClientID: w.clientID}})
+			OAuth: &oauth.Spec{ClientID: w.ClientID}})
 	h.cfg.ConfigDir = h.cfg.Workspace
 	ctx := context.Background()
 	h.shareHosted(ctx, ServerShell, &startPhase{})

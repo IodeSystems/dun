@@ -1,4 +1,4 @@
-package harness
+package oauth
 
 import (
 	"context"
@@ -17,36 +17,36 @@ import (
 // itself), and the HTTP client follows it to HTML: what the user then saw
 // was a JSON decode error, or a discovery timeout. That is not the MCP OAuth
 // flow (no 401, no resource metadata), and nothing in dun can complete a
-// browser login for a gate; the fix is configuration. probeMCP recognises
+// browser login for a gate; the fix is configuration. Probe recognises
 // the gate and says which.
 
-// mcpProbe is how a server answered an unauthenticated initialize.
-type mcpProbe struct {
-	status int
-	www    string // WWW-Authenticate, on a 401
-	gate   string // the login-gate diagnosis, or ""
+// ProbeResult is how a server answered an unauthenticated initialize.
+type ProbeResult struct {
+	Status int
+	WWW    string // WWW-Authenticate, on a 401
+	Gate   string // the login-gate diagnosis, or ""
 }
 
-// probeMCP POSTs an initialize with no credentials and does NOT follow
+// Probe POSTs an initialize with no credentials and does NOT follow
 // redirects: the redirect is the evidence.
-func probeMCP(ctx context.Context, serverURL string) (mcpProbe, error) {
+func Probe(ctx context.Context, serverURL string) (ProbeResult, error) {
 	hc := &http.Client{Timeout: 15 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	body := `{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"dun","version":"probe"}}}`
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, serverURL, strings.NewReader(body))
 	if err != nil {
-		return mcpProbe{}, err
+		return ProbeResult{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	resp, err := hc.Do(req)
 	if err != nil {
-		return mcpProbe{}, fmt.Errorf("probe %s: %w", serverURL, err)
+		return ProbeResult{}, fmt.Errorf("probe %s: %w", serverURL, err)
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
-	p := mcpProbe{status: resp.StatusCode, www: resp.Header.Get("WWW-Authenticate")}
-	p.gate = gateDiagnosis(serverURL, resp)
+	p := ProbeResult{Status: resp.StatusCode, WWW: resp.Header.Get("WWW-Authenticate")}
+	p.Gate = gateDiagnosis(serverURL, resp)
 	return p, nil
 }
 

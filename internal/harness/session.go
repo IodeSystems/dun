@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"testing"
 	"time"
 
 	"github.com/iodesystems/agentkit/agent"
+	"github.com/iodesystems/dun/internal/dunhome"
 )
 
 // Session persistence layout — à la ~/.claude, scoped by the workspace ROOT.
@@ -24,28 +24,7 @@ import (
 // repo's last conversation. $DUN_HOME overrides ~/.dun.
 
 // SessionsDir is the root of dun's session storage (~/.dun/sessions).
-func SessionsDir() string {
-	if h := os.Getenv("DUN_HOME"); h != "" {
-		return filepath.Join(h, "sessions")
-	}
-	if testing.Testing() {
-		// A test that did not set $DUN_HOME never reaches the real one:
-		// 1,207 ~/.dun/sessions/-tmp-Test… directories leaked from tests
-		// before this (2026-11-14).
-		return filepath.Join(testHome(), "sessions")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".dun", "sessions")
-	}
-	return filepath.Join(home, ".dun", "sessions")
-}
-
-// testHome is a test binary's stand-in for ~/.dun, one per process. It is
-// not created here: a test that only looks leaves nothing behind.
-func testHome() string {
-	return filepath.Join(os.TempDir(), fmt.Sprintf("dun-test-home-%d", os.Getpid()))
-}
+func SessionsDir() string { return filepath.Join(dunhome.Dir(), "sessions") }
 
 // RootDir is the sessions directory for one workspace root — the abs path
 // flattened to a single, filesystem-safe name (leading marker kept for read-back).

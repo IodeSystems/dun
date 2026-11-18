@@ -1,4 +1,4 @@
-package harness
+package oauth
 
 import (
 	"context"
@@ -21,33 +21,33 @@ import (
 // An engine with no dund (a test, a bare `dun --engine`) keeps its own client, as
 // before.
 
-// OAuthRequest is one ask of the broker (proto.OAuthReq). Op is token,
+// Request is one ask of the broker (proto.OAuthReq). Op is token,
 // ensure, unauthorized, login, logout or status.
-type OAuthRequest struct {
-	Op   string    `json:"op"`
-	ID   string    `json:"id"`
-	URL  string    `json:"url"`
-	WWW  string    `json:"www,omitempty"`
-	Spec OAuthSpec `json:"spec"`
+type Request struct {
+	Op   string `json:"op"`
+	ID   string `json:"id"`
+	URL  string `json:"url"`
+	WWW  string `json:"www,omitempty"`
+	Spec Spec   `json:"spec"`
 	// Rejected is, for "unauthorized", the Authorization the server
 	// refused: when the broker's is already another (a refresh for another
 	// engine), that one is the answer and nothing is refreshed.
 	Rejected string `json:"rejected,omitempty"`
 }
 
-// OAuthResult is the broker's answer.
-type OAuthResult struct {
-	Authorization string      `json:"authorization,omitempty"`
-	Status        OAuthStatus `json:"status"`
-	Revoked       bool        `json:"revoked,omitempty"`
+// Result is the broker's answer.
+type Result struct {
+	Authorization string `json:"authorization,omitempty"`
+	Status        Status `json:"status"`
+	Revoked       bool   `json:"revoked,omitempty"`
 }
 
-// OAuthBroker is dund's: one client per server id.
-type OAuthBroker struct {
+// Broker is dund's: one client per server id.
+type Broker struct {
 	open func(string) error
 
 	mu      sync.Mutex
-	clients map[string]*oauthClient
+	clients map[string]*Client
 
 	wmu      sync.Mutex
 	seq      int
@@ -55,28 +55,28 @@ type OAuthBroker struct {
 	shown    map[string]string                       // the URL of a login waiting now
 }
 
-// NewOAuthBroker is a broker that opens a login URL with open (nil: only
+// NewBroker is a broker that opens a login URL with open (nil: only
 // shows it).
-func NewOAuthBroker(open func(string) error) *OAuthBroker {
-	return &OAuthBroker{open: open, clients: map[string]*oauthClient{},
+func NewBroker(open func(string) error) *Broker {
+	return &Broker{open: open, clients: map[string]*Client{},
 		watchers: map[string]map[int]func(string, string){}, shown: map[string]string{}}
 }
 
 // client is req's server's, replaced when its URL or oauth block changed.
-func (b *OAuthBroker) client(req OAuthRequest) *oauthClient {
+func (b *Broker) client(req Request) *Client {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if c := b.clients[req.ID]; c != nil && c.url == req.URL && fmt.Sprint(c.spec) == fmt.Sprint(req.Spec) {
 		return c
 	}
 	spec := req.Spec
-	c := newOAuthClient(Server{ID: req.ID, URL: req.URL, OAuth: &spec}, b.showLogin, b.open)
+	c := NewClient(req.ID, req.URL, spec, b.showLogin, b.open)
 	b.clients[req.ID] = c
 	return c
 }
 
 // showLogin hands a login's URL to every request waiting on that server.
-func (b *OAuthBroker) showLogin(id, url string) {
+func (b *Broker) showLogin(id, url string) {
 	b.wmu.Lock()
 	b.shown[id] = url
 	ws := make([]func(string, string), 0, len(b.watchers[id]))
@@ -91,7 +91,7 @@ func (b *OAuthBroker) showLogin(id, url string) {
 
 // watch registers notify for id's login URL while a request runs; one
 // already shown is handed over now. The returned func ends the watch.
-func (b *OAuthBroker) watch(id string, notify func(id, url string)) func() {
+func (b *Broker) watch(id string, notify func(id, url string)) func() {
 	if notify == nil {
 		return func() {}
 	}
@@ -116,19 +116,19 @@ func (b *OAuthBroker) watch(id string, notify func(id, url string)) func() {
 
 // Do runs one request. notify, when set, is shown a login's URL if this
 // request waits on one.
-func (b *OAuthBroker) Do(ctx context.Context, req OAuthRequest, notify func(id, url string)) (OAuthResult, error) {
+func (b *Broker) Do(ctx context.Context, req Request, notify func(id, url string)) (Result, error) {
 	if req.ID == "" || req.URL == "" {
-		return OAuthResult{}, fmt.Errorf("oauth: a server id and url are needed")
+		return Result{}, fmt.Errorf("oauth: a server id and url are needed")
 	}
 	c := b.client(req)
 	defer b.watch(req.ID, notify)()
-	var res OAuthResult
+	var res Result
 	var err error
 	switch req.Op {
 	case "token":
 		res.Authorization, err = c.Authorization(ctx)
 	case "ensure":
-		if err = c.ensure(ctx); err == nil {
+		if err = c.Ensure(ctx); err == nil {
 			res.Authorization, err = c.Authorization(ctx)
 		}
 	case "unauthorized":
@@ -152,7 +152,7 @@ func (b *OAuthBroker) Do(ctx context.Context, req OAuthRequest, notify func(id, 
 		delete(b.shown, req.ID)
 		b.wmu.Unlock()
 	}
-	res.Status = c.status()
+	res.Status = c.Status()
 	return res, err
 }
 
@@ -161,29 +161,29 @@ func (b *OAuthBroker) Do(ctx context.Context, req OAuthRequest, notify func(id, 
 // the server refuses it, so a request does not wait on dund.
 type brokered struct {
 	id, url string
-	spec    OAuthSpec // its client secret resolved here, where the env is
-	call    func(ctx context.Context, req OAuthRequest) (OAuthResult, error)
+	spec    Spec // its client secret resolved here, where the env is
+	call    func(ctx context.Context, req Request) (Result, error)
 
 	mu    sync.Mutex
 	auth  string
 	until time.Time
-	last  OAuthStatus
+	last  Status
 }
 
-func newBrokered(s Server, call func(context.Context, OAuthRequest) (OAuthResult, error)) *brokered {
-	spec := *s.OAuth
-	spec.ClientSecret = (&oauthClient{spec: spec}).clientSecret()
-	return &brokered{id: s.ID, url: s.URL, spec: spec, call: call}
+// NewBrokered is server id's login through call (dund's broker). spec goes
+// as given: resolve its client secret first (ClientSecret) where the env is.
+func NewBrokered(id, url string, spec Spec, call func(context.Context, Request) (Result, error)) Source {
+	return &brokered{id: id, url: url, spec: spec, call: call}
 }
 
-func (b *brokered) ask(ctx context.Context, op, www string) (OAuthResult, error) {
+func (b *brokered) ask(ctx context.Context, op, www string) (Result, error) {
 	return b.askRejected(ctx, op, www, "")
 }
 
-func (b *brokered) askRejected(ctx context.Context, op, www, rejected string) (OAuthResult, error) {
-	res, err := b.call(ctx, OAuthRequest{Op: op, ID: b.id, URL: b.url, WWW: www, Spec: b.spec, Rejected: rejected})
+func (b *brokered) askRejected(ctx context.Context, op, www, rejected string) (Result, error) {
+	res, err := b.call(ctx, Request{Op: op, ID: b.id, URL: b.url, WWW: www, Spec: b.spec, Rejected: rejected})
 	b.mu.Lock()
-	if err == nil || res.Status != (OAuthStatus{}) {
+	if err == nil || res.Status != (Status{}) {
 		b.last = res.Status
 	}
 	if res.Authorization != "" {
@@ -215,7 +215,7 @@ func (b *brokered) OnUnauthorized(ctx context.Context, www string) error {
 	return err
 }
 
-func (b *brokered) ensure(ctx context.Context) error {
+func (b *brokered) Ensure(ctx context.Context) error {
 	_, err := b.ask(ctx, "ensure", "")
 	return err
 }
@@ -238,7 +238,7 @@ func (b *brokered) Logout(ctx context.Context) (bool, error) {
 
 // status asks dund, briefly: the /mcp listing waits on it. Unanswered, it
 // is the last state dund gave.
-func (b *brokered) status() OAuthStatus {
+func (b *brokered) Status() Status {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if res, err := b.ask(ctx, "status", ""); err == nil {
@@ -249,49 +249,49 @@ func (b *brokered) status() OAuthStatus {
 	return b.last
 }
 
-// oauthSource is what the harness needs of a server's login: the engine's
+// Source is what the harness needs of a server's login: the engine's
 // own client, or dund's through brokered.
-type oauthSource interface {
+type Source interface {
 	Authorization(ctx context.Context) (string, error)
 	OnUnauthorized(ctx context.Context, wwwAuthenticate string) error
-	ensure(ctx context.Context) error
+	Ensure(ctx context.Context) error
 	Login(ctx context.Context, wwwAuthenticate string) error
 	Logout(ctx context.Context) (bool, error)
-	status() OAuthStatus
+	Status() Status
 }
 
-// MarshalOAuthSpec and the three below carry a request's spec and its
+// MarshalSpec and the three below carry a request's spec and its
 // result's status across proto, which does not import dun.
-func MarshalOAuthSpec(s OAuthSpec) string {
+func MarshalSpec(s Spec) string {
 	b, _ := json.Marshal(s)
 	return string(b)
 }
 
-func UnmarshalOAuthSpec(s string) (OAuthSpec, error) {
-	var o OAuthSpec
+func UnmarshalSpec(s string) (Spec, error) {
+	var o Spec
 	err := json.Unmarshal([]byte(s), &o)
 	return o, err
 }
 
-func MarshalOAuthStatus(s OAuthStatus) string {
+func MarshalStatus(s Status) string {
 	b, _ := json.Marshal(s)
 	return string(b)
 }
 
-func UnmarshalOAuthStatus(s string) OAuthStatus {
-	var o OAuthStatus
+func UnmarshalStatus(s string) Status {
+	var o Status
 	_ = json.Unmarshal([]byte(s), &o)
 	return o
 }
 
-// OAuthTokenHere is `dun oauth token` with no dund to ask: this process's
+// TokenHere is `dun oauth token` with no dund to ask: this process's
 // own client on the shared token file. retry is a server's refusal of the
 // last token (mcpshell's MCPSHELL_AUTH_RETRY): refresh, else log in.
-func OAuthTokenHere(ctx context.Context, s Server, retry bool, notify func(id, url string), open func(string) error) (string, error) {
-	if s.OAuth == nil || s.URL == "" {
+func TokenHere(ctx context.Context, s AuthSpec, retry bool, notify func(id, url string), open func(string) error) (string, error) {
+	if s.URL == "" {
 		return "", fmt.Errorf("%s: no oauth block and url", s.ID)
 	}
-	c := newOAuthClient(s, notify, open)
+	c := NewClient(s.ID, s.URL, s.OAuth, notify, open)
 	if retry {
 		if err := c.OnUnauthorized(ctx, ""); err != nil {
 			return "", err
@@ -299,31 +299,31 @@ func OAuthTokenHere(ctx context.Context, s Server, retry bool, notify func(id, u
 	}
 	a, err := c.Authorization(ctx)
 	if err == nil && a == "" {
-		if err = c.ensure(ctx); err == nil {
+		if err = c.Ensure(ctx); err == nil {
 			a, err = c.Authorization(ctx)
 		}
 	}
 	return a, err
 }
 
-// OAuthAuthSpec is what `dun oauth token --spec` carries for a server: its
+// AuthSpec is what `dun oauth token --spec` carries for a server: its
 // id, url and oauth block, the client secret as configured ($NAME is read
 // where the command runs).
-type OAuthAuthSpec struct {
-	ID    string    `json:"id"`
-	URL   string    `json:"url"`
-	OAuth OAuthSpec `json:"oauth"`
+type AuthSpec struct {
+	ID    string `json:"id"`
+	URL   string `json:"url"`
+	OAuth Spec   `json:"oauth"`
 }
 
-// EncodeOAuthAuthSpec and DecodeOAuthAuthSpec are `dun oauth token --spec`:
+// EncodeAuthSpec and DecodeAuthSpec are `dun oauth token --spec`:
 // base64 (URL alphabet) JSON, so it needs no quoting in a shell.
-func EncodeOAuthAuthSpec(s OAuthAuthSpec) string {
+func EncodeAuthSpec(s AuthSpec) string {
 	b, _ := json.Marshal(s)
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-func DecodeOAuthAuthSpec(v string) (OAuthAuthSpec, error) {
-	var s OAuthAuthSpec
+func DecodeAuthSpec(v string) (AuthSpec, error) {
+	var s AuthSpec
 	b, err := base64.RawURLEncoding.DecodeString(v)
 	if err != nil {
 		return s, fmt.Errorf("--spec: %w", err)

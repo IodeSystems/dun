@@ -23,6 +23,7 @@ import (
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/mcpmgr"
 	"github.com/iodesystems/dun/internal/mounttool"
+	"github.com/iodesystems/dun/internal/oauth"
 	"github.com/iodesystems/dun/internal/procstat"
 	"github.com/iodesystems/dun/internal/spendmeter"
 	"github.com/iodesystems/dun/internal/tokenmeter"
@@ -194,7 +195,7 @@ type Config struct {
 	// say (harnessinfo.go): the build and the provider's name.
 	Version, Provider string
 	// OnLogin shows the person the URL that logs in to an OAuth server
-	// (mcpoauth.go); url "" means another session's login is being waited
+	// (internal/oauth/mcpoauth.go); url "" means another session's login is being waited
 	// for. The engine may have no display, so this is the way that always
 	// works; OpenBrowser, when set, also tries to open it here.
 	OnLogin func(server, url string)
@@ -203,9 +204,9 @@ type Config struct {
 	OnLoginEnd  func(server string, err error)
 	OpenBrowser func(url string) error
 	// OAuthBroker, when set, is dund: it holds every OAuth server's token,
-	// refreshes it and runs the login (oauthbroker.go); OnLogin and
+	// refreshes it and runs the login (internal/oauth/oauthbroker.go); OnLogin and
 	// OpenBrowser are then dund's to do.
-	OAuthBroker func(ctx context.Context, req OAuthRequest) (OAuthResult, error)
+	OAuthBroker func(ctx context.Context, req oauth.Request) (oauth.Result, error)
 	// Gateway, when set, is dund's MCP gateway (gateway.go): a shared
 	// server is reached through it, one connection for every session.
 	Gateway MCPGateway

@@ -185,7 +185,7 @@ engine's exit release it. The upstream stops a grace period after its last
 client is released, so a server switched off and on, or a session resumed,
 does not pay the start again.
 
-**Auth.** dund already holds every OAuth token (`internal/harness/oauthbroker.go`); the
+**Auth.** dund already holds every OAuth token (`internal/oauth/oauthbroker.go`); the
 gateway's upstream asks the broker directly, so an OAuth server logs in once
 for every session. A login's URL goes to the session that started the
 upstream, and to every session attached while the login waits, as the
@@ -262,7 +262,7 @@ on every request). The older HTTP+SSE transport and the server-initiated GET
 stream are not built. `url`, `bearer` (`$NAME` reads the environment at use,
 never written resolved) and `headers` are on the spec.
 
-OAuth (`ServerSpec.OAuth`; `internal/harness/mcpoauth.go`, `internal/harness/servers_oauth.go`). Targets that
+OAuth (`ServerSpec.OAuth`; `internal/oauth/mcpoauth.go`, `internal/harness/servers_oauth.go`). Targets that
 shaped it: Snowflake's managed MCP (401 -> RFC 9728 -> RFC 8414, no dynamic
 client registration, pre-registered client and **exact** redirect URI),
 Superset (validates an external IdP's JWT; with Google that is the ID token),
@@ -273,7 +273,7 @@ and corporate tools behind a login gate.
   must cover the server URL, path prefix allowed; otherwise the login is
   refused, so one server cannot obtain a login meant for another) -> first
   authorization server -> its metadata.
-- **The client** (`internal/harness/oauthauto.go`; USER 2026-10-29: "auto-register dun, if
+- **The client** (`internal/oauth/oauthauto.go`; USER 2026-10-29: "auto-register dun, if
   that doesn't work, we ask for clientId"). A `client_id` in the oauth block
   is used as given. With none, in order: an authorization server that says
   `client_id_metadata_document_supported` (ElevenLabs) gets dun's URL,
@@ -315,7 +315,7 @@ and corporate tools behind a login gate.
 - **Refresh**: 60 s before expiry and on a 401; if refresh fails, interactive
   login bounded at 5 min. **A 401 within 30 s of a login is an error, not
   another browser tab.**
-- **dund holds the tokens** (`internal/harness/oauthbroker.go`, `internal/dund/oauth.go`; USER
+- **dund holds the tokens** (`internal/oauth/oauthbroker.go`, `internal/dund/oauth.go`; USER
   2026-10-29). Under dund, an engine runs no OAuth client of its own: it asks
   dund over its stdio (peer op `oauth`: token, ensure, unauthorized, login,
   logout, status), and dund keeps one client per server for every session.
@@ -337,7 +337,7 @@ and corporate tools behind a login gate.
   `MCPSHELL_AUTH_REJECTED`; without them an opaque token refused before its
   expiry is handed back unchanged. Each hosted OAuth server is logged in
   before the shell starts, since mcpshell gives auth_cmd 30 s.
-- **Login gate diagnosis** (`internal/harness/mcpgate.go`): a server behind Google IAP,
+- **Login gate diagnosis** (`internal/oauth/mcpgate.go`): a server behind Google IAP,
   Cloudflare Access or oauth2-proxy answers with a redirect or an HTML login
   page, which used to surface as a JSON decode error or a discovery timeout.
   An unauthenticated `initialize` is sent without following redirects; a 3xx

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/oauth"
 )
 
 // One connection per server (docs/mcp-and-tools.md, "One connection per
@@ -40,7 +41,7 @@ type ShareSpec struct {
 	Env     []string          `json:"env,omitempty"`
 	URL     string            `json:"url,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
-	OAuth   *OAuthSpec        `json:"oauth,omitempty"`
+	OAuth   *oauth.Spec       `json:"oauth,omitempty"`
 	Timeout int               `json:"timeout,omitempty"`
 }
 
@@ -91,7 +92,7 @@ var GatewayGrace = 2 * time.Minute
 
 // Gateway is dund's MCP gateway.
 type Gateway struct {
-	broker *OAuthBroker
+	broker *oauth.Broker
 	mgr    *mcpmgr.Manager
 
 	mu      sync.Mutex
@@ -125,7 +126,7 @@ type gwClient struct {
 }
 
 // NewGateway is a gateway whose OAuth servers log in through b.
-func NewGateway(b *OAuthBroker) *Gateway {
+func NewGateway(b *oauth.Broker) *Gateway {
 	g := &Gateway{broker: b, mgr: mcpmgr.NewManager(), ups: map[string]*gwUpstream{}, clients: map[string]*gwClient{}}
 	g.mgr.SetNotificationHandler(g.notify)
 	return g
@@ -256,15 +257,15 @@ func (g *Gateway) start(up *gwUpstream) {
 		Timeout: int(timeout / time.Second), URL: s.URL, Headers: s.Headers}
 	var err error
 	if s.OAuth != nil && s.URL != "" {
-		src := &brokered{id: s.ID, url: s.URL, spec: *s.OAuth, call: func(ctx context.Context, req OAuthRequest) (OAuthResult, error) {
+		src := oauth.NewBrokered(s.ID, s.URL, *s.OAuth, func(ctx context.Context, req oauth.Request) (oauth.Result, error) {
 			var shown atomic.Bool
 			res, err := g.broker.Do(ctx, req, func(id, url string) { shown.Store(true); up.showLogin(id, url) })
 			if shown.Load() {
 				up.endLogin(s.ID, err)
 			}
 			return res, err
-		}}
-		err = src.ensure(ctx)
+		})
+		err = src.Ensure(ctx)
 		cfg.Authorization, cfg.OnUnauthorized = src.Authorization, src.OnUnauthorized
 	}
 	if err == nil {

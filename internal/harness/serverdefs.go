@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/iodesystems/dun/internal/oauth"
 )
 
 // Server is one MCP tool server dun spawns.
@@ -55,8 +57,8 @@ type Server struct {
 	// dun writing the token into a file. Headers carries the resolved value.
 	Bearer string
 	// OAuth, when set, logs in to the server and sends the token it gets
-	// (mcpoauth.go) instead of a fixed Bearer.
-	OAuth *OAuthSpec
+	// (internal/oauth/mcpoauth.go) instead of a fixed Bearer.
+	OAuth *oauth.Spec
 	// Attach and Detach are the indexes switched on and off, the nearest
 	// scope deciding each (attach.go).
 	Attach, Detach []string

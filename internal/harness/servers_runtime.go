@@ -20,6 +20,7 @@ import (
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/mcpmgr"
 	"github.com/iodesystems/dun/internal/mounttool"
+	"github.com/iodesystems/dun/internal/oauth"
 )
 
 // Tool servers start and stop while a session runs.
@@ -548,7 +549,7 @@ func (h *Harness) startServer(ctx context.Context, s Server) error {
 	if oc := h.oauthFor(s); err == nil && oc != nil && !shared {
 		phase.set("logging in (OAuth)")
 		h.noteServer(s.ID, "OAuth: checking the login")
-		err = oc.ensure(ctx)
+		err = oc.Ensure(ctx)
 		mcfg.Authorization, mcfg.OnUnauthorized = oc.Authorization, oc.OnUnauthorized
 	}
 	if err == nil {
@@ -1257,9 +1258,9 @@ func (h *Harness) AddServer(ctx context.Context, spec ServerSpec) (string, error
 		return "", fmt.Errorf("instance agent is for a standalone server: a scripted one runs in the session's shell, which a sub-agent shares")
 	}
 	// A remote server with no credentials that answers with an OAuth
-	// challenge logs in with OAuth; dun picks the client (oauthauto.go).
+	// challenge logs in with OAuth; dun picks the client (internal/oauth/oauthauto.go).
 	if spec.OAuth == nil && wantsOAuth(ctx, spec) {
-		spec.OAuth = &OAuthSpec{}
+		spec.OAuth = &oauth.Spec{}
 	}
 	if err := checkOAuth(spec, via); err != nil {
 		return "", err
@@ -1302,7 +1303,7 @@ func (h *Harness) RemoveServer(id string) ([]string, error) {
 	}
 	// Its stored login goes with it: a token for a server dun no longer
 	// knows is a secret with no owner.
-	_ = os.Remove(filepath.Join(OAuthDir(), id+".json"))
+	_ = os.Remove(filepath.Join(oauth.Dir(), id+".json"))
 	h.oauthMu.Lock()
 	delete(h.oauth, id)
 	h.oauthMu.Unlock()
