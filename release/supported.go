@@ -116,9 +116,15 @@ var Supported = []Tool{
 	// `tsc --lsp --stdio` instead of typescript-language-server (needs the
 	// @typescript/typescript-<os>-<arch> platform package); the forwarding
 	// needs typescript-language-server >= 6.1.0 for TS <= 6. No new flag or
-	// config for dun.
+	// config for dun. Recommended v0.5.3 (23b7ee3, 2026-11-17), tarballs in
+	// deps.json: watcher fixes for the macOS CPU loop (Chmod-only events
+	// dropped, .gitignore re-resolve debounced, kqueue-aware watch budget), an
+	// additive per-root `activity` object in `status --json` (dun ps reads
+	// it), a runaway-root back-off, --version; help goes to stdout with
+	// rare flags under --help-all. `mcp --root`, `daemon --restart` and the
+	// `mcp --help` marker phrases dun probes are unchanged.
 	{Name: "poly-lsp-mcp", Module: "github.com/iodesystems/lsp-mcp",
-		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.5.2"},
+		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.5.3"},
 	// Min 5d24299 (main, 2026-10-24): the raglit/setup notification, doctor
 	// --json and provider keys by api_key_file, which /rag setup and
 	// doctor read. v0.1.0 (a32c5db): raglit's first release. v0.2.0 (574d91e,

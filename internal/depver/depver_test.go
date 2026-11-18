@@ -73,7 +73,7 @@ func TestModuleLines(t *testing.T) {
 		"agentkit v0.32.2",
 		"openai-claude-api-shim v0.6.0",
 		"raglit v0.9.0 (ragcore)",
-		"poly-lsp-mcp devel (segment) — replaced by /src/poly-lsp-mcp; go.mod pins v0.5.2",
+		"poly-lsp-mcp devel (segment) — replaced by /src/poly-lsp-mcp; go.mod pins v0.5.3",
 		"gwag v2.11.0 (gat) — from go.mod: this binary's build info lists no modules",
 		"bubbleteandmd v0.5.2 (render)",
 	}
