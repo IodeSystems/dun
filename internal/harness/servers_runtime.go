@@ -738,7 +738,9 @@ func (h *Harness) rebuildTools() {
 	}
 	if cfg.Ask != nil {
 		toolDefs = append(toolDefs, askToolDef())
-		dispatch = withAsk(dispatch, cfg.Ask, report)
+		// Refused in a round dun added (autoturn.go): outside withAsk, so
+		// no question reaches the person.
+		dispatch = withAskGuard(withAsk(dispatch, cfg.Ask, report), h)
 	}
 	// Mount tool: only useful when exec runs inside Docker — there is no
 	// container to mount into when exec is on the host.

@@ -102,6 +102,9 @@ type planNudge struct {
 	// moved is the round of the last plan move or stall nudge in this turn
 	// (0: the turn's start); stalls is the stall nudges given in this turn.
 	moved, stalls int
+	// lastAt is the round a nudge or stall nudge came after (0: none in
+	// this turn): the next round is dun's (autoturn.go, nudgeRoundNow).
+	lastAt int
 	// churn is the current failure streak's last attempts, in brief, for
 	// the learning phase (learn.go). Its length is not a count: fails is.
 	// recent is the turn's last calls, failed or not; stallEp is the
@@ -113,7 +116,7 @@ type planNudge struct {
 func (n *planNudge) reset() {
 	n.mu.Lock()
 	n.fails, n.done, n.force = 0, false, false
-	n.moved, n.stalls = 0, 0
+	n.moved, n.stalls, n.lastAt = 0, 0, 0
 	n.churn, n.recent, n.stallEp = nil, nil, nil
 	n.mu.Unlock()
 }
@@ -202,6 +205,7 @@ func (h *Harness) planStallRound() {
 	}
 	h.nudge.stalls++
 	h.nudge.moved = n // the window starts again
+	h.nudge.lastAt = n
 	// The learning phase's stall episode: the plan moving next resolves it
 	// (planMoved). A second stall before a move keeps the first.
 	if h.nudge.stallEp == nil {
@@ -273,7 +277,17 @@ func (h *Harness) planNudgeResult(failed bool, a churnAttempt) *churnEpisode {
 // nudge.mu.
 func (h *Harness) planNudgeNow(why string) {
 	h.nudge.done, h.nudge.force = true, true
+	h.nudge.lastAt = int(h.turnRounds.n.Load())
 	h.AsideWith(why+planNudgeAsk, AsideOpts{Key: "plan-nudge", TurnScoped: true})
+}
+
+// nudgeRoundNow reports whether the round running now is the one right
+// after a plan nudge or stall nudge: a round dun added (autoturn.go).
+func (h *Harness) nudgeRoundNow() bool {
+	h.nudge.mu.Lock()
+	at := h.nudge.lastAt
+	h.nudge.mu.Unlock()
+	return at > 0 && int(h.turnRounds.n.Load()) == at+1
 }
 
 // planForceOpts is the turn runner's hook (reasoningTee): the options for

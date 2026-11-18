@@ -159,3 +159,35 @@ func checkAsk(question string, options []string, multi bool, recommended []strin
 	}
 	return ""
 }
+
+// No questions in a round dun added (USER 2026-11-18; autoturn.go).
+
+// askAutoRefused is ask_user's result in a round dun added.
+const askAutoRefused = "ERROR: ask_user is not available in this round: dun started it, not the user, so no one may be " +
+	"there to answer. Do not wait for an answer. Mark the ask (or the plan node the question is about) blocked with " +
+	`the question as the reason — plan_close {"id":"<id>","outcome":"block","reason":"<the question>"} — and go on ` +
+	"with what needs no answer. The user sees the question in the plan."
+
+// autoRound reports whether the round running now is one dun added: after
+// the turn-end check, right after a plan nudge, or in an automatic turn
+// with no open ask. The main agent only.
+func (h *Harness) autoRound() bool {
+	if h.isChild() {
+		return false
+	}
+	if h.idle.wasChecked() || h.nudgeRoundNow() {
+		return true
+	}
+	o, _ := h.turnOriginNow()
+	return o == originAuto && h.asksOn() && !h.openAskNow()
+}
+
+// withAskGuard refuses ask_user in a round dun added (autoRound).
+func withAskGuard(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher {
+	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+		if tc.Function.Name == "ask_user" && h.autoRound() {
+			return askAutoRefused, nil
+		}
+		return inner(ctx, tc)
+	}
+}
