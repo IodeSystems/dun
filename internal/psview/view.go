@@ -232,6 +232,9 @@ func (m *model) itemLine(it item, sel bool, c cols, w int) string {
 	case kRootErr:
 		s = procps.Fit(pad("", wPID+gap)+"  "+it.row.RootsErr, max(0, w-wGutter))
 		return "  " + tui.SecondaryStyle().Render(s)
+	case kRagNote:
+		s = procps.Fit(pad("", wPID+gap)+"  "+it.note, max(0, w-wGutter))
+		return "  " + tui.SecondaryStyle().Render(s)
 	case kRagEmbed:
 		s = procps.Fit(pad("", wPID+gap)+"  "+procps.RagEmbedLine(*it.row.RagEmbed), max(0, w-wGutter))
 		return "  " + tui.SecondaryStyle().Render(s)

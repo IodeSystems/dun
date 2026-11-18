@@ -33,14 +33,6 @@ type RagIndex struct {
 	ErrAgeSec int64 `json:"error_age_sec"`
 }
 
-// RaglitIndexes is the hook for the raglit daemon's indexes under its row
-// (roleRaglitDaemon), from `raglit status --json --all`, which raglit does
-// not have yet (asked of raglit's owner, 2026-11-17). nil: not read. When
-// it exists, set it to run that command (as ReadRoots runs poly-lsp-mcp's
-// status) and convert its indexes; dundcli's sample then calls AttachRag
-// on the daemon's pid with them, and the rows render as dund's do.
-var RaglitIndexes func(d *Proc) (*proto.ProcRag, error)
-
 // RaglitDaemon is the raglit daemon in snap, nil if none.
 func RaglitDaemon(snap Snapshot) *Proc {
 	for _, pid := range sortedPIDs(snap) {

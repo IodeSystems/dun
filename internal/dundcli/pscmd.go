@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/procps"
 	"github.com/iodesystems/dun/proto"
 )
@@ -154,12 +155,11 @@ func sample(l *loader, prev procps.Snapshot, rc *rootsCache) (PSView, procps.Sna
 		sessions = list.Sessions
 		procps.AttachRag(rows, list.DundPID, list.Rag, sessions, cur.At)
 	}
-	// The raglit daemon's indexes: a hook until raglit answers
-	// `raglit status --json --all` (procps.RaglitIndexes).
-	if d := procps.RaglitDaemon(cur); d != nil && procps.RaglitIndexes != nil {
-		if rag, err := procps.RaglitIndexes(d); err == nil {
-			procps.AttachRag(rows, d.PID, rag, sessions, cur.At)
-		}
+	// The raglit daemon's indexes: `raglit status --json --all` with dun's
+	// login token, at most every rootsEvery.
+	if d := procps.RaglitDaemon(cur); d != nil {
+		r, rerr := rc.getRaglit(d, cur.At)
+		procps.AttachRaglit(rows, d.PID, r, rerr, sessions, cur.At)
 	}
 	v := PSView{At: cur.At, Window: cur.At.Sub(prev.At).Seconds(), Groups: procps.Groups(rows), List: list}
 	if list != nil {
@@ -187,6 +187,27 @@ type rootsCache struct {
 	roots []procps.Root
 	err   error
 	read  func(*procps.Proc) ([]procps.Root, error) // procps.ReadRoots; tests replace it
+
+	ragAt   time.Time
+	ragPID  int
+	rag     *procps.RaglitReading
+	ragErr  error
+	readRag func(*procps.Proc, time.Time) (*procps.RaglitReading, error) // tests replace it
+}
+
+// getRaglit is the raglit daemon's last status, read at most every rootsEvery.
+func (c *rootsCache) getRaglit(d *procps.Proc, now time.Time) (*procps.RaglitReading, error) {
+	if c.ragPID != d.PID || c.ragAt.IsZero() || now.Sub(c.ragAt) >= rootsEvery {
+		read := c.readRag
+		if read == nil {
+			read = func(d *procps.Proc, now time.Time) (*procps.RaglitReading, error) {
+				return procps.ReadRaglit(d, harness.RaglitTokenEnv(), now)
+			}
+		}
+		c.rag, c.ragErr = read(d, now)
+		c.ragAt, c.ragPID = now, d.PID
+	}
+	return c.rag, c.ragErr
 }
 
 func (c *rootsCache) get(d *procps.Proc, now time.Time) ([]procps.Root, error) {

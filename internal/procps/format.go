@@ -128,8 +128,12 @@ func Table(gs []Group, width int) string {
 			for _, l := range RagLines(r) {
 				line("", l[0], l[1], "", "", "", "")
 			}
+			notes := r.RagNote
 			if r.RootsErr != "" {
-				msg := "  " + r.RootsErr
+				notes = append([]string{r.RootsErr}, notes...)
+			}
+			for _, n := range notes {
+				msg := "  " + n
 				if width > 0 {
 					msg = "\x1b[2m" + Fit(msg, width) + "\x1b[0m"
 				}

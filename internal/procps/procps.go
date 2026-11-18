@@ -106,6 +106,9 @@ type Row struct {
 	RagEmbed *proto.ProcRagEmbed `json:"rag_embed,omitempty"`
 	Rag      []RagIndex          `json:"rag,omitempty"`
 	RagIdle  []RagIndex          `json:"rag_idle,omitempty"`
+	// RagNote are dim lines under the row: why the raglit daemon's indexes
+	// are missing, or that some are hidden.
+	RagNote []string `json:"rag_note,omitempty"`
 
 	CPU     float64 `json:"cpu"` // percent of one core; -1 before a rate
 	RSS     int64   `json:"rss"`

@@ -34,6 +34,7 @@ const (
 	kRagEmbed                 // the embed backend of retrieval in a process (dund)
 	kRag                      // an active index of retrieval in a process
 	kRagIdle                  // the idle indexes, folded into one line
+	kRagNote                  // a dim line under a row: raglit status failed, or is partial
 )
 
 // item is one line of the list.
@@ -44,6 +45,7 @@ type item struct {
 	root  procps.Root
 	name  string // kRoot: the root's short name
 	rag   procps.RagIndex
+	note  string
 }
 
 func (it item) selectable() bool { return it.kind == kGroup || it.kind == kProc || it.kind == kRag }
@@ -322,6 +324,9 @@ func (m *model) items() []item {
 			}
 			if r.RootsErr != "" {
 				out = append(out, item{kind: kRootErr, group: g, row: r})
+			}
+			for ni := range r.RagNote {
+				out = append(out, item{kind: kRagNote, group: g, row: r, note: r.RagNote[ni]})
 			}
 			if r.RagEmbed != nil {
 				if len(r.Rag) > 0 || r.RagEmbed.InFlight > 0 {
