@@ -18,6 +18,8 @@ export type TurnState = {
   retry: string;
   /** turn_state's notes_waiting: news held while idle (dun harness autoturn.go). */
   notes: number;
+  /** turn_state's net_wait: waiting for the network (dun harness netwait.go). */
+  net?: { since: number; next: number };
 };
 
 export function turnState(v: View): TurnState {
@@ -28,6 +30,7 @@ export function turnState(v: View): TurnState {
     interrupting: false,
     retry: t?.retry ?? '',
     notes: t?.notes ?? 0,
+    net: t?.net,
   };
   switch (t?.phase) {
     case 'waiting_answer':
@@ -64,9 +67,20 @@ export function statusText(t: TurnState, now: number): string {
       if (t.interrupting) return 'interrupting…' + elapsed(t.since, now);
       return 'working…' + (t.tool ? ' ' + t.tool : '') + elapsed(t.since, now);
   }
+  if (t.net) return netWaitText(t.net, now);
   if (t.notes === 1) return 'idle: 1 note waiting';
   if (t.notes > 1) return `idle: ${t.notes} notes waiting`;
   return 'ready';
+}
+
+/** 'waiting for network · since 14:02 · next try 30s' (the TUI's netWaitWord). */
+export function netWaitText(w: { since: number; next: number }, now: number): string {
+  const d = new Date(w.since);
+  const hm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  const left = Math.round((w.next - now) / 1000);
+  // elapsed(now - left, now) is ' · 30s', Go's Duration form, as the TUI prints it.
+  const tail = left > 0 ? ' · next try ' + elapsed(now - left * 1000, now).slice(3) : ' · trying now';
+  return `waiting for network · since ${hm}` + tail;
 }
 
 export function headerStatus(v: View, now: number): { state: State; text: string } {

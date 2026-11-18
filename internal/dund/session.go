@@ -134,6 +134,7 @@ type session struct {
 	// one (peer.go). notes is turn_state's notes_waiting, for dun ps.
 	personSeq uint64
 	notes     int
+	netSince  int64 // turn_state's net_wait.since: waiting for the network
 
 	// Engine adoption (adopt.go, docs/engine-adoption.md), under actMu.
 	// stale: this engine was adopted and is to move to a new engine at its
@@ -163,6 +164,10 @@ func (s *session) track(ev proto.Event) {
 		s.turnStated = true
 		s.inTurn = p.Phase != proto.PhaseIdle
 		s.notes = p.NotesWaiting
+		s.netSince = 0
+		if p.NetWait != nil {
+			s.netSince = p.NetWait.Since
+		}
 		s.asking = p.Ask != nil || p.Mount != nil
 		s.ask = nil
 		if p.Ask != nil {

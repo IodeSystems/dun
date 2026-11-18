@@ -210,6 +210,9 @@ func (a *attributor) walkSession(s proto.ProcSession) {
 	if s.Blocked != "" {
 		label += " (not adopted after dund's restart: " + s.Blocked + "; kill it to go on)"
 	}
+	if s.NetWaitSince > 0 {
+		label += " (waiting for network since " + time.UnixMilli(s.NetWaitSince).Format("15:04") + ")"
+	}
 	if s.NotesWaiting > 0 {
 		label += " (idle: " + strconv.Itoa(s.NotesWaiting) + " notes waiting)"
 	}

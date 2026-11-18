@@ -358,11 +358,7 @@ func (h *Harness) runTurn(ctx context.Context, turn func(context.Context) (agent
 }
 
 // retry delivers a note to the UI hook (nil-safe).
-func (h *Harness) retry(n RetryNote) {
-	if h.onRetry != nil {
-		h.onRetry(n)
-	}
-}
+func (h *Harness) retry(n RetryNote) { h.noteRetry(n) }
 
 // turnRetrySleep is the wait between turn attempts. A var so a test can exercise
 // the loop without sitting out the real schedule; production never replaces it.
