@@ -72,8 +72,16 @@ var Supported = []Tool{
 	// return xs; Ns.help() on a command namespace.
 	// Recommended v0.13.0 (2026-11-17), tarballs in deps.json: a shorter eval
 	// description; no schema or flag changes.
+	// Recommended v0.14.0 (2026-11-18, 67203e2), tarballs in deps.json.
+	// Breaking for scripts, not for dun: graph and file commands are Graph.*
+	// and Files.* only (no bare root(), readLines()); a namespace reference
+	// loads its toolkit, load("graph") is an error and unload("db") is
+	// Db.unload(); a disabled toolkit fails at the reference. The eval
+	// description's Toolkits line is "Toolkits (Ns.help() describes one): …".
+	// Min stays: dun's text names no toolkit command, and the model learns
+	// the syntax from the running binary's own description.
 	{Name: "mcpshell", Module: "github.com/iodesystems/mcpshell/cmd/mcpshell",
-		Min: "v0.2.0", Recommended: "v0.13.0"},
+		Min: "v0.2.0", Recommended: "v0.14.0"},
 	// Min 46caee4 (main, 2026-10-24): the first pushed commit with the index
 	// protocol (--exclude, --index-budget), doctor --json, and the pure-Go
 	// tree-sitter, so go install needs Go alone. v0.1.0 (6dab491), its first
