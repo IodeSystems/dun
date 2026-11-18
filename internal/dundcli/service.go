@@ -379,6 +379,9 @@ SuccessExitStatus=75
 RestartForceExitStatus=75
 # A stop asks every engine to end (10 s grace each, in parallel) before the
 # socket closes; a turn in flight is cut short and resumes from the transcript.
+# Engines run in systemd scopes of their own, outside this unit's cgroup: an
+# upgrade's exit (75) leaves them running for the next dund to adopt
+# (docs/engine-adoption.md).
 TimeoutStopSec=30
 
 [Install]
