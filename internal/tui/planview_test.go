@@ -74,7 +74,7 @@ func TestPlanScreen(t *testing.T) {
 			}
 			// "Old way" is a tree on its own, dropped: finished, so it is in
 			// the one row at the end, not in the tree.
-			for _, want := range []string{"○ Document", "◐ Emit", "✓ Parse", "≡ 1 tree finished · 1 node", "1 wait"} {
+			for _, want := range []string{"○ Document", "◐ Emit", "✓ Parse", "≡ 1 tree finished · 1 node", "waits 1"} {
 				if !strings.Contains(plain, want) {
 					t.Errorf("lacks %q:\n%s", want, plain)
 				}
@@ -471,5 +471,118 @@ func TestPlanScreen_AutoTag(t *testing.T) {
 	}
 	if strings.Contains(plain, "auto Parse") || strings.Contains(plain, "auto Old") {
 		t.Errorf("agent's node tagged:\n%s", plain)
+	}
+}
+
+// A node under two parents: 9 is needed by 7 and 8 and waits on 5 and 6.
+func sharedPlanModel(t *testing.T, w, h int) tuiModel {
+	t.Helper()
+	m, _ := planModel(t, w, h)
+	row := func(id, status string, needs ...any) map[string]any {
+		return map[string]any{"id": id, "title": "Node " + id, "status": status, "needs": needs}
+	}
+	r9 := row("9", "todo", "5", "6")
+	r9["waiting"] = []any{"needs 5 (doing)", "needs 6 (todo)"}
+	m = m.notePlan(evMsg{"type": "plan", "mode": true, "total": 5.0, "done": 0.0, "rows": []any{
+		row("7", "todo", "9"), r9, row("5", "doing"), row("6", "todo"), row("8", "todo", "9"),
+	}})
+	m.planPaging().view = planOutline
+	m.syncPager()
+	m.pg.cur = 0
+	return m
+}
+
+func nodeIndexes(m tuiModel, id string) []int {
+	var at []int
+	for i, n := range m.pg.doc.nodes {
+		if n.group == id {
+			at = append(at, i)
+		}
+	}
+	return at
+}
+
+func TestPlanScreen_SameNodeMarkedAndJump(t *testing.T) {
+	m := sharedPlanModel(t, 100, 30)
+	at := nodeIndexes(m, "9")
+	if len(at) != 2 {
+		t.Fatalf("9 shown %d times", len(at))
+	}
+	m.pg.cur = at[1] // the "again" row
+	m.syncPager()
+	p := planRowsText(m)
+	var gut []string
+	for _, l := range strings.Split(p, "\n") {
+		if strings.Contains(l, "Node 9") {
+			j := strings.Index(l, "▸")
+			gut = append(gut, strings.TrimSpace(l[:j]))
+		}
+	}
+	if len(gut) != 2 || !strings.HasSuffix(gut[0], "◆") || !strings.HasSuffix(gut[1], "▎") {
+		t.Errorf("gutters of 9 = %v:\n%s", gut, p)
+	}
+	if strings.Count(p, "◆") != 1 {
+		t.Errorf("other nodes marked:\n%s", p)
+	}
+	m = planKey(m, "]")
+	if m.pg.cur != at[0] {
+		t.Errorf("] went to %d, want %d", m.pg.cur, at[0])
+	}
+	m = planKey(m, "[")
+	if m.pg.cur != at[1] {
+		t.Errorf("[ went to %d, want %d", m.pg.cur, at[1])
+	}
+	m.pg.cur = 0 // a node shown once: the key stays put
+	m = planKey(m, "]")
+	if m.pg.cur != 0 {
+		t.Errorf("] on a single row moved to %d", m.pg.cur)
+	}
+}
+
+func TestPlanScreen_EveryOccurrenceNamesAllBlockersAndParents(t *testing.T) {
+	for _, w := range []int{100, 60} {
+		m := sharedPlanModel(t, w, 40)
+		at := nodeIndexes(m, "9")
+		var bodies []string
+		for _, i := range at {
+			n := m.pg.doc.nodes[i]
+			tags := n.head + " " + n.sub
+			for _, want := range []string{"waits 2", "under 7, 8"} {
+				if !strings.Contains(tags, want) {
+					t.Errorf("%d: row %d tags lack %q: %q", w, i, want, tags)
+				}
+			}
+			bodies = append(bodies, strings.ReplaceAll(n.body, "(already shown under another parent)\n", ""))
+		}
+		if bodies[0] != bodies[1] {
+			t.Errorf("%d: bodies differ:\n%s\n--\n%s", w, bodies[0], bodies[1])
+		}
+		for _, want := range []string{"needs 5 (doing) · Node 5", "needs 6 (todo) · Node 6", "under: 7 · 8"} {
+			if !strings.Contains(bodies[0], want) {
+				t.Errorf("%d: body lacks %q:\n%s", w, want, bodies[0])
+			}
+		}
+		for i := range m.pg.doc.nodes { // open all: every line fits
+			m.pg.open[i] = true
+		}
+		m.syncPager()
+		for _, l := range strings.Split(planRowsText(m), "\n") {
+			if n := len([]rune(l)); n > w {
+				t.Errorf("%d: row of %d cells: %q", w, n, l)
+			}
+		}
+	}
+}
+
+func TestPlanScreen_FlatNamesParentsToo(t *testing.T) {
+	m := sharedPlanModel(t, 100, 30)
+	m.planPaging().view = planFlat
+	m.syncPager()
+	at := nodeIndexes(m, "9")
+	if len(at) != 1 || strings.Contains(planRowsText(m), "◆") {
+		t.Fatalf("flat shows 9 %d times", len(at))
+	}
+	if b := m.pg.doc.nodes[at[0]].body; !strings.Contains(b, "under: 7 · 8") || !strings.Contains(b, "needs 6 (todo) · Node 6") {
+		t.Errorf("flat body: %s", b)
 	}
 }

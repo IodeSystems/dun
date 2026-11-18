@@ -42,6 +42,9 @@ type pageNode struct {
 	// style, when set, draws the head instead of the default (the plan's
 	// owner colours); err still wins.
 	style *lipgloss.Style
+	// group names what the node shows (the plan's node id): the selected
+	// node's other rows of the same group get the ◆ gutter (planview.go).
+	group string
 }
 
 // inspSource is what the inspector shows for a call.
@@ -148,6 +151,8 @@ func (p *pager) layout(doc pageDoc, w, h int) {
 		gutter, mark := " ", "▸ "
 		if i == p.cur {
 			gutter = stSel.Render("▎")
+		} else if g := p.doc.nodes[p.cur].group; g != "" && g == n.group {
+			gutter = stSel.Render("◆")
 		}
 		if p.open[i] {
 			mark = "▾ "
@@ -191,6 +196,24 @@ func wrapRows(s string, w int) []string {
 		return []string{StDim.Render("(empty)")}
 	}
 	return strings.Split(lipgloss.NewStyle().Width(max(1, w)).Render(s), "\n")
+}
+
+// jumpSame moves the selection to the next (or previous) node of the group,
+// wrapping round.
+func (p *pager) jumpSame(group string, next bool) {
+	n := len(p.doc.nodes)
+	for k := 1; k < n; k++ {
+		i := (p.cur + k) % n
+		if !next {
+			i = ((p.cur-k)%n + n) % n
+		}
+		if p.doc.nodes[i].group == group {
+			p.cur = i
+			p.layout(p.doc, p.w, p.h)
+			p.showCur()
+			return
+		}
+	}
 }
 
 func (p *pager) scroll(n int) {

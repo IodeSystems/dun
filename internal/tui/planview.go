@@ -27,6 +27,8 @@ import (
 //	e, m         edit the selected node's title, details: the composer takes
 //	             the command, filled in, to change and send
 //	d            drop the selected node, same way: a reason can be added
+//	], [         next, previous row of the same node (it sits under several
+//	             parents; every row of the selected node is marked ◆)
 //	v            the view: outline (goals over what they need), order (the
 //	             graph's own tree), flat (one row per node); not saved
 //	c            on the finished row: /plan clear, archive the finished trees
@@ -271,8 +273,10 @@ func (v *planView) page() pageDoc {
 		v.order = append(v.order, planSumRow)
 		v.keys = append(v.keys, planSumKey)
 	}
+	info := v.occurrences(live)
 	for _, d := range live {
 		i, r := d.i, v.rows[d.i]
+		in := info[r.id]
 		mark, style, ownerTag := v.motion(r)
 		indent := strings.Repeat("  ", d.depth)
 		head := indent + r.id + " " + mark + planBy(r) + " " + r.title
@@ -280,14 +284,19 @@ func (v *planView) page() pageDoc {
 		if d.repeat {
 			tags = append(tags, "again")
 		}
-		if r.ready {
+		if in.ready {
 			tags = append(tags, "ready")
 		}
 		if ownerTag != "" {
 			tags = append(tags, ownerTag)
 		}
-		if len(r.waiting) > 0 {
-			tags = append(tags, textfmt.Plural(len(r.waiting), "wait"))
+		// The same on every occurrence of a node: all it waits on, and
+		// every parent it sits under (USER 2026-11-18).
+		if len(in.waiting) > 0 {
+			tags = append(tags, fmt.Sprintf("waits %d", len(in.waiting)))
+		}
+		if in.n > 1 && len(in.parents) > 0 {
+			tags = append(tags, "under "+strings.Join(in.parents, ", "))
 		}
 		sub := ""
 		if len(tags) > 0 {
@@ -306,8 +315,11 @@ func (v *planView) page() pageDoc {
 		add("details", r.details)
 		add("done when", r.doneWhen)
 		add("needs", strings.Join(r.needs, ", "))
-		for _, w := range r.waiting {
-			add("waiting", w)
+		if len(in.parents) > 0 {
+			add("under", strings.Join(in.parents, " · "))
+		}
+		for _, w := range in.waiting {
+			add("waiting", v.blocker(w))
 		}
 		add("replaces", r.replaces)
 		add("why", r.why)
@@ -315,7 +327,7 @@ func (v *planView) page() pageDoc {
 		if d.repeat {
 			body = append([]string{"(already shown under another parent)"}, body...)
 		}
-		nodes = append(nodes, pageNode{head: head, sub: sub, body: strings.Join(body, "\n"), pre: true,
+		nodes = append(nodes, pageNode{head: head, sub: sub, body: strings.Join(body, "\n"), pre: true, group: r.id,
 			err: r.status == "dropped" || r.status == "blocked", style: style})
 		v.order = append(v.order, i)
 		seen[r.id]++
@@ -347,6 +359,58 @@ func (v *planView) page() pageDoc {
 		nodes = append(nodes, pageNode{body: "The plan is empty. The model makes nodes with its plan tools when a task has several steps."})
 	}
 	return pageDoc{title: textfmt.Plural(v.total, "node"), nodes: nodes}
+}
+
+// planInfo is what every occurrence of a node shows alike.
+type planInfo struct {
+	waiting, parents []string
+	ready            bool
+	n                int // rows it has on the page
+}
+
+// occurrences gathers, per node id, the engine's waiting lists (all rows of
+// the node, joined), the nodes that need it (its parents, from the reversed
+// needs) and how many rows show it. No readiness is worked out here.
+func (v *planView) occurrences(live []planDisp) map[string]*planInfo {
+	info := map[string]*planInfo{}
+	get := func(id string) *planInfo {
+		if info[id] == nil {
+			info[id] = &planInfo{}
+		}
+		return info[id]
+	}
+	for _, r := range v.rows {
+		in := get(r.id)
+		for _, w := range r.waiting {
+			if !slices.Contains(in.waiting, w) {
+				in.waiting = append(in.waiting, w)
+			}
+		}
+		in.ready = in.ready || r.ready
+		for _, n := range r.needs {
+			if pi := get(n); !slices.Contains(pi.parents, r.id) {
+				pi.parents = append(pi.parents, r.id)
+			}
+		}
+	}
+	for _, d := range live {
+		get(v.rows[d.i].id).n++
+	}
+	return info
+}
+
+// blocker is an engine's waiting line ("needs 2 (doing)") with the title of
+// the node it names, when that node is on the plan.
+func (v *planView) blocker(w string) string {
+	f := strings.Fields(w)
+	if len(f) >= 2 && f[0] == "needs" {
+		for _, r := range v.rows {
+			if r.id == f[1] {
+				return w + " · " + r.title
+			}
+		}
+	}
+	return w
 }
 
 // planSpin is a working owner's mark, one frame per pulse step.
@@ -415,10 +479,10 @@ func (v *planView) motion(r planRow) (mark string, style *lipgloss.Style, tag st
 func (v *planView) hint() string {
 	name := "view: " + planViewNames[v.view]
 	if v.width > 0 && v.width < narrowW {
-		return "s summary · t tell · a approve · e m d edit/drop · v " + planViewNames[v.view] + " · enter · esc"
+		return "s summary · t tell · a approve · e m d edit/drop · [ ] same · v " + planViewNames[v.view] + " · enter · esc"
 	}
 	return StDim.Render(name+" ") + hotKey("summary", "s") + StDim.Render(" · ") + hotKey("change view", "v") + StDim.Render(" · ") + hotKey("tell", "t") + StDim.Render(" · ") + hotKey("approve", "a") + StDim.Render(" · ") + hotKey("edit title", "e") +
-		StDim.Render(" · ") + hotKey("details", "m") + StDim.Render(" · ") + hotKey("drop", "d") +
+		StDim.Render(" · ") + hotKey("details", "m") + StDim.Render(" · ") + hotKey("drop", "d") + StDim.Render(" · ") + hotKey("same node", "[ ]") +
 		StDim.Render(" · enter dive into its agent, else details · → details · esc back")
 }
 
@@ -516,6 +580,11 @@ func (planListPane) key(m *tuiModel, msg tea.KeyPressMsg) bool {
 			return true
 		}
 		m.flashText, m.flashUntil = "/plan summary", time.Now().Add(flashFor)
+		return true
+	case "]", "[":
+		if r != nil {
+			m.pg.jumpSame(r.id, k == "]")
+		}
 		return true
 	case "v":
 		v.view = (v.view + 1) % planViews
