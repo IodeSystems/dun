@@ -19,7 +19,7 @@ func TestSupportedTool_RegistryRaises(t *testing.T) {
 	}
 	mcpserver.UseRegistry(ix, "v0.1.3")
 	t.Cleanup(func() { mcpserver.UseRegistry(nil, "") })
-	s, ok := supportedTool("raglit")
+	s, ok := mcpserver.SupportedTool("raglit")
 	if !ok || s.Recommended != "v9.9.9" || s.Min != built.Min {
 		t.Errorf("raglit: %+v (built %+v)", s, built)
 	}

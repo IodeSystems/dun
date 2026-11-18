@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/iodesystems/dun/internal/buildinfo"
@@ -22,15 +23,19 @@ import (
 
 const toolsHelp = `dun tools — the tools dun runs, against the versions it pins
 
-  dun tools              each tool's version, and the update for it if any
-  dun tools --upgrade    run those updates: a release tool is downloaded at
-                         its pinned version (the sha256 is checked), a go
-                         install one is go-installed; a checkout is said
+  dun tools              each tool: pinned (dun's copy under $DUN_HOME/tools),
+                         your build (an override) or not installed, its path
+                         and version, and the update for it if any
+  dun tools --upgrade    run those updates: a kept copy older than the pin
+                         gets the pin's, downloaded on a release build (the
+                         sha256 is checked), go-installed on any other; your
+                         build is never updated
   --json                 one JSON array of the rows
 
 The pin is this build's release/deps.json, raised by the registry (fetched
-first). A running engine keeps the tool it started; /upgrade now restarts
-them.
+first). An override is $DUN_MCPSHELL, $DUN_POLY_LSP_MCP or $DUN_RAGLIT, else
+tools.<name>.path in $DUN_HOME/mcp.json. A running engine keeps the tool it
+started; /upgrade now restarts them.
 `
 
 // toolRow is one tool's line.
@@ -48,24 +53,14 @@ type toolRow struct {
 	Missing bool   `json:"missing,omitempty"`
 	Pin     string `json:"pin,omitempty"`     // the version this dun pins (the download, else Recommended)
 	Release bool   `json:"release,omitempty"` // a release build of the tool
+	Source  string `json:"source,omitempty"`  // pinned, override (your build) or missing (mcpserver.Resolved)
+	Via     string `json:"via,omitempty"`     // an override's origin: $DUN_<TOOL> or tools.<name>.path
 }
 
 // dep is the row as /version and dun --version show it.
 func (r toolRow) dep() depver.Tool {
 	return depver.Tool{Name: r.Name, Path: r.Path, Version: r.Version, Origin: r.Origin,
-		Pin: r.Pin, Release: r.Release, Missing: r.Missing}
-}
-
-// pinFor is the version this dun pins for name: the release download, else
-// the version it supports (release.Supported, raised by the registry).
-func pinFor(name string) string {
-	if a, _, ok := pinnedTool(name); ok {
-		return a.Version
-	}
-	if s, ok := supportedTool(name); ok {
-		return s.Recommended
-	}
-	return ""
+		Pin: r.Pin, Release: r.Release, Missing: r.Missing, Source: r.Source}
 }
 
 func toolsCmd(args []string, stdout, stderr io.Writer) int {
@@ -111,47 +106,50 @@ func toolsCmd(args []string, stdout, stderr io.Writer) int {
 }
 
 // toolRows checks each tool the engines run (doctorTools but git); with
-// upgrade, runs the updates dun can run.
+// upgrade, runs the updates dun can run: a kept copy older than the pin
+// gets the pin's. Your build (an override) is never updated.
 func toolRows(upgrade bool) []toolRow {
 	var rows []toolRow
 	d := &doctor{fix: true}
 	for _, t := range doctorTools {
-		if t.name == "git" {
+		if !mcpserver.IsManaged(t.name) {
 			continue
 		}
-		r := toolRow{Name: t.name, Pin: pinFor(t.name)}
-		p, err := mcpserver.FindCommand(t.name)
-		if err != nil {
+		res := mcpserver.ResolveTool(t.name)
+		r := toolRow{Name: t.name, Pin: res.Pin, Source: res.Source, Via: res.Via, Path: res.Path}
+		if res.Path == "" {
 			r.Missing = true
-			if fixTools[t.name] {
+			switch {
+			case res.Via != "":
+				r.Fix = res.Why
+			case fixTools[t.name] || d.toolEnv(t.name).release:
 				r.Fix = "dun doctor --fix installs it"
 			}
 			rows = append(rows, r)
 			continue
 		}
-		r.Path = p
-		o, err := update.OfFile(p)
+		o, err := update.OfFile(res.Path)
 		if err != nil {
 			r.Note = "no build info: its version is not known"
 			rows = append(rows, r)
 			continue
 		}
 		r.Version, r.Origin, r.Release = o.Version, o.String(), o.Kind == update.Release
-		s, ok := supportedTool(t.name)
-		if !ok {
-			rows = append(rows, r)
-			continue
-		}
-		pl := planTool(t.name, p, o, s, d.toolEnv(t.name, p))
-		r.Note = trimPrefix(pl.detail, t.name+": "+o.String())
+		s, _ := mcpserver.SupportedTool(t.name)
+		pl := planTool(t.name, res, o, s, d.toolEnv(t.name))
+		r.Note = strings.TrimPrefix(strings.TrimPrefix(pl.detail, t.name+": "), sourceWords(res)+", "+o.String())
+		r.Note = strings.TrimPrefix(r.Note, "; ")
 		r.Target, r.Fix, r.Can = pl.target, pl.fix, pl.act != ""
 		if upgrade && r.Can {
-			if err := d.update(t.name, p, s, pl); err != nil {
+			if err := d.update(t.name, s, pl); err != nil {
 				r.Error = err.Error()
 			} else {
 				r.Updated = true
-				if o, err := update.OfFile(p); err == nil {
-					r.Version, r.Origin, r.Release = o.Version, o.String(), o.Kind == update.Release
+				if res = mcpserver.ResolveTool(t.name); res.Path != "" {
+					r.Path = res.Path
+					if o, err := update.OfFile(res.Path); err == nil {
+						r.Version, r.Origin, r.Release = o.Version, o.String(), o.Kind == update.Release
+					}
 				}
 			}
 		}
@@ -160,17 +158,16 @@ func toolRows(upgrade bool) []toolRow {
 	return rows
 }
 
-func trimPrefix(s, p string) string {
-	if len(s) >= len(p) && s[:len(p)] == p {
-		s = s[len(p):]
+// sourceWords is planTool's words for where r comes from.
+func sourceWords(r mcpserver.Resolved) string {
+	if r.Source == mcpserver.SourceOverride {
+		return "your build"
 	}
-	if len(s) >= 2 && s[:2] == "; " {
-		s = s[2:]
-	}
-	return s
+	return "pinned " + r.Version
 }
 
-// line is a row as `dun tools` prints it.
+// line is a row as `dun tools` prints it: the tool, where it comes from
+// (pinned, your build, missing) and its path, then its version.
 func (r toolRow) line() string {
 	switch {
 	case r.Missing:
@@ -182,15 +179,21 @@ func (r toolRow) line() string {
 	case r.Error != "":
 		return r.Name + ": " + r.Origin + "; the update to " + r.Target + " failed: " + r.Error
 	case r.Updated:
-		return r.Name + ": updated to " + r.Version
+		return r.Name + ": updated to " + r.Version + " at " + r.Path
 	}
-	s := r.Name + ": " + r.Origin
+	s := r.Name + ": pinned at " + r.Path
+	if r.Source == mcpserver.SourceOverride {
+		s = r.Name + ": your build at " + r.Path + " (from " + r.Via + ")"
+	}
+	if r.Origin != "" {
+		s += ", " + r.Origin
+	}
 	if r.Note != "" {
 		s += "; " + r.Note
 	}
-	if r.Target != "" && r.Fix != "" {
+	if r.Fix != "" {
 		if r.Can {
-			s += " — dun tools --upgrade (or /upgrade now) installs it"
+			s += " — dun tools --upgrade (or /upgrade now) installs " + r.Target
 		} else {
 			s += " — " + r.Fix
 		}

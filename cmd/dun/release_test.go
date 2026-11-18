@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/update"
 )
 
@@ -20,12 +21,12 @@ func TestDoctor_Origins(t *testing.T) {
 		t.Fatal(err)
 	}
 	d = &doctor{}
-	d.toolOrigin("mcpshell", exe)
+	d.toolOrigin("mcpshell", mcpserver.Resolved{Name: "mcpshell", Source: mcpserver.SourcePinned, Path: exe, Pin: "v1.0.0", Version: "v1.0.0"})
 	if len(d.found) != 1 || !strings.HasPrefix(d.found[0].detail, "mcpshell: ") {
 		t.Fatalf("%+v", d.found)
 	}
 	d = &doctor{}
-	d.toolOrigin("mcpshell", "/bin/sh-not-there")
+	d.toolOrigin("mcpshell", mcpserver.Resolved{Name: "mcpshell", Source: mcpserver.SourcePinned, Path: "/bin/sh-not-there"})
 	if len(d.found) != 0 {
 		t.Fatalf("a missing file: %+v", d.found)
 	}
@@ -46,7 +47,7 @@ func TestDoctor_FixesFromThePin(t *testing.T) {
 		t.Fatalf("%q %v %q", p, err, got)
 	}
 	_, err := (&doctor{}).install("poly-lsp-mcp")
-	if fix := toolFix("poly-lsp-mcp", err); fix != "dun doctor --fix (downloads poly-lsp-mcp v0.9.2 from its release; the sha256 is pinned in this build)" {
+	if fix := toolFix("poly-lsp-mcp", err); fix != "dun doctor --fix (downloads poly-lsp-mcp v0.9.2 from its release; the sha256 is pinned in this build), or a session fetches it when it first needs it" {
 		t.Fatalf("fix %q", fix)
 	}
 }

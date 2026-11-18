@@ -41,19 +41,19 @@ func TestDoctorPolyLSP(t *testing.T) {
 	older := write("old", "      --root string")
 	interim := write("interim", "      --index-max-files int")
 	d := &doctor{}
-	d.polyLSPAt(newer, "this PATH")
-	d.polyLSPAt(older, "the service's PATH")
-	d.polyLSPAt(interim, "this PATH")
+	d.polyLSPAt(newer, "your build")
+	d.polyLSPAt(older, "dun's pinned copy")
+	d.polyLSPAt(interim, "your build")
 	if len(d.found) != 3 {
 		t.Fatalf("%+v", d.found)
 	}
-	if f := d.found[0]; f.level != "ok" || !strings.Contains(f.detail, newer+" (on this PATH): indexes in the background; takes --exclude and --index-budget") {
+	if f := d.found[0]; f.level != "ok" || !strings.Contains(f.detail, newer+" (your build): indexes in the background; takes --exclude and --index-budget") {
 		t.Errorf("new: %+v", f)
 	}
 	if f := d.found[2]; f.level != "warn" || !strings.Contains(f.detail, "caps files instead of a startup budget (an interim build)") {
 		t.Errorf("interim: %+v", f)
 	}
-	if f := d.found[1]; f.level != "warn" || !strings.Contains(f.detail, older+" (on the service's PATH) is an older build: startup waits for its index") ||
+	if f := d.found[1]; f.level != "warn" || !strings.Contains(f.detail, older+" (dun's pinned copy) is an older build: startup waits for its index") ||
 		f.fix != "update it (poly-lsp: make install)" {
 		t.Errorf("old: %+v", f)
 	}

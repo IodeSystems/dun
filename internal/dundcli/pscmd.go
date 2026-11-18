@@ -17,8 +17,10 @@ import (
 	"golang.org/x/term"
 
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/procps"
 	"github.com/iodesystems/dun/proto"
+	"github.com/iodesystems/dun/release"
 )
 
 // addPS adds `ps`: under `sessions` (dund sessions ps) and at the top (dund
@@ -52,6 +54,10 @@ active index, "rag <project> <kind>  state  queue N  files/min  embeds/min
 err", by the session whose workspace is that project; indexes idle for
 10 minutes fold into one "N idle indexes" line. --json has every index
 with its counters.
+
+Under the table: where each of dun's tools comes from, as its engines
+resolve it — pinned (dun's copy under $DUN_HOME/tools), your build (an
+override) or not installed — and its path; --json has them as tools.
 
 CPU% and IO are measured over one second, not averaged over the process's
 life. SESSION (none) is a process no live session owns: an orphan, or a
@@ -109,6 +115,44 @@ type PSView struct {
 	// List is dund's answer (nil: dund did not answer); the interactive
 	// view reads each session's workspace from it.
 	List *proto.ProcsList `json:"-"`
+	// Tools is where each of dun's tools comes from (pinned, override,
+	// missing) and its path, as dund's engines resolve it: the same code, in
+	// the same DUN_HOME (mcpserver.ResolveTool). One reading, not watched.
+	Tools []mcpserver.Resolved `json:"tools,omitempty"`
+}
+
+// toolLines are PSView.Tools as the table's footer: "tools: mcpshell
+// pinned v0.14.0 <path>", a line each.
+func toolLines(ts []mcpserver.Resolved) string {
+	var b strings.Builder
+	for i, r := range ts {
+		head := "       "
+		if i == 0 {
+			head = "tools: "
+		}
+		switch r.Source {
+		case mcpserver.SourcePinned:
+			fmt.Fprintf(&b, "%s%s pinned %s %s\n", head, r.Name, r.Version, r.Path)
+		case mcpserver.SourceOverride:
+			fmt.Fprintf(&b, "%s%s your build %s (from %s)\n", head, r.Name, r.Path, r.Via)
+		default:
+			why := ""
+			if r.Why != "" {
+				why = ": " + r.Why
+			}
+			fmt.Fprintf(&b, "%s%s not installed%s\n", head, r.Name, why)
+		}
+	}
+	return b.String()
+}
+
+// managedTools is ResolveTool for each of dun's tools.
+func managedTools() []mcpserver.Resolved {
+	var out []mcpserver.Resolved
+	for _, t := range release.Supported {
+		out = append(out, mcpserver.ResolveTool(t.Name))
+	}
+	return out
 }
 
 // PSSource is what the interactive view (Interactive) reads and acts with.
@@ -227,13 +271,14 @@ func psOnce(l *loader, w io.Writer, asJSON bool) error {
 	if err != nil {
 		return err
 	}
+	v.Tools = managedTools()
 	if asJSON {
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
 		return enc.Encode(v)
 	}
 	width, _ := termSize(w)
-	_, err = io.WriteString(w, render(v, width, 0))
+	_, err = io.WriteString(w, render(v, width, 0)+"\n"+toolLines(v.Tools))
 	return err
 }
 

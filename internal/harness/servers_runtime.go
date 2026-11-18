@@ -67,7 +67,7 @@ type ServerState struct {
 	Tools int    `json:"tools"`
 	Err   string `json:"err,omitempty"` // why the last start attempt failed
 	// Missing: Err is a MissingError — the command is not installed, a setup
-	// step rather than a failure (mcpserver/missing.go).
+	// step rather than a failure (mcpserver/tools.go).
 	Missing bool `json:"missing,omitempty"`
 	// Starting is a start in flight: launched, not yet answering with its
 	// tools (Running may already be true: the handshake is done, discovery
@@ -416,9 +416,27 @@ func (h *Harness) startServer(ctx context.Context, s mcpserver.Server) error {
 	defer close(done)
 	go h.watchStart(s.ID, phase, timeout, done)
 	ext, isExt := h.extension(s.ID)
+	// A local command is resolved by mcpserver/tools.go before anything runs
+	// it (raglitAuth runs raglit): dun's own tools are its pinned copies
+	// under DUN_HOME, and a release build fetches a missing one here, saying
+	// so in the log and as a quiet line; any other command is looked for on
+	// PATH, then beside dun. One that is not installed is not started at all.
+	command, cmdErr := s.Command, error(nil)
+	if s.URL == "" && command != "" {
+		command, cmdErr = mcpserver.EnsureCommand(ctx, command, func(line string) {
+			h.noteServer(s.ID, "%s", line)
+			if cb := h.cfg.OnServerSetup; cb != nil {
+				cb(s.ID, line)
+			}
+		})
+	}
 	// A raglit with keys starts with the session's key, or not at all
 	// (raglitauth.go).
-	ragEnv, authErr := h.raglitAuth(ctx, s)
+	var ragEnv []string
+	authErr := cmdErr
+	if cmdErr == nil {
+		ragEnv, authErr = h.raglitAuth(ctx, s)
+	}
 	// raglit answers nothing until the workspace is in its index, so ingest
 	// belongs to STARTING the server (hook workspace.open), not to starting
 	// dun: a session that never turns rag on never pays for it.
@@ -453,13 +471,7 @@ func (h *Harness) startServer(ctx context.Context, s mcpserver.Server) error {
 		args = h.shellArgs(s) // + --mcp <file> when servers are placed in it
 		env = h.shellEnv(s, env)
 	}
-	// A local command is looked for on PATH, then beside dun (mcpserver/missing.go);
-	// one in neither place is not started at all.
-	command := s.Command
-	err := authErr
-	if err == nil && s.URL == "" && command != "" {
-		command, err = mcpserver.FindCommand(command)
-	}
+	err := authErr // a missing command, or a raglit login that failed
 	switch {
 	case err != nil:
 		h.noteServer(s.ID, "%s", oneLine(err.Error(), 400))

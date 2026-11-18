@@ -131,9 +131,7 @@ func TestStartServer_FailureLeavesSessionUsable(t *testing.T) {
 // the proactive-docs preparer together — they are all derived from the same
 // fact and drift apart if any one of them is updated on its own.
 func TestStartStopServer_RebuildsToolSet(t *testing.T) {
-	if !haveBinary("mcpshell") {
-		t.Skip("mcpshell not on PATH")
-	}
+	toolFromPath(t, "mcpshell")
 	dir := t.TempDir()
 	h, err := Start(context.Background(), Config{
 		Workspace: dir,
@@ -172,6 +170,17 @@ func TestStartStopServer_RebuildsToolSet(t *testing.T) {
 func haveBinary(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
+}
+
+// toolFromPath points dun at the PATH's copy of one of its own tools
+// ($DUN_<TOOL>: dun does not look on PATH for them), or skips the test.
+func toolFromPath(t *testing.T, name string) {
+	t.Helper()
+	p, err := exec.LookPath(name)
+	if err != nil {
+		t.Skip(name + " not on PATH")
+	}
+	t.Setenv(mcpserver.ToolEnv(name), p)
 }
 
 func serverState(h *Harness, id string) (ServerState, bool) {

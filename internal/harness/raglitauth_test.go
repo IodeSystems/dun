@@ -30,7 +30,7 @@ func (r raglitRun) token() string {
 	return ""
 }
 
-// fakeRaglit puts a raglit with keys on PATH and answers its key and ingest
+// fakeRaglit points $DUN_RAGLIT at a raglit with keys and answers its key and ingest
 // commands; runs records every call.
 func fakeRaglit(t *testing.T) (*[]raglitRun, mcpserver.Server) {
 	t.Helper()
@@ -39,7 +39,7 @@ func fakeRaglit(t *testing.T) (*[]raglitRun, mcpserver.Server) {
 	if err := os.WriteFile(filepath.Join(bin, "raglit"), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("DUN_RAGLIT", filepath.Join(bin, "raglit")) // dun runs its own raglit, not PATH's
 	var runs []raglitRun
 	oldRun, oldHas := runRaglit, raglitHasKeys
 	runRaglit = func(_ context.Context, _, _ string, env []string, stdin string, args ...string) (string, string, error) {
