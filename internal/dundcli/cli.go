@@ -7,6 +7,7 @@
 //	dund token       make a new local token for HTTP clients (the old one stops working)
 //	dund token create|list|revoke   named API tokens, one per client
 //	dund rag         search and fill the retrieval indexes (docs/rag.md)
+//	dund enable|disable web|tui   the HTTP listener and /tui, at runtime (web.go)
 //
 // Paths: $DUN_HOME (default ~/.dun) holds dund.sock (0600), dund.pid, the
 // registry in dund/, the retrieval indexes in dund/rag/ and, when a client started the service, dund.log.
@@ -20,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -123,7 +123,7 @@ func newRoot() *cobra.Command {
 	}
 	root.PersistentFlags().StringVar(&l.home, "home", "", "state directory (default $DUN_HOME, else ~/.dun)")
 	root.PersistentFlags().StringVar(&l.sock, "socket", "", "unix socket (default <home>/dund.sock)")
-	root.AddCommand(serveCmd(l), sessionsCmd(l), tokenCmd(l), serviceCmd(l), schemaCmd(), ragCmd(l))
+	root.AddCommand(serveCmd(l), sessionsCmd(l), tokenCmd(l), serviceCmd(l), schemaCmd(), ragCmd(l), enableCmd(l), disableCmd(l))
 	return root
 }
 
@@ -156,12 +156,14 @@ func serveCmd(l *loader) *cobra.Command {
 	cmd.Flags().StringArrayVar(&oidcCfg.Allow, "oidc-allow", nil, "sign-in: an email that may sign in (repeatable); each sees the owner's sessions")
 	cmd.Flags().StringVar(&oidcCfg.Redirect, "oidc-redirect", "", "sign-in: the callback URL (default: /auth/callback on the address the browser used)")
 	cmd.Flags().StringVar(&releases, "releases", "", "serve Android releases from here (tools/release-android): /releases, /dun.apk, announced in /api/v1/hello")
-	cmd.Flags().StringVar(&webRoot, "web-root", "", "with --web-experimental: serve this built client at / (mobile: pnpm export:web); default: the copy a release build embeds")
+	cmd.Flags().StringVar(&webRoot, "web-root", "", "serve this built web client at /web (mobile: pnpm export:web); default: the copy a release build embeds")
 	cmd.Flags().BoolVar(&checkOnly, "check", false, "prove these settings can run, then exit (the unit's ExecStartPre)")
 	// The web app and its HTTP API are not tested yet (USER 2026-10-28: "it's
 	// not ready, it's not tested"), so the flag says so. --http was its name:
 	// still accepted, with a warning, so an installed service keeps running.
-	cmd.Flags().StringVar(&httpAddr, "web-experimental", "", "EXPERIMENTAL, untested: serve the web app and its HTTP API here (e.g. 127.0.0.1:20003); needs a token (dund token)")
+	// Since 2026-11-17 the flag only seeds <home>/dund/web.json (web.go);
+	// `dun dund enable web` is the way to turn it on.
+	cmd.Flags().StringVar(&httpAddr, "web-experimental", "", "EXPERIMENTAL: seed the HTTP listener (web app, TUI, API) at this address while <home>/dund/web.json does not exist; use `dund enable web` instead")
 	cmd.Flags().StringVar(&httpAddr, "http", "", "")
 	_ = cmd.Flags().MarkDeprecated("http", "use --web-experimental (the web app is not tested yet)")
 	// The check a service's dund runs on a new build before it hands over
@@ -261,33 +263,34 @@ func serve(ctx context.Context, l *loader, bin, httpAddr string, o dundapi.Optio
 		return err
 	}
 	srv.SetRag(rag)
-	go func() { errc <- srv.Serve(ln) }()
-	var hs *http.Server
-	if httpAddr != "" {
-		o.Owner = dundapi.Owner(os.Getuid())
-		h, err := dundapi.Handler(svc, o)
-		if err != nil {
-			ln.Close()
-			rag.Close(0)
-			return err
-		}
-		hs = &http.Server{Addr: httpAddr, Handler: h, ReadHeaderTimeout: 10 * time.Second}
-		hl, err := net.Listen("tcp", httpAddr)
-		if err != nil {
-			ln.Close()
-			rag.Close(0)
-			return fmt.Errorf("listen %s: %w", httpAddr, err)
-		}
-		go func() {
-			if err := hs.Serve(hl); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				errc <- err
-			}
-		}()
-		if !svc.HasToken() {
-			fmt.Fprintln(os.Stderr, "dund: no local token yet — HTTP clients are refused until `dun dund token`")
-		}
-		fmt.Fprintf(os.Stderr, "dund: HTTP on %s\n", httpAddr)
+	// The HTTP listener (web.go): web.json decides; the flag seeds it.
+	webSt, seeded, err := effectiveWeb(l.home, httpAddr)
+	if err != nil {
+		ln.Close()
+		rag.Close(0)
+		return err
 	}
+	web, err := newWebCtl(l.home, bin, svc, o)
+	if err != nil {
+		ln.Close()
+		rag.Close(0)
+		return err
+	}
+	if seeded {
+		if err := saveWebState(l.home, webSt); err != nil {
+			fmt.Fprintf(os.Stderr, "dund: web: %v\n", err)
+		} else {
+			fmt.Fprintf(os.Stderr, "dund: web: saved the flag's %s in %s; from now on it decides (dun dund enable|disable web)\n", httpAddr, webStatePath(l.home))
+		}
+	} else if httpAddr != "" {
+		fmt.Fprintf(os.Stderr, "dund: web: %s decides; the flag's %s is not used (dun dund enable web --addr to change it)\n", webStatePath(l.home), httpAddr)
+	}
+	web.start(webSt)
+	if webSt.Enabled && !svc.HasToken() {
+		fmt.Fprintln(os.Stderr, "dund: no local token yet — HTTP clients are refused until `dun dund token`")
+	}
+	srv.SetWeb(web.set)
+	go func() { errc <- srv.Serve(ln) }()
 	go watchSelf(ctx, svc, self)
 	fmt.Fprintf(os.Stderr, "dund: serving %s (engines: %s)\n", sock, bin)
 	reexec := false
@@ -317,11 +320,10 @@ func serve(ctx context.Context, l *loader, bin, httpAddr string, o dundapi.Optio
 		self, reexec = exe, true
 		srv.Drain(time.Second) // clients read "restarting" before the socket goes
 	}
-	if hs != nil {
-		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = hs.Shutdown(sctx)
-		cancel()
-	}
+	// Every path out: the TUIs in browser tabs are killed (their sockets are
+	// hijacked, which Shutdown leaves open) and the listener stops, before a
+	// re-exec or a handover's exit.
+	web.stop()
 	ln.Close()
 	os.Remove(sock)
 	// Before the re-exec too: a job cut off here goes back on the queue for

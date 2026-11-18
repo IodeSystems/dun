@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>dun · terminal</title>
-<link rel="stylesheet" href="/static/xterm.min.css">
+<link rel="stylesheet" href="static/xterm.min.css">
 <style>
   html,body { margin:0; height:100%; background:#0d0f12; }
   #term { position:absolute; inset:0; padding:6px 8px; }
@@ -14,10 +14,10 @@
 </style>
 </head>
 <body>
-  <div class="bar">dun · terminal</div>
+  <div class="bar">dun · terminal{{BACK}}</div>
   <div id="term"></div>
-  <script src="/static/xterm.js"></script>
-  <script src="/static/addon-fit.js"></script>
+  <script src="static/xterm.js"></script>
+  <script src="static/addon-fit.js"></script>
   <script>
     const term = new Terminal({
       fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
@@ -30,7 +30,9 @@
     fit.fit();
 
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const ws = new WebSocket(proto + '://' + location.host + '/term/ws');
+    // ws beside this page: /tui/ws under dund, /ws for dun --web-tui.
+    const base = location.pathname.replace(/[^/]*$/, '');
+    const ws = new WebSocket(proto + '://' + location.host + base + 'ws');
     ws.binaryType = 'arraybuffer';
 
     // resize frame: [1, colsHi, colsLo, rowsHi, rowsLo] → server pty.Setsize →

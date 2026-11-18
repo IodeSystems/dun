@@ -19,8 +19,8 @@ import (
 // the same verbs. Same verbs and unit shape as `raglit service`, `corrallm
 // service` and `aw4 service`.
 //
-// Without a service, dund runs only while some TUI has started it, and never
-// with --web-experimental — so the web app has nothing behind it after a reboot.
+// Without a service, dund runs only while some TUI has started it — so the
+// web app (`dun dund enable web`) has nothing behind it after a reboot.
 
 // ServiceUnit is the service name a TUI looks for before starting dund itself.
 const ServiceUnit = "dund"
@@ -178,6 +178,22 @@ func serviceCmd(l *loader) *cobra.Command {
 			// `<exec> serve` when it is the standalone dund.
 			prefix := servePrefix(execPath)
 
+			// The listener lives in web.json now (web.go): a flag for it
+			// seeds that, and stays out of the unit.
+			args, seed := stripWebFlag(args)
+			if seed != "" {
+				if _, ok, err := loadWebState(l.home); err != nil {
+					return err
+				} else if !ok {
+					if err := saveWebState(l.home, webState{Enabled: true, Addr: seed}); err != nil {
+						return err
+					}
+					fmt.Printf("web: on at %s, saved in %s (not in the unit; dun dund disable web to stop it)\n", seed, webStatePath(l.home))
+				} else {
+					fmt.Printf("web: %s already decides; the flag's %s is not used (dun dund enable web --addr %s)\n", webStatePath(l.home), seed, seed)
+				}
+			}
+
 			chk := exec.Command(execPath, append(append(append([]string{}, prefix...), "--home", l.home, "serve", "--check"), args...)...)
 			chk.Stdout, chk.Stderr = os.Stderr, os.Stderr
 			if err := chk.Run(); err != nil {
@@ -251,6 +267,57 @@ func serviceCmd(l *loader) *cobra.Command {
 	logs.Flags().StringVar(&name, "name", ServiceUnit, "unit name without .service")
 	c.AddCommand(logs)
 	return c
+}
+
+// stripWebFlag takes --web-experimental and its old name --http out of
+// serve flags, and returns the address they named ("" for none; the last
+// wins).
+func stripWebFlag(args []string) ([]string, string) {
+	var out []string
+	addr := ""
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		name, val, eq := strings.Cut(a, "=")
+		if name != "--web-experimental" && name != "--http" && name != "-web-experimental" && name != "-http" {
+			out = append(out, a)
+			continue
+		}
+		if !eq && i+1 < len(args) {
+			i++
+			val = args[i]
+		}
+		addr = val
+	}
+	return out, addr
+}
+
+// unitWebAddr is the address an installed unit for home passes
+// --web-experimental (or --http), "" when none: a unit written before web.json
+// existed. Its dund seeds web.json from it at its next start; a change made
+// while it is stopped seeds from it too, so the change does not turn the
+// listener off.
+func unitWebAddr(home string) string {
+	if !ServiceServes(ServiceUnit, home) {
+		return ""
+	}
+	p, _ := ServiceFile(ServiceUnit)
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if strings.HasPrefix(line, "ExecStartPre=") {
+			continue // the same flags as ExecStart
+		}
+		line = strings.NewReplacer("<string>", " ", "</string>", " ", `"`, " ").Replace(line)
+		if _, addr := stripWebFlag(strings.Fields(line)); addr != "" {
+			return addr
+		}
+	}
+	// launchd: one <string> per line, the flag and its value on two.
+	f := strings.Fields(strings.NewReplacer("<string>", " ", "</string>", " ").Replace(string(b)))
+	_, addr := stripWebFlag(f)
+	return addr
 }
 
 // servePrefix is what goes between the binary and "serve".
@@ -352,6 +419,15 @@ func check(l *loader, bin, httpAddr, webRoot string, handoverFrom int) error {
 	}
 	if pid, alive := pidAlive(l.pidfile()); alive && pid != os.Getpid() && pid != handoverFrom {
 		return fmt.Errorf("another dund already runs for %s (pid %d) — stop it first", l.home, pid)
+	}
+	// The address serve will bind: web.json's when it exists (web.go).
+	web, _, err := effectiveWeb(l.home, httpAddr)
+	if err != nil {
+		return err
+	}
+	httpAddr = ""
+	if web.Enabled {
+		httpAddr = web.Addr
 	}
 	if httpAddr != "" && handoverFrom > 0 {
 		if _, err := net.ResolveTCPAddr("tcp", httpAddr); err != nil {

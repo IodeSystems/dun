@@ -492,6 +492,44 @@ func TestSignInTokens(t *testing.T) {
 	}
 }
 
+// A browser session made from a bearer lives only while that bearer does:
+// a new local token, a revoked named token, or a signed-out sign-in ends it.
+func TestSignInFromABearerEndsWithIt(t *testing.T) {
+	svc, _, dir := newSvc(t)
+	local, _ := NewToken(dir)
+	named, _ := CreateAPIToken(dir, "phone")
+	signin, _ := svc.MintSignIn(alice, "a@example.com", time.Hour)
+	mint := func(bearer string) string {
+		t.Helper()
+		from := svc.TokenSource(bearer)
+		if from == "" {
+			t.Fatalf("%.8s is not a live bearer", bearer)
+		}
+		tok, err := svc.MintSignInFrom(alice, "", from, time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tok
+	}
+	fromLocal, fromNamed, fromSignIn := mint(local), mint(named), mint(signin)
+	for _, tok := range []string{fromLocal, fromNamed, fromSignIn} {
+		if _, ok := svc.CheckSignIn(tok); !ok {
+			t.Fatalf("%.10s refused while its bearer is live", tok)
+		}
+	}
+	if svc.TokenSource("dun_nope") != "" {
+		t.Error("a bad bearer has a source")
+	}
+	_, _ = NewToken(dir)
+	_ = RevokeAPIToken(dir, "phone")
+	_ = svc.RevokeSignIn(signin)
+	for name, tok := range map[string]string{"local": fromLocal, "named": fromNamed, "sign-in": fromSignIn} {
+		if _, ok := svc.CheckSignIn(tok); ok {
+			t.Errorf("made from the %s token: still accepted after it ended", name)
+		}
+	}
+}
+
 // After a restart the session's log is new: its seqs start from 1 again
 // and may already have passed the seq a client resumes from. A seq from
 // another epoch gets a snapshot, never a replay from the middle of the new

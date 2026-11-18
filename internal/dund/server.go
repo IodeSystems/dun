@@ -62,6 +62,9 @@ type Server struct {
 	// rag is retrieval (ragd), set by SetRag; nil refuses the rag commands.
 	rag *ragd.Host
 
+	// web answers WebSet (dundcli's listener controller), set by SetWeb.
+	web func(proto.WebSet) (proto.WebState, error)
+
 	mu    sync.Mutex
 	conns map[*conn]struct{}
 }
@@ -79,6 +82,9 @@ func NewServer(svc *Service, principal Principal) *Server {
 func (s *Server) SetBuild(version, exe string, upgrade func(exe, version string) error) {
 	s.version, s.exe, s.upgrade = version, exe, upgrade
 }
+
+// SetWeb answers WebSet with web (nil: refused). Call it before Serve.
+func (s *Server) SetWeb(web func(proto.WebSet) (proto.WebState, error)) { s.web = web }
 
 // SetRag serves the rag commands from h. Call it before Serve.
 func (s *Server) SetRag(h *ragd.Host) { s.rag = h }
@@ -388,6 +394,19 @@ func (c *conn) handle(cmd proto.Command) {
 			err = svc.UpgradeNow()
 		}
 		c.ack(cmd, "", err)
+	case *proto.WebSet:
+		if c.srv.web == nil {
+			c.ack(cmd, "", errors.New("this dund cannot change its HTTP listener"))
+			return
+		}
+		go func() { // starting a listener can take a moment; reads go on
+			st, err := c.srv.web(*p)
+			if err != nil {
+				c.ack(cmd, "", err)
+				return
+			}
+			c.reply(cmd, "", &st)
+		}()
 	case *proto.JobUsageReq:
 		c.reply(cmd, cmd.Session, svc.JobUsage(c.who, cmd.Session, p.Job))
 	case *proto.Persist:

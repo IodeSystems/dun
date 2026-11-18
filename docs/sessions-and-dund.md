@@ -181,6 +181,11 @@ releases on its own.
   socket keeps peer-uid auth.
 - The server URL in the app defaults to the hz name and can be overridden in
   Settings; this is how a standalone install is reached.
+- **The listener is turned on at runtime**: `dun dund enable web [--addr]`,
+  `disable web`, `enable tui`, `disable tui`, saved in `dund/web.json`. One
+  listener serves the chooser at `/`, the web app at `/web`, the TUI at
+  `/tui` and the API at root; pages need the session cookie from
+  `/auth/signin` (decisions.md, "dund's HTTP listener").
 
 ## Sign-in (OIDC)
 

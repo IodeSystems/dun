@@ -1,50 +1,21 @@
 package main
 
 import (
-	"embed"
-	"io/fs"
 	"log"
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"strings"
-	"sync/atomic"
-	"syscall"
-
-	"github.com/creack/pty"
-	"github.com/gorilla/websocket"
 
 	"github.com/iodesystems/dun/internal/tui"
+	"github.com/iodesystems/dun/internal/webterm"
 )
 
-// activeWeb counts live browser sessions (open PTYs), for the shutdown
-// kick-warning.
-var activeWeb int64
-
-// dun --web-tui — the bubbletea TUI in the browser via xterm.js. On a WebSocket
-// connect the server spawns `dun -tui` in a pseudo-terminal and pipes raw bytes
-// both ways, so the browser shows the REAL terminal: a resize sends the new size
-// over the socket, the PTY delivers SIGWINCH, and bubbletea reflows exactly as
-// in a terminal. Each browser gets its own session (use --continue to resume).
-//
-// Framing (browser → server, binary): first byte tags the message —
-//   0x00 + bytes  = keystrokes → written to the PTY
-//   0x01 + 4 bytes = resize (cols hi/lo, rows hi/lo) → pty.Setsize
-// Server → browser: raw PTY output as binary frames.
-
-//go:embed serveterm.html
-var serveTermHTML []byte
-
-//go:embed web
-var termAssetsFS embed.FS
-
-var wsUpgrader = websocket.Upgrader{
-	// Local single-user dev tool; the listen address is the access control.
-	CheckOrigin: func(*http.Request) bool { return true },
-}
-
+// dun --web-tui: the TUI in the browser (internal/webterm). Each browser gets
+// its own `dun --tui` in a pty; use --continue to resume. dund serves the same
+// page at /tui (`dun dund enable tui`), behind its sign-in; this flag is the
+// older, unauthenticated way, kept until it is removed.
 func runServe(o tui.TuiOpts, addr string) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -56,105 +27,34 @@ func runServe(o tui.TuiOpts, addr string) error {
 	if !loopbackOnly(addr) {
 		log.Print("⚠ bound to a non-loopback address — no auth; anyone who can reach it can drive this agent")
 	}
-	mux := http.NewServeMux()
-	page := func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write(serveTermHTML)
+	exe, err := os.Executable()
+	if err != nil {
+		return err
 	}
-	mux.HandleFunc("/", page)
-	mux.HandleFunc("/term", page)
-	sub, _ := fs.Sub(termAssetsFS, "web")
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(sub))))
-	mux.HandleFunc("/term/ws", func(w http.ResponseWriter, r *http.Request) { termWS(w, r, o) })
-	go watchShutdown()
-	return http.Serve(ln, mux)
+	// ctrl+c/esc do not quit: you leave by closing the tab, which drops the
+	// socket and kills the process group. The session lives on in dund.
+	o.DisableExit = true
+	h := webterm.New(webterm.Config{
+		Bin:  exe,
+		Args: tui.ProcArgs(o, "--tui"),
+		Env:  append(webEnv(os.Environ()), "DUN_CHILD=1"), // the spawned TUI never self-rebuilds
+	})
+	go watchShutdown(h)
+	return http.Serve(ln, h)
 }
 
 // watchShutdown warns before Ctrl-C drops attached browser sessions; a second
 // Ctrl-C confirms.
-func watchShutdown() {
+func watchShutdown(h *webterm.Handler) {
 	sig := make(chan os.Signal, 2)
 	signal.Notify(sig, os.Interrupt)
 	<-sig
-	if n := atomic.LoadInt64(&activeWeb); n > 0 {
+	if n := h.Active(); n > 0 {
 		log.Printf("⚠ %d web session(s) attached — Ctrl-C again to drop them", n)
 		<-sig
 	}
+	h.Close()
 	os.Exit(0)
-}
-
-func termWS(w http.ResponseWriter, r *http.Request, o tui.TuiOpts) {
-	conn, err := wsUpgrader.Upgrade(w, r, nil)
-	if err != nil {
-		return
-	}
-	defer conn.Close()
-
-	exe, err := os.Executable()
-	if err != nil {
-		return
-	}
-	// Web sessions disable ctrl+c/esc quit — you leave by closing the tab (which
-	// drops the socket and reaps the process group). Avoids an accidental ctrl+c
-	// killing the session.
-	o.DisableExit = true
-	atomic.AddInt64(&activeWeb, 1)
-	defer atomic.AddInt64(&activeWeb, -1)
-	cmd := exec.Command(exe, tui.ProcArgs(o, "--tui")...)
-	cmd.Env = append(webEnv(os.Environ()), "DUN_CHILD=1") // spawned TUI never self-rebuilds
-	ptmx, err := pty.Start(cmd)                           // pty.Start makes the child a session leader
-	if err != nil {
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("pty error: "+err.Error()))
-		return
-	}
-	// Kill the TUI's whole process group on disconnect. Its session lives on
-	// in dund; only this browser's view of it goes.
-	defer func() {
-		_ = ptmx.Close()
-		if cmd.Process != nil {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		}
-	}()
-
-	// PTY → browser.
-	go func() {
-		buf := make([]byte, 32*1024)
-		for {
-			n, err := ptmx.Read(buf)
-			if n > 0 {
-				if conn.WriteMessage(websocket.BinaryMessage, buf[:n]) != nil {
-					return
-				}
-			}
-			if err != nil {
-				_ = conn.Close() // unblock the reader below
-				return
-			}
-		}
-	}()
-
-	// Browser → PTY (keystrokes + resize).
-	for {
-		_, data, err := conn.ReadMessage()
-		if err != nil {
-			return
-		}
-		if len(data) == 0 {
-			continue
-		}
-		switch data[0] {
-		case 0: // keystrokes
-			if _, err := ptmx.Write(data[1:]); err != nil {
-				return
-			}
-		case 1: // resize: cols hi/lo, rows hi/lo → SIGWINCH → bubbletea reflow
-			if len(data) >= 5 {
-				cols := uint16(data[1])<<8 | uint16(data[2])
-				rows := uint16(data[3])<<8 | uint16(data[4])
-				_ = pty.Setsize(ptmx, &pty.Winsize{Rows: rows, Cols: cols})
-			}
-		}
-	}
 }
 
 // reachableURLs turns a bound address into the URL(s) to open. For an all-
@@ -211,18 +111,5 @@ func loopbackOnly(addr string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// webEnv is the environment for a web session's TUI: without the server's
-// tmux and terminal, which the browser's terminal is not, so the TUI marks
-// no tmux window and sends no iTerm2 escapes (tmux.go, iterm.go).
-func webEnv(env []string) []string {
-	out := make([]string, 0, len(env))
-	for _, kv := range env {
-		k, _, _ := strings.Cut(kv, "=")
-		switch k {
-		case "TMUX", "TMUX_PANE", "TERM_PROGRAM", "LC_TERMINAL":
-			continue
-		}
-		out = append(out, kv)
-	}
-	return out
-}
+// webEnv is the environment for a web session's TUI (webterm.CleanEnv).
+func webEnv(env []string) []string { return webterm.CleanEnv(env) }
