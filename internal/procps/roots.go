@@ -166,9 +166,9 @@ func AttachRoots(rows []Row, daemonPID int, roots []Root, statusErr error, list 
 	}
 }
 
-// rootNames shortens each root to its base name; two roots with one base
+// RootNames shortens each root to its base name; two roots with one base
 // name keep their ~ path, which the table elides in the middle.
-func rootNames(rs []Root) []string {
+func RootNames(rs []Root) []string {
 	count := map[string]int{}
 	for _, r := range rs {
 		count[filepath.Base(r.Root)]++
@@ -184,8 +184,8 @@ func rootNames(rs []Root) []string {
 	return out
 }
 
-// rootLine is what the JOB column says of a root.
-func rootLine(r Root, name string) string {
+// RootLine is what the JOB column says of a root.
+func RootLine(r Root, name string) string {
 	langs := "-"
 	if len(r.Langs) > 0 {
 		langs = strings.Join(shortLangs(r.Langs), ",")

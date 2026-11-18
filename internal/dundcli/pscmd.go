@@ -47,7 +47,12 @@ whose tree is their root, and dun's processes left to pid 1.
 
 CPU% and IO are measured over one second, not averaged over the process's
 life. SESSION (none) is a process no live session owns: an orphan, or a
-language server for a root no session works in.`,
+language server for a root no session works in.
+
+dun ps --watch on a terminal is interactive: enter folds a session or shows
+a process in full, S cycles the sort (CPU, MEM, IO, AGE), k kills, s stops
+the session, o opens it in dun, r restarts the poly-lsp daemon, q quits.
+Piped, it redraws the table; --json prints one reading per interval.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			l.load()
@@ -86,22 +91,42 @@ func parseInterval(s string) (time.Duration, error) {
 	return d, nil
 }
 
-// psView is one table's worth: what it shows and what it says about it.
-type psView struct {
+// PSView is one table's worth: what it shows and what it says about it.
+type PSView struct {
 	At       time.Time      `json:"at"`
 	Window   float64        `json:"window_sec"`
 	Groups   []procps.Group `json:"groups"`
 	Sessions int            `json:"sessions"`
 	Note     string         `json:"note,omitempty"`
+	// List is dund's answer (nil: dund did not answer); the interactive
+	// view reads each session's workspace from it.
+	List *proto.ProcsList `json:"-"`
 }
+
+// PSSource is what the interactive view (Interactive) reads and acts with.
+type PSSource struct {
+	// Sample is the next reading, rated against the one before it (the
+	// first waits sampleWindow), with the table it was read from.
+	Sample func() (PSView, procps.Snapshot, error)
+	// StopSession stops a session's engine through dund.
+	StopSession func(id string) error
+	// Every is the refresh interval.
+	Every time.Duration
+}
+
+// Interactive is `ps --watch` on a terminal: the bubbletea view in
+// internal/psview. cmd/dun sets it; dundcli cannot import it, because
+// internal/tui (whose styles it uses) imports dundcli. Nil (dund's own
+// binary): the redrawn table.
+var Interactive func(ctx context.Context, src PSSource) error
 
 // sample reads dund's sessions and the table, rated against prev (or
 // against a reading sampleWindow before, when prev is empty).
-func sample(l *loader, prev procps.Snapshot, rc *rootsCache) (psView, procps.Snapshot, error) {
+func sample(l *loader, prev procps.Snapshot, rc *rootsCache) (PSView, procps.Snapshot, error) {
 	if prev.Procs == nil {
 		s, err := procps.Read()
 		if err != nil {
-			return psView{}, prev, err
+			return PSView{}, prev, err
 		}
 		prev = s
 		time.Sleep(sampleWindow)
@@ -109,7 +134,7 @@ func sample(l *loader, prev procps.Snapshot, rc *rootsCache) (psView, procps.Sna
 	list, lerr := fetchProcs(l)
 	cur, err := procps.Read()
 	if err != nil {
-		return psView{}, prev, err
+		return PSView{}, prev, err
 	}
 	rows := procps.Attribute(cur, list, procps.Cwd)
 	procps.Apply(rows, procps.Rates(prev, cur))
@@ -117,7 +142,7 @@ func sample(l *loader, prev procps.Snapshot, rc *rootsCache) (psView, procps.Sna
 		roots, rerr := rc.get(d, cur.At)
 		procps.AttachRoots(rows, d.PID, roots, rerr, list)
 	}
-	v := psView{At: cur.At, Window: cur.At.Sub(prev.At).Seconds(), Groups: procps.Groups(rows)}
+	v := PSView{At: cur.At, Window: cur.At.Sub(prev.At).Seconds(), Groups: procps.Groups(rows), List: list}
 	if list != nil {
 		v.Sessions = len(list.Sessions)
 	}
@@ -176,10 +201,23 @@ func psWatch(ctx context.Context, l *loader, w io.Writer, asJSON bool, every tim
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
-	defer stop()
 	var prev procps.Snapshot
 	rc := &rootsCache{}
+	if !asJSON && Interactive != nil && isTTY(w) && isTTY(os.Stdin) {
+		return Interactive(ctx, PSSource{
+			Sample: func() (PSView, procps.Snapshot, error) {
+				v, cur, err := sample(l, prev, rc)
+				if err == nil {
+					prev = cur
+				}
+				return v, cur, err
+			},
+			StopSession: func(id string) error { return stopSession(l, id) },
+			Every:       every,
+		})
+	}
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
+	defer stop()
 	for {
 		v, cur, err := sample(l, prev, rc)
 		if err != nil {
@@ -204,7 +242,7 @@ func psWatch(ctx context.Context, l *loader, w io.Writer, asJSON bool, every tim
 }
 
 // render is the table and its footer, cut to height lines (0: all).
-func render(v psView, width, height int) string {
+func render(v PSView, width, height int) string {
 	body := procps.Table(v.Groups, width)
 	n := 0
 	for _, g := range v.Groups {
@@ -247,6 +285,40 @@ func termSize(w io.Writer) (int, int) {
 		return c, 0
 	}
 	return 80, 0
+}
+
+func isTTY(v any) bool {
+	f, ok := v.(*os.File)
+	return ok && term.IsTerminal(int(f.Fd()))
+}
+
+// stopSession asks dund to stop session id's engine (proto.Stop), and
+// waits for its answer.
+func stopSession(l *loader, id string) error {
+	c, err := net.DialTimeout("unix", l.socket(), 2*time.Second)
+	if err != nil {
+		return fmt.Errorf("no service at %s", l.socket())
+	}
+	defer c.Close()
+	cmd := proto.NewCommand("stop", &proto.Stop{})
+	cmd.Session = id
+	if err := json.NewEncoder(c).Encode(cmd); err != nil {
+		return err
+	}
+	_ = c.SetReadDeadline(time.Now().Add(10 * time.Second))
+	dec := json.NewDecoder(c)
+	for {
+		var ev proto.Event
+		if err := dec.Decode(&ev); err != nil {
+			return err
+		}
+		if a, ok := ev.Payload.(*proto.Ack); ok && ev.Re == "stop" {
+			if a.Error != "" {
+				return errors.New(a.Error)
+			}
+			return nil
+		}
+	}
 }
 
 // fetchProcs asks dund for its running sessions.

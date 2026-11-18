@@ -85,10 +85,10 @@ func Table(gs []Group, width int) string {
 		wSes = max(wSes, runeLen(g.Session))
 		for _, r := range g.Rows {
 			wJob = max(wJob, runeLen(r.Job))
-			names := rootNames(r.Roots)
+			names := RootNames(r.Roots)
 			for i, root := range r.Roots {
 				wSes = max(wSes, runeLen(root.Session))
-				wRoot = max(wRoot, runeLen("  "+rootLine(root, names[i])))
+				wRoot = max(wRoot, runeLen("  "+RootLine(root, names[i])))
 			}
 		}
 		wJob = max(wJob, runeLen(totalLabel(g)))
@@ -101,11 +101,11 @@ func Table(gs []Group, width int) string {
 	}
 	var b strings.Builder
 	line := func(pid, ses, job, cpu, mem, io, age string) {
-		s := pad(pid, wPID) + sp() + pad(fit(ses, wSes), wSes) + sp() + pad(fitJob(job, wJob), wJob) + sp() +
+		s := pad(pid, wPID) + sp() + pad(Fit(ses, wSes), wSes) + sp() + pad(FitJob(job, wJob), wJob) + sp() +
 			lpad(cpu, wCPU) + sp() + lpad(mem, wMEM) + sp() + lpad(io, wIO) + sp() + lpad(age, wAGE)
 		s = strings.TrimRight(s, " ")
 		if width > 0 {
-			s = fit(s, width)
+			s = Fit(s, width)
 		}
 		b.WriteString(s)
 		b.WriteByte('\n')
@@ -116,21 +116,21 @@ func Table(gs []Group, width int) string {
 			b.WriteByte('\n')
 		}
 		for _, r := range g.Rows {
-			line(fmt.Sprint(r.PID), g.Session, r.Job, cpuText(r.CPU), Size(float64(r.RSS)), ioText(r.ReadBps, r.WritBps), Age(r.AgeSec))
-			names := rootNames(r.Roots)
+			line(fmt.Sprint(r.PID), g.Session, r.Job, CPUText(r.CPU), Size(float64(r.RSS)), IOText(r.ReadBps, r.WritBps), Age(r.AgeSec))
+			names := RootNames(r.Roots)
 			for i, root := range r.Roots {
-				line("", root.Session, "  "+rootLine(root, names[i]), "", "", "", "")
+				line("", root.Session, "  "+RootLine(root, names[i]), "", "", "", "")
 			}
 			if r.RootsErr != "" {
 				msg := "  " + r.RootsErr
 				if width > 0 {
-					msg = "\x1b[2m" + fit(msg, width) + "\x1b[0m"
+					msg = "\x1b[2m" + Fit(msg, width) + "\x1b[0m"
 				}
 				b.WriteString(msg + "\n")
 			}
 		}
 		if len(g.Rows) > 1 {
-			line("", g.Session, totalLabel(g), cpuText(g.CPU), Size(float64(g.RSS)), ioText(g.ReadBps, g.WritBps), "")
+			line("", g.Session, totalLabel(g), CPUText(g.CPU), Size(float64(g.RSS)), IOText(g.ReadBps, g.WritBps), "")
 		}
 	}
 	return b.String()
@@ -140,14 +140,16 @@ func totalLabel(g Group) string { return fmt.Sprintf("= total, %d processes", le
 
 func sp() string { return strings.Repeat(" ", gap) }
 
-func cpuText(c float64) string {
+// CPUText is a CPU percent as the table shows it; "-" before a rate.
+func CPUText(c float64) string {
 	if c < 0 {
 		return "-"
 	}
 	return fmt.Sprintf("%.1f", c)
 }
 
-func ioText(r, w float64) string {
+// IOText is read/write per second; "-" unknown.
+func IOText(r, w float64) string {
 	if r < 0 || w < 0 {
 		return "-"
 	}
@@ -190,8 +192,8 @@ func Age(sec int64) string {
 
 func runeLen(s string) int { return len([]rune(s)) }
 
-// fit cuts s to n runes, the last one an ellipsis when cut.
-func fit(s string, n int) string {
+// Fit cuts s to n runes, the last one an ellipsis when cut.
+func Fit(s string, n int) string {
 	r := []rune(s)
 	if len(r) <= n {
 		return s
@@ -202,9 +204,9 @@ func fit(s string, n int) string {
 	return string(r[:n-1]) + "…"
 }
 
-// fitJob is fit, except a path in the job (an LSP's root) loses its
+// FitJob is Fit, except a path in the job (an LSP's root) loses its
 // middle, not its end: the end names the tree.
-func fitJob(s string, n int) string {
+func FitJob(s string, n int) string {
 	r := []rune(s)
 	if len(r) <= n {
 		return s
@@ -214,13 +216,13 @@ func fitJob(s string, n int) string {
 		i = j
 	}
 	if i < 0 {
-		return fit(s, n)
+		return Fit(s, n)
 	}
 	head := []rune(s[:i+1])
 	path := []rune(s[i+1:])
 	keep := n - len(head) - 1 // the ellipsis
 	if keep < 8 {
-		return fit(s, n)
+		return Fit(s, n)
 	}
 	return string(head) + "…" + string(path[len(path)-keep:])
 }

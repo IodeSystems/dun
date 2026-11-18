@@ -31,6 +31,7 @@ import (
 	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/openurl"
+	"github.com/iodesystems/dun/internal/psview"
 	"github.com/iodesystems/dun/internal/spendmeter"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/internal/tui"
@@ -90,6 +91,8 @@ func warnShipRemoved() {
 	}
 }
 func main() {
+	// `ps --watch` on a terminal is the interactive view (internal/psview).
+	dundcli.Interactive = psview.Run
 	// `dun dund …` is the session service (internal/dundcli), in this binary
 	// so the service and the engines it runs are always the same build.
 	if len(os.Args) > 1 && os.Args[1] == "dund" {

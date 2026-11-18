@@ -106,7 +106,7 @@ func TestAttachRoots_Error(t *testing.T) {
 }
 
 func TestRootNames_Collision(t *testing.T) {
-	n := rootNames([]Root{{Root: "/x/app"}, {Root: "/y/app"}, {Root: "/x/lib"}})
+	n := RootNames([]Root{{Root: "/x/app"}, {Root: "/y/app"}, {Root: "/x/lib"}})
 	if n[0] != "/x/app" || n[1] != "/y/app" || n[2] != "lib" {
 		t.Errorf("names: %v", n)
 	}
