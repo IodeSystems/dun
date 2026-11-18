@@ -12,7 +12,7 @@ own tools into one agent working inside an isolated workspace:
 - **[raglit](https://github.com/iodesystems/raglit)** — search your docs/code +
   proactive suggestions.
 
-Get it dun. Rip and tear until it is dun. dun is for long jobs: it plans,
+Git'rdun! dun is for long jobs: it plans,
 delegates, manages its own context and keeps going until the work is done.
 It works with any OpenAI-compatible model, hosted or local, and is tuned for
 cheap models and modest hardware: reliability, not peak capability. Evidence
