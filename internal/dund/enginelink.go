@@ -427,6 +427,7 @@ func (s ExecSpawner) Adopt() []*Adoption {
 	if s.EnginesDir == "" {
 		return nil
 	}
+	reapExited()
 	return adoptEngines(s.EnginesDir)
 }
 

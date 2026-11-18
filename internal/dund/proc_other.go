@@ -21,6 +21,8 @@ func killPidGroup(pid int) {
 	}
 }
 
+func reapExited() {}
+
 func waitPid(pid int) error {
 	p, err := os.FindProcess(pid)
 	if err != nil {

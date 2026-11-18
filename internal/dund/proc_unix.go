@@ -34,6 +34,19 @@ func killPidGroup(pid int) {
 	_ = syscall.Kill(pid, syscall.SIGKILL)
 }
 
+// reapExited collects the children an in-place exec kept that died while
+// no dund held them (engines that exited in the gap): else they stay
+// zombies. Called once at start, before dund starts children of its own.
+func reapExited() {
+	for {
+		var ws syscall.WaitStatus
+		pid, err := syscall.Wait4(-1, &ws, syscall.WNOHANG, nil)
+		if pid <= 0 || err != nil {
+			return
+		}
+	}
+}
+
 // pidPoll is how often waitPid looks for a process that is not dund's child.
 var pidPoll = 200 * time.Millisecond
 
