@@ -167,6 +167,9 @@ type Config struct {
 	// thinking headings, the Markdown note); cmd/dun gives it no Ask, so
 	// there is no ask_user. {OUTPUT} stays: the engine expands it.
 	NonInteractive bool
+	// NoAsks: the person's messages do not become ask nodes (asks.go). For
+	// an embedder with no person, and tests of other things.
+	NoAsks bool
 	// TurnLimit caps tool-call rounds per turn (--tool-call-turn-limit);
 	// 0 is DUN_MAX_TURNS, else 400 (turnlimit.go).
 	TurnLimit int
@@ -334,6 +337,10 @@ type Harness struct {
 	// (plansummary.go).
 	journal journalState
 	planSum planSummaryState
+	// The person's asks and the turn ledger (asks.go, ledger.go). The
+	// root session's only.
+	asks   askState
+	ledger ledgerState
 	// The session's task plan (plan.go), read from its sidecar on first use.
 	planMu sync.Mutex
 	plan   *planState
@@ -954,14 +961,20 @@ func (h *Harness) AskAs(ctx context.Context, id, task string) (agent.TurnResult,
 	h.clearBudgetNotes()
 	h.settleBegin(true)
 	h.planAutoArchive(ctx)
+	// Before prepareTurn: the turn's plan mark (suggestdone.go) and its
+	// plan line include the ask.
+	h.askOpen(task)
 	h.prepareTurn(ctx)
+	h.ledgerBegin()
 	h.workInput(task)
 	h.store.publish(agent.Entry{
 		ID: id, Kind: agent.KindUser, Content: task, CreatedAt: time.Now().UnixNano(),
 	})
 	res, err := h.turnThenTriggers(ctx)
 	h.settleEnd(true, false, err)
-	return h.finishInterrupt(ctx, res, err)
+	res, err = h.finishInterrupt(ctx, res, err)
+	h.ledgerEnd(ctx, err)
+	return res, err
 }
 
 // turnThenTriggers runs a turn, then — in the background, once the turn has
@@ -1002,6 +1015,7 @@ func (h *Harness) turnThenTriggers(ctx context.Context) (agent.TurnResult, error
 func (h *Harness) Close() {
 	h.markClosed()
 	h.settleClose()
+	h.asksSessionEnd() // the asks still open get their entry (asks.go)
 	h.closeAgents()
 	// A sync of folded history in flight gets a moment, so a one-shot run
 	// that folded does not exit before its spans reach dund.

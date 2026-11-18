@@ -108,3 +108,31 @@ func TestJournalScreen(t *testing.T) {
 		t.Errorf("n sent %s", rec.String())
 	}
 }
+
+// A ledger row (an ask, a turn) is long: at any width the screen's rows fit,
+// and the row's start (number, kind, ask, outcome) shows.
+func TestJournalScreen_LedgerRowFits(t *testing.T) {
+	ask := "#4  Nov 17 12:00  ask      ask 3 · done · \"fix the flaky test\" · turns 12–15 · 6 files (+120/−34) · 1 commit · 11 cmds (1 failed) · 9m"
+	turn := "#5  Nov 17 12:30  turn     turn 16 · 2 files (+3/−1) · 4 cmds · 1m"
+	for _, w := range []int{40, 60, 100} {
+		rec := &recWC{}
+		m := newTUIModel(&dunProc{stdin: rec}, "/ws")
+		nm, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: 30})
+		m = nm.(tuiModel)
+		m.openJournal()
+		ev := journalEvent()
+		ev["entries"] = append(ev["entries"].([]any),
+			map[string]any{"n": 4.0, "kind": "ask", "line": ask, "text": "files (6, +120/−34):"},
+			map[string]any{"n": 5.0, "kind": "turn", "line": turn, "text": "commands (4, 0 failed):"})
+		m = m.noteJournal(ev)
+		plain := ansi.Strip(m.drawView())
+		for _, l := range strings.Split(plain, "\n") {
+			if n := ansi.StringWidth(l); n > w {
+				t.Errorf("width %d: row of %d cells: %q", w, n, l)
+			}
+		}
+		if !strings.Contains(plain, "#4") || !strings.Contains(plain, "ask 3") || !strings.Contains(plain, "#5") {
+			t.Errorf("width %d: the ledger rows do not show:\n%s", w, plain)
+		}
+	}
+}

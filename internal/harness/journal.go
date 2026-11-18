@@ -34,6 +34,10 @@ import (
 //     <session>.journal/<n>.md, so the sessions index can hold it as it holds
 //     the folds.
 //   - worklog: an account /worklog write wrote; the entry points at its file.
+//   - ask: a message the person typed, closed (done, dropped) or still open
+//     as the session ended, with what the turns that served it did (asks.go,
+//     ledger.go). Open asks are listed after the kept entries, as open.
+//   - turn: a turn that served no ask and made a tool call: its facts.
 //
 // Kept in <session>.journal.jsonl, one entry per line, append-only, so a
 // resumed session keeps its journal. The root session's only, as the worklog.
@@ -67,6 +71,9 @@ type JournalEntry struct {
 	Cost     float64 `json:"cost,omitempty"`
 	Currency string  `json:"currency,omitempty"`
 	Costed   bool    `json:"costed,omitempty"`
+	// Ask and Turn are a ledger entry's facts (kind ask, turn).
+	Ask  *AskLedger  `json:"ask,omitempty"`
+	Turn *TurnLedger `json:"turn,omitempty"`
 }
 
 // JournalFile is the session's journal sidecar.
@@ -117,11 +124,13 @@ func (h *Harness) journalAdd(e JournalEntry) error {
 	return f.Close()
 }
 
-// Journal is the session's entries, oldest first: entry n is [n-1].
+// Journal is the session's entries, oldest first: entry n is [n-1]. The
+// open asks come last, not kept (asks.go).
 func (h *Harness) Journal() []JournalEntry {
 	h.journal.mu.Lock()
-	defer h.journal.mu.Unlock()
-	return h.journalLocked()
+	out := h.journalLocked()
+	h.journal.mu.Unlock()
+	return append(out, h.openAskEntries()...)
 }
 
 func (h *Harness) journalLocked() []JournalEntry {
@@ -148,6 +157,12 @@ func (h *Harness) journalLocked() []JournalEntry {
 // Body is the entry's text: its own, or its file's (a fold's summary, not
 // the span it replaced).
 func (e JournalEntry) Body() string {
+	switch {
+	case e.Ask != nil:
+		return e.Ask.Full()
+	case e.Turn != nil:
+		return e.Turn.Full()
+	}
 	if e.Path == "" {
 		return e.Text
 	}
@@ -170,7 +185,14 @@ func (e JournalEntry) Body() string {
 
 // Line is the entry as /journal lists it.
 func (e JournalEntry) Line(n int) string {
-	s := fmt.Sprintf("#%d  %s  %-7s  %s", n, e.At.Local().Format("Jan 2 15:04"), e.Kind, e.Title)
+	title := e.Title
+	switch {
+	case e.Ask != nil:
+		title = e.Ask.Row()
+	case e.Turn != nil:
+		title = e.Turn.Row()
+	}
+	s := fmt.Sprintf("#%d  %s  %-7s  %s", n, e.At.Local().Format("Jan 2 15:04"), e.Kind, title)
 	if e.Tokens > 0 {
 		s += " · " + numfmt.TokK(e.Tokens) + " tok"
 	}
@@ -203,7 +225,7 @@ func (h *Harness) JournalCmd(action string) (string, error) {
 	switch strings.ToLower(verb) {
 	case "", "list":
 		if len(all) == 0 {
-			return "journal: empty · folds add entries, and /journal now writes one", nil
+			return "journal: empty · folds, asks and turns add entries, and /journal now writes one", nil
 		}
 		lines := []string{"journal (newest first) · /journal view <n>"}
 		for i := len(all) - 1; i >= 0; i-- {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -63,7 +64,11 @@ func (h *Harness) idleOpenNodes() string {
 			more++
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("- %s %s; done_when: %s", n.ID, n.Title, n.DoneWhen))
+		line := fmt.Sprintf("- %s %s; done_when: %s", n.ID, n.Title, n.DoneWhen)
+		if h.isAskNode(n.ID) { // the person's message, so a forgotten one is raised (asks.go)
+			line += "; the user wrote: " + strconv.Quote(workClip(n.Details, askIdleQuote))
+		}
+		lines = append(lines, line)
 	}
 	if more > 0 {
 		lines = append(lines, fmt.Sprintf("- and %d more (plan_show)", more))

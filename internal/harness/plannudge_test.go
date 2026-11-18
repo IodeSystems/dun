@@ -151,7 +151,7 @@ func startStall(t *testing.T, r *nudgeRunner, rounds, fails, stall int) *Harness
 	h, err := Start(context.Background(), Config{
 		Workspace: dir, Servers: []mcpserver.Server{}, Client: r, Exec: &HostShell{Dir: dir},
 		SessionFile:     filepath.Join(dir, "s.jsonl"),
-		PlanNudgeRounds: rounds, PlanNudgeFails: fails, PlanStallRounds: stall,
+		PlanNudgeRounds: rounds, PlanNudgeFails: fails, PlanStallRounds: stall, NoAsks: true,
 	})
 	if err != nil {
 		t.Fatal(err)

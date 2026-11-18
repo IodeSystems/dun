@@ -112,9 +112,23 @@ summary as the command's reply. In memory only (decisions.md, "/plan summary and
 
 **Journal.** `/journal` lists what the agent did, newest first: each compaction fold
 (its summary), each `/journal now` entry (one side call over what happened since the
-last entry) and each `/worklog write` account. In the TUI it is a screen (enter opens
-an entry, `n` is `/journal now`); text clients use `/journal view <n>`. Kept in
-`<session>.journal.jsonl`.
+last entry), each `/worklog write` account, each ask and each turn that served none.
+In the TUI it is a screen (enter opens an entry, `n` is `/journal now`); text clients
+use `/journal view <n>`. Kept in `<session>.journal.jsonl`.
+
+**Asks.** Each message the person types is a top-level plan node, `ask: <first
+line>`, with the message in its details; the agent closes it with `plan_close` (done,
+or drop with the reason), and the turn-end check names an open ask with what the
+person wrote. A message typed mid-turn is its own ask. What each turn did — files
+(+/− lines), commits, commands (exit, time), background jobs, sub-agents, tool errors,
+tokens, cost, wall time, interrupted — is recorded from the turn's tool events, with
+no model call, and goes to the asks open during it (to the one the turn's plan
+changes worked under, when they show it). When an ask closes it becomes a `/journal`
+entry, `ask 3 · done · "fix the flaky test" · turns 12–15 · 6 files (+120/−34) · 1
+commit · 11 cmds (1 failed) · 9m`, and `session_search` finds it (`kind:ask`). An open
+ask is listed as open with its facts so far. A turn with a tool call and no ask open
+is an entry of its own, `turn 14 · …`. Kept in `<session>.asks.json` (decisions.md,
+"Asks and the turn ledger").
 
 **Archive.** `/plan clear` archives every finished tree: a connected component (edges
 either way) whose nodes are all done or dropped; one with an open node is left whole.

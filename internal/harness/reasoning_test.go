@@ -103,6 +103,7 @@ func TestHarness_StreamsAndReplaysReasoning(t *testing.T) {
 		Client:      runner,
 		SessionFile: filepath.Join(dir, "s.jsonl"),
 		OnReasoning: func(s string) { mu.Lock(); live.WriteString(s); mu.Unlock() },
+		NoAsks:      true,
 	})
 	if err != nil {
 		t.Fatal(err)

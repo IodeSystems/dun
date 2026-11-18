@@ -847,6 +847,75 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
 - **Risk, known.** `prepareTurn` runs before each attempt of a retried
   turn, so a plan change in a failed attempt is not seen as the turn's.
 
+## Asks and the turn ledger (USER 2026-11-17)
+
+- **Each message the person types is an ask: a top-level plan node**
+  `ask: <first line>` (`internal/harness/asks.go`), the whole message (cut at
+  4,000 runes) in its details, status `doing`, marked as the person's in the
+  plan sidecar's `by` (`user`, beside `suggest`). The agent closes it with the
+  plan tools (`plan_close` done with the account, or drop with the reason). A
+  message typed mid-turn (`SayAs`) is its own ask and the earlier one stays
+  open; the plan board is queued again so the model reads the new node with
+  the message. Not an ask: a message that starts with a bracketed lowercase
+  tag (`[automatic] …`, `[control/plan] …`, `[settle] …`: what dun or dund
+  sends in the person's place; a person who starts a message with `[wip]` is
+  misread, accepted), a sub-agent's, a `--non-interactive` run's (nobody
+  reads the plan; the benchmarks' turns stay as they were), a session with no
+  plan tools, and `Config.NoAsks` (embedders, and tests of other things).
+- **The turn-end check raises a forgotten ask.** The interactive check lists
+  open plan nodes (`idlecheck.go`, USER 2026-11-07); an ask's line adds
+  `the user wrote: "<text, 300 runes>"`. So an interactive turn that has not
+  closed its ask gets the check's round. The plan nudges (no plan, stalled
+  plan, the forced tool) count only the agent's own nodes (`openWork`): an
+  ask is the person's request, not a plan the agent wrote, and the stall's
+  node ids and the no-plan nudge stay as measured.
+- **The turn ledger: facts from the turn's own tool events, no model call**
+  (`internal/harness/ledger.go`). `withLedger` is the outermost dispatcher
+  wrapper, in the root and in each sub-agent (a child's facts carry its
+  number). Files: `file_edit`'s own `+N -M`; `file_write` and `file_delete`
+  diff against the file read before the call (Myers line count, exact up to
+  4,000 edits); `file_move` names both paths. A file a command changed is not
+  seen: a workspace diff per turn would cost a git run over the tree each
+  turn, and the tool events are exact for what they cover. Commands: exec's
+  first line, exit (from the `ExecResult`, `markExecLedger`), duration; one
+  that outran its grace is `job #N still running`, and the job's end is
+  recorded when it comes (`bgJob.finish`). Sub-agents: started
+  (`spawnAgentFor`) and finished with done/failed/dismissed (`settleThen`).
+  Tool errors: a failed call other than an exec that ran. Commits: each
+  watched tree's HEAD (the root's and each child's own worktree) at the
+  turn's start and end, `git log --first-parent` between (a merge is one
+  commit; a child's tree new since the start counts from the root's start
+  HEAD, which it branched from). Totals: the round stats' tokens and cost
+  for the turn (sub-agents' included, as `roundstats.go` counts them), the
+  rounds, the tool calls, the wall time, interrupted, and the turn's error.
+  Every list stops at 50 with `… +N more`; the totals count everything.
+  Events between turns (a job ending while idle) go to the next turn.
+- **Facts go to the asks open during the turn** (open as it began, or
+  opened in it). When the turn's plan changes touch an ask or a node that
+  descends from one (`needs` followed up: the graph's "under"), the facts go
+  to those asks only; otherwise to every open ask, and the turn is marked
+  shared on each. Chosen as the simplest rule that uses what the agent
+  already says; a turn that touched nothing cannot be split honestly, so it
+  is counted in full in each. A turn with no ask open and a tool call is its
+  own `/journal` entry, kind `turn`, indexed as `kind:ledger`; one with no
+  tool call gets nothing.
+- **An ask's `/journal` entry** (kind `ask`, indexed as `kind:ask` so
+  `session_search` finds "which ask changed X") is written at the end of the
+  turn in which its node is closed (by the agent, or the person's `/plan`
+  edit: the turn end reads the plan), with its text, outcome and note, the
+  turns that served it (numbers, times, shared, interrupted) and the facts
+  summed. Row: `ask 3 · done · "fix the flaky test" · turns 12–15 · 6 files
+  (+120/−34) · 1 commit · 11 cmds (1 failed) · 9m` (the time is the turns'
+  wall time summed). An open ask is listed after the kept entries as open
+  with its facts so far; when the session ends (`Close`) with it open, it
+  gets one entry, `open at session end`, once.
+- **Kept in `<session>.asks.json`** with the session's turn counter, so a
+  resumed session keeps its asks and numbers its turns on; `/close`
+  (`ForgetSession`) removes it, and the journal and index entries go as the
+  others do. The idle suggestion call's done nodes name the turn
+  (`recorded after turn N by the idle suggestion call`): the ask or turn
+  entry of turn N holds its facts.
+
 ## dund's HTTP listener: runtime, one listener, chooser (USER 2026-11-17)
 
 - **dund starts and stops its HTTP listener while it runs.** `dun dund

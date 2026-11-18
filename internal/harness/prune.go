@@ -516,6 +516,7 @@ func ForgetSession(root, id string) {
 	_ = os.RemoveAll(foldsDir(SessionFile(root, id)))
 	// /journal now's entries and /worklog write's accounts.
 	_ = os.RemoveAll(JournalDir(SessionFile(root, id)))
+	_ = os.Remove(AsksFile(SessionFile(root, id))) // the asks and the turn count (asks.go)
 	_ = os.RemoveAll(WorklogDir(SessionFile(root, id)))
 	// The shell's saved output (Harness.overflowDir), the children's too.
 	over, _ := filepath.Glob(filepath.Join(RootDir(root), "overflow", id+".*"))
