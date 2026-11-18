@@ -47,7 +47,7 @@ func runHuman(ctx context.Context, h *dun.Harness, task, workspace string, imgs 
 		// The conversation is on disk, so this is recoverable — say how, since the
 		// retries already visible above have run out and the alternative is a user
 		// starting the whole task again.
-		fmt.Fprintf(os.Stderr, "\ndun: resume with: dun --continue --workspace %s \"<what to do next>\"\n", workspace)
+		fmt.Fprintf(os.Stderr, "\ndun: resume with: dun --continue --workspace %s -p \"<what to do next>\"\n", workspace)
 		fatal(turnErr(ctx, err))
 	}
 	fmt.Fprint(os.Stderr, numfmt.Commaf("\n\n--- done (%d tokens) ---\n", res.Usage.Total))

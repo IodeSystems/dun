@@ -7,7 +7,7 @@ Short rules about supervision: "Sessions, supervision and diagnosis" in
 
 ## Shape and owner choices
 
-- The engine is its own process (`dun -p`), JSON lines over stdio. dund
+- The engine is its own process (`dun --engine`), JSON lines over stdio. dund
   (`dun dund`, same binary) runs one engine per session as a child, numbers its
   events, and lets any number of clients attach. The TUI always attaches; it has
   no direct-spawn mode. Quitting the TUI leaves the session and its background

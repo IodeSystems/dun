@@ -12,7 +12,7 @@ The model is reached through an OpenAI-compatible endpoint (DUN_URL, DUN_LLM_KEY
 from the worker's environment). The reasoning effort is dun's own /effort level,
 written to $DUN_HOME/effort.json and sent as reasoning_effort (DUN_REASONING=openai).
 
-dun runs in engine mode (-p): the JSON event log goes to /logs/agent/dun.jsonl,
+dun runs in engine mode (--engine): the JSON event log goes to /logs/agent/dun.jsonl,
 and its usage event gives the token counts. cost_usd is priced from those counts
 with DUN_PRICE_IN / DUN_PRICE_CACHED / DUN_PRICE_OUT (USD per 1M tokens); without
 them it is left unset.
@@ -127,7 +127,7 @@ class Dun(BaseInstalledAgent):
                 '''p="$p${p:+,}\\"$d\\":{\\"on\\":true,\\"mode\\":\\"write\\",\\"index\\":false}"; done; '''
                 f"printf '{{\"paths\":{{%s}}}}' \"$p\" > {HOME}/paths.json; "
                 f"printf '%s\\n' {shlex.quote(event)} | "
-                f'dun -p --non-interactive --workspace "$PWD" --timeout {TIMEOUT} > {LOG} 2> /logs/agent/dun.stderr; '
+                f'dun --engine --non-interactive --workspace "$PWD" --timeout {TIMEOUT} > {LOG} 2> /logs/agent/dun.stderr; '
                 "echo dun exit $? >> /logs/agent/dun.stderr"
             ),
             env=env,

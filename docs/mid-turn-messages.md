@@ -95,7 +95,7 @@ Empty string when no messages are pending.
 
 ## Programmatic Mode (`cmd/dun/main.go`)
 
-In `-p` mode, `inputStream.setMidTurn()` handles the buffering:
+In `--engine` mode, `inputStream.setMidTurn()` handles the buffering:
 
 ```go
 in.setMidTurn(func(text string) bool {

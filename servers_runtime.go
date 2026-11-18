@@ -645,7 +645,7 @@ func waitServerTools(ctx context.Context, mgr *mcpmgr.Manager, id string, timeou
 
 // applyTools rebuilds the Session's tool set, deferring to the end of the
 // current turn if one is running. Safe from any goroutine: server commands
-// arrive on the -p reader while a turn may be mid-flight, and rewriting
+// arrive on the --engine reader while a turn may be mid-flight, and rewriting
 // Session.Tools under a running turn is a data race.
 func (h *Harness) applyTools() {
 	h.applyPending.Store(true)
@@ -700,7 +700,7 @@ func (h *Harness) rebuildTools() {
 	// are handled locally by the dispatcher wrappers; everything else routes to
 	// its MCP server.
 	cfg := h.cfg
-	// Every wrapper reports through this, so the -p stream and the TUI carry the
+	// Every wrapper reports through this, so the --engine stream and the TUI carry the
 	// CLIPPED result — the one the model actually read.
 	report := h.cappedReporter(cfg.OnToolCall)
 	toolDefs := mcpToolDefs(tools)

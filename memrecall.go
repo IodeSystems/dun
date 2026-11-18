@@ -27,7 +27,7 @@ import (
 // query words it holds, so an index with embeddings runs the similarity rule
 // and one without the coverage rule.
 //
-// dund down (a standalone `dun -p` with no dund, or dund running no
+// dund down (a standalone `dun --engine` with no dund, or dund running no
 // retrieval): the memory tool still writes notes, and recall is a plain
 // word search of the note files, under the coverage rule. The session says
 // so once. Nothing written is lost: on the next contact with dund (the first

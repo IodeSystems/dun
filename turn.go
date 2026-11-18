@@ -17,7 +17,7 @@ import (
 func (h *Harness) Resumed() int { return h.store.Loaded() }
 
 // HistoryItem is one replayable conversation entry for a resuming client — the
-// neutral shape the -p `history` event carries so a TUI can rebuild scrollback
+// neutral shape the --engine `history` event carries so a TUI can rebuild scrollback
 // without re-running any turn. A tool_call and its result share a CallID so the
 // client folds them into one block.
 type HistoryItem struct {

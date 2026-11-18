@@ -513,7 +513,7 @@ type Harness struct {
 	sessIdxOnce sync.Once
 	sessIdx     *dundSessionIndex
 	// turnMu is held for the length of a turn. A server command arrives on
-	// another goroutine (the -p reader), and swapping the Session's tools out
+	// another goroutine (the --engine reader), and swapping the Session's tools out
 	// from under a running turn is a data race — so a rebuild that cannot take
 	// the lock sets applyPending and the turn applies it on the way out.
 	turnMu       sync.Mutex

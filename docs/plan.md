@@ -122,7 +122,8 @@ owner's call before work starts.
   tell root from same-model sub-agents (both role main).
 - [~] `dun -p "thing"`: the model is told to answer after a `# RESPONSE
   BELOW` line; stdout is the answer alone, the work goes to stderr.
-  `dun -p` with no task is the JSON engine, as before.
+  With no task, the task is read from stdin; the JSON engine is
+  `dun --engine` (USER 2026-11-17).
 - [x] `--no-tools`, `--no-rag`, `--no-lsp`.
 - [x] `--media <file>` with a prompt (one-shot only).
 - [~] `dun --no-dir`: a session attached to no directory, to talk with dun,

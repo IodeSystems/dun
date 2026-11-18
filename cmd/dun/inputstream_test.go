@@ -26,7 +26,7 @@ func drain(t *testing.T, s *inputStream) []string {
 }
 
 // TestInputStreamEOFIsNotAStop pins the distinction runProgrammatic relies on:
-// plain EOF must NOT look like an explicit stop, or a one-shot `dun -p 'task'`
+// plain EOF must NOT look like an explicit stop, or a one-shot `dun --engine 'task'`
 // exits with its background jobs still in flight and never delivers their
 // completion notifications.
 func TestInputStreamEOFIsNotAStop(t *testing.T) {

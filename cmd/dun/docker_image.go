@@ -83,7 +83,7 @@ func buildDunImage() error {
 
 	// Build
 	cmd := exec.Command("docker", "build", "-t", "dun:local", tmpdir)
-	cmd.Stdout = os.Stderr // build output goes to stderr (stdout is for -p events)
+	cmd.Stdout = os.Stderr // build output goes to stderr (stdout is for --engine events)
 	cmd.Stderr = os.Stderr
 	if out, err := cmd.CombinedOutput(); err != nil {
 		_ = os.WriteFile(filepath.Join(tmpdir, "build.log"), out, 0644)

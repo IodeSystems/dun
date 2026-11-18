@@ -72,7 +72,7 @@
     "sessions: /loop, paced by interval or by the model (loop_ctl)",
     "interfaces: TUI",
     "interfaces: one-shot dun \"task\"",
-    "interfaces: JSON engine dun -p",
+    "interfaces: JSON engine dun --engine",
     "interfaces: dun session <id> info",
     "rules and skills: listed with token cost, switched per session, project or global",
     "releases: signed with minisign"

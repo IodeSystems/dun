@@ -1,5 +1,5 @@
 // Package enginecmd is what the engine says as data: its slash commands, the
-// server states and /mcp info. The -p engine sends them; the TUI and its tests
+// server states and /mcp info. The engine (--engine) sends them; the TUI and its tests
 // read the same lists.
 package enginecmd
 

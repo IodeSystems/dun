@@ -1,6 +1,6 @@
 // Package tui is dun's terminal UI.
 //
-// The TUI is a CLIENT of the `-p` JSON event protocol: it re-execs `dun -p`,
+// The TUI is a CLIENT of the `--engine` JSON event protocol: it re-execs `dun --engine`,
 // writes user events to its stdin, and renders the event stream. The engine
 // stays headless; the UI is pure presentation.
 package tui
@@ -20,7 +20,7 @@ import (
 	"github.com/iodesystems/dun/internal/dunconfig"
 )
 
-// tuiOpts are the flags the TUI forwards to its `dun -p` subprocess.
+// tuiOpts are the flags the TUI forwards to its `dun --engine` subprocess.
 // frame is one computed layout: the conversation's rendered rows plus the
 // per-block geometry (rowOffset + height) and the viewport's window size. It is
 // the SINGLE geometry truth — refresh() computes it, and everything that
@@ -52,7 +52,7 @@ type TuiOpts struct {
 	DisableExit                        bool   // --disable-exit: ctrl+c/esc don't quit (use /exit)
 	Suggest                            bool   // --no-suggest=false: engine emits suggestions after each turn
 	// Rag/lsp are --rag/--lsp as typed: "" (unset, use the saved setting),
-	// "true" or "false". Passed through to the -p engine verbatim.
+	// "true" or "false". Passed through to the engine (--engine) verbatim.
 	Rag, Lsp string
 	// Rephrase is --rephrase: rephrase each user prompt for specificity
 	// before acting on it. Passed to the engine verbatim (a CLI flag), so it
@@ -78,7 +78,7 @@ type TuiOpts struct {
 	Flags dunconfig.Overrides
 }
 
-// RunTUI launches the Bubble Tea app against a re-exec'd `dun -p` subprocess.
+// RunTUI launches the Bubble Tea app against a re-exec'd `dun --engine` subprocess.
 // lc (may be nil) is the launcher registration — its reload channel drives the
 // "update ready" indicator + /reload.
 func RunTUI(o TuiOpts) error {

@@ -18,7 +18,7 @@ import (
 // had at all. The login still finishes on dund's machine: the redirect is
 // its loopback.
 //
-// An engine with no dund (a test, a bare `dun -p`) keeps its own client, as
+// An engine with no dund (a test, a bare `dun --engine`) keeps its own client, as
 // before.
 
 // OAuthRequest is one ask of the broker (proto.OAuthReq). Op is token,

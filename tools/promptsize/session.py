@@ -43,7 +43,7 @@ def run_agent(kind, path, run_dir, repo, port):
     base = f"http://127.0.0.1:{port}"
     if kind == "dun":
         env.update(DUN_HOME=os.path.join(home, ".dun"), DUN_REGISTRY="off")
-        cmd = [path, "--url", base, "--model", MODEL, "--no-rag", "--no-lsp", TASK]
+        cmd = [path, "--url", base, "--model", MODEL, "--no-rag", "--no-lsp", "-p", TASK]
     elif kind == "pi":
         agent = os.path.join(home, "pi-agent")
         os.makedirs(agent, exist_ok=True)

@@ -125,7 +125,7 @@ func TestIndexAnyway_PersonOnly(t *testing.T) {
 	}
 }
 
-// A headless session (dun -p --non-interactive, harbor: no Config.Ask) is
+// A headless session (dun --engine --non-interactive, harbor: no Config.Ask) is
 // "not now": the line, nothing saved, no --index-anyway.
 func TestIndexAnyway_HeadlessNeverSets(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())

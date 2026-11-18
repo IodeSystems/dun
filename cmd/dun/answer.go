@@ -5,7 +5,7 @@ import "strings"
 // dun -p "task" (USER 2026-10-27): a one-shot for a shell or a script. The
 // model is told the caller wants a simple answer after a delimiter; its work
 // (tool calls, the text before the delimiter) goes to stderr, and stdout is
-// the answer alone. dun -p with no task is the JSON engine, as before.
+// the answer alone. The JSON engine is --engine (USER 2026-11-17, cli.go).
 
 const answerDelim = "# RESPONSE BELOW"
 

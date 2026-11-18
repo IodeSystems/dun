@@ -346,7 +346,7 @@ them. Code and doc search are unchanged (raglit, `/rag on`). Code:
 sync), `memory.go` (the tool).
 
 - **Link.** A session dials dund's socket (`Socket(DUN_HOME)`) for each
-  call, under dund or as a standalone `dun -p`. `DUN_MEMORY=0`: no memory
+  call, under dund or as a standalone `dun --engine`. `DUN_MEMORY=0`: no memory
   tool and no memory recall.
 - **Write.** A note stays a file (`memory/<project>/`, or
   `memory/@global/` for `scope: global`) with its attestation log. The
