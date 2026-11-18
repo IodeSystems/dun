@@ -54,27 +54,27 @@
       }
     },
     "raglit": {
-      "version": "v0.9.0",
+      "version": "v0.10.0",
       "files": {
         "darwin_amd64": {
-          "url": "https://github.com/IodeSystems/raglit/releases/download/v0.9.0/raglit_darwin_amd64.tar.gz",
-          "sha256": "8bd96b0f585337028b5830e7decf4453a09a7dd2ec79a07ef1fa31fcbe843d20",
-          "size": 36783234
+          "url": "https://github.com/IodeSystems/raglit/releases/download/v0.10.0/raglit_darwin_amd64.tar.gz",
+          "sha256": "df3b71efbec8018896280d08c3f9ed654b4bee875080d67d0c044172100375f9",
+          "size": 36902284
         },
         "darwin_arm64": {
-          "url": "https://github.com/IodeSystems/raglit/releases/download/v0.9.0/raglit_darwin_arm64.tar.gz",
-          "sha256": "0cc53b03c758c01b8ae24e07e650bc90995cab45994d5601da1411add69e0107",
-          "size": 34739732
+          "url": "https://github.com/IodeSystems/raglit/releases/download/v0.10.0/raglit_darwin_arm64.tar.gz",
+          "sha256": "9ae46a8f9c189c8558f5dc49f9c71c382169ad8576502a43be35bfb7c33d0a47",
+          "size": 34862585
         },
         "linux_amd64": {
-          "url": "https://github.com/IodeSystems/raglit/releases/download/v0.9.0/raglit_linux_amd64.tar.gz",
-          "sha256": "80d6841e8f7adfe73850b320df331553955a8983d31e5091345b9acbe7131ddd",
-          "size": 35703982
+          "url": "https://github.com/IodeSystems/raglit/releases/download/v0.10.0/raglit_linux_amd64.tar.gz",
+          "sha256": "4137eec0d6f3096195c3a049d5d7a07635c156db1321792e473a98ab1ec8e491",
+          "size": 35822364
         },
         "linux_arm64": {
-          "url": "https://github.com/IodeSystems/raglit/releases/download/v0.9.0/raglit_linux_arm64.tar.gz",
-          "sha256": "d84eca731dd9730fe89f470b62aac6ce9678b4fc624f90126dd9133cf7153140",
-          "size": 32908991
+          "url": "https://github.com/IodeSystems/raglit/releases/download/v0.10.0/raglit_linux_arm64.tar.gz",
+          "sha256": "1b36c7aab82eab8ed09b0f64b641304e84c146c0d08b38f9887e54a8ede4b074",
+          "size": 33022145
         }
       }
     }
