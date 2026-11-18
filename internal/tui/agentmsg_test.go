@@ -122,7 +122,7 @@ func TestAgentMsg_ReportAndPlainJobsStay(t *testing.T) {
 	if n := len(msgBoxes(v.m)); n != 0 {
 		t.Errorf("%d message boxes, want none", n)
 	}
-	if !strings.Contains(v.view(), "🔔 agent #2 is idle") {
+	if !strings.Contains(v.view(), "🤖 agent #2 is idle") {
 		t.Errorf("the report is not a notification line:\n%s", v.view())
 	}
 }

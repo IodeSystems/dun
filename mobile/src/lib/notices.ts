@@ -97,7 +97,9 @@ export function textNotice(text: string, label?: string): Notice {
       output: nl < 0 ? '' : rest.slice(nl + 1).replace(/\n+$/, ''),
     };
   }
-  const n: Notice = { type: 'plain', tone: 'note', icon: '🔔', text: text.trim() };
+  // A sub-agent's notice ("agent #34 …") gets a robot (USER 2026-11-17).
+  const icon = /^agent #\d+\b/.test(text.trim()) ? '🤖' : '🔔';
+  const n: Notice = { type: 'plain', tone: 'note', icon, text: text.trim() };
   return label ? { ...n, label } : n;
 }
 

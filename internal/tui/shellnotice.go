@@ -82,15 +82,28 @@ func noticeEntry(text string, w int) convoEntry {
 	}
 	first, _, several := strings.Cut(strings.TrimSpace(text), "\n")
 	e := convoEntry{collapsed: noticeRow(first, w)}
-	if several || (w > 0 && ansi.StringWidth("🔔 "+first) > w) {
-		e.full = stNote.Render("🔔 " + strings.TrimSpace(text))
+	icon := noticeIcon(first)
+	if several || (w > 0 && ansi.StringWidth(icon+" "+first) > w) {
+		e.full = stNote.Render(icon + " " + strings.TrimSpace(text))
 	}
 	return e
 }
 
+// agentNoticeRe matches a notice about a sub-agent: "agent #34 …".
+var agentNoticeRe = regexp.MustCompile(`^agent #\d+\b`)
+
+// noticeIcon is a notice's leading icon: a robot for a sub-agent's notice
+// (USER 2026-11-17), the bell for the rest.
+func noticeIcon(text string) string {
+	if agentNoticeRe.MatchString(strings.TrimSpace(text)) {
+		return "🤖"
+	}
+	return "🔔"
+}
+
 // noticeRow is a notice's one row, cut to w columns (w <= 0: not cut).
 func noticeRow(text string, w int) string {
-	line := "🔔 " + textfmt.OneLine(text)
+	line := noticeIcon(text) + " " + textfmt.OneLine(text)
 	if w > 0 {
 		line = ansi.Truncate(line, w, "…")
 	}
