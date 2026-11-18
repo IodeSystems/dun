@@ -227,8 +227,9 @@ func TestLoadFiles_Layers(t *testing.T) {
 	}
 }
 
-// Reads, greps and lists reach /tmp by absolute path; changes do not, and a
-// path outside both the tree and /tmp is still refused.
+// /tmp is not open as a whole (USER 2026-11-18): a read, grep or list of a
+// path there is refused like any path outside the tree, with how to ask
+// for it (/file add, fileadd.go), when nobody can be asked; a write too.
 func TestFileTools_ReadTmp(t *testing.T) {
 	h := startFiles(t, Config{})
 	dir, err := os.MkdirTemp("/tmp", "dun-readtmp-")
@@ -239,13 +240,13 @@ func TestFileTools_ReadTmp(t *testing.T) {
 	log := filepath.Join(dir, "run.log")
 	os.WriteFile(log, []byte("alpha\nneedle beta\n"), 0o644)
 
-	if out := dispatchFile(t, h, "file_read", `{"path":"`+log+`"}`); !strings.Contains(out, "needle beta") || !strings.Contains(out, log) {
+	if out := dispatchFile(t, h, "file_read", `{"path":"`+log+`"}`); strings.Contains(out, "needle beta") || !strings.Contains(out, "/file add "+log) {
 		t.Errorf("read of %s:\n%s", log, out)
 	}
-	if out := dispatchFile(t, h, "file_read", `{"grep":"needle","path":"`+dir+`"}`); !strings.Contains(out, "needle beta") {
+	if out := dispatchFile(t, h, "file_read", `{"grep":"needle","path":"`+dir+`"}`); strings.Contains(out, "needle beta") || !strings.Contains(out, "/file add "+dir) {
 		t.Errorf("grep under %s:\n%s", dir, out)
 	}
-	if out := dispatchFile(t, h, "file_read", `{"path":"`+dir+`"}`); !strings.Contains(out, "run.log") {
+	if out := dispatchFile(t, h, "file_read", `{"path":"`+dir+`"}`); strings.Contains(out, "run.log") || !strings.HasPrefix(out, "ERROR") {
 		t.Errorf("list of %s:\n%s", dir, out)
 	}
 	if out := dispatchFile(t, h, "file_write", `{"path":"`+filepath.Join(dir, "new.txt")+`","content":"x"}`); !strings.Contains(out, "ERROR") {
@@ -253,16 +254,5 @@ func TestFileTools_ReadTmp(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "new.txt")); err == nil {
 		t.Error("the write landed in /tmp")
-	}
-	// Refused, with how to ask for it (/file add, fileadd.go).
-	if out := dispatchFile(t, h, "file_read", `{"path":"/etc/hostname"}`); !strings.Contains(out, "outside this workspace") || !strings.Contains(out, "/file add /etc/hostname") {
-		t.Errorf("a read outside the tree and /tmp:\n%s", out)
-	}
-	// A link in /tmp that points out of it is not followed.
-	link := filepath.Join(dir, "out")
-	if err := os.Symlink("/etc", link); err == nil {
-		if out := dispatchFile(t, h, "file_read", `{"path":"`+link+`/hostname"}`); !strings.HasPrefix(out, "ERROR") || !strings.Contains(out, "outside") {
-			t.Errorf("read through a link out of /tmp:\n%s", out)
-		}
 	}
 }

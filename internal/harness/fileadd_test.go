@@ -30,9 +30,6 @@ func fileCall(t *testing.T, h *Harness, name string, args map[string]any) string
 // directory opens what is under it; the grants survive a resume.
 func TestFileAdd(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	old := tmpRoots
-	tmpRoots = func() []string { return nil } // these dirs are in /tmp, which reads may see
-	t.Cleanup(func() { tmpRoots = old })
 	ws, other := t.TempDir(), t.TempDir()
 	agents := filepath.Join(other, "AGENTS.md")
 	os.WriteFile(agents, []byte("# rules\nkeep tests green\n"), 0o644)
@@ -92,9 +89,6 @@ func TestFileAdd(t *testing.T) {
 // (USER 2026-10-28: v0.1.8 refused the subdirectory's files).
 func TestFileAdd_ThroughASymlink(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	old := tmpRoots
-	tmpRoots = func() []string { return nil }
-	t.Cleanup(func() { tmpRoots = old })
 	ws, other := t.TempDir(), t.TempDir()
 	os.MkdirAll(filepath.Join(other, "a", "b"), 0o755)
 	os.WriteFile(filepath.Join(other, "a", "b", "deep.txt"), []byte("deep line\n"), 0o644)
@@ -135,9 +129,6 @@ func TestFileAdd_ThroughASymlink(t *testing.T) {
 func TestFilePaths_ScopesModeAndPrecedence(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	t.Setenv("PATH", t.TempDir()) // no raglit: a directory is opened, not indexed
-	old := tmpRoots
-	tmpRoots = func() []string { return nil }
-	t.Cleanup(func() { tmpRoots = old })
 	ws, other := t.TempDir(), t.TempDir()
 	f := filepath.Join(other, "notes.txt")
 	os.WriteFile(f, []byte("first\n"), 0o644)
@@ -296,9 +287,6 @@ func TestFilePaths_WorkspaceRow(t *testing.T) {
 // the same call a third time is not a loop: the person changed its answer.
 func TestFileAdd_DuringATurn(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	old := tmpRoots
-	tmpRoots = func() []string { return nil }
-	t.Cleanup(func() { tmpRoots = old })
 	ws, other := t.TempDir(), t.TempDir()
 	notes := filepath.Join(other, "notes.md")
 	os.WriteFile(notes, []byte("old\n"), 0o644)
@@ -333,9 +321,6 @@ func TestFileAdd_DuringATurn(t *testing.T) {
 // directory does: that file alone opens, and the write makes it.
 func TestFileAdd_ANewFile(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	old := tmpRoots
-	tmpRoots = func() []string { return nil }
-	t.Cleanup(func() { tmpRoots = old })
 	ws, other := t.TempDir(), t.TempDir()
 	fresh := filepath.Join(other, "plan.md")
 	h, err := Start(context.Background(), Config{Workspace: ws, SessionFile: filepath.Join(t.TempDir(), "s.jsonl"), Client: &scriptRunner{}})

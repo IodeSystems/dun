@@ -33,9 +33,6 @@ func accessHarness(t *testing.T, a *accessAsker) (h *Harness, ws, outside string
 func accessHarnessFiles(t *testing.T, a *accessAsker, files *mcpserver.FilesConfig) (h *Harness, ws, outside string) {
 	t.Helper()
 	t.Setenv("DUN_HOME", t.TempDir())
-	old := tmpRoots
-	tmpRoots = func() []string { return nil } // these dirs are in /tmp, which reads may see
-	t.Cleanup(func() { tmpRoots = old })
 	ws, other := t.TempDir(), t.TempDir()
 	outside = filepath.Join(other, "notes.txt")
 	if err := os.WriteFile(outside, []byte("alpha\nbeta\n"), 0o644); err != nil {
