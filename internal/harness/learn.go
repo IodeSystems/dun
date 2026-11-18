@@ -4,21 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"log"
-	"os"
-	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/taskgraph"
+	"github.com/iodesystems/dun/internal/memory"
 )
 
 // learn.go — the learning phase, first slice: churn → resolved candidate →
@@ -55,17 +51,17 @@ import (
 // oldest go). The model may answer skip.
 // The task's text is not in the prompt.
 //
-// Genericity (genericityError): deterministic heuristics reject a detail
+// Genericity (memory lesson.go: genericityError): deterministic heuristics reject a detail
 // with a path, a file name, a URL, a hash or long number, quoted code, an
 // identifier from the workspace or the episode, or the task's words. A
 // lesson is for a different task: what is useless without this one is
 // dropped, so a benchmark score measures retrieval, not memorization.
 //
 // The candidate is a strategy in the project's scope tagged candidate,
-// written by strategyStore().apply as the memory tool's add (file, dund
+// written by strategyStore().Propose as the memory tool's add (file, dund
 // ingest), with a "proposed" entry in its attestation log. It is not
 // important: only the user marks that. Recall leaves candidates out
-// (memFinder: a tag filter in dun, as raglit's filter keeps tags and cannot
+// (memory.Finder: a tag filter in dun, as raglit's filter keeps tags and cannot
 // exclude one; raglit is asked for NotTags, USER 2026-11-09). A lesson that
 // comes back as a current candidate adds a "recurred" entry to its log, the
 // count /memories candidates shows; it is never accepted for the user.
@@ -95,17 +91,6 @@ const (
 	learnHoldMax = 12
 	// learnTimeout bounds one lesson call.
 	learnTimeout = 90 * time.Second
-
-	// candidateTag marks a strategy the learning phase proposed and the
-	// user has not accepted.
-	candidateTag = "candidate"
-
-	// learnDetailMax and learnSentencesMax bound a lesson's detail.
-	learnDetailMax    = 400
-	learnSentencesMax = 3
-	// lessonOverlap is the share of the shorter text's words two lessons
-	// must share to be the same lesson.
-	lessonOverlap = 0.7
 )
 
 // churnAttempt is one tool call in brief.
@@ -314,14 +299,6 @@ func (h *Harness) learnFlush(ctx context.Context) []string {
 	}
 }
 
-// lesson is what the model proposes.
-type lesson struct {
-	Name   string   `json:"name"`
-	Detail string   `json:"detail"`
-	Tags   []string `json:"tags"`
-	Skip   bool     `json:"skip"`
-}
-
 // learnOne is one episode's call, check and write.
 func (h *Harness) learnOne(ctx context.Context, ep churnEpisode) string {
 	s := h.strategyStore()
@@ -334,37 +311,10 @@ func (h *Harness) learnOne(ctx context.Context, ep churnEpisode) string {
 	if err != nil {
 		return "the lesson call failed: " + err.Error()
 	}
-	c, err := parseLesson(reply)
-	if err != nil {
-		return "no lesson: " + err.Error()
-	}
-	if c.Skip {
-		return "no lesson: the model found none that holds beyond this task"
-	}
-	c.Name = itemSlug(c.Name)
-	if err := genericityError(c, h.learnTaskText(), episodeText(ep), workspaceNames(h.cfg.Workspace)); err != nil {
-		return "rejected " + c.Name + ": " + err.Error()
-	}
-	if dup, cand := h.lessonDuplicate(ctx, s, c); dup != "" {
-		if cand != "" {
-			n, _ := readNote(cand)
-			_ = s.attest(cand, attestEntry{Kind: "recurred", Unit: n.unit(), By: "dun:learn", Note: "proposed again as " + c.Name})
-			return "recurred " + c.Name + ": " + dup
-		}
-		return "skipped " + c.Name + ": " + dup
-	}
-	out, err := s.apply(memoryArgs{Action: "add", Kind: kindStrategy, Name: c.Name, Content: c.Detail,
-		Tags: append(slices.Clone(c.Tags), candidateTag)}, h.noteMeta())
-	if err != nil {
-		return "not saved " + c.Name + ": " + err.Error()
-	}
-	if p := s.named(kindStrategy, c.Name); p != "" {
-		n, _ := readNote(p)
-		_ = s.attest(p, attestEntry{Kind: "proposed", Unit: n.unit(), By: "dun:learn",
-			Note: episodeNote(ep)})
-	}
-	if h.cfg.OnNotify != nil {
-		h.cfg.OnNotify("learned a candidate strategy:" + c.Name + " — /memories candidates to accept or reject it")
+	out, name := s.Propose(ctx, h.stratLink(), reply, memory.LessonSource{Task: h.learnTaskText,
+		Calls: episodeText(ep), Workspace: h.cfg.Workspace, Note: episodeNote(ep), Meta: h.noteMeta})
+	if name != "" && h.cfg.OnNotify != nil {
+		h.cfg.OnNotify("learned a candidate strategy:" + name + " — /memories candidates to accept or reject it")
 	}
 	return out
 }
@@ -444,23 +394,6 @@ func (h *Harness) learnCall(ctx context.Context, prompt string) (string, error) 
 	return out.String(), nil
 }
 
-// parseLesson reads the model's JSON object, fenced or not.
-func parseLesson(reply string) (lesson, error) {
-	var c lesson
-	i, j := strings.Index(reply, "{"), strings.LastIndex(reply, "}")
-	if i < 0 || j < i {
-		return c, fmt.Errorf("the answer holds no JSON object")
-	}
-	if err := json.Unmarshal([]byte(reply[i:j+1]), &c); err != nil {
-		return c, fmt.Errorf("the answer is not the JSON asked for: %v", err)
-	}
-	c.Detail = flatLine(c.Detail)
-	if !c.Skip && (itemSlug(c.Name) == "" || c.Detail == "") {
-		return c, fmt.Errorf("the answer has no name or no detail")
-	}
-	return c, nil
-}
-
 // learnTaskText is the session's user messages: the task, for the filter.
 func (h *Harness) learnTaskText() string {
 	if h.store == nil {
@@ -482,329 +415,4 @@ func episodeText(ep churnEpisode) string {
 		b.WriteString(t.Args + "\n" + t.Out + "\n")
 	}
 	return b.String()
-}
-
-// workspaceNamesMax bounds the walk for workspaceNames.
-const workspaceNamesMax = 5000
-
-// workspaceNames is the names of the workspace's files and directories,
-// three levels down, lower case: each name and its stem (before the first
-// dot). Dot directories, node_modules and vendor are skipped.
-func workspaceNames(root string) map[string]bool {
-	out := map[string]bool{}
-	if root == "" {
-		return out
-	}
-	root = filepath.Clean(root)
-	n := 0
-	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || p == root {
-			return nil
-		}
-		if n++; n > workspaceNamesMax {
-			return filepath.SkipAll
-		}
-		name := d.Name()
-		if d.IsDir() {
-			if strings.HasPrefix(name, ".") || name == "node_modules" || name == "vendor" ||
-				strings.Count(strings.TrimPrefix(p, root), string(os.PathSeparator)) >= 3 {
-				return filepath.SkipDir
-			}
-		}
-		l := strings.ToLower(name)
-		out[l] = true
-		if stem, _, ok := strings.Cut(l, "."); ok && stem != "" {
-			out[stem] = true
-		}
-		return nil
-	})
-	return out
-}
-
-var (
-	// A path: /a, ./a, ../a, ~/a, a/b/c, C:\a.
-	lessonPathRe = regexp.MustCompile(`(^|[\s"'(\x60=:])(~|\.{1,2})?/[\w.-]+|\w+/[\w.-]+/[\w.-]+|\b[A-Za-z]:\\`)
-	// A file name with a common extension.
-	lessonFileRe = regexp.MustCompile(`(?i)\b[\w-]+\.(py|go|js|mjs|ts|tsx|jsx|c|h|cc|cpp|hpp|rs|java|kt|rb|php|cs|swift|json|ya?ml|toml|ini|cfg|conf|txt|md|rst|sh|bash|csv|tsv|html?|css|sql|log|xml|lock|mod|sum|db|sqlite|so|tar|gz|tgz|zip|whl|jar|pdf|png|jpe?g|svg|wasm|bin|out|exe|dll)\b`)
-	lessonURLRe  = regexp.MustCompile(`(?i)[a-z]+://|\bwww\.`)
-	// A hash, a long number, an IP address.
-	lessonHashRe = regexp.MustCompile(`(?i)\b[0-9a-f]{7,}\b`)
-	lessonNumRe  = regexp.MustCompile(`\b\d{5,}\b|\b\d{1,3}(\.\d{1,3}){3}\b`)
-	// A quoted span: backticks or double quotes.
-	lessonQuoteRe = regexp.MustCompile("`[^`]*`|\"[^\"]*\"")
-	// A token: letters, digits and _, with . - inside.
-	lessonTokenRe = regexp.MustCompile(`[A-Za-z0-9_][A-Za-z0-9_.\-]*[A-Za-z0-9_]|[A-Za-z0-9_]`)
-	lessonSentRe  = regexp.MustCompile(`[.!?](\s|$)`)
-)
-
-// lessonQuoteMax is the longest quoted span a lesson may hold: a command
-// name, not a line of code or output.
-const lessonQuoteMax = 40
-
-// genericityError says why a lesson is about its task, nil when it is not.
-// Heuristics, in order:
-//   - shape: detail at most learnDetailMax bytes and learnSentencesMax
-//     sentences; a name of at most 6 words;
-//   - always rejected: a path, a file name with a common extension, a URL,
-//     a hash (7+ hex characters with a digit and a letter), a number of 5+
-//     digits or an IP address, a code fence, a quoted span longer than
-//     lessonQuoteMax;
-//   - rejected when the task or the workspace has it: a workspace file or
-//     directory name that looks like an identifier (identLike); a token
-//     the task marks (marked: quoted, or with a digit, _, ., or an inner
-//     capital); five words in a row of the task's text;
-//   - rejected when the episode has it: an identifier (snake_case, an
-//     inner capital, dotted.name; not an ALL_CAPS variable).
-func genericityError(c lesson, task, episode string, names map[string]bool) error {
-	text := c.Name + " " + c.Detail + " " + strings.Join(c.Tags, " ")
-	switch {
-	case len(c.Detail) > learnDetailMax:
-		return fmt.Errorf("the detail is %d bytes; at most %d", len(c.Detail), learnDetailMax)
-	case len(lessonSentRe.FindAllString(c.Detail+" ", -1)) > learnSentencesMax:
-		return fmt.Errorf("the detail is more than %d sentences", learnSentencesMax)
-	case len(strings.Split(c.Name, "-")) > 6:
-		return fmt.Errorf("the name is more than 6 words")
-	case strings.Contains(text, "```"):
-		return fmt.Errorf("it quotes code")
-	}
-	for _, q := range lessonQuoteRe.FindAllString(c.Detail, -1) {
-		if len(q) > lessonQuoteMax+2 {
-			return fmt.Errorf("it quotes %d characters", len(q)-2)
-		}
-	}
-	for _, r := range []struct {
-		re   *regexp.Regexp
-		what string
-	}{{lessonURLRe, "a URL"}, {lessonPathRe, "a path"}, {lessonFileRe, "a file name"}, {lessonHashRe, "a hash"}, {lessonNumRe, "a number or address"}} {
-		for _, m := range r.re.FindAllString(text, -1) {
-			// A hash has a digit and a letter: "defaced" is a word.
-			if r.re == lessonHashRe && (!strings.ContainsAny(m, "0123456789") || strings.Trim(m, "0123456789") == "") {
-				continue
-			}
-			return fmt.Errorf("it holds %s (%s)", r.what, strings.TrimSpace(m))
-		}
-	}
-	marked := taskMarked(task)
-	epIdents := map[string]bool{}
-	for _, t := range lessonTokenRe.FindAllString(episode, -1) {
-		if identLike(t, false) {
-			epIdents[strings.ToLower(t)] = true
-		}
-	}
-	for _, t := range lessonTokenRe.FindAllString(text, -1) {
-		l := strings.ToLower(t)
-		switch {
-		case names[l] && (identLike(t, true) || identLike(l, true)):
-			return fmt.Errorf("it names %q from the workspace", t)
-		case marked[l]:
-			return fmt.Errorf("it names %q from the task", t)
-		case epIdents[l]:
-			return fmt.Errorf("it names %q from the failed calls", t)
-		}
-	}
-	if s := sharedRun(c.Detail, task, 5); s != "" {
-		return fmt.Errorf("it repeats the task (%q)", s)
-	}
-	return nil
-}
-
-// identLike reports whether t looks like a name in code: it has _ (not an
-// ALL_CAPS variable), a dot between letters, or a capital after a lower
-// case letter; with digits, also a letter and a digit together or a - .
-func identLike(t string, digits bool) bool {
-	hasLower, hasUpper, hasDigit, hasLetter := false, false, false, false
-	inner := false
-	for i, r := range t {
-		switch {
-		case unicode.IsLower(r):
-			hasLower, hasLetter = true, true
-		case unicode.IsUpper(r):
-			hasUpper, hasLetter = true, true
-			if i > 0 && hasLower {
-				inner = true
-			}
-		case unicode.IsDigit(r):
-			hasDigit = true
-		}
-	}
-	switch {
-	case strings.Contains(t, "_") && hasLower:
-		return true
-	case strings.Contains(strings.Trim(t, "."), ".") && hasLetter:
-		return true
-	case inner:
-		return true
-	case digits && hasDigit && hasLetter:
-		return true
-	case digits && strings.Contains(t, "-") && hasUpper:
-		return true
-	}
-	return false
-}
-
-// taskMarked is the tokens of the task that name something of its own,
-// lower case: each token of a quoted span, and each token identLike with
-// digits.
-func taskMarked(task string) map[string]bool {
-	out := map[string]bool{}
-	for _, q := range lessonQuoteRe.FindAllString(task, -1) {
-		for _, t := range lessonTokenRe.FindAllString(q, -1) {
-			if len(t) >= 3 && !stopWords[strings.ToLower(t)] {
-				out[strings.ToLower(t)] = true
-			}
-		}
-	}
-	for _, t := range lessonTokenRe.FindAllString(task, -1) {
-		if identLike(t, true) {
-			out[strings.ToLower(t)] = true
-		}
-	}
-	return out
-}
-
-// sharedRun is the first run of n words a and b share, "" with none.
-func sharedRun(a, b string, n int) string {
-	bw := wordsOf(b)
-	if len(bw) < n {
-		return ""
-	}
-	runs := map[string]bool{}
-	for i := 0; i+n <= len(bw); i++ {
-		runs[strings.Join(bw[i:i+n], " ")] = true
-	}
-	aw := wordsOf(a)
-	for i := 0; i+n <= len(aw); i++ {
-		if s := strings.Join(aw[i:i+n], " "); runs[s] {
-			return s
-		}
-	}
-	return ""
-}
-
-// lessonDuplicate names the strategy c repeats, "" when it is new: one of
-// its name (current or voided: a rejected lesson is not proposed again),
-// or one that shares lessonOverlap of the shorter text's words, found by
-// the strategies index (dund down: the files) or among the voided ones.
-//
-// cand is the current candidate it repeats, "" for any other match: a
-// recurrence is counted on a candidate only.
-func (h *Harness) lessonDuplicate(ctx context.Context, s *memoryStore, c lesson) (dup, cand string) {
-	ifCand := func(p string) string {
-		if isCandidate(p) {
-			return p
-		}
-		return ""
-	}
-	if p := s.named(kindStrategy, c.Name); p != "" {
-		return "strategy:" + c.Name + " exists", ifCand(p)
-	}
-	terms := queryTerms(c.Name + " " + c.Detail)
-	same := func(p string) bool {
-		n, err := readNote(p)
-		return err == nil && noteKind(n.meta) == kindStrategy &&
-			termOverlap(terms, queryTerms(noteNameOf(strings.TrimSuffix(p, voidSuffix), n.meta)+" "+n.body)) >= lessonOverlap
-	}
-	for _, d := range s.dirs() {
-		voided, _ := filepath.Glob(filepath.Join(d, "*.md"+voidSuffix))
-		for _, p := range voided {
-			n, err := readNote(p)
-			if err == nil && noteKind(n.meta) == kindStrategy && noteNameOf(strings.TrimSuffix(p, voidSuffix), n.meta) == c.Name {
-				return "strategy:" + c.Name + " was voided", ""
-			}
-			if same(p) {
-				return "like the voided " + filepath.Base(p), ""
-			}
-		}
-	}
-	if l := h.stratLink(); l != nil {
-		hits, _ := (&memFinder{l: l, m: s, candidates: true}).Find(ctx, []string{c.Name + " " + c.Detail})
-		for _, hit := range hits {
-			if same(hit.DocID) {
-				n, _ := readNote(hit.DocID)
-				return "like strategy:" + noteNameOf(hit.DocID, n.meta), ifCand(hit.DocID)
-			}
-		}
-	}
-	return "", ""
-}
-
-// termOverlap is the share of the shorter list's terms the other holds.
-func termOverlap(a, b []string) float64 {
-	if len(a) == 0 || len(b) == 0 {
-		return 0
-	}
-	if len(b) < len(a) {
-		a, b = b, a
-	}
-	in := map[string]bool{}
-	for _, t := range b {
-		in[t] = true
-	}
-	n := 0
-	for _, t := range a {
-		if in[t] {
-			n++
-		}
-	}
-	return float64(n) / float64(len(a))
-}
-
-// isCandidate reports whether the item at path is a candidate.
-func isCandidate(path string) bool {
-	n, err := readNote(path)
-	return err == nil && slices.Contains(noteTags(n.meta), candidateTag)
-}
-
-// candidatesListing is /memories candidates.
-func (h *Harness) candidatesListing() (string, error) {
-	s := h.strategyStore()
-	if s == nil {
-		return "", fmt.Errorf("off in this session (DUN_MEMORY=0, or no dund link)")
-	}
-	var b strings.Builder
-	n := 0
-	for _, i := range s.list() {
-		if i.Void || !slices.Contains(i.Tags, candidateTag) {
-			continue
-		}
-		n++
-		fmt.Fprintf(&b, "\n  %s:%s  %s  · %s", i.Kind, i.Name, i.Body, i.Date)
-		if i.Recurred > 0 {
-			fmt.Fprintf(&b, " · seen %d×", i.Recurred+1)
-		}
-	}
-	if n == 0 {
-		return "candidates: none — the learning phase proposes a strategy when a run of failed calls ends in one that works", nil
-	}
-	return fmt.Sprintf("candidates — %d proposed strategies, not used until accepted:", n) + b.String() +
-		"\n/memories accept <kind:name> to use one, /memories reject <kind:name> to void it", nil
-}
-
-// reviewCandidate is /memories accept and reject.
-func (h *Harness) reviewCandidate(verb, arg string) (string, error) {
-	m, path, err := h.itemArg(arg)
-	if err != nil {
-		return "", err
-	}
-	if !isCandidate(path) {
-		return "", fmt.Errorf("%s is not a candidate", arg)
-	}
-	if verb == "reject" {
-		return m.apply(memoryArgs{Action: "void", OldText: arg, Why: "rejected by the user with /memories reject", Source: "user"}, h.noteMeta())
-	}
-	n, err := readNote(path)
-	if err != nil {
-		return "", err
-	}
-	if err := m.attest(path, attestEntry{Kind: "confirmed", Unit: n.unit(), Note: "accepted by the user with /memories accept", By: "user"}); err != nil {
-		return "", err
-	}
-	n.meta["confirmed"] = m.now().Format("2006-01-02")
-	tags := slices.DeleteFunc(noteTags(n.meta), func(t string) bool { return t == candidateTag })
-	down, err := m.write(path, memoryArgs{Content: n.body, Question: n.meta["question"], Public: n.meta["public"] == "true", Tags: tags},
-		noteMeta{extra: n.meta, tagOnly: true})
-	if err != nil {
-		return "", err
-	}
-	return arg + ": accepted, found by search from now on" + down, nil
 }

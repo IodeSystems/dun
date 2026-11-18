@@ -1,7 +1,7 @@
 # Reading: virtual paths and a budgeted whole read
 
 Built: the item paths (`memory:`, `strategy:`, `constraint:`; `strategies.md`,
-`internal/harness/notekinds.go`) and the whole read (section 2, `internal/harness/wholeread.go`). Not built:
+`internal/memory/kinds.go`) and the whole read (section 2, `internal/harness/wholeread.go`). Not built:
 `doc:` paths. Code: agentkit `files/read.go` (the caps), dun `internal/harness/wholeread.go`
 (the whole read), `internal/harness/recap.go` (large-result cues), `internal/harness/exec.go` (clipping). Related: `rag.md` (what
 the virtual paths would read), `memory.md`.

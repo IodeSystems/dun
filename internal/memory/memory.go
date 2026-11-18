@@ -1,4 +1,4 @@
-package harness
+package memory
 
 import (
 	"context"
@@ -19,8 +19,8 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/dunhome"
 	"github.com/iodesystems/dun/internal/mcpserver"
-	"github.com/iodesystems/dun/internal/project"
 )
 
 // Memory — notes a later session on this project needs and cannot get from the
@@ -30,12 +30,12 @@ import (
 // ~/.dun/memory/@global/ (scope global), put into dund's memories index of
 // that project or of the global set (docs/rag.md, slice 5). That index is the
 // reason a note is worth writing: the proactive search (docsPreparer, through
-// memrecall.go) brings a note back into a later conversation unasked, inlined
+// recall.go) brings a note back into a later conversation unasked, inlined
 // whole, when that conversation is about it (M0: right note on 10 of 11
 // probes that share its words, 0 wrong). The tool is there whenever the
 // session has a RagLink, with or without the docs server. With dund down,
 // a note is still written, the search falls back to the notes on disk, and
-// the index catches up on the next contact (memrecall.go).
+// the index catches up on the next contact (recall.go).
 //
 // Writes go straight to disk, with no approval step (USER, 2026-10-19), after
 // a scan for text that would act on a later prompt instead of informing it.
@@ -46,9 +46,9 @@ import (
 // frontmatter and changes nothing yet; the remote private/public layers are a
 // later slice that uploads these same files.
 
-// memoryIndex is dund's index notes go into, a project's or the global
+// NotesIndex is dund's index notes go into, a project's or the global
 // set's (internal/ragd).
-const memoryIndex = "memories"
+const NotesIndex = "memories"
 
 // globalMemoryDir is the directory of the notes of scope global, under
 // memory/. '@' is in no project slug (normalizeProject), so no project's
@@ -68,10 +68,10 @@ const memoryMaxChars = 1200
 // memoryDir is where a project's notes live. $DUN_HOME overrides ~/.dun, as
 // for sessions.
 func memoryDir(project string) string {
-	return filepath.Join(filepath.Dir(SessionsDir()), "memory", project)
+	return filepath.Join(dunhome.Dir(), "memory", project)
 }
 
-func memoryToolDef() llm.ToolDef {
+func ToolDef() llm.ToolDef {
 	var td llm.ToolDef
 	td.Type = "function"
 	td.Function.Name = "memory"
@@ -91,7 +91,7 @@ func memoryToolDef() llm.ToolDef {
 		"type": "object",
 		"properties": map[string]any{
 			"action": map[string]any{"type": "string", "enum": []string{"add", "refine", "void", "confirm"}},
-			"kind": map[string]any{"type": "string", "enum": []string{kindMemory, kindStrategy, kindConstraint},
+			"kind": map[string]any{"type": "string", "enum": []string{KindMemory, KindStrategy, KindConstraint},
 				"description": "memory (default): a fact; strategy: an approach; constraint: a rule the user set"},
 			"name":     map[string]any{"type": "string", "description": "add: a short name, a few words (made a slug); required for strategy and constraint"},
 			"content":  map[string]any{"type": "string", "description": "add/refine: the note — the fact and where it applies, and why it holds only if that was said; never add a reason or consequence nobody stated, and no dates (dun records when)"},
@@ -110,7 +110,7 @@ func memoryToolDef() llm.ToolDef {
 	return td
 }
 
-type memoryArgs struct {
+type toolArgs struct {
 	Action   string   `json:"action"`
 	Content  string   `json:"content"`
 	Question string   `json:"question"`
@@ -124,8 +124,8 @@ type memoryArgs struct {
 	Name     string   `json:"name"`
 }
 
-// noteMeta is what the frontmatter records about where a note came from.
-type noteMeta struct {
+// NoteMeta is what the frontmatter records about where a note came from.
+type NoteMeta struct {
 	Session string
 	Commit  string
 	// extra is a rewritten note's existing frontmatter, kept over the above.
@@ -136,18 +136,18 @@ type noteMeta struct {
 	tagOnly bool
 }
 
-// memoryStore writes, replaces and removes notes in two directories (the
+// Store writes, replaces and removes notes in two directories (the
 // project's and the global one), and keeps the index in step. ingest and
 // forget are nil when there is no index; an error from either that wraps
-// ErrRagDown is a note to the model, not a failure: the file is the record
-// and the index catches up (memrecall.go).
-type memoryStore struct {
+// ErrDown is a note to the model, not a failure: the file is the record
+// and the index catches up (recall.go).
+type Store struct {
 	dir    string
 	global string // "" when there is no global scope
 	// index is the dund index the files go into ("" is memories), kinds
 	// the kinds kept here (nil is memory only), groups the surfacing groups
 	// of a project and a global hit (zero: the memory groups). One shape
-	// for every kind (notekinds.go).
+	// for every kind (kinds.go).
 	index  string
 	kinds  []string
 	groups [2]string
@@ -157,8 +157,13 @@ type memoryStore struct {
 	now    func() time.Time
 }
 
+// Dir is the directory of the project's notes, GlobalDir of the global
+// ones ("" when the store keeps none).
+func (m *Store) Dir() string       { return m.dir }
+func (m *Store) GlobalDir() string { return m.global }
+
 // dirs is the directories the store's notes are in.
-func (m *memoryStore) dirs() []string {
+func (m *Store) dirs() []string {
 	if m.global == "" {
 		return []string{m.dir}
 	}
@@ -171,7 +176,7 @@ const downNote = " — dund is not reachable: the note is on disk, and it is ind
 
 // apply runs one memory call. The error is for the model to read: a bad call
 // is answered, never fatal.
-func (m *memoryStore) apply(a memoryArgs, meta noteMeta) (string, error) {
+func (m *Store) apply(a toolArgs, meta NoteMeta) (string, error) {
 	switch a.Action {
 	case "add":
 		kind, err := m.kindOf(a.Kind)
@@ -239,12 +244,12 @@ func (m *memoryStore) apply(a memoryArgs, meta noteMeta) (string, error) {
 		if a.Tags, err = cleanTags(a.Tags); err != nil {
 			return "", err
 		}
-		// A candidate stays one: only the user accepts it (learn.go).
-		if slices.Contains(noteTags(old.meta), candidateTag) && !slices.Contains(a.Tags, candidateTag) {
-			a.Tags = append(a.Tags, candidateTag)
+		// A candidate stays one: only the user accepts it (lesson.go).
+		if slices.Contains(noteTags(old.meta), CandidateTag) && !slices.Contains(a.Tags, CandidateTag) {
+			a.Tags = append(a.Tags, CandidateTag)
 		}
 		a.Public = old.meta["public"] == "true"
-		if err := m.attest(path, attestEntry{Kind: "corrected", Unit: old.unit(), Text: strings.TrimSpace(a.Content),
+		if err := m.attest(path, AttestEntry{Kind: "corrected", Unit: old.unit(), Text: strings.TrimSpace(a.Content),
 			Note: a.Why, By: by, Was: old.body}); err != nil {
 			return "", err
 		}
@@ -253,7 +258,7 @@ func (m *memoryStore) apply(a memoryArgs, meta noteMeta) (string, error) {
 		retag := strings.TrimSpace(a.Content) == strings.TrimSpace(old.body) && a.Question == old.meta["question"]
 		old.meta["refined"] = m.now().Format("2006-01-02")
 		delete(old.meta, "confirmed") // a confirmation was of the text this replaces
-		down, err := m.write(path, a, noteMeta{Session: meta.Session, Commit: meta.Commit, extra: old.meta, tagOnly: retag})
+		down, err := m.write(path, a, NoteMeta{Session: meta.Session, Commit: meta.Commit, extra: old.meta, tagOnly: retag})
 		if err != nil {
 			return "", err
 		}
@@ -274,10 +279,10 @@ func (m *memoryStore) apply(a memoryArgs, meta noteMeta) (string, error) {
 		// Out of the index first: a log line for a void that then failed
 		// would say the note is gone while search still serves it. With dund
 		// down, the void goes ahead: the next contact removes every *.md.void
-		// from the index (memrecall.go), and the search on disk reads *.md.
+		// from the index (recall.go), and the search on disk reads *.md.
 		down := ""
 		if m.forget != nil {
-			if err := m.forget(path); errors.Is(err, ErrRagDown) {
+			if err := m.forget(path); errors.Is(err, ErrDown) {
 				down = " — dund is not reachable: it leaves the index when dund is"
 			} else if err != nil {
 				return "", fmt.Errorf("not voided: the index refused it: %w", err)
@@ -286,7 +291,7 @@ func (m *memoryStore) apply(a memoryArgs, meta noteMeta) (string, error) {
 		// unsupported, not retract: in attest, retract withdraws an earlier
 		// ruling and leaves the unit untouched; unsupported is the one
 		// verdict that stops a claim counting.
-		if err := m.attest(path, attestEntry{Kind: "unsupported", Unit: old.unit(), Note: a.Why, By: by}); err != nil {
+		if err := m.attest(path, AttestEntry{Kind: "unsupported", Unit: old.unit(), Note: a.Why, By: by}); err != nil {
 			return "", err
 		}
 		// Kept, out of the *.md set that is listed and indexed: nothing a
@@ -308,12 +313,12 @@ func (m *memoryStore) apply(a memoryArgs, meta noteMeta) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if err := m.attest(path, attestEntry{Kind: "confirmed", Unit: old.unit(), Note: a.Why, By: by}); err != nil {
+		if err := m.attest(path, AttestEntry{Kind: "confirmed", Unit: old.unit(), Note: a.Why, By: by}); err != nil {
 			return "", err
 		}
 		old.meta["confirmed"] = m.now().Format("2006-01-02")
-		down, err := m.write(path, memoryArgs{Content: old.body, Question: old.meta["question"], Public: old.meta["public"] == "true",
-			Tags: noteTags(old.meta)}, noteMeta{extra: old.meta})
+		down, err := m.write(path, toolArgs{Content: old.body, Question: old.meta["question"], Public: old.meta["public"] == "true",
+			Tags: noteTags(old.meta)}, NoteMeta{extra: old.meta})
 		if err != nil {
 			return "", err
 		}
@@ -325,7 +330,7 @@ func (m *memoryStore) apply(a memoryArgs, meta noteMeta) (string, error) {
 
 // write writes the note and indexes it. down is downNote when the index
 // could not be reached, else "".
-func (m *memoryStore) write(path string, a memoryArgs, meta noteMeta) (down string, err error) {
+func (m *Store) write(path string, a toolArgs, meta NoteMeta) (down string, err error) {
 	// A rewritten note keeps when and where it was first written; refined
 	// and confirmed say what has happened to it since.
 	field := func(k, v string) string {
@@ -339,7 +344,7 @@ func (m *memoryStore) write(path string, a memoryArgs, meta noteMeta) (down stri
 	if v := field("name", a.Name); v != "" {
 		b.WriteString("name: " + v + "\n")
 	}
-	if v := field("kind", a.Kind); v != "" && v != kindMemory {
+	if v := field("kind", a.Kind); v != "" && v != KindMemory {
 		b.WriteString("kind: " + v + "\n")
 	}
 	if meta.extra["important"] == "true" {
@@ -374,7 +379,7 @@ func (m *memoryStore) write(path string, a memoryArgs, meta noteMeta) (down stri
 		index = m.retag
 	}
 	if index != nil {
-		if err := index(path); errors.Is(err, ErrRagDown) {
+		if err := index(path); errors.Is(err, ErrDown) {
 			return downNote, nil
 		} else if err != nil {
 			// The file is the record; the index can be rebuilt from it. Say so
@@ -424,7 +429,7 @@ func noteTags(meta map[string]string) []string {
 
 // noteName is date, a slug of the question (or the note), and a short hash of
 // the text, so two notes never share a file.
-func (m *memoryStore) noteName(a memoryArgs) string {
+func (m *Store) noteName(a toolArgs) string {
 	src := a.Question
 	if strings.TrimSpace(src) == "" {
 		src = a.Content
@@ -442,13 +447,13 @@ func (m *memoryStore) noteName(a memoryArgs) string {
 
 // find returns the one note whose text contains phrase, or the one a path
 // (strategy:<name>) names.
-func (m *memoryStore) find(phrase string) (string, error) {
+func (m *Store) find(phrase string) (string, error) {
 	phrase = strings.TrimSpace(phrase)
 	if phrase == "" {
 		return "", fmt.Errorf("old_text is required: a phrase copied from the note")
 	}
 	if kind, name, ok := parseItemPath(phrase); ok && m.keeps(kind) {
-		if p := m.named(kind, name); p != "" {
+		if p := m.Named(kind, name); p != "" {
 			return p, nil
 		}
 		return "", fmt.Errorf("no %s named %q", kind, name)
@@ -508,12 +513,12 @@ func scanNote(content, question string) error {
 	return nil
 }
 
-// memoryFor is the store for a workspace's project: its notes and the
+// NotesFor is the store for a workspace's project: its notes and the
 // global ones, indexed into dund's memories indexes through link. A nil link
 // keeps the files and indexes nothing.
-func memoryFor(link *memLink, workspace string) *memoryStore {
-	m := &memoryStore{dir: memoryDir(mcpserver.RaglitProject(workspace)), global: memoryDir(globalMemoryDir), now: time.Now,
-		index: memoryIndex, kinds: []string{kindMemory}, groups: [2]string{groupMemory, groupMemoryGlobal}}
+func NotesFor(link *Link, workspace string) *Store {
+	m := &Store{dir: memoryDir(mcpserver.RaglitProject(workspace)), global: memoryDir(globalMemoryDir), now: time.Now,
+		index: NotesIndex, kinds: []string{KindMemory}, groups: [2]string{GroupMemory, GroupMemoryGlobal}}
 	if link == nil {
 		return m
 	}
@@ -525,49 +530,24 @@ func memoryFor(link *memLink, workspace string) *memoryStore {
 
 // scopeOf is the dund project a note's index belongs to: "" (the global
 // set) for a global note, else the project's slug.
-func (m *memoryStore) scopeOf(path, project string) string {
+func (m *Store) scopeOf(path, project string) string {
 	if m.global != "" && filepath.Dir(path) == m.global {
 		return ""
 	}
 	return project
 }
 
-// raglitStoreFlags picks the flags that choose WHICH store out of a raglit
-// serve command line: --embedded, --home, --daemon, --project. --index is
-// left out — notes have their own.
-func raglitStoreFlags(args []string) []string {
-	var out []string
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		name, _, hasValue := strings.Cut(strings.TrimLeft(a, "-"), "=")
-		if !strings.HasPrefix(a, "-") {
-			continue
-		}
-		switch name {
-		case "embedded":
-			out = append(out, a)
-		case "home", "daemon", "project":
-			out = append(out, a)
-			if !hasValue && i+1 < len(args) {
-				i++
-				out = append(out, args[i])
-			}
-		}
-	}
-	return out
-}
-
-// group names the surfacing group of a hit: memory for a project note in
+// Group names the surfacing group of a hit: memory for a project note in
 // this store, memory-global for a global one, "" for anything else.
 // Nil-safe: with no store nothing is a note.
-func (m *memoryStore) group(docID string) string {
+func (m *Store) Group(docID string) string {
 	switch {
-	case m == nil || !m.holds(docID):
+	case m == nil || !m.Holds(docID):
 		return ""
 	}
 	g := m.groups
 	if g[0] == "" {
-		g = [2]string{groupMemory, groupMemoryGlobal}
+		g = [2]string{GroupMemory, GroupMemoryGlobal}
 	}
 	if m.global != "" && strings.HasPrefix(docID, m.global+string(os.PathSeparator)) {
 		return g[1]
@@ -575,8 +555,8 @@ func (m *memoryStore) group(docID string) string {
 	return g[0]
 }
 
-// holds reports whether path is in one of the store's directories.
-func (m *memoryStore) holds(path string) bool {
+// Holds reports whether path is in one of the store's directories.
+func (m *Store) Holds(path string) bool {
 	for _, d := range m.dirs() {
 		if strings.HasPrefix(path, d+string(os.PathSeparator)) {
 			return true
@@ -585,16 +565,15 @@ func (m *memoryStore) holds(path string) bool {
 	return false
 }
 
-// memoryStore is the note store, or nil when the session has no RagLink.
-func (h *Harness) memoryStore() *memoryStore { return h.memory.Load() }
-
-// withMemory handles the memory tool locally; everything else routes onward.
-func withMemory(inner agent.ToolDispatcher, h *Harness, m *memoryStore, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
+// WithTool handles the memory tool locally; everything else routes onward.
+// call parses and applies one call's arguments and returns the result the
+// model reads (Stores.Call).
+func WithTool(inner agent.ToolDispatcher, call func(rawArgs string) string, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		if tc.Function.Name != "memory" {
 			return inner(ctx, tc)
 		}
-		out := h.memoryCall(m, tc.Function.Arguments)
+		out := call(tc.Function.Arguments)
 		if onCall != nil {
 			var a map[string]any
 			_ = json.Unmarshal([]byte(tc.Function.Arguments), &a)
@@ -604,16 +583,13 @@ func withMemory(inner agent.ToolDispatcher, h *Harness, m *memoryStore, onCall f
 	}
 }
 
-// memoryCall parses and applies one memory call, rendering any error as the
-// result the model reads.
-func (h *Harness) memoryCall(m *memoryStore, rawArgs string) string {
-	var a memoryArgs
+// Call parses and applies one memory call on m (the notes store), rendering
+// any error as the result the model reads. A strategy or a constraint goes
+// to the strategies store.
+func (s Stores) Call(m *Store, rawArgs string, meta NoteMeta) string {
+	var a toolArgs
 	if err := json.Unmarshal([]byte(rawArgs), &a); err != nil {
 		return "memory: arguments are not valid JSON: " + err.Error()
-	}
-	meta := noteMeta{Commit: project.GitLine(h.cfg.Workspace, "rev-parse", "--short", "HEAD")}
-	if h.cfg.SessionFile != "" {
-		meta.Session = strings.TrimSuffix(filepath.Base(h.cfg.SessionFile), ".jsonl")
 	}
 	// A strategy or a constraint is in the strategies store: by its kind,
 	// or by the path old_text names.
@@ -621,27 +597,21 @@ func (h *Harness) memoryCall(m *memoryStore, rawArgs string) string {
 	if k, _, ok := parseItemPath(a.OldText); ok && kind == "" {
 		kind = k
 	}
-	if kind == kindStrategy || kind == kindConstraint {
-		if m = h.strategyStore(); m == nil {
+	if kind == KindStrategy || kind == KindConstraint {
+		if m = s.Strategies; m == nil {
 			return "memory: this session keeps no strategies or constraints"
 		}
 	}
 	// The candidate tag is the learning phase's; the user accepts or
-	// rejects a candidate (learn.go).
+	// rejects a candidate (lesson.go).
 	for _, t := range a.Tags {
-		if strings.EqualFold(strings.TrimSpace(t), candidateTag) {
+		if strings.EqualFold(strings.TrimSpace(t), CandidateTag) {
 			return "memory: the candidate tag is set by the learning phase only; the user reviews candidates with /memories candidates"
 		}
 	}
-	before := h.importantKey()
 	out, err := m.apply(a, meta)
 	if err != nil {
 		return "memory: " + err.Error()
-	}
-	// An important item changed or went: the standing list in the system
-	// prompt is rebuilt (after the turn, applyTools).
-	if h.importantKey() != before {
-		h.applyTools()
 	}
 	return out
 }

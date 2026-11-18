@@ -1,8 +1,9 @@
 # Memories, strategies and constraints
 
-Built. Code: `internal/harness/notekinds.go` (kinds, names, the standing list, the
-`file_read` paths, `/memories`), `internal/harness/memory.go` (the tool and the store),
-`internal/harness/memrecall.go` (dund link, sync, recall). Related: `memory.md`, `rag.md`
+Built. Code: `internal/memory/kinds.go` (kinds, names, the standing list, the
+`file_read` paths, `/memories`), `internal/memory/memory.go` (the tool and the store),
+`internal/memory/recall.go` (dund link, sync, recall); `internal/harness/memories.go`
+holds the session's stores and links. Related: `memory.md`, `rag.md`
 ("Built: slice 5"), `surfacing.md`, `reading.md`.
 
 ## What they are
@@ -129,7 +130,9 @@ depend on dund.
 
 ## Learning phase (first slice, built)
 
-Code: `internal/harness/learn.go`; the streak is `internal/harness/plannudge.go`'s. Churn → resolved
+Code: `internal/harness/learn.go` (episodes, gate, the lesson call), `internal/memory/lesson.go`
+(the genericity check, duplicates, the candidate and its review); the streak is
+`internal/harness/plannudge.go`'s. Churn → resolved
 candidate → lesson, written as a strategy the user reviews.
 
 Constraints (USER 2026-11-09): lessons are generic (no task names, paths,

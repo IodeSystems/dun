@@ -9,16 +9,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iodesystems/dun/internal/memory"
 	"github.com/iodesystems/dun/proto"
 )
 
 // RagLink is the way to dund's retrieval (docs/rag.md, slice 5): its
-// indexes hold the memory notes (memory.go) and answer the proactive search
-// for them (memrecall.go), and hold the workspace's code and docs
+// indexes hold the memory notes (internal/memory) and answer the proactive search
+// for them (memory.Finder), and hold the workspace's code and docs
 // (codesearch.go). The session dials dund's socket for each call,
 // so a session under dund and a standalone `dun --engine` with dund serving reach
 // it the same way. An error that wraps ErrRagDown means dund is not there,
-// or runs no retrieval: the caller degrades (memrecall.go), it does not
+// or runs no retrieval: the caller degrades (internal/memory), it does not
 // fail.
 type RagLink interface {
 	Search(ctx context.Context, q proto.RagSearch) (*proto.RagHits, error)
@@ -30,8 +31,9 @@ type RagLink interface {
 }
 
 // ErrRagDown is a RagLink's error when dund cannot be reached, or answers
-// that it runs no retrieval.
-var ErrRagDown = errors.New("dund is not reachable")
+// that it runs no retrieval. It is memory.ErrDown: the notes degrade on
+// the same error the code and session indexes do.
+var ErrRagDown = memory.ErrDown
 
 // DundRag is the RagLink over dund's socket at sock.
 func DundRag(sock string) RagLink { return dundRag{sock: sock} }

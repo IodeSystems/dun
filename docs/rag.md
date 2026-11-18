@@ -66,7 +66,7 @@ single-store adapter. The `attestations` table stays in the schema, unused.
 
 **Not used from ragcore** (USER: "doesn't really need attestation"): attestation,
 HTTP API, auth, UI, MCP server. Attestation is a judgment layer above
-retrieval. dun's memory already keeps its own log (`internal/harness/memattest.go` writes
+retrieval. dun's memory already keeps its own log (`internal/memory/attest.go` writes
 `<note>.md.attest.jsonl` in raglit's `attest.Entry` shape), and the raglit
 server keeps its own over ragcore. What attestation needs from the core is a
 stable content id per fragment and "does this id still exist", which any
@@ -342,8 +342,8 @@ replaced embedder is not written (`TestReembedWhileAJobRuns`, `-race`).
 
 The memory tool and memory recall use dund; `/rag on` is not needed for
 them. Code and doc search are unchanged (raglit, `/rag on`). Code:
-`internal/harness/raglink.go` (the socket client), `internal/harness/memrecall.go` (search, degraded mode,
-sync), `internal/harness/memory.go` (the tool).
+`internal/harness/raglink.go` (the socket client), `internal/memory/recall.go` (search, degraded mode,
+sync), `internal/memory/memory.go` (the tool).
 
 - **Link.** A session dials dund's socket (`Socket(DUN_HOME)`) for each
   call, under dund or as a standalone `dun --engine`. `DUN_MEMORY=0`: no memory

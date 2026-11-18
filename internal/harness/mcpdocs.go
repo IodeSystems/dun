@@ -13,6 +13,7 @@ import (
 
 	"github.com/iodesystems/agentkit/mcpmgr"
 	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/dun/internal/memory"
 	"github.com/iodesystems/dun/internal/proc"
 )
 
@@ -252,11 +253,11 @@ func firstNonEmptyStr(vs ...string) string {
 // rules, MCP docs, or the workspace's own documents. Each group is ranked on
 // its own because raglit scores from different indexes do not compare (see
 // groupHits). skill and rules may be nil.
-func docGroup(mems []*memoryStore, skill func(string) (skillHit, bool), rules func(string) bool) func(string) string {
+func docGroup(mems []*memory.Store, skill func(string) (skillHit, bool), rules func(string) bool) func(string) string {
 	root := mcpDocsRoot() + string(os.PathSeparator)
 	return func(docID string) string {
 		for _, mem := range mems {
-			if g := mem.group(docID); g != "" {
+			if g := mem.Group(docID); g != "" {
 				return g
 			}
 		}
@@ -273,4 +274,29 @@ func docGroup(mems []*memoryStore, skill func(string) (skillHit, bool), rules fu
 		}
 		return ""
 	}
+}
+
+// raglitStoreFlags picks the flags that choose WHICH store out of a raglit
+// serve command line: --embedded, --home, --daemon, --project. --index is
+// left out — notes have their own.
+func raglitStoreFlags(args []string) []string {
+	var out []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		name, _, hasValue := strings.Cut(strings.TrimLeft(a, "-"), "=")
+		if !strings.HasPrefix(a, "-") {
+			continue
+		}
+		switch name {
+		case "embedded":
+			out = append(out, a)
+		case "home", "daemon", "project":
+			out = append(out, a)
+			if !hasValue && i+1 < len(args) {
+				i++
+				out = append(out, args[i])
+			}
+		}
+	}
+	return out
 }

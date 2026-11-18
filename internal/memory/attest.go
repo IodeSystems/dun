@@ -1,4 +1,4 @@
-package harness
+package memory
 
 import (
 	"crypto/sha256"
@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/iodesystems/dun/internal/frontmatter"
 )
 
 // A note's history (plan item 9 M4).
@@ -39,7 +41,7 @@ const (
 	voidSuffix   = ".void"
 )
 
-type attestEntry struct {
+type AttestEntry struct {
 	Kind string `json:"kind"`
 	Unit string `json:"unit,omitempty"`
 	Text string `json:"text,omitempty"`
@@ -51,7 +53,7 @@ type attestEntry struct {
 
 // attestBy is who a verdict is from: the user (relayed by the model), or
 // the code as dun read it.
-func attestBy(a memoryArgs) (string, error) {
+func attestBy(a toolArgs) (string, error) {
 	if strings.TrimSpace(a.Why) == "" {
 		return "", fmt.Errorf("why is required: what the user said, or what in the code shows it")
 	}
@@ -64,7 +66,7 @@ func attestBy(a memoryArgs) (string, error) {
 	return "", fmt.Errorf("source must be user or code, not %q", a.Source)
 }
 
-func (m *memoryStore) attest(notePath string, e attestEntry) error {
+func (m *Store) attest(notePath string, e AttestEntry) error {
 	// Local time with its offset (still RFC3339): the date a person reads
 	// in /memories is the day it was where they are.
 	e.At = m.now().Format(time.RFC3339)
@@ -81,14 +83,14 @@ func (m *memoryStore) attest(notePath string, e attestEntry) error {
 	return err
 }
 
-func readAttest(notePath string) []attestEntry {
+func ReadAttest(notePath string) []AttestEntry {
 	b, err := os.ReadFile(notePath + attestSuffix)
 	if err != nil {
 		return nil
 	}
-	var out []attestEntry
+	var out []AttestEntry
 	for _, l := range strings.Split(string(b), "\n") {
-		var e attestEntry
+		var e AttestEntry
 		if json.Unmarshal([]byte(l), &e) == nil && e.Kind != "" {
 			out = append(out, e)
 		}
@@ -107,7 +109,7 @@ func readNote(path string) (note, error) {
 	if err != nil {
 		return note{}, err
 	}
-	meta, body := splitFrontmatter(string(b))
+	meta, body := frontmatter.Split(string(b))
 	return note{meta: meta, body: strings.TrimSpace(body)}, nil
 }
 
@@ -122,8 +124,8 @@ func (n note) unit() string {
 	return hex.EncodeToString(sum[:8])
 }
 
-// MemoryInfo is one note, for /memories.
-type MemoryInfo struct {
+// Info is one note, for /memories.
+type Info struct {
 	File      string `json:"file"`
 	Question  string `json:"question"`
 	Body      string `json:"body"`
@@ -139,19 +141,19 @@ type MemoryInfo struct {
 	Tags         []string `json:"tags,omitempty"`
 	// Kind is memory, strategy or constraint; Name its short name, and
 	// Kind:Name the path file_read takes. Important: shown in every
-	// session (notekinds.go).
+	// session (kinds.go).
 	Kind      string `json:"kind,omitempty"`
 	Name      string `json:"name,omitempty"`
 	Important bool   `json:"important,omitempty"`
 	// Recurred: how many times the learning phase proposed this candidate
-	// again (learn.go).
+	// again (lesson.go).
 	Recurred int    `json:"recurred,omitempty"`
 	path     string // the file, for the standing list
 }
 
-// list reports every note, current first by date, then the voided ones.
-func (m *memoryStore) list() []MemoryInfo {
-	var out []MemoryInfo
+// List reports every note, current first by date, then the voided ones.
+func (m *Store) List() []Info {
+	var out []Info
 	for _, pat := range []string{"*.md", "*.md" + voidSuffix} {
 		var paths []string
 		for _, d := range m.dirs() {
@@ -166,12 +168,12 @@ func (m *memoryStore) list() []MemoryInfo {
 				continue
 			}
 			base := strings.TrimSuffix(p, voidSuffix)
-			info := MemoryInfo{File: filepath.Base(base), Question: n.meta["question"], Body: n.body,
+			info := Info{File: filepath.Base(base), Question: n.meta["question"], Body: n.body,
 				Date: n.meta["date"], Void: strings.HasSuffix(p, voidSuffix),
 				Global: m.global != "" && filepath.Dir(p) == m.global, Tags: noteTags(n.meta),
 				Kind: noteKind(n.meta), Name: noteNameOf(base, n.meta), Important: n.meta["important"] == "true", path: base}
 			cur := n.unit()
-			for _, e := range readAttest(base) {
+			for _, e := range ReadAttest(base) {
 				switch e.Kind {
 				case "corrected":
 					info.Refined++
@@ -193,21 +195,16 @@ func (m *memoryStore) list() []MemoryInfo {
 	return out
 }
 
-// Memories lists this project's notes and the global ones, then the
-// strategies and constraints (notekinds.go), or nil when the session keeps
-// none (no RagLink).
-func (h *Harness) Memories() []MemoryInfo {
-	m := h.memoryStore()
-	if m == nil {
+// List is this project's notes and the global ones, then the strategies
+// and constraints (kinds.go), or nil when the session keeps none (no
+// RagLink).
+func (s Stores) List() []Info {
+	if s.Notes == nil {
 		return nil
 	}
-	out := m.list()
-	if s := h.strategyStore(); s != nil {
-		out = append(out, s.list()...)
+	out := s.Notes.List()
+	if s.Strategies != nil {
+		out = append(out, s.Strategies.List()...)
 	}
 	return out
 }
-
-// Remembering reports whether notes can be written and found: the session
-// has a RagLink (dund, or with dund down the notes on disk).
-func (h *Harness) Remembering() bool { return h.memoryStore() != nil }

@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/iodesystems/dun/internal/frontmatter"
 )
 
 // Reading a skill as a person does (the /skill browser): its files' text and
@@ -241,7 +243,7 @@ func (h *Harness) SkillFile(ctx context.Context, name, file string) (SkillFileVi
 	}
 	v.Clipped = clipped
 	if v.File == "SKILL.md" {
-		meta, body := splitFrontmatter(text)
+		meta, body := frontmatter.Split(text)
 		v.Name, v.Description, text = meta["name"], strings.Join(strings.Fields(meta["description"]), " "), body
 	}
 	v.Text = text

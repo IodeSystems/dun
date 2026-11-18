@@ -1,4 +1,4 @@
-package harness
+package memory
 
 import (
 	"context"
@@ -15,7 +15,6 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 
-	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -37,11 +36,11 @@ import (
 // holds stale and removes the voided ones. Ingest is idempotent, so sending
 // the whole set is safe.
 
-// memLink is a session's way to its notes' indexes. It is the harness's for
-// its life: a tool rebuild makes a new memoryStore over the same dirs, not a
+// Link is a session's way to its notes' indexes. It is the harness's for
+// its life: a tool rebuild makes a new Store over the same dirs, not a
 // new link, so the sync runs once per contact, not once per rebuild.
-type memLink struct {
-	link    RagLink
+type Link struct {
+	rag     Rag
 	project string       // the project's slug in dund
 	notice  func(string) // says, once, that recall is degraded
 
@@ -49,28 +48,61 @@ type memLink struct {
 	synced  bool // a sync reached dund since the last failure
 	syncing bool
 	said    bool
-	meta    map[string]memHit // per document path, from the latest searches
+	meta    map[string]Hit // per document path, from the latest searches
 }
 
-// memHit is what a memory search says about one note.
-type memHit struct {
-	meta    hitMeta
-	meaning bool   // its index searches by meaning
-	index   string // where it was found
+// Rag is the way to dund's indexes the notes go into (harness.RagLink). An
+// error that wraps ErrDown means dund is not there, or runs no retrieval:
+// the notes degrade to the files on disk, they do not fail.
+type Rag interface {
+	Search(ctx context.Context, q proto.RagSearch) (*proto.RagHits, error)
+	Ingest(ctx context.Context, q proto.RagIngest) (*proto.RagIngested, error)
+	Forget(ctx context.Context, q proto.RagForget) (*proto.RagForgotten, error)
+	Sync(ctx context.Context, q proto.RagSync) (*proto.RagSynced, error)
+	Tag(ctx context.Context, q proto.RagTag) (*proto.RagTagged, error)
 }
 
-func newMemLink(link RagLink, project string, notice func(string)) *memLink {
-	return &memLink{link: link, project: project, notice: notice, meta: map[string]memHit{}}
+// ErrDown is a Rag's error when dund cannot be reached, or answers that it
+// runs no retrieval (harness.ErrRagDown is this error).
+var ErrDown = errors.New("dund is not reachable")
+
+// syncTimeout bounds a rag_sync of the note set: harness's ragReplyTimeout.
+const syncTimeout = 30 * time.Second
+
+// Measures is what raglit says about a hit besides its score: the
+// harness's Measures, field for field.
+type Measures struct {
+	Sim     float64
+	HasSim  bool
+	Matched int
+	Terms   int
 }
+
+// Hit is what a memory search says about one note.
+type Hit struct {
+	Meta    Measures
+	Meaning bool   // its index searches by meaning
+	Index   string // where it was found
+}
+
+// NewLink is a session's link to its notes' indexes in dund, through rag.
+// notice (may be nil) is told, once, that recall is degraded.
+func NewLink(rag Rag, project string, notice func(string)) *Link {
+	return &Link{rag: rag, project: project, notice: notice, meta: map[string]Hit{}}
+}
+
+// Contact is the first contact with dund: files written while no dund was
+// there get indexed now, or the session learns it is degraded.
+func (l *Link) Contact(m *Store) { l.saw(m, nil) }
 
 // ragCallTimeout bounds a memory write's call to dund: it only queues.
 const ragCallTimeout = 10 * time.Second
 
-func (l *memLink) ingest(m *memoryStore, path string) error {
+func (l *Link) ingest(m *Store, path string) error {
 	n, _ := readNote(path)
 	ctx, cancel := context.WithTimeout(context.Background(), ragCallTimeout)
 	defer cancel()
-	_, err := l.link.Ingest(ctx, proto.RagIngest{Project: m.scopeOf(path, l.project), Index: m.indexName(),
+	_, err := l.rag.Ingest(ctx, proto.RagIngest{Project: m.scopeOf(path, l.project), Index: m.indexName(),
 		Path: path, Title: noteTitle(path, n.meta), Tags: ragTags(n.meta), Text: noteText(path, n)})
 	l.saw(m, err)
 	return err
@@ -81,7 +113,7 @@ func (l *memLink) ingest(m *memoryStore, path string) error {
 // tags (ragTags), so a word in the name and the detail is one hit.
 func noteText(path string, n note) string {
 	head := noteNameOf(path, n.meta)
-	if noteKind(n.meta) == kindMemory {
+	if noteKind(n.meta) == KindMemory {
 		head = n.meta["question"]
 	}
 	return strings.TrimSpace(head + "\n\n" + strings.TrimSpace(n.body))
@@ -91,11 +123,11 @@ func noteText(path string, n note) string {
 // for a change that leaves its text as it was, such as marking it
 // important. Its indexed text (noteText) is unchanged, so the next sync
 // finds it current.
-func (l *memLink) tag(m *memoryStore, path string) error {
+func (l *Link) tag(m *Store, path string) error {
 	n, _ := readNote(path)
 	ctx, cancel := context.WithTimeout(context.Background(), ragCallTimeout)
 	defer cancel()
-	_, err := l.link.Tag(ctx, proto.RagTag{Project: m.scopeOf(path, l.project), Index: m.indexName(),
+	_, err := l.rag.Tag(ctx, proto.RagTag{Project: m.scopeOf(path, l.project), Index: m.indexName(),
 		Path: path, Tags: ragTags(n.meta)})
 	l.saw(m, err)
 	return err
@@ -112,18 +144,18 @@ func ragTags(meta map[string]string) []string {
 	return out
 }
 
-func (l *memLink) forget(m *memoryStore, path string) error {
+func (l *Link) forget(m *Store, path string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), ragCallTimeout)
 	defer cancel()
-	_, err := l.link.Forget(ctx, proto.RagForget{Project: m.scopeOf(path, l.project), Index: m.indexName(), Path: path})
+	_, err := l.rag.Forget(ctx, proto.RagForget{Project: m.scopeOf(path, l.project), Index: m.indexName(), Path: path})
 	l.saw(m, err)
 	return err
 }
 
 // saw records how a call to dund went: down marks the index behind, and a
 // call that reached dund syncs the notes if it is.
-func (l *memLink) saw(m *memoryStore, err error) {
-	if errors.Is(err, ErrRagDown) {
+func (l *Link) saw(m *Store, err error) {
+	if errors.Is(err, ErrDown) {
 		l.down()
 		return
 	}
@@ -138,7 +170,7 @@ func (l *memLink) saw(m *memoryStore, err error) {
 	}
 }
 
-func (l *memLink) down() {
+func (l *Link) down() {
 	l.mu.Lock()
 	l.synced = false
 	say := !l.said
@@ -155,7 +187,7 @@ func (l *memLink) down() {
 
 // sync sends the note set to dund: every current note to queue if the index
 // lacks it or holds it stale, every voided one to remove.
-func (l *memLink) sync(m *memoryStore) {
+func (l *Link) sync(m *Store) {
 	ok := l.syncOnce(m)
 	l.mu.Lock()
 	l.syncing = false
@@ -168,7 +200,7 @@ func (l *memLink) sync(m *memoryStore) {
 // syncOnce reports whether dund was reached for every scope. A refusal (a
 // project slug dund does not take) counts as reached: retrying it every
 // pass would not change the answer.
-func (l *memLink) syncOnce(m *memoryStore) bool {
+func (l *Link) syncOnce(m *Store) bool {
 	scopes := []struct{ project, dir string }{{l.project, m.dir}}
 	if m.global != "" {
 		scopes = append(scopes, struct{ project, dir string }{"", m.global})
@@ -190,11 +222,11 @@ func (l *memLink) syncOnce(m *memoryStore) bool {
 		if len(q.Files) == 0 && len(q.Gone) == 0 {
 			continue
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), ragReplyTimeout)
-		r, err := l.link.Sync(ctx, q)
+		ctx, cancel := context.WithTimeout(context.Background(), syncTimeout)
+		r, err := l.rag.Sync(ctx, q)
 		cancel()
 		switch {
-		case errors.Is(err, ErrRagDown):
+		case errors.Is(err, ErrDown):
 			l.down()
 			return false
 		case err != nil:
@@ -206,25 +238,42 @@ func (l *memLink) syncOnce(m *memoryStore) bool {
 	return true
 }
 
-// memFinder is the proactive search's finder for one store's files: the
+// Finder is the proactive search's finder for one store's files: the
 // memory notes, or the strategies and constraints. skip (may be nil) leaves
-// out a file the standing list already shows (notekinds.go).
-// Candidates (learn.go) are left out unless candidates is set: a tag
+// out a file the standing list already shows (kinds.go).
+// Candidates (lesson.go) are left out unless Candidates is set: a tag
 // filter in dun, after the search (raglit's filter keeps tags; it has no
 // way to exclude one). raglit is asked for an exclude-tag filter (NotTags,
 // USER 2026-11-09); when dund passes it, the search can leave candidates
 // out and stop spending its hits on them. Keep this drop until then.
-type memFinder struct {
-	l          *memLink
-	m          *memoryStore
+type Finder struct {
+	l          *Link
+	m          *Store
 	skip       func(path string) bool
-	candidates bool
+	Candidates bool
 }
+
+// NewFinder is the finder for m's files through l; skip may be nil.
+func NewFinder(l *Link, m *Store, skip func(path string) bool) *Finder {
+	return &Finder{l: l, m: m, skip: skip}
+}
+
+// Hit is what the latest search said of docID, when it is one of the
+// store's files.
+func (f *Finder) Hit(docID string) (Hit, bool) {
+	if h, ok := f.l.hit(docID); ok && f.m.Holds(docID) {
+		return h, true
+	}
+	return Hit{}, false
+}
+
+// Holds reports whether docID is one of the store's files.
+func (f *Finder) Holds(docID string) bool { return f.m.Holds(docID) }
 
 // memSearchLimit is the hits asked of each memories index per pass.
 const memSearchLimit = 8
 
-func (f *memFinder) Find(ctx context.Context, texts []string) ([]agent.DocHit, error) {
+func (f *Finder) Find(ctx context.Context, texts []string) ([]agent.DocHit, error) {
 	q := strings.TrimSpace(strings.Join(texts, " "))
 	if q == "" {
 		return nil, nil
@@ -248,7 +297,7 @@ func (f *memFinder) Find(ctx context.Context, texts []string) ([]agent.DocHit, e
 			if name == "" {
 				name = "global"
 			}
-			r, err := f.l.link.Search(ctx, proto.RagSearch{Project: p, Index: f.m.indexName(), Query: q, Limit: memSearchLimit})
+			r, err := f.l.rag.Search(ctx, proto.RagSearch{Project: p, Index: f.m.indexName(), Query: q, Limit: memSearchLimit})
 			res[i] = result{index: name + "/" + f.m.indexName(), hits: r, err: err}
 		}()
 	}
@@ -257,7 +306,7 @@ func (f *memFinder) Find(ctx context.Context, texts []string) ([]agent.DocHit, e
 	var firstErr error
 	for _, r := range res {
 		switch {
-		case errors.Is(r.err, ErrRagDown):
+		case errors.Is(r.err, ErrDown):
 			down++
 		case r.err != nil:
 			reached = true
@@ -284,7 +333,7 @@ func (f *memFinder) Find(ctx context.Context, texts []string) ([]agent.DocHit, e
 		meaning := r.hits.Mode == "hybrid"
 		for _, h := range r.hits.Hits {
 			path := strings.TrimPrefix(h.Path, "file://")
-			if !f.m.holds(path) {
+			if !f.m.Holds(path) {
 				continue
 			}
 			if _, err := os.Stat(path); err != nil {
@@ -293,10 +342,10 @@ func (f *memFinder) Find(ctx context.Context, texts []string) ([]agent.DocHit, e
 			if f.skip != nil && f.skip(path) {
 				continue // in the standing list of every request already
 			}
-			if !f.candidates && isCandidate(path) {
-				continue // proposed, not accepted (learn.go)
+			if !f.Candidates && IsCandidate(path) {
+				continue // proposed, not accepted (lesson.go)
 			}
-			hm := hitMeta{Matched: h.Matched, Terms: h.Terms}
+			hm := Measures{Matched: h.Matched, Terms: h.Terms}
 			if h.Similarity != nil {
 				hm.Sim, hm.HasSim = *h.Similarity, true
 			}
@@ -311,7 +360,7 @@ func (f *memFinder) Find(ctx context.Context, texts []string) ([]agent.DocHit, e
 				continue
 			}
 			seen[path] = len(out)
-			f.l.record(path, memHit{meta: hm, meaning: meaning, index: r.index})
+			f.l.record(path, Hit{Meta: hm, Meaning: meaning, Index: r.index})
 			title := h.Title
 			if title == "" {
 				title = filepath.Base(path)
@@ -326,7 +375,7 @@ func (f *memFinder) Find(ctx context.Context, texts []string) ([]agent.DocHit, e
 	return out, nil
 }
 
-func (l *memLink) record(path string, h memHit) {
+func (l *Link) record(path string, h Hit) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.meta[path] = h
@@ -334,23 +383,23 @@ func (l *memLink) record(path string, h memHit) {
 
 // merge folds another fragment's measures into a note's: the higher
 // similarity, the most query words.
-func (l *memLink) merge(path string, m hitMeta) {
+func (l *Link) merge(path string, m Measures) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	h := l.meta[path]
-	if m.HasSim && (!h.meta.HasSim || m.Sim > h.meta.Sim) {
-		h.meta.Sim, h.meta.HasSim = m.Sim, true
+	if m.HasSim && (!h.Meta.HasSim || m.Sim > h.Meta.Sim) {
+		h.Meta.Sim, h.Meta.HasSim = m.Sim, true
 	}
-	if m.Matched > h.meta.Matched {
-		h.meta.Matched = m.Matched
+	if m.Matched > h.Meta.Matched {
+		h.Meta.Matched = m.Matched
 	}
-	if m.Terms > h.meta.Terms {
-		h.meta.Terms = m.Terms
+	if m.Terms > h.Meta.Terms {
+		h.Meta.Terms = m.Terms
 	}
 	l.meta[path] = h
 }
 
-func (l *memLink) hit(path string) (memHit, bool) {
+func (l *Link) hit(path string) (Hit, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	h, ok := l.meta[path]
@@ -363,7 +412,7 @@ const localIndex = "notes on disk (dund down)"
 // local is recall with dund down: each note scored by how many of the
 // query's words it holds (its question, text and tags), for the coverage
 // rule. No ranking by meaning, no stemming.
-func (f *memFinder) local(q string) []agent.DocHit {
+func (f *Finder) local(q string) []agent.DocHit {
 	terms := queryTerms(q)
 	if len(terms) == 0 {
 		return nil
@@ -376,7 +425,7 @@ func (f *memFinder) local(q string) []agent.DocHit {
 				continue
 			}
 			n, err := readNote(p)
-			if err != nil || (!f.candidates && slices.Contains(noteTags(n.meta), candidateTag)) {
+			if err != nil || (!f.Candidates && slices.Contains(noteTags(n.meta), CandidateTag)) {
 				continue
 			}
 			words := map[string]bool{}
@@ -392,7 +441,7 @@ func (f *memFinder) local(q string) []agent.DocHit {
 			if matched == 0 {
 				continue
 			}
-			f.l.record(p, memHit{meta: hitMeta{Matched: matched, Terms: len(terms)}, index: localIndex})
+			f.l.record(p, Hit{Meta: Measures{Matched: matched, Terms: len(terms)}, Index: localIndex})
 			title := noteTitle(p, n.meta)
 			line, _, _ := strings.Cut(n.body, "\n")
 			out = append(out, agent.DocHit{DocID: p, Title: title, Score: float64(matched), Line: line})
@@ -431,119 +480,4 @@ func queryTerms(q string) []string {
 		out = append(out, w)
 	}
 	return out
-}
-
-// fetchNote reads a note whole for inlining: the file, when it is at most
-// max chars.
-func fetchNote(path string, max int) (string, bool) {
-	b, err := os.ReadFile(path)
-	if err != nil || len(b) == 0 || len(b) > max {
-		return "", false
-	}
-	return string(b), true
-}
-
-// memLink is the harness's link for its notes, nil without a RagLink. A
-// child shares its parent's, so a sub-agent does not sync the notes again.
-func (h *Harness) memLink() *memLink {
-	h.memLinkOnce.Do(func() {
-		h.memLinkV = h.newStoreLink(func(p *Harness) *memLink { return p.memLink() }, memoryFor, h.cfg.OnNotify)
-	})
-	return h.memLinkV
-}
-
-// stratLink is the same for the strategies and constraints (notekinds.go):
-// its own link, so each index syncs on its own. It gives no notice: the
-// notes' link says dund is down for both.
-func (h *Harness) stratLink() *memLink {
-	h.stratLinkOnce.Do(func() {
-		h.stratLinkV = h.newStoreLink(func(p *Harness) *memLink { return p.stratLink() }, strategyFor, nil)
-	})
-	return h.stratLinkV
-}
-
-func (h *Harness) newStoreLink(parent func(*Harness) *memLink, store func(*memLink, string) *memoryStore, notice func(string)) *memLink {
-	if h.cfg.Rag == nil {
-		return nil
-	}
-	if p := h.cfg.Parent; p != nil {
-		if l := parent(p); l != nil {
-			return l
-		}
-	}
-	l := newMemLink(h.cfg.Rag, mcpserver.RaglitProject(h.cfg.Workspace), notice)
-	// The first contact: files written while no dund was there get
-	// indexed now, or the session learns it is degraded.
-	go l.saw(store(l, h.cfg.Workspace), nil)
-	return l
-}
-
-// withMemFinder adds the memory finder to the proactive search: its hits
-// beside the docs server's (inner, nil without one), read whole from their
-// files, and described from what dund said of them. src is changed in
-// place to look a note up here first.
-func withMemFinder(mf *memFinder, inner agent.DocFinder, fetch docBodyFunc, src *hitSources) (agent.DocFinder, docBodyFunc) {
-	index, meta, meaning := src.index, src.meta, src.meaning
-	src.index = func(docID string) string {
-		if h, ok := mf.l.hit(docID); ok && mf.m.holds(docID) {
-			return h.index
-		}
-		if index != nil {
-			return index(docID)
-		}
-		return ""
-	}
-	src.meta = func(docID string) (hitMeta, bool) {
-		if h, ok := mf.l.hit(docID); ok && mf.m.holds(docID) {
-			return h.meta, true
-		}
-		if meta != nil {
-			return meta(docID)
-		}
-		return hitMeta{}, false
-	}
-	src.meaning = func(docID string) (bool, bool) {
-		if h, ok := mf.l.hit(docID); ok && mf.m.holds(docID) {
-			return h.meaning, true
-		}
-		if meaning != nil {
-			return meaning(docID)
-		}
-		return false, false
-	}
-	readAll := func(ctx context.Context, docID string, max int) (string, bool) {
-		if mf.m.holds(docID) {
-			return fetchNote(docID, max)
-		}
-		if fetch != nil {
-			return fetch(ctx, docID, max)
-		}
-		return "", false
-	}
-	if inner == nil {
-		return mf, readAll
-	}
-	return bothFinders{mf, inner}, readAll
-}
-
-// bothFinders asks the memory finder and the docs server's at once. One
-// failing leaves the other's hits; both failing is the docs server's error.
-type bothFinders struct {
-	mem, docs agent.DocFinder
-}
-
-func (b bothFinders) Find(ctx context.Context, texts []string) ([]agent.DocHit, error) {
-	var memHits []agent.DocHit
-	var memErr error
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		memHits, memErr = b.mem.Find(ctx, texts)
-	}()
-	docHits, docErr := b.docs.Find(ctx, texts)
-	<-done
-	if memErr != nil && docErr != nil {
-		return nil, docErr
-	}
-	return append(memHits, docHits...), nil
 }

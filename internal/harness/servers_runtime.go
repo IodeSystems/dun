@@ -18,6 +18,7 @@ import (
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/mcpmgr"
 	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/dun/internal/memory"
 	"github.com/iodesystems/dun/internal/mounttool"
 	"github.com/iodesystems/dun/internal/oauth"
 )
@@ -813,29 +814,29 @@ func (h *Harness) rebuildTools() {
 	// its plan.
 	// memory whenever the session reaches dund's retrieval (cfg.Rag): a note
 	// is worth writing only because the proactive search brings it back, and
-	// that search is dund's now, not the docs server's (memory.go,
-	// memrecall.go). With dund down it reads the files.
+	// that search is dund's now, not the docs server's (internal/memory).
+	// With dund down it reads the files.
 	// Strategies and constraints ride the same link, tool and recall, in
-	// their own index (notekinds.go); file_read takes their paths.
+	// their own index (internal/memory); file_read takes their paths.
 	h.memory.Store(nil)
 	h.strategies.Store(nil)
-	var memF, stratF *memFinder
+	var memF, stratF *memory.Finder
 	if l := h.memLink(); l != nil {
-		m := memoryFor(l, h.cfg.Workspace)
+		m := memory.NotesFor(l, h.cfg.Workspace)
 		h.memory.Store(m)
-		memF = &memFinder{l: l, m: m, skip: h.listedImportant}
+		memF = memory.NewFinder(l, m, h.listedImportant)
 		if sl := h.stratLink(); sl != nil {
-			s := strategyFor(sl, h.cfg.Workspace)
+			s := memory.StrategiesFor(sl, h.cfg.Workspace)
 			h.strategies.Store(s)
-			stratF = &memFinder{l: sl, m: s, skip: h.listedImportant}
+			stratF = memory.NewFinder(sl, s, h.listedImportant)
 		}
-		// A child reads notes with file_read (withItemRead) but is not offered
+		// A child reads notes with file_read (memory.WithItemRead) but is not offered
 		// the memory tool: it works a node, it does not curate notes.
 		if !h.isChild() {
-			toolDefs = append(toolDefs, memoryToolDef())
-			dispatch = withMemory(dispatch, h, m, report)
+			toolDefs = append(toolDefs, memory.ToolDef())
+			dispatch = memory.WithTool(dispatch, func(raw string) string { return h.memoryCall(m, raw) }, report)
 		}
-		dispatch = withItemRead(dispatch, h)
+		dispatch = memory.WithItemRead(dispatch, h.memStores)
 	}
 	// search: the code and docs indexes, whenever the code link is up.
 	var codeF *codeFinder
@@ -923,7 +924,7 @@ func (h *Harness) rebuildTools() {
 		rules, rulesMode, rulesSet = h.rulesBlock(rulesIndexed)
 		sys += rules
 		// The important memories, strategies and constraints, by path
-		// (notekinds.go): in every session, with no retrieval.
+		// (internal/memory): in every session, with no retrieval.
 		sys += h.standingBlock()
 	}
 	if slices.ContainsFunc(toolDefs, func(d llm.ToolDef) bool { return d.Function.Name == "recap" }) {
@@ -1015,7 +1016,7 @@ func (h *Harness) rebuildTools() {
 		// no fixed range. What surfaces is decided by the hit's similarity
 		// or query-word coverage instead (see docsPreparer): one document
 		// per group and pass, inlined when short.
-		inner := docGroup([]*memoryStore{h.memoryStore(), h.strategyStore()}, h.skillForDoc, h.isRulesDoc)
+		inner := docGroup([]*memory.Store{h.memoryStore(), h.strategyStore()}, h.skillForDoc, h.isRulesDoc)
 		group := inner
 		home, _ := os.UserHomeDir()
 		src := &hitSources{display: func(p string) string { return displayPath(p, home, h.cfg.Workspace, h.cfg.ConfigDir) }}

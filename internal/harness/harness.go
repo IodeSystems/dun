@@ -23,6 +23,7 @@ import (
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/mcpmgr"
 	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/dun/internal/memory"
 	"github.com/iodesystems/dun/internal/mounttool"
 	"github.com/iodesystems/dun/internal/oauth"
 	"github.com/iodesystems/dun/internal/procstat"
@@ -278,7 +279,7 @@ type Config struct {
 	// Peers: no dund, no loops.
 	Loops LoopLink
 	// Rag reaches dund's retrieval, which holds the memory notes' indexes
-	// (raglink.go, memrecall.go). Set, the session has the memory tool and
+	// (raglink.go, internal/memory). Set, the session has the memory tool and
 	// recalls notes, with dund down too (from the files); nil, neither.
 	Rag RagLink
 	// NoCodeSearch turns off the code and docs search through dund
@@ -542,17 +543,17 @@ type Harness struct {
 	toolNames atomic.Pointer[[]string]
 	// memory is the note store when the session has a RagLink, else nil.
 	// Set by rebuildTools; read by /remember from another goroutine.
-	memory atomic.Pointer[memoryStore]
+	memory atomic.Pointer[memory.Store]
 	// memLinkOnce makes memLinkV, the notes' link to dund, once per harness
 	// (a child uses its parent's).
 	memLinkOnce sync.Once
-	memLinkV    *memLink
+	memLinkV    *memory.Link
 	// strategies is the strategies and constraints store, beside memory
-	// (notekinds.go); stratLink its link to dund. listed is the files the
+	// (internal/memory); stratLink its link to dund. listed is the files the
 	// standing list of the system prompt shows, as of the last rebuild.
-	strategies    atomic.Pointer[memoryStore]
+	strategies    atomic.Pointer[memory.Store]
 	stratLinkOnce sync.Once
-	stratLinkV    *memLink
+	stratLinkV    *memory.Link
 	// codeLinkOnce makes codeLinkV, the link to the code and docs indexes
 	// (codesearch.go), once per harness (a child uses its parent's).
 	codeLinkOnce sync.Once
