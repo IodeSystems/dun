@@ -728,7 +728,7 @@ func (h *Harness) rebuildTools() {
 	code := h.codeLink()
 	mcpDefs := len(toolDefs) // after these: dun's own (builtins.go)
 	if cfg.Exec != nil {
-		toolDefs = append(toolDefs, execToolDef(!h.isChild() && !cfg.NonInteractive && !cfg.Worker))
+		toolDefs = append(toolDefs, execToolDef(!h.isChild() && !cfg.NonInteractive && !cfg.Worker, cfg.Exec))
 		// ONE backend for everything. A long command used to need a stateless
 		// backend of its own so it would not hold the shell that every other
 		// command serializes on; now it donates that shell when it is promoted
@@ -738,6 +738,7 @@ func (h *Harness) rebuildTools() {
 			return h.startJob(cfg.Exec, command)
 		}
 		dispatch = withExec(dispatch, cfg.Exec, report, startJob, h.spillExec, h.userWaiting, h.workEnded)
+		dispatch = withCdNudge(dispatch, execStartDir(cfg.Exec), &h.cdNudges)
 	}
 	// File tools, rooted at the working tree. Rebuilt with the tool set, so a
 	// worktree switch (Rehoist) moves their root with exec's.
