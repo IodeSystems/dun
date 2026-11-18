@@ -46,6 +46,9 @@ const maxLinkSock = 103
 // errDetached is an engine's Wait after dund let go of it: it runs on.
 var errDetached = errors.New("engine detached")
 
+// errLinkBusy: another dund is attached to the engine (link_busy).
+var errLinkBusy = errors.New("another dund is attached to it")
+
 // proc is the engine's process: a child dund started, or one it adopted.
 type proc interface {
 	wait() error
@@ -255,7 +258,7 @@ func dialLink(sock string, timeout time.Duration) (net.Conn, *bufio.Scanner, pro
 	_ = c.SetReadDeadline(time.Time{})
 	if sc.Text() == proto.LinkBusyLine {
 		c.Close()
-		return nil, nil, proto.LinkHello{}, errors.New("another dund is attached to it")
+		return nil, nil, proto.LinkHello{}, errLinkBusy
 	}
 	var h proto.LinkHello
 	if err := json.Unmarshal(sc.Bytes(), &h); err != nil || h.Type != proto.LinkHelloType {
@@ -454,10 +457,10 @@ func adoptEngines(dir string) []*Adoption {
 		if sock == "" {
 			sock = filepath.Join(dir, strconv.Itoa(info.Pid)+".sock")
 		}
-		c, sc, h, err := dialLink(sock, adoptDial)
+		c, sc, h, err := dialAdopt(sock)
 		if err != nil {
 			log.Printf("dund: engine %d (session %q) not adopted: %v; its session resumes from the record", info.Pid, info.Session, err)
-			if !strings.Contains(err.Error(), "another dund") {
+			if !errors.Is(err, errLinkBusy) {
 				removeEngineFiles(dir, info.Pid)
 			}
 			continue
@@ -478,6 +481,20 @@ func adoptEngines(dir string) []*Adoption {
 		out = append(out, a)
 	}
 	return out
+}
+
+// dialAdopt is dialLink for an adoption. "Busy" right after a restart is
+// usually the last dund's connection, which the engine has not seen close
+// yet (an in-place exec is quick): tried again for adoptDial.
+func dialAdopt(sock string) (net.Conn, *bufio.Scanner, proto.LinkHello, error) {
+	deadline := time.Now().Add(adoptDial)
+	for {
+		c, sc, h, err := dialLink(sock, adoptDial)
+		if !errors.Is(err, errLinkBusy) || time.Now().After(deadline) {
+			return c, sc, h, err
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 func removeEngineFiles(dir string, pid int) {

@@ -193,7 +193,7 @@ func (s *Service) adoptAll(ad Adopter) map[string]bool {
 		}
 		ses.adopt(eng, a.Hello, ad.EngineBuild())
 		adopted[ses.id] = true
-		log.Printf("dund: adopted engine %d of session %s (build %s)", a.Hello.Pid, ses.id, orBuild(a.Hello.Version))
+		log.Printf("dund: adopted engine %d of session %s (build %q)", a.Hello.Pid, ses.id, a.Hello.Version)
 	}
 	changed := false
 	for _, ses := range s.sessions {

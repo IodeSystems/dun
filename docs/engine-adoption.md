@@ -140,7 +140,8 @@ before it resumes sessions (`resumeFlagged`) and before the crash check:
   (`wait4` when it is still dund's child after an in-place exec, else polled).
   `Kill`: `SIGKILL` to its process group when the group is its own.
 - Logs of exited engines (`<pid>.log` with no `<pid>.json`) are pruned after
-  7 days.
+  7 days. Engines that died in the gap after an in-place exec are still
+  dund's children: they are reaped first (`reapExited`).
 
 ## Upgrade with adoption
 
@@ -180,6 +181,20 @@ leave the group (a future change) is not killed either. Not verified on a
 Mac: `launchctl kickstart -k` and a KeepAlive relaunch with a live engine
 are the checks to run.
 
+## Tests
+
+- `cmd/dun/enginelink_test.go`: resume after seq N (no loss, no repeat), ring
+  overflow (`link_gap`), state on resume, a second dialer refused,
+  backpressure, orphan stop, flush at exit.
+- `internal/dund/adopt_test.go` (fake engines behind a fake link): adoption
+  across a Service restart, the three fallbacks, an engine with no session,
+  `reattach`, the move of an older build at idle.
+- `cmd/dun/adopt_integration_test.go`: two real builds, a dund that re-execs
+  mid-turn against a slow fake LLM; tokens in order with none lost or
+  repeated, the turn completes, the engine moves to the new build at idle.
+  `DUN_TEST_SYSTEMD=1` runs the same as a transient systemd user service
+  through the exit-75 handover (passed on systemd 259, 2026-11-18).
+
 ## Not covered
 
 - Shared MCP servers (dund's gateway) die with the old dund; an adopted
@@ -187,4 +202,6 @@ are the checks to run.
   call to such a server fails.
 - The partial reply streamed before the restart is not in a reconnecting
   client's snapshot until its `message` comes (as after any dund restart).
-- Windows: no adoption (no unix sockets in `ExecSpawner`'s path there).
+- `--docker`: the outer process holds the link and pipes the container's
+  stdio through it (`dropListen`); not tested.
+- launchd: not run on a Mac (see "launchd").
