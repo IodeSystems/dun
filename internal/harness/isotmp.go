@@ -11,8 +11,8 @@ import (
 // The isolation tmp: where saved output (a clipped exec result, a background
 // job's log) can be READ, at one absolute path that means the same file on
 // the host, in a worktree and inside a --docker container (mounted there at
-// the same path). file_read already reads absolute paths under /tmp, and any
-// exec can cat or grep it.
+// the same path). file_read reads it by absolute path with no grant
+// (sessionReadDirs, files.go), and any exec can cat or grep it.
 //
 // Saved output is written twice (USER 2026-11-06, "dual write and isolation
 // restore"): the session's bg dir is the durable copy that travels with the

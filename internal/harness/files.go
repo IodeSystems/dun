@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/iodesystems/agentkit/agent"
@@ -111,15 +112,17 @@ var tmpRoots = func() []string { // a var: a test whose dirs are in /tmp turns i
 	return out
 }
 
-// tmpReaders is a read-only toolset per tmp root, configured like ts (same
-// caps and prefix). Resolve keeps the path as the model wrote it, so a read's
-// header says /tmp/x.log, not x.log.
-func tmpReaders(cfg filetools.Config) []*filetools.Toolset {
+// tmpReaders is a read-only toolset per root (the tmp roots, then extra),
+// configured like ts (same caps and prefix). Resolve keeps the path as the
+// model wrote it, so a read's header says /tmp/x.log, not x.log. A root is
+// real (symlinks resolved) and the path is resolved to match: on macOS the
+// temp dir is /var/folders/…, a link to /private/var/folders/….
+func tmpReaders(cfg filetools.Config, extra ...string) []*filetools.Toolset {
 	var out []*filetools.Toolset
-	for _, root := range tmpRoots() {
+	for _, root := range append(tmpRoots(), extra...) {
 		c := cfg
 		c.Root, c.ReadOnly, c.ExtraIgnore = root, true, nil
-		c.Resolve = func(rel string) (string, error) { return filetools.Under(root, rel) }
+		c.Resolve = func(rel string) (string, error) { return filetools.Under(root, realAbs(rel)) }
 		ts, err := filetools.New(c)
 		if err != nil {
 			continue
@@ -137,7 +140,61 @@ func (h *Harness) tmpReaders() []*filetools.Toolset {
 	if !ok {
 		return nil
 	}
-	return tmpReaders(cfg)
+	return tmpReaders(cfg, h.sessionReadDirs()...)
+}
+
+// sessionReadDirs are the directories where dun saves files for this session
+// and gives the model their paths: the isolation tmp (job logs, clipped exec
+// output, harness.json; isotmp.go) and the shell's overflow dir
+// (shellhost.go). Read, grep and list open them with no grant and no
+// question: the model was refused the log of a job dun started for it
+// (macOS, /var/folders/…/dun-<id>/job-18.log). A sub-agent gets its
+// ancestors' dirs too, so it can read a parent's job log by the path it was
+// passed; a parent's isolation tmp already holds its children's (child-N).
+// Exact dirs, real paths: not another session's, not the whole temp dir.
+func (h *Harness) sessionReadDirs() []string {
+	var out []string
+	add := func(d string) {
+		if d == "" {
+			return
+		}
+		if real, err := filepath.EvalSymlinks(d); err == nil && !slices.Contains(out, real) {
+			out = append(out, real)
+		}
+	}
+	if tmp := h.isoTmp(); tmp != "" {
+		add(tmp)
+	} else {
+		add(h.bgLogDir()) // saveBoth's path then: no isolation tmp
+	}
+	over := h.overflowDir()
+	_ = os.MkdirAll(over, 0o700) // mcpshell makes it later; a root must exist
+	add(over)
+	for f := parentSessionFile(h.cfg.SessionFile); f != ""; f = parentSessionFile(f) {
+		add(IsoTmpDir(f))
+		add(filepath.Join(filepath.Dir(f), "overflow", strings.TrimSuffix(filepath.Base(f), ".jsonl")))
+	}
+	return out
+}
+
+// parentSessionFile is the session file of a sub-agent's parent
+// (childSessionFile reversed), "" for a top-level session.
+func parentSessionFile(f string) string {
+	m := subSession.FindStringSubmatch(strings.TrimSuffix(filepath.Base(f), ".jsonl"))
+	if f == "" || m == nil {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(f), m[1]+".jsonl")
+}
+
+// realAbs is an absolute path with its symlinks resolved; a relative one as
+// it is.
+func realAbs(p string) string {
+	p = strings.TrimSpace(p)
+	if !filepath.IsAbs(p) {
+		return p
+	}
+	return resolveExisting(filepath.Clean(p))
 }
 
 // tmpReader is the tmp toolset for a read, grep or list call whose path is
@@ -158,8 +215,9 @@ func tmpReader(ts *filetools.Toolset, tmp []*filetools.Toolset, name, args strin
 	if _, err := filetools.Under(ts.Root(), p); err == nil {
 		return nil // inside the working tree: the tree's toolset has it
 	}
+	real := realAbs(p)
 	for _, t := range tmp {
-		if _, err := filetools.Under(t.Root(), p); err == nil {
+		if _, err := filetools.Under(t.Root(), real); err == nil {
 			return t
 		}
 	}
