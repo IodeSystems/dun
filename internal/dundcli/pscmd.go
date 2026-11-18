@@ -97,7 +97,7 @@ type psView struct {
 
 // sample reads dund's sessions and the table, rated against prev (or
 // against a reading sampleWindow before, when prev is empty).
-func sample(l *loader, prev procps.Snapshot) (psView, procps.Snapshot, error) {
+func sample(l *loader, prev procps.Snapshot, rc *rootsCache) (psView, procps.Snapshot, error) {
 	if prev.Procs == nil {
 		s, err := procps.Read()
 		if err != nil {
@@ -113,6 +113,10 @@ func sample(l *loader, prev procps.Snapshot) (psView, procps.Snapshot, error) {
 	}
 	rows := procps.Attribute(cur, list, procps.Cwd)
 	procps.Apply(rows, procps.Rates(prev, cur))
+	if d := procps.PolyDaemon(cur); d != nil {
+		roots, rerr := rc.get(d, cur.At)
+		procps.AttachRoots(rows, d.PID, roots, rerr, list)
+	}
 	v := psView{At: cur.At, Window: cur.At.Sub(prev.At).Seconds(), Groups: procps.Groups(rows)}
 	if list != nil {
 		v.Sessions = len(list.Sessions)
@@ -128,8 +132,33 @@ func sample(l *loader, prev procps.Snapshot) (psView, procps.Snapshot, error) {
 	return v, cur, nil
 }
 
+// rootsEvery is the least time between two `poly-lsp-mcp status` runs in
+// --watch: it walks the daemon's status files.
+const rootsEvery = 10 * time.Second
+
+// rootsCache holds the last reading of the daemon's roots (or its failure).
+type rootsCache struct {
+	at    time.Time
+	pid   int
+	roots []procps.Root
+	err   error
+	read  func(*procps.Proc) ([]procps.Root, error) // procps.ReadRoots; tests replace it
+}
+
+func (c *rootsCache) get(d *procps.Proc, now time.Time) ([]procps.Root, error) {
+	if c.pid != d.PID || c.at.IsZero() || now.Sub(c.at) >= rootsEvery {
+		read := c.read
+		if read == nil {
+			read = procps.ReadRoots
+		}
+		c.roots, c.err = read(d)
+		c.at, c.pid = now, d.PID
+	}
+	return c.roots, c.err
+}
+
 func psOnce(l *loader, w io.Writer, asJSON bool) error {
-	v, _, err := sample(l, procps.Snapshot{})
+	v, _, err := sample(l, procps.Snapshot{}, &rootsCache{})
 	if err != nil {
 		return err
 	}
@@ -150,8 +179,9 @@ func psWatch(ctx context.Context, l *loader, w io.Writer, asJSON bool, every tim
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
 	defer stop()
 	var prev procps.Snapshot
+	rc := &rootsCache{}
 	for {
-		v, cur, err := sample(l, prev)
+		v, cur, err := sample(l, prev, rc)
 		if err != nil {
 			return err
 		}

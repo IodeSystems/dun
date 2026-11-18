@@ -71,6 +71,8 @@ const (
 	// maxJob caps the JOB column when the terminal is wider (or unknown):
 	// past it the other columns drift too far from the name to read across.
 	maxJob = 64
+	// maxRootJob is the same for a daemon's root lines, which say more.
+	maxRootJob = 110
 )
 
 // Table is the groups as aligned text, width columns wide at most (0: no
@@ -78,15 +80,21 @@ const (
 func Table(gs []Group, width int) string {
 	wSes := len("SESSION")
 	wJob := len("JOB")
+	wRoot := 0
 	for _, g := range gs {
 		wSes = max(wSes, runeLen(g.Session))
 		for _, r := range g.Rows {
 			wJob = max(wJob, runeLen(r.Job))
+			names := rootNames(r.Roots)
+			for i, root := range r.Roots {
+				wSes = max(wSes, runeLen(root.Session))
+				wRoot = max(wRoot, runeLen("  "+rootLine(root, names[i])))
+			}
 		}
 		wJob = max(wJob, runeLen(totalLabel(g)))
 	}
 	wSes = min(wSes, maxSession)
-	wJob = min(wJob, maxJob)
+	wJob = max(min(wJob, maxJob), min(wRoot, maxRootJob))
 	if width > 0 {
 		fixed := wPID + wSes + wCPU + wMEM + wIO + wAGE + 6*gap
 		wJob = max(minJob, min(wJob, width-fixed))
@@ -109,6 +117,17 @@ func Table(gs []Group, width int) string {
 		}
 		for _, r := range g.Rows {
 			line(fmt.Sprint(r.PID), g.Session, r.Job, cpuText(r.CPU), Size(float64(r.RSS)), ioText(r.ReadBps, r.WritBps), Age(r.AgeSec))
+			names := rootNames(r.Roots)
+			for i, root := range r.Roots {
+				line("", root.Session, "  "+rootLine(root, names[i]), "", "", "", "")
+			}
+			if r.RootsErr != "" {
+				msg := "  " + r.RootsErr
+				if width > 0 {
+					msg = "\x1b[2m" + fit(msg, width) + "\x1b[0m"
+				}
+				b.WriteString(msg + "\n")
+			}
 		}
 		if len(g.Rows) > 1 {
 			line("", g.Session, totalLabel(g), cpuText(g.CPU), Size(float64(g.RSS)), ioText(g.ReadBps, g.WritBps), "")

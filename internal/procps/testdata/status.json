@@ -1,0 +1,789 @@
+[
+  {
+    "pid": 200,
+    "root": "/w/raglit",
+    "updatedAt": "2026-11-17T20:54:32-08:00",
+    "children": [
+      {
+        "language": "go",
+        "root": "/w/raglit",
+        "state": "stopped",
+        "idleSec": 202505,
+        "starts": 0,
+        "crashRestarts": 0,
+        "idleStops": 0,
+        "memoryStops": 0,
+        "pressureStops": 0,
+        "capStops": 1,
+        "lastStop": "cap",
+        "lastStopAt": "2026-11-15T12:39:28-08:00",
+        "lastStopRSS": 181342208
+      },
+      {
+        "language": "typescript",
+        "root": "/w/raglit",
+        "state": "stopped",
+        "idleSec": 202500,
+        "starts": 0,
+        "crashRestarts": 0,
+        "idleStops": 1,
+        "memoryStops": 0,
+        "pressureStops": 0,
+        "lastStop": "idle",
+        "lastStopAt": "2026-11-15T12:49:32-08:00",
+        "lastStopRSS": 14499840
+      }
+    ],
+    "fleet": {
+      "maxChildren": 4,
+      "running": 0,
+      "rss": 0,
+      "rssBudget": 32604481525
+    },
+    "index": {
+      "files": 580,
+      "bytes": 5072459,
+      "cached": 0,
+      "wallMs": 2320,
+      "heaviest": [
+        {
+          "dir": "cmd/raglit/",
+          "files": 155,
+          "bytes": 1092415,
+          "costMs": 570,
+          "share": 0.215
+        },
+        {
+          "dir": "web/",
+          "files": 66,
+          "bytes": 558515,
+          "costMs": 390,
+          "share": 0.11
+        },
+        {
+          "dir": "docs/design/",
+          "files": 33,
+          "bytes": 423935,
+          "costMs": 29,
+          "share": 0.083
+        }
+      ],
+      "hint": "to drop a directory from the index, pass --exclude \u003cdir\u003e or add it to .gitignore",
+      "leftOut": [
+        {
+          "dir": ".poly-lsp-mcp",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": ".raglit",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "bench/probes/ocr-drawing-dimensions/_fixture",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "bench/probes/ocr-esize-survey/_fixture",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "bench/probes/ocr-scanned-exhibit/_fixture",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "bench/probes/ocr-survey-corners/_fixture",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "bench/probes/ocr-survey-facts/_fixture",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "bin",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "dist",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "web/node_modules",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "web/packages/attest-core/dist",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "web/packages/attest-react/dist",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "bench/__pycache__",
+          "reason": "skipped dir"
+        },
+        {
+          "dir": "bench/agent-ab/__pycache__",
+          "reason": "skipped dir"
+        },
+        {
+          "dir": "bench/retrieval/__pycache__",
+          "reason": "skipped dir"
+        },
+        {
+          "dir": "web/dist",
+          "reason": "skipped dir"
+        }
+      ],
+      "leftOutBy": [
+        {
+          "reason": "git-ignored",
+          "count": 12
+        },
+        {
+          "reason": "skipped dir",
+          "count": 4,
+          "hint": "index one anyway: --include \u003cdir\u003e (repeatable) or include: in poly-lsp-mcp.yaml"
+        }
+      ],
+      "languages": {
+        "go": 418,
+        "json": 12,
+        "markdown": 83,
+        "python": 6,
+        "sql": 2,
+        "typescript": 56,
+        "yaml": 3
+      }
+    },
+    "memoryLimit": 2147483648
+  },
+  {
+    "pid": 200,
+    "root": "/w/poly-lsp-mcp",
+    "updatedAt": "2026-11-17T20:54:36-08:00",
+    "children": [
+      {
+        "language": "go",
+        "root": "/w/poly-lsp-mcp",
+        "state": "stopped",
+        "idleSec": 202509,
+        "starts": 0,
+        "crashRestarts": 0,
+        "idleStops": 0,
+        "memoryStops": 0,
+        "pressureStops": 0,
+        "capStops": 1,
+        "lastStop": "cap",
+        "lastStopAt": "2026-11-15T12:39:26-08:00",
+        "lastStopRSS": 34496512
+      },
+      {
+        "language": "typescript",
+        "root": "/w/poly-lsp-mcp",
+        "state": "stopped",
+        "idleSec": 202500,
+        "starts": 0,
+        "crashRestarts": 0,
+        "idleStops": 1,
+        "memoryStops": 0,
+        "pressureStops": 0,
+        "lastStop": "idle",
+        "lastStopAt": "2026-11-15T12:49:36-08:00",
+        "lastStopRSS": 14569472
+      }
+    ],
+    "fleet": {
+      "maxChildren": 4,
+      "running": 0,
+      "rss": 0,
+      "rssBudget": 32604481525
+    },
+    "index": {
+      "files": 489,
+      "bytes": 3827685,
+      "cached": 1,
+      "wallMs": 2108,
+      "heaviest": [
+        {
+          "dir": "mcp/",
+          "files": 140,
+          "bytes": 1610140,
+          "costMs": 773,
+          "share": 0.42
+        },
+        {
+          "dir": "symbols/",
+          "files": 57,
+          "bytes": 405257,
+          "costMs": 201,
+          "share": 0.105
+        },
+        {
+          "dir": "daemon/",
+          "files": 43,
+          "bytes": 280793,
+          "costMs": 177,
+          "share": 0.073
+        },
+        {
+          "dir": "bench/probes/find-render-entrypoints/_fixture/",
+          "files": 12,
+          "bytes": 270374,
+          "costMs": 241,
+          "share": 0.07
+        },
+        {
+          "dir": "internal/",
+          "files": 65,
+          "bytes": 266508,
+          "costMs": 193,
+          "share": 0.069
+        },
+        {
+          "dir": "multiplex/",
+          "files": 44,
+          "bytes": 201838,
+          "costMs": 122,
+          "share": 0.052
+        }
+      ],
+      "hint": "to drop a directory from the index, pass --exclude \u003cdir\u003e or add it to .gitignore",
+      "leftOut": [
+        {
+          "dir": ".claude",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": ".claude/worktrees",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": ".poly-lsp-mcp",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "dist",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "scripts/smoke/__pycache__",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "testdata/fixtures/polyglot/.poly-lsp-mcp",
+          "reason": "git-ignored"
+        }
+      ],
+      "leftOutBy": [
+        {
+          "reason": "git-ignored",
+          "count": 6
+        }
+      ],
+      "languages": {
+        "go": 441,
+        "json": 6,
+        "markdown": 15,
+        "proto": 2,
+        "python": 6,
+        "sql": 1,
+        "swift": 4,
+        "typescript": 3,
+        "yaml": 11
+      }
+    },
+    "memoryLimit": 2147483648
+  },
+  {
+    "pid": 200,
+    "root": "/tmp/scratch/promptreview/ws/A2",
+    "updatedAt": "2026-11-17T20:54:40-08:00",
+    "children": [
+      {
+        "language": "go",
+        "root": "/tmp/scratch/promptreview/ws/A2",
+        "state": "stopped",
+        "idleSec": 35680,
+        "starts": 0,
+        "crashRestarts": 0,
+        "idleStops": 0,
+        "memoryStops": 0,
+        "pressureStops": 0,
+        "clientStops": 1,
+        "lastStop": "no-client",
+        "lastStopAt": "2026-11-17T11:01:29-08:00",
+        "lastStopRSS": 338931712
+      }
+    ],
+    "fleet": {
+      "maxChildren": 4,
+      "running": 0,
+      "rss": 0,
+      "rssBudget": 32604481525
+    },
+    "index": {
+      "files": 2,
+      "bytes": 32,
+      "cached": 0,
+      "wallMs": 0,
+      "heaviest": null,
+      "languages": {
+        "go": 1,
+        "markdown": 1
+      }
+    },
+    "memoryLimit": 2147483648
+  },
+  {
+    "pid": 200,
+    "root": "/w/a",
+    "updatedAt": "2026-11-17T20:54:32-08:00",
+    "children": [
+      {
+        "language": "go",
+        "root": "/w/a",
+        "state": "stopped",
+        "idleSec": 6440,
+        "starts": 0,
+        "crashRestarts": 0,
+        "idleStops": 0,
+        "memoryStops": 0,
+        "pressureStops": 0,
+        "clientStops": 1,
+        "lastStop": "no-client",
+        "lastStopAt": "2026-11-17T19:08:12-08:00",
+        "lastStopRSS": 1248956416
+      },
+      {
+        "language": "typescript",
+        "root": "/w/a",
+        "state": "stopped",
+        "idleSec": 6440,
+        "starts": 0,
+        "crashRestarts": 0,
+        "idleStops": 0,
+        "memoryStops": 0,
+        "pressureStops": 0,
+        "clientStops": 1,
+        "lastStop": "no-client",
+        "lastStopAt": "2026-11-17T19:08:12-08:00",
+        "lastStopRSS": 15040512
+      }
+    ],
+    "fleet": {
+      "maxChildren": 4,
+      "running": 0,
+      "rss": 0,
+      "rssBudget": 32604481525
+    },
+    "index": {
+      "files": 965,
+      "bytes": 8093004,
+      "cached": 2,
+      "wallMs": 3853,
+      "heaviest": [
+        {
+          "dir": "internal/",
+          "files": 344,
+          "bytes": 2791297,
+          "costMs": 1268,
+          "share": 0.344
+        },
+        {
+          "dir": "mobile/",
+          "files": 107,
+          "bytes": 960022,
+          "costMs": 504,
+          "share": 0.118
+        },
+        {
+          "dir": "cmd/dun/",
+          "files": 102,
+          "bytes": 888724,
+          "costMs": 769,
+          "share": 0.109
+        }
+      ],
+      "hint": "to drop a directory from the index, pass --exclude \u003cdir\u003e or add it to .gitignore",
+      "leftOut": [
+        {
+          "dir": ".claude/worktrees",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": ".dun",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": ".poly-lsp-mcp",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "dist",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "examples/harbor/__pycache__",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "examples/harbor/bin",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "examples/harbor/jobs",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "internal/dundapi/webdist",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "mobile/.expo",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "mobile/android",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "mobile/dist",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "mobile/node_modules",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "mobile/src/gql",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "tmp",
+          "reason": "git-ignored"
+        }
+      ],
+      "leftOutBy": [
+        {
+          "reason": "git-ignored",
+          "count": 14
+        }
+      ],
+      "languages": {
+        "go": 764,
+        "graphql": 1,
+        "json": 39,
+        "markdown": 50,
+        "python": 9,
+        "typescript": 99,
+        "yaml": 3
+      }
+    },
+    "memoryLimit": 2147483648
+  },
+  {
+    "pid": 200,
+    "root": "/w/redline",
+    "updatedAt": "2026-11-17T20:54:36-08:00",
+    "children": [
+      {
+        "language": "go",
+        "root": "/w/redline",
+        "state": "stopped",
+        "idleSec": 202509,
+        "starts": 0,
+        "crashRestarts": 0,
+        "idleStops": 0,
+        "memoryStops": 0,
+        "pressureStops": 0,
+        "capStops": 1,
+        "lastStop": "cap",
+        "lastStopAt": "2026-11-15T12:39:31-08:00",
+        "lastStopRSS": 1149956096
+      },
+      {
+        "language": "typescript",
+        "root": "/w/redline",
+        "state": "stopped",
+        "idleSec": 202500,
+        "starts": 0,
+        "crashRestarts": 0,
+        "idleStops": 0,
+        "memoryStops": 0,
+        "pressureStops": 1,
+        "lastStop": "pressure",
+        "lastStopAt": "2026-11-15T12:48:16-08:00",
+        "lastStopRSS": 14786560
+      }
+    ],
+    "fleet": {
+      "maxChildren": 4,
+      "running": 0,
+      "rss": 0,
+      "rssBudget": 32604481525
+    },
+    "index": {
+      "files": 2866,
+      "bytes": 26081038,
+      "cached": 15,
+      "wallMs": 10835,
+      "heaviest": [
+        {
+          "dir": "internal/",
+          "files": 1499,
+          "bytes": 14432479,
+          "costMs": 4949,
+          "share": 0.553
+        },
+        {
+          "dir": "ui/src/",
+          "files": 767,
+          "bytes": 4513690,
+          "costMs": 3314,
+          "share": 0.173
+        },
+        {
+          "dir": "e2e/",
+          "files": 184,
+          "bytes": 1575102,
+          "costMs": 543,
+          "share": 0.06
+        }
+      ],
+      "hint": "to drop a directory from the index, pass --exclude \u003cdir\u003e or add it to .gitignore",
+      "leftOut": [
+        {
+          "dir": ".cache",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": ".claude/worktrees",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": ".idea",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "db/.gen",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "deploy/bin",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "deploy/web",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "dist",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "home/cr",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "home/data",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "home/logs",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "tmp",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "ui/.tanstack",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "ui/dist",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "ui/node_modules",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "ui/src/gql",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "ux/runs/20261108-122948-assistant-create-team-run",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "ux/runs/20261108-150649-getting-in-admin-run",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "ux/runs/20261108-150817-getting-in-member-run",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "ux/runs/20261108-151119-getting-in-deeplink-run",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "ux/runs/20261108-151224-getting-in-group-run",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "www/node_modules",
+          "reason": "skipped dir"
+        }
+      ],
+      "leftOutBy": [
+        {
+          "reason": "git-ignored",
+          "count": 26
+        },
+        {
+          "reason": "skipped dir",
+          "count": 1,
+          "hint": "index one anyway: --include \u003cdir\u003e (repeatable) or include: in poly-lsp-mcp.yaml"
+        }
+      ],
+      "languages": {
+        "go": 1450,
+        "graphql": 1,
+        "json": 71,
+        "markdown": 134,
+        "python": 2,
+        "sql": 381,
+        "typescript": 816,
+        "yaml": 11
+      }
+    },
+    "memoryLimit": 2147483648
+  },
+  {
+    "pid": 200,
+    "root": "/tmp/scratch/ws",
+    "updatedAt": "2026-11-17T20:54:37-08:00",
+    "children": [],
+    "fleet": {
+      "maxChildren": 4,
+      "running": 0,
+      "rss": 0,
+      "rssBudget": 32604481525
+    },
+    "index": {
+      "files": 1,
+      "bytes": 4,
+      "cached": 0,
+      "wallMs": 0,
+      "heaviest": null,
+      "languages": {
+        "python": 1
+      }
+    },
+    "memoryLimit": 2147483648
+  },
+  {
+    "pid": 200,
+    "root": "/w/aw4",
+    "updatedAt": "2026-11-17T20:54:33-08:00",
+    "children": [
+      {
+        "language": "go",
+        "root": "/w/aw4",
+        "state": "stopped",
+        "idleSec": 202506,
+        "starts": 0,
+        "crashRestarts": 0,
+        "idleStops": 0,
+        "memoryStops": 0,
+        "pressureStops": 0,
+        "capStops": 1,
+        "lastStop": "cap",
+        "lastStopAt": "2026-11-15T12:39:32-08:00",
+        "lastStopRSS": 281747456
+      }
+    ],
+    "fleet": {
+      "maxChildren": 4,
+      "running": 0,
+      "rss": 0,
+      "rssBudget": 32604481525
+    },
+    "index": {
+      "files": 2660,
+      "bytes": 21132984,
+      "cached": 90,
+      "wallMs": 7460,
+      "heaviest": [
+        {
+          "dir": "internal/",
+          "files": 2314,
+          "bytes": 18373075,
+          "costMs": 6465,
+          "share": 0.869
+        }
+      ],
+      "hint": "to drop a directory from the index, pass --exclude \u003cdir\u003e or add it to .gitignore",
+      "leftOut": [
+        {
+          "dir": ".air",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": ".claude/worktrees",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": ".vscode",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "home/files",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "tmp",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "ui/dist/assets",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "ui/node_modules",
+          "reason": "git-ignored"
+        },
+        {
+          "dir": "ui/dist",
+          "reason": "skipped dir"
+        }
+      ],
+      "leftOutBy": [
+        {
+          "reason": "git-ignored",
+          "count": 7
+        },
+        {
+          "reason": "skipped dir",
+          "count": 1,
+          "hint": "index one anyway: --include \u003cdir\u003e (repeatable) or include: in poly-lsp-mcp.yaml"
+        }
+      ],
+      "languages": {
+        "go": 2048,
+        "json": 9,
+        "markdown": 163,
+        "sql": 315,
+        "typescript": 120,
+        "yaml": 5
+      },
+      "shadowed": {
+        "ts over js": 1
+      }
+    },
+    "memoryLimit": 2147483648
+  }
+]

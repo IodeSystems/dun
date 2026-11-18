@@ -96,6 +96,10 @@ type Row struct {
 	Root   string `json:"root,omitempty"`
 	Orphan bool   `json:"orphan,omitempty"`
 	Argv   string `json:"argv"`
+	// Roots are the roots a poly-lsp-mcp daemon holds, by owning session;
+	// RootsErr says why they are missing.
+	Roots    []Root `json:"roots,omitempty"`
+	RootsErr string `json:"roots_error,omitempty"`
 
 	CPU     float64 `json:"cpu"` // percent of one core; -1 before a rate
 	RSS     int64   `json:"rss"`
