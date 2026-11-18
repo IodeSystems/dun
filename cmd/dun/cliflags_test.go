@@ -50,12 +50,8 @@ func TestNoRagNoLsp_AreTheOffSpelling(t *testing.T) {
 // The flags exist and are listed by --help; --media is repeatable, needs a
 // one-shot task, and refuses a file that is not an image.
 func TestFlags_RealBinary(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "dun")
-	build := exec.Command("go", "build", "-o", bin, ".")
-	build.Env = append(os.Environ(), "CGO_ENABLED=0")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("go build: %v\n%s", err, out)
-	}
+	t.Parallel()
+	bin := testDun(t) // the same build (CGO_ENABLED=0, no ldflags), made once per run
 	run := func(args ...string) string {
 		cmd := exec.Command(bin, args...)
 		cmd.Env = append(os.Environ(), "DUN_NO_SELFUPDATE=1")

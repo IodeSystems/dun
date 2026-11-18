@@ -99,6 +99,7 @@ func runDun(t *testing.T, stdin string, env []string, args ...string) (string, s
 }
 
 func TestCLI_BareWordIsRefused(t *testing.T) {
+	t.Parallel() // runs the built dun (testDun): its own process and env
 	_, stderr, code := runDun(t, "", nil, "fix it")
 	if code != 2 || !strings.Contains(stderr, `unknown command "fix it" — for a headless task: dun -p "fix it"`) {
 		t.Errorf("exit %d: %s", code, stderr)
@@ -108,6 +109,7 @@ func TestCLI_BareWordIsRefused(t *testing.T) {
 // -p is the headless run: with no provider it stops with the headless
 // message (nologin.go), and prints no JSON.
 func TestCLI_PIsHeadless(t *testing.T) {
+	t.Parallel() // runs the built dun (testDun): its own process and env
 	for _, args := range [][]string{{"--no-tools", "-p", "fix it"}, {"--no-tools", "-p"}} {
 		stdout, stderr, code := runDun(t, "fix it from stdin\n", nil, args...)
 		if code != 2 || !strings.Contains(stderr, "so the task cannot run") || strings.Contains(stdout, `"type"`) {
@@ -122,6 +124,7 @@ func TestCLI_PIsHeadless(t *testing.T) {
 // --engine speaks JSON events, and so does `-p` spawned exactly as a dund
 // that predates --engine spawned it.
 func TestCLI_EngineEmitsJSON(t *testing.T) {
+	t.Parallel() // runs the built dun (testDun): its own process and env
 	for _, c := range []struct {
 		env  []string
 		args []string
@@ -151,6 +154,7 @@ func TestCLI_EngineEmitsJSON(t *testing.T) {
 // Only the exact old-dund spawn is the engine: a task on stdin under dund's
 // environment, or another argv shape, is still the headless run.
 func TestOldDundSpawn(t *testing.T) {
+	t.Parallel() // runs the built dun (testDun): its own process and env
 	env := func(k string) string { return map[string]string{"DUN_DUND": "1", "DUN_CHILD": "1"}[k] }
 	none := func(string) string { return "" }
 	old := []string{"dun", "-p", "--workspace", "/ws"}
@@ -176,6 +180,7 @@ func TestDashBeforeArgs(t *testing.T) {
 
 // --web-tui moved into dund: exit 2 with where it went, and --help leaves it out.
 func TestCLI_WebTuiMovedIntoDund(t *testing.T) {
+	t.Parallel() // runs the built dun (testDun): its own process and env
 	_, stderr, code := runDun(t, "", nil, "--web-tui")
 	if code != 2 || !strings.Contains(stderr, "--web-tui moved into dund: dun dund enable web && dun dund enable tui, then open the address it prints") {
 		t.Errorf("exit %d: %s", code, stderr)

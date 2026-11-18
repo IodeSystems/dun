@@ -33,7 +33,7 @@ DUN_BIN := $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/dun/dun
 # Where `make web` installs the built client that dund serves (--web-root).
 WEB_ROOT := $(if $(XDG_DATA_HOME),$(XDG_DATA_HOME),$(HOME)/.local/share)/dun/web
 
-.PHONY: build install install-launcher run test clean schema web ux webapp release site site-push
+.PHONY: build install install-launcher run test test-changed test-pkg clean schema web ux webapp release site site-push
 
 build: ## build ./dun (version + source stamped)
 	go build -ldflags "$(LDFLAGS)" -o dun ./cmd/dun
@@ -58,6 +58,16 @@ run: ## build + launch the TUI
 test: ## build + vet (Linux and macOS, CLI-14) + test, and the recorder (its own module)
 	go build ./... && go vet ./... && GOOS=darwin go vet ./... && go test ./...
 	cd tools/ttyrec && go vet ./... && go test ./...
+
+# While working: test only what a change touches (tools/test-changed.sh).
+# Run the full `make test` once, before a merge.
+BASE ?= main
+test-changed: ## test the packages changed vs BASE (default main) and the packages that import them
+	BASE=$(BASE) tools/test-changed.sh
+
+P ?= ./...
+test-pkg: ## test the packages P names (P=./internal/tui/...), make test's flags
+	go test $(P)
 
 # A UX walk: hermetic dun + stub LLM, recorded at each of the walk's sizes;
 # writes tmp/ux-run-<walk>-<stamp>-<cols>x<rows>/ per size

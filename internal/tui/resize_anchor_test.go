@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 // resize_anchor_test.go covers what an on-screen keyboard does.
@@ -35,7 +37,21 @@ func filled(t *testing.T, w, h int) *vtui {
 	v := newVtui(w, h)
 	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
 	for i := 1; i <= 25; i++ {
-		v.send("question " + itoaT(i))
+		// Pasted, then enter: the same composer text and submit as typing
+		// it, in one Update instead of one per key (typing the 25 questions
+		// was most of this file's run time; TestResize_OffsetStays… builds
+		// 32 of these).
+		q := "question " + itoaT(i)
+		nm, _ := v.m.Update(tea.PasteMsg{Content: q})
+		v.m = nm.(tuiModel)
+		if got := v.m.input.Value(); got != q {
+			t.Fatalf("the paste did not land in the composer: %q", got)
+		}
+		v.m = key(v.m, kEnter)
+		if got := v.m.input.Value(); got != "" {
+			t.Fatalf("enter did not submit %q", got)
+		}
+		v.event(map[string]any{"type": "user", "content": q}) // the engine's echo, as send does
 		v.event(map[string]any{"type": "token", "text": "answer " + itoaT(i)})
 		v.event(map[string]any{"type": "done"})
 	}

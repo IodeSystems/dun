@@ -283,7 +283,9 @@ func TestMCP_StartSettleOffByDefault(t *testing.T) {
 					ev.Session = "s1"
 				case *proto.ListSessions:
 					ev = proto.NewEvent(&proto.SessionList{Items: []proto.SessionSummary{{ID: "s1", Running: true}}})
-				case *proto.Subscribe:
+				case *proto.Subscribe, *proto.User:
+					// The send's ack ends start's wait at once; unanswered,
+					// each start waited out sendAckWait (10 s).
 					ev = proto.NewEvent(&proto.Ack{})
 				default:
 					continue

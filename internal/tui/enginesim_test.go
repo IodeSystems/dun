@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/iodesystems/dun/proto"
@@ -12,9 +13,15 @@ import (
 // the turn_state the engine would send next (proto.StepTurnState, the
 // engine's own rule, and the queue as the harness keeps it). One per
 // model, by its proc.
-var simTurns = map[*dunProc]*proto.TurnState{}
+// simMu guards the map, not the states: each belongs to one test's model.
+var (
+	simMu    sync.Mutex
+	simTurns = map[*dunProc]*proto.TurnState{}
+)
 
 func simTurn(p *dunProc) *proto.TurnState {
+	simMu.Lock()
+	defer simMu.Unlock()
 	st := simTurns[p]
 	if st == nil {
 		st = &proto.TurnState{Phase: proto.PhaseIdle, Queued: []proto.QueuedMsg{}}
