@@ -4,9 +4,12 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"html"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -111,16 +114,32 @@ func ssoServer(t *testing.T, idp *fakeIdP) *httptest.Server {
 func signIn(t *testing.T, srv *httptest.Server, idp *fakeIdP, ret, code string) string {
 	t.Helper()
 	c := noRedirect()
-	resp, err := c.Get(srv.URL + "/auth/login?return=" + url.QueryEscape(ret))
+	resp, err := c.Get(dl(srv) + "/auth/login?return=" + url.QueryEscape(ret))
 	if err != nil || resp.StatusCode != http.StatusFound {
 		t.Fatalf("login: %v %v", resp.Status, err)
 	}
 	state := idp.approve(t, resp.Header.Get("Location"), code)
-	resp, err = c.Get(srv.URL + "/auth/callback?code=" + code + "&state=" + url.QueryEscape(state))
-	if err != nil || resp.StatusCode != http.StatusFound {
-		t.Fatalf("callback: %v %v", resp.Status, err)
+	resp, err = c.Get(dl(srv) + "/auth/callback?code=" + code + "&state=" + url.QueryEscape(state))
+	if err != nil {
+		t.Fatal(err)
 	}
-	return resp.Header.Get("Location")
+	return next(t, resp)
+}
+
+// next is where a response sends the browser: a redirect's Location, or the
+// link on a hop page (front.go).
+func next(t *testing.T, resp *http.Response) string {
+	t.Helper()
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusSeeOther {
+		return resp.Header.Get("Location")
+	}
+	b, _ := io.ReadAll(resp.Body)
+	m := regexp.MustCompile(`id="next" href="([^"]*)"`).FindSubmatch(b)
+	if resp.StatusCode != http.StatusOK || m == nil {
+		t.Fatalf("neither a redirect nor a hop: %d %.200s", resp.StatusCode, b)
+	}
+	return html.UnescapeString(string(m[1]))
 }
 
 func fragment(t *testing.T, loc string) url.Values {
@@ -137,14 +156,14 @@ func TestSignInWithTheIdentityProvider(t *testing.T) {
 	idp := newIdP(t)
 	srv := ssoServer(t, idp) // the issuer configured WITH a trailing slash
 
-	// The web: back to /signin with the token in the fragment.
-	loc := signIn(t, srv, idp, "/session/x", "c1")
-	if !strings.HasPrefix(loc, "/signin#") {
+	// The web app: back to /web/signin with the token in the fragment.
+	loc := signIn(t, srv, idp, "/web/session/x", "c1")
+	if !strings.HasPrefix(loc, "/web/signin#") {
 		t.Fatalf("landed at %s", loc)
 	}
 	f := fragment(t, loc)
 	tok := f.Get("token")
-	if !strings.HasPrefix(tok, "dun_s_") || f.Get("return") != "/session/x" {
+	if !strings.HasPrefix(tok, "dun_s_") || f.Get("return") != "/web/session/x" {
 		t.Fatalf("fragment: %v", f)
 	}
 	// The token works on the API, and signing out ends it.
@@ -158,6 +177,11 @@ func TestSignInWithTheIdentityProvider(t *testing.T) {
 		t.Fatalf("after sign-out: %d", code)
 	}
 
+	// The chooser or the TUI: straight back (the session cookie is set).
+	if loc := signIn(t, srv, idp, "/tui/", "c3"); loc != "/tui/" {
+		t.Fatalf("tui landing: %s", loc)
+	}
+
 	// The app: back to its own dun:// link.
 	if loc := signIn(t, srv, idp, "dun://auth", "c2"); !strings.HasPrefix(loc, "dun://auth#token=dun_s_") {
 		t.Fatalf("app landing: %s", loc)
@@ -169,31 +193,31 @@ func TestSignInRefusals(t *testing.T) {
 	srv := ssoServer(t, idp)
 
 	idp.email = "stranger@example.com"
-	if f := fragment(t, signIn(t, srv, idp, "/", "c1")); f.Get("token") != "" || !strings.Contains(f.Get("error"), "may not sign in") {
+	if f := fragment(t, signIn(t, srv, idp, "/web/", "c1")); f.Get("token") != "" || !strings.Contains(f.Get("error"), "may not sign in") {
 		t.Errorf("not on the allow-list: %v", f)
 	}
 	idp.email, idp.verified = "carl@example.com", false
-	if f := fragment(t, signIn(t, srv, idp, "/", "c2")); f.Get("token") != "" || !strings.Contains(f.Get("error"), "verified email") {
+	if f := fragment(t, signIn(t, srv, idp, "/web/", "c2")); f.Get("token") != "" || !strings.Contains(f.Get("error"), "verified email") {
 		t.Errorf("unverified: %v", f)
 	}
 
 	// A state is good once.
 	idp.verified = true
 	c := noRedirect()
-	resp, _ := c.Get(srv.URL + "/auth/login?return=/")
+	resp, _ := c.Get(dl(srv) + "/auth/login?return=/web/")
 	state := idp.approve(t, resp.Header.Get("Location"), "c3")
-	resp, _ = c.Get(srv.URL + "/auth/callback?code=c3&state=" + url.QueryEscape(state))
-	if fragment(t, resp.Header.Get("Location")).Get("token") == "" {
+	resp, _ = c.Get(dl(srv) + "/auth/callback?code=c3&state=" + url.QueryEscape(state))
+	if fragment(t, next(t, resp)).Get("token") == "" {
 		t.Fatal("first use refused")
 	}
-	resp, _ = c.Get(srv.URL + "/auth/callback?code=c3&state=" + url.QueryEscape(state))
-	if fragment(t, resp.Header.Get("Location")).Get("token") != "" {
+	resp, _ = c.Get(dl(srv) + "/auth/callback?code=c3&state=" + url.QueryEscape(state))
+	if fragment(t, next(t, resp)).Get("token") != "" {
 		t.Error("a state was used twice")
 	}
 
 	// Not an open redirect.
 	for _, bad := range []string{"https://evil.example/", "//evil.example/x", "javascript:alert(1)"} {
-		resp, _ := c.Get(srv.URL + "/auth/login?return=" + url.QueryEscape(bad))
+		resp, _ := c.Get(dl(srv) + "/auth/login?return=" + url.QueryEscape(bad))
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("return %q: %d", bad, resp.StatusCode)
 		}

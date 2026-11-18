@@ -24,6 +24,7 @@ func init() {
 	command[Upgrade]("upgrade")
 	command[JobUsageReq]("job_usage")
 	command[ServiceNotice]("service_notice")
+	command[WebSet]("web_set")
 
 	event[SessionList]("sessions")
 	event[EngineState]("engine")
@@ -32,6 +33,39 @@ func init() {
 	event[HelloReply]("hello")
 	event[UpgradeStatus]("upgrade")
 	event[JobUsage]("job_usage")
+	event[WebState]("web")
+}
+
+// WebSet changes dund's HTTP listener while it runs (`dun dund enable|disable
+// web|tui`): Enable starts or stops it, Addr moves it (host:port; "" keeps
+// the one it has), TUI turns /tui on or off. A nil field is left as it is, so
+// a WebSet with none set asks for the state. The change is saved
+// (<home>/dund/web.json) and applies at every later start. Answered with
+// WebState, or an ack with the error (a port that cannot be bound: the
+// listener stays as it was).
+//
+// TrustProxies, when not nil, replaces the proxies (CIDRs or addresses)
+// whose X-Forwarded-Proto and -Host dund believes, besides loopback; an
+// empty list clears them.
+type WebSet struct {
+	Enable       *bool    `json:"enable,omitempty"`
+	Addr         string   `json:"addr,omitempty"`
+	TUI          *bool    `json:"tui,omitempty"`
+	TrustProxies []string `json:"trust_proxies"` // null: unchanged; []: none
+}
+
+// WebState is dund's HTTP listener after a WebSet. Listening: it is serving
+// now. URL is where to open it; Warning is said to the person who made the
+// change (the TUI on a non-loopback address).
+type WebState struct {
+	Enabled   bool   `json:"enabled"`
+	Addr      string `json:"addr"`
+	TUI       bool   `json:"tui"`
+	Listening bool   `json:"listening,omitempty"`
+	// TrustProxies are the trusted proxies besides loopback.
+	TrustProxies []string `json:"trust_proxies,omitempty"`
+	URL          string   `json:"url,omitempty"`
+	Warning      string   `json:"warning,omitempty"`
 }
 
 // ServiceNotice is dund's word to a session's engine about the service

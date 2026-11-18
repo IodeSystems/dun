@@ -777,6 +777,67 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   archives, and the span files are one (the 2026-11-14 rule). `/clear` keeps
   the session id, so the spans of the cleared log stay with the session.
 
+## dund's HTTP listener: runtime, one listener, chooser (USER 2026-11-17)
+
+- **dund starts and stops its HTTP listener while it runs.** `dun dund
+  enable web [--addr host:port]` / `disable web` reach the running dund
+  over its socket (`proto.WebSet`, `internal/dundcli/web.go`); with no dund
+  running the change is saved and "applies when dund next starts". Default
+  address `127.0.0.1:20003`. Reason: the listener was fixed by a flag in
+  the unit, so turning it on meant editing the unit and restarting every
+  session.
+- **The saved state wins.** `<home>/dund/web.json` (0600, atomic write:
+  `{enabled, addr, tui}`) decides at every start once it exists.
+  `--web-experimental` / `--http` only seed it while it does not;
+  `disable web` stops a listener the flag started, and the flag does not
+  bring it back. `service install` writes no such flag into a new unit
+  (it seeds `web.json` instead); an old unit's flag still seeds. `serve
+  --check` binds the address `web.json` names. A busy port refuses the
+  change and leaves the old listener serving.
+- **One listener, three ways in.** `/` is a chooser: Terminal (`/tui`) or
+  Web app (`/web`, marked experimental). The choice is kept in a cookie
+  whose value is only `tui` or `web`, so `/` redirects to one of two fixed
+  paths (no open redirect); `/?choose=1` offers it again. `/web/*` is the
+  spa with the prefix stripped; the API stays at root (`/api/*`,
+  `/auth/*`, `/releases`, `/dun.apk`, `/healthz`) because the native app
+  uses `baseUrl + /api/...`.
+- **The TUI in the browser is a separate opt-in** (`enable tui` /
+  `disable tui`) on the same listener; off, `/tui` is 404 and disabling
+  closes the open tabs. Each tab runs the dund's own `dun --tui` in a pty
+  (`internal/webterm`), in `$HOME`, with `DUN_HOME` set to the dund's home.
+  A TUI on a non-loopback address is allowed, with a warning: it is a shell
+  as this user for whoever signs in.
+- **Every page needs a sign-in; the browser holds a session cookie.**
+  `/auth/signin` takes a token (local, named, or a sign-in token: AUTH-2) and
+  sets an HttpOnly, SameSite=Strict, Secure-over-TLS cookie whose value is a
+  new sign-in token tied to that bearer by hash: a new `dund token`, a
+  `token revoke` or a sign-out ends the sessions made from it. The OIDC
+  callback sets it too. A redirect at the end of a cross-site chain is
+  cross-site, so the browser withholds a Strict cookie: the callback lands
+  with a page of its own (`hop`). Open: `/auth/*`, hello, `/healthz` and the
+  releases (the app opens `/dun.apk` with `Linking.openURL`, which carries
+  no credentials). A cookie request that changes state must be same-origin.
+- **The cookie belongs to one host name, never a configured domain**
+  (USER 2026-11-17). A cookie is sent to every port on its host, so: no
+  Domain attribute; each session is bound to the host it was made on, and
+  is refused under another (no replay through 127.0.0.1); `__Host-` and
+  Secure over https. `X-Forwarded-Proto` is believed from loopback (hz,
+  cloudflared) or `web.json`'s `trusted_proxies`; `X-Forwarded-Host` only
+  from `trusted_proxies` (cloudflared passes a client's through). Origin
+  checks compare scheme and host. Plain http on a shared loopback name goes
+  to `dun.localhost` before sign-in (not when a proxy on the box forwarded
+  it); this stops ordinary local servers, not a hostile local process
+  (https + `__Host-` does). A bare LAN IP is allowed with a warning. See
+  sessions-and-dund.md, "Reaching the web listener".
+- **The pty WebSocket checks the cookie and the Origin.** `CheckOrigin`
+  returning true (the old `--web-tui`) let any page the user visited open a
+  shell. It is a second realtime endpoint beside RT-1's `/api/graphql`: a
+  byte stream to a pty is not a GraphQL subscription (caveat proposed with
+  this change).
+- **Every exit kills the ptys first.** `http.Server.Shutdown` does not close
+  hijacked connections, and `/tui`'s are hijacked: stop, re-exec and the
+  service handover call `webterm.Close` before the listener stops.
+
 ## Release updates
 
 - **para shares dun's signing key (Carl, 2026-11-10); manifests are bound to

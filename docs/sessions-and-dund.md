@@ -181,6 +181,60 @@ releases on its own.
   socket keeps peer-uid auth.
 - The server URL in the app defaults to the hz name and can be overridden in
   Settings; this is how a standalone install is reached.
+- **The listener is turned on at runtime**: `dun dund enable web [--addr]`,
+  `disable web`, `enable tui`, `disable tui`, saved in `dund/web.json`. One
+  listener serves the chooser at `/`, the web app at `/web`, the TUI at
+  `/tui` and the API at root; pages need the session cookie from
+  `/auth/signin` (decisions.md, "dund's HTTP listener").
+
+## Reaching the web listener: LAN, VPN, hz, cloudflared
+
+A cookie is scoped to a host name, not a port, so dund's sign-in cookie
+goes to every server on the name the browser used. dund never sets a
+Domain: the cookie is host-only, for the name the browser is looking at, and
+each session is bound to that name (with its port). A cookie that arrives
+under another name is refused (401). Over https the cookie is `Secure`
+and named `__Host-dun_session`.
+
+- **Loopback** (`http://127.0.0.1:20003`, `localhost`, `::1`): pages are
+  sent to `http://dun.localhost:20003` before sign-in. Browsers resolve
+  `*.localhost` to loopback, and no other local server answers to
+  `dun.localhost`. The API (`/api/*`, `/healthz`, releases) is not
+  redirected; bearer clients go on using `127.0.0.1`.
+- **LAN or a VPN's LAN by IP** (`http://192.168.1.76:20003`): allowed, with
+  a warning on the sign-in page, the chooser and `enable tui`: every other
+  server on that IP gets the cookie. Use a host name (a DNS or
+  `/etc/hosts` name only dund serves), or https through a proxy.
+- **hz or any reverse proxy on the box**: it connects from loopback, so
+  dund believes its `X-Forwarded-Proto` (https). It does NOT believe
+  `X-Forwarded-Host` from loopback: cloudflared also connects from
+  loopback and passes a client's own `X-Forwarded-Host` through. A proxy
+  that keeps the browser's `Host` needs nothing; one that rewrites `Host`
+  and names the real one in `X-Forwarded-Host` (or `Forwarded: host=`)
+  needs `--trust-proxy 127.0.0.1`. With several values, the last (the
+  closest proxy's) is taken. A loopback request that names a client
+  (`X-Forwarded-For`, `CF-Connecting-IP`, `Forwarded`) is not sent to
+  `dun.localhost`: that browser is on another machine.
+- **A proxy on another machine**: `dun dund enable web --trust-proxy
+  10.0.0.5` (or a CIDR; repeatable; it replaces the saved list, and
+  `--trust-proxy=` clears it). Saved in `web.json` as `trusted_proxies`.
+  From any other peer, `X-Forwarded-*` is ignored: a client cannot claim
+  https or another host.
+- **Origin checks compare scheme and host**: a page on `http://H` is not
+  `https://H`, although some browsers treat the two as one site.
+- **The limit of `dun.localhost`**: it keeps the cookie from ordinary
+  local servers on `localhost`/`127.0.0.1`. It does not protect against a
+  hostile local process: that process can send the browser to itself on
+  `dun.localhost` as well, or replay a cookie with a forged `Host`. Real
+  isolation from other local processes needs https and the `__Host-`
+  cookie.
+- **cloudflared** (on the box, so from loopback): by default it passes the
+  public hostname as `Host` and sends no `X-Forwarded-Host`; Cloudflare
+  sets `X-Forwarded-Proto` and `CF-Visitor`, which dund reads as https.
+  Leave `originRequest.httpHostHeader` unset. If it names another host
+  (`localhost:20003`), `Host` is no longer what the browser used: the
+  Origin checks then refuse `/tui`'s WebSocket and the sign-in form (the
+  403 names both hosts). Set it to the public hostname, or unset it.
 
 ## Sign-in (OIDC)
 

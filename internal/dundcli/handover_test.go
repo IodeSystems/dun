@@ -174,4 +174,15 @@ func TestCheckBesideTheLiveDund(t *testing.T) {
 	if err := check(l, bin, "not an address", "", live); err == nil {
 		t.Fatal("a bad HTTP address passed the handover check")
 	}
+	// The listener the live dund started from web.json (web.go), no flag.
+	if err := saveWebState(home, webState{Enabled: true, Addr: ln.Addr().String()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := check(l, bin, "", "", live); err != nil {
+		t.Fatalf("handover check with web.json's live listener: %v", err)
+	}
+	_ = os.Remove(l.pidfile())
+	if err := check(l, bin, "", "", 0); err == nil || !strings.Contains(err.Error(), "cannot bind") {
+		t.Fatalf("plain check with web.json's busy address: %v", err)
+	}
 }

@@ -87,9 +87,10 @@ func waitDundStopped() error {
 }
 
 // startDund starts the service: the installed one (a systemd unit, or a
-// launchd agent on macOS) when there is one for this DUN_HOME, so its flags,
-// --web-experimental included, apply; else `dun dund serve` from this binary, in its own
-// session so it outlives the TUI, output to dund.log.
+// launchd agent on macOS) when there is one for this DUN_HOME, so its flags
+// apply; else `dun dund serve` from this binary, in its own session so it
+// outlives the TUI, output to dund.log. Either way the web listener is what
+// <home>/dund/web.json says (`dun dund enable web`).
 func startDund() error {
 	if dundcli.ServiceServes(dundcli.ServiceUnit, dunconfig.DunHome()) {
 		return dundcli.StartService(dundcli.ServiceUnit)

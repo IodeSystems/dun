@@ -492,6 +492,68 @@ func TestSignInTokens(t *testing.T) {
 	}
 }
 
+// A browser session made from a bearer lives only while that bearer does:
+// a new local token, a revoked named token, or a signed-out sign-in ends it.
+func TestSignInFromABearerEndsWithIt(t *testing.T) {
+	svc, _, dir := newSvc(t)
+	local, _ := NewToken(dir)
+	named, _ := CreateAPIToken(dir, "phone")
+	signin, _ := svc.MintSignIn(alice, "a@example.com", time.Hour)
+	mint := func(bearer string) string {
+		t.Helper()
+		from := svc.TokenSource(bearer)
+		if from == "" {
+			t.Fatalf("%.8s is not a live bearer", bearer)
+		}
+		tok, err := svc.MintSignInFrom(alice, "", from, time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tok
+	}
+	fromLocal, fromNamed, fromSignIn := mint(local), mint(named), mint(signin)
+	for _, tok := range []string{fromLocal, fromNamed, fromSignIn} {
+		if _, ok := svc.CheckSignIn(tok); !ok {
+			t.Fatalf("%.10s refused while its bearer is live", tok)
+		}
+	}
+	if svc.TokenSource("dun_nope") != "" {
+		t.Error("a bad bearer has a source")
+	}
+	_, _ = NewToken(dir)
+	_ = RevokeAPIToken(dir, "phone")
+	_ = svc.RevokeSignIn(signin)
+	for name, tok := range map[string]string{"local": fromLocal, "named": fromNamed, "sign-in": fromSignIn} {
+		if _, ok := svc.CheckSignIn(tok); ok {
+			t.Errorf("made from the %s token: still accepted after it ended", name)
+		}
+	}
+}
+
+// A browser session is good on its host only, and never as a bearer.
+func TestSessionAtItsHost(t *testing.T) {
+	svc, _, _ := newSvc(t)
+	tok, err := svc.MintSessionAt(alice, "", "", "Dun.LAN:20003", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, ok := svc.CheckSessionAt(tok, "dun.lan:20003"); !ok || p != alice {
+		t.Fatalf("its host: %q %v", p, ok)
+	}
+	for _, h := range []string{"dun.lan:20004", "127.0.0.1:20003", ""} {
+		if _, ok := svc.CheckSessionAt(tok, h); ok {
+			t.Errorf("host %q accepted", h)
+		}
+	}
+	if _, ok := svc.CheckSignIn(tok); ok {
+		t.Error("a browser session works as a bearer")
+	}
+	bearer, _ := svc.MintSignIn(alice, "", time.Hour)
+	if _, ok := svc.CheckSessionAt(bearer, "dun.lan:20003"); ok {
+		t.Error("a bearer sign-in works as a session cookie")
+	}
+}
+
 // After a restart the session's log is new: its seqs start from 1 again
 // and may already have passed the seq a client resumes from. A seq from
 // another epoch gets a snapshot, never a replay from the middle of the new

@@ -74,7 +74,7 @@ func TestSessionEventsSubscription(t *testing.T) {
 	}
 	principal, ts, mac := tk["principal"].(string), int64(tk["timestamp"].(float64)), tk["hmac"].(string)
 
-	c := wsDial(t, ctx, srv.URL)
+	c := wsDial(t, ctx, dl(srv))
 	p, _ := json.Marshal(map[string]any{"query": subscribeQuery(id, principal, ts, mac, 0)})
 	wsWrite(t, ctx, c, wsMsg{ID: "1", Type: "subscribe", Payload: p})
 	sentAfterReady := false
@@ -118,7 +118,7 @@ func TestSubscriptionRefusesWithoutAValidToken(t *testing.T) {
 	defer cancel()
 	_, m := call(t, srv, tok, "POST", "/api/v1/sessions", map[string]any{"workspace": t.TempDir()})
 	id := m["id"].(string)
-	c := wsDial(t, ctx, srv.URL)
+	c := wsDial(t, ctx, dl(srv))
 	p, _ := json.Marshal(map[string]any{"query": subscribeQuery(id, "unix:1000", time.Now().Unix(), "deadbeef", 0)})
 	wsWrite(t, ctx, c, wsMsg{ID: "1", Type: "subscribe", Payload: p})
 	// Refused before the handler runs: an error frame with status 401.
@@ -150,7 +150,7 @@ func TestSessionEventsOverSSE(t *testing.T) {
 		"timestamp": {fmt.Sprint(int64(tk["timestamp"].(float64)))}, "hmac": {tk["hmac"].(string)}}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, "GET", srv.URL+"/api/v1/session-events?"+q.Encode(), nil)
+	req, _ := http.NewRequestWithContext(ctx, "GET", dl(srv)+"/api/v1/session-events?"+q.Encode(), nil)
 	req.Header.Set("Authorization", "Bearer "+tok)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -161,7 +161,7 @@ func TestSessionEventsOverSSE(t *testing.T) {
 		t.Fatalf("%d %s", resp.StatusCode, ct)
 	}
 	q.Set("hmac", "deadbeef")
-	bad, _ := http.NewRequestWithContext(ctx, "GET", srv.URL+"/api/v1/session-events?"+q.Encode(), nil)
+	bad, _ := http.NewRequestWithContext(ctx, "GET", dl(srv)+"/api/v1/session-events?"+q.Encode(), nil)
 	bad.Header.Set("Authorization", "Bearer "+tok)
 	if r, err := http.DefaultClient.Do(bad); err != nil || r.StatusCode != http.StatusUnauthorized {
 		t.Errorf("forged token over REST: %v %v", r.Status, err)
