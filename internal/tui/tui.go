@@ -242,6 +242,7 @@ type tuiModel struct {
 	// and the root's own conversation, stashed while it is (activity.go).
 	scopeAgent   int
 	rootView     convoView
+	scopeFrom    *actKey         // the strip's row the scope was opened from; nil: not from the strip
 	sel          int             // selected message index (convo focus); -1 = none
 	search       textinput.Model // vim-style "/" message search box
 	searching    bool            // typing a search query
