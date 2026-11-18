@@ -37,14 +37,46 @@ var peerTimeout = 15 * time.Second
 
 type peerLink struct {
 	em *emitter
+	// link is the engine link (enginelink.go), nil over stdio: a request
+	// open when a dund attaches goes again (resend).
+	link *engineLink
 
 	mu      sync.Mutex
 	seq     int
-	waiting map[string]chan proto.PeerReply
+	waiting map[string]*peerCall
+	// shares are the gateway grants held, by bearer (hello.shared).
+	shares map[string]bool
+}
+
+type peerCall struct {
+	req proto.PeerRequest
+	ch  chan proto.PeerReply
 }
 
 func newPeerLink(em *emitter) *peerLink {
-	return &peerLink{em: em, waiting: map[string]chan proto.PeerReply{}}
+	return &peerLink{em: em, waiting: map[string]*peerCall{}, shares: map[string]bool{}}
+}
+
+// resend sends every open request again: a dund attached, and the one that
+// had them may have gone without answering (docs/engine-adoption.md). A
+// reply to the first copy that comes after all is dropped (reply).
+func (p *peerLink) resend() {
+	p.mu.Lock()
+	open := make([]proto.PeerRequest, 0, len(p.waiting))
+	for _, c := range p.waiting {
+		open = append(open, c.req)
+	}
+	p.mu.Unlock()
+	for i := range open {
+		p.em.emit(&open[i])
+	}
+}
+
+// sharedCount is how many gateway grants are held.
+func (p *peerLink) sharedCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.shares)
 }
 
 func (p *peerLink) call(ctx context.Context, req proto.PeerRequest) (proto.PeerReply, error) {
@@ -83,11 +115,17 @@ func (p *peerLink) Share(ctx context.Context, req harness.ShareRequest) (harness
 	if rep.Share == nil {
 		return harness.ShareGrant{}, errors.New("dund gave no endpoint")
 	}
+	p.mu.Lock()
+	p.shares[rep.Share.Bearer] = true
+	p.mu.Unlock()
 	return harness.ShareGrant{URL: rep.Share.URL, Bearer: rep.Share.Bearer, Key: rep.Share.Key}, nil
 }
 
 // Release gives a gateway client back.
 func (p *peerLink) Release(ctx context.Context, bearer string) error {
+	p.mu.Lock()
+	delete(p.shares, bearer)
+	p.mu.Unlock()
 	_, err := p.call(ctx, proto.PeerRequest{Op: "mcp_release", Share: &proto.McpShareReq{Release: bearer}})
 	return err
 }
@@ -97,7 +135,7 @@ func (p *peerLink) callFor(ctx context.Context, req proto.PeerRequest, timeout t
 	p.mu.Lock()
 	p.seq++
 	req.RID = "p" + strconv.Itoa(p.seq)
-	p.waiting[req.RID] = ch
+	p.waiting[req.RID] = &peerCall{req: req, ch: ch}
 	p.mu.Unlock()
 	defer func() {
 		p.mu.Lock()
@@ -114,6 +152,9 @@ func (p *peerLink) callFor(ctx context.Context, req proto.PeerRequest, timeout t
 		}
 		return rep, nil
 	case <-t.C:
+		if p.link != nil && !p.link.connected() {
+			return proto.PeerReply{}, fmt.Errorf("dund did not answer within %s: dund is restarting (not attached); try again in a moment", timeout)
+		}
 		return proto.PeerReply{}, fmt.Errorf("dund did not answer within %s", timeout)
 	case <-ctx.Done():
 		return proto.PeerReply{}, ctx.Err()
@@ -124,10 +165,12 @@ func (p *peerLink) callFor(ctx context.Context, req proto.PeerRequest, timeout t
 // dropped.
 func (p *peerLink) reply(rep proto.PeerReply) {
 	p.mu.Lock()
-	ch := p.waiting[rep.RID]
+	c := p.waiting[rep.RID]
+	// Taken: a second reply (to a resent copy) finds none.
+	delete(p.waiting, rep.RID)
 	p.mu.Unlock()
-	if ch != nil {
-		ch <- rep
+	if c != nil {
+		c.ch <- rep
 	}
 }
 
