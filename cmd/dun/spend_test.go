@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/spendmeter"
 )
 
@@ -78,7 +78,7 @@ func TestClientCache_AnotherProvider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := dun.Endpoint{URL: "http://127.0.0.1:2/v1", Key: "lk", Model: "qwen3-8b"}
+	want := harness.Endpoint{URL: "http://127.0.0.1:2/v1", Key: "lk", Model: "qwen3-8b"}
 	if cc.Endpoint != want {
 		t.Errorf("endpoint %+v, want %+v", cc.Endpoint, want)
 	}

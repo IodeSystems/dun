@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -39,7 +39,7 @@ func TestEmitterFramesEvents(t *testing.T) {
 	em := &emitter{w: &buf}
 	em.emit(&proto.Error{Error: "early", Fatal: true})
 	em.setSession("s1")
-	em.emit(retryEvent(dun.RetryNote{Scope: "request", Kind: "429", Delay: time.Second, Capacity: 4, Queue: "rejected"}))
+	em.emit(retryEvent(harness.RetryNote{Scope: "request", Kind: "429", Delay: time.Second, Capacity: 4, Queue: "rejected"}))
 	emitTurnError(context.Background(), nil, em, errors.New("boom"))
 	evs := decodeStrict[proto.Event](t, buf.Bytes())
 	if len(evs) != 3 {

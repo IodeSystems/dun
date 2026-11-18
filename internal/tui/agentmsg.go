@@ -220,7 +220,7 @@ var (
 	childMsgRe = regexp.MustCompile(`(?s)^agent #(\d+): (.+)$`)
 	// A peer notification as the TUI gets it live: "<name> (<id>): <text>".
 	peerLiveRe = regexp.MustCompile(`(?s)^(.+?) \(([^()]*)\): (.*)$`)
-	// The same message as the session log keeps it (dun.PeerLabel).
+	// The same message as the session log keeps it (harness.PeerLabel).
 	peerLogRe = regexp.MustCompile(`(?s)^\[dun msg from (.+?) \(session ([^()]*)\)\] (.*?)(?:\n\(A message from another dun session.*)?$`)
 )
 

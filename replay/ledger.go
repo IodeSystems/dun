@@ -13,7 +13,7 @@ import (
 )
 
 // RoundStat is one model round, one line of $DUN_HOME/stats/rounds-*.jsonl.
-// The same shape the root package's stats ledger writes (dun.RoundStat); the
+// The same shape internal/harness's stats ledger writes (harness.RoundStat); the
 // replay package cannot import it without a cycle, so it declares the fields
 // it reads itself.
 type RoundStat struct {

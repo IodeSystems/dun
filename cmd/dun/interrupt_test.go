@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -63,8 +63,8 @@ func TestEngineInterrupt(t *testing.T) {
 	r := &hangRunner{}
 	evR, evW := io.Pipe()
 	em := &emitter{w: evW}
-	h, err := dun.Start(ctx, dun.Config{
-		Workspace: home, Servers: []dun.Server{}, Client: r,
+	h, err := harness.Start(ctx, harness.Config{
+		Workspace: home, Servers: []harness.Server{}, Client: r,
 		SessionFile: filepath.Join(home, "s.jsonl"),
 		OnToken:     func(s string) { em.emit(&proto.Token{Text: s}) },
 		OnReasoning: func(s string) { em.emit(&proto.Reasoning{Text: s}) },

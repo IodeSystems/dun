@@ -292,7 +292,7 @@ func TestLedgerReplay(t *testing.T) {
 // conversation whole and the replay's prompt size is the size the live build
 // would have produced before any budget rung fired. The fields the root
 // package's shaperPolicy sets (which is unexported) are mirrored here;
-// TestShaperPolicy_CoversPolicyFor guards that mirror in the root package.
+// TestShaperPolicy_CoversPolicyFor guards that mirror in internal/harness.
 func CurrentPolicy() agent.ShaperPolicy {
 	return agent.ShaperPolicy{
 		BudgetTokens: 0,

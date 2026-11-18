@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
@@ -352,13 +352,13 @@ func (p *peerLink) sched(ctx context.Context, req proto.SchedReq) (proto.SchedRe
 
 // LoopCtl is loop_ctl through dund. The reason is the person's to read: it
 // goes out as a line in the session, beside the tool call.
-func (p *peerLink) LoopCtl(ctx context.Context, nextIn time.Duration, stop bool, reason string) (dun.LoopState, error) {
+func (p *peerLink) LoopCtl(ctx context.Context, nextIn time.Duration, stop bool, reason string) (harness.LoopState, error) {
 	rep, err := p.sched(ctx, proto.SchedReq{Action: "loop_ctl", NextIn: nextIn, Stop: stop, Reason: reason})
 	if err != nil {
-		return dun.LoopState{}, err
+		return harness.LoopState{}, err
 	}
 	e := rep.Entry
-	st := dun.LoopState{ID: e.ID, Next: e.At, Stopped: stop}
+	st := harness.LoopState{ID: e.ID, Next: e.At, Stopped: stop}
 	what := fmt.Sprintf("loop %d: next run %s", e.ID, whenShown(*e, time.Now()))
 	if stop {
 		what = fmt.Sprintf("loop %d stopped by the model", e.ID)

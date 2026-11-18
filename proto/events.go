@@ -197,7 +197,7 @@ type ContextPart struct {
 	Tokens int    `json:"tokens"`
 }
 
-// Window is how the context window is divided (dun.WindowBudget).
+// Window is how the context window is divided (harness.WindowBudget).
 type Window struct {
 	Window         int     `json:"window"`
 	WindowReserved int     `json:"window_reserved"`
@@ -537,7 +537,7 @@ const (
 	HistoryModelSwitch = "model_switch"
 )
 
-// HistoryItem mirrors dun.HistoryItem.
+// HistoryItem mirrors harness.HistoryItem.
 type HistoryItem struct {
 	Kind string `json:"kind"`
 	// ID is a user message's id, the one its user event carried, or a

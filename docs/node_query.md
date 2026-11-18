@@ -17,7 +17,7 @@ cmd/dun/tui.go                          # ✗ parsed as a type name
 
 ```
 #Save                                  # find by name anywhere
-#'harness.go#Save'                     # pin to one file
+#'internal/harness/harness.go#Save'                     # pin to one file
 func name~=^Test                       # regex on name (~=)
 func:not([name^=Test])                 # negation
 ```
@@ -25,7 +25,7 @@ func:not([name^=Test])                 # negation
 ## Call graph (::in / ::out)
 
 ```
-#'harness.go#Start'::in.call > *       # who calls Start
+#'internal/harness/harness.go#Start'::in.call > *       # who calls Start
 #'main'::out.call > *                  # what main calls
 func:empty(::in)                       # dead code (no callers)
 ```

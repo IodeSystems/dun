@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -322,7 +322,7 @@ func (s *session) summary() proto.SessionSummary {
 // transcriptTime is when the session's transcript was last written: the
 // activity that outlives a dund restart.
 func transcriptTime(workspace, id string) (time.Time, bool) {
-	st, err := os.Stat(dun.SessionFile(workspace, id))
+	st, err := os.Stat(harness.SessionFile(workspace, id))
 	if err != nil {
 		return time.Time{}, false
 	}
@@ -371,7 +371,7 @@ func (s *session) hasMessages() bool { return askedIn(s.workspace, s.id) }
 // askedIn is the same rule PruneSessions keeps transcripts by, so dund never
 // drops a session the engine keeps (a variable: the tests' fake engine writes
 // no transcript).
-var askedIn = dun.SessionAsked
+var askedIn = harness.SessionAsked
 
 // readEvents appends every frame the engine writes until its stdout closes,
 // then handles the exit.
@@ -688,10 +688,10 @@ func (s *session) subscribe(after uint64, epoch string) (*proto.Event, []proto.E
 // agree: when an event was written while the file was read, it reads again
 // (a few times; a session that never pauses is read as it is, and
 // afterSnapshot drops what repeats).
-func (s *session) historyAt() (uint64, []dun.HistoryItem) {
+func (s *session) historyAt() (uint64, []harness.HistoryItem) {
 	for try := 0; ; try++ {
 		last := s.log.Last()
-		items := dun.SessionHistory(dun.SessionFile(s.workspace, s.id))
+		items := harness.SessionHistory(harness.SessionFile(s.workspace, s.id))
 		if s.log.Last() == last || try == 4 {
 			return last, items
 		}
@@ -702,7 +702,7 @@ func (s *session) historyAt() (uint64, []dun.HistoryItem) {
 // entries the snapshot's items already hold: a user message by its id, a
 // tool call or result by its call_id, a reply by its id. The engine writes an entry and sends its event apart
 // (either may come first), so without this an entry could show twice.
-func afterSnapshot(items []dun.HistoryItem, replay []proto.Event) []proto.Event {
+func afterSnapshot(items []harness.HistoryItem, replay []proto.Event) []proto.Event {
 	users, calls, results, replies := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	lastReply := ""
 	for _, it := range items {
@@ -752,7 +752,7 @@ func afterSnapshot(items []dun.HistoryItem, replay []proto.Event) []proto.Event 
 // errEpoch: a seq from another log than this one.
 var errEpoch = errors.New("seq from another epoch")
 
-func historyItems(items []dun.HistoryItem) []proto.HistoryItem {
+func historyItems(items []harness.HistoryItem) []proto.HistoryItem {
 	out := make([]proto.HistoryItem, 0, len(items))
 	for _, it := range items {
 		out = append(out, proto.HistoryItem{Kind: it.Kind, ID: it.ID, Queued: it.Queued, IsError: it.IsError, Content: it.Content, Tool: it.Tool, CallID: it.CallID, Args: it.Args, Agent: it.Agent})

@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/agent"
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/enginecmd"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
@@ -24,7 +24,7 @@ import (
 // skillPoll is how often the engine looks for changed skill files.
 var skillPoll = 3 * time.Second
 
-func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *inputStream, peers *peerLink, firstTask string, cc closeCtx) {
+func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *inputStream, peers *peerLink, firstTask string, cc closeCtx) {
 	// Stop the turn in flight (proto.Interrupt, /interrupt). On the reader
 	// goroutine: it only cancels a context, and the turn loop reports the end
 	// with done{reason: interrupted}. Installed before ready, so a client that
@@ -168,20 +168,20 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			var msg string
 			switch text {
 			case "":
-				p, own := dun.RephrasePrompt()
+				p, own := harness.RephrasePrompt()
 				who := "dun's"
 				if own {
 					who = "yours"
 				}
 				msg = "rephrase prompt (" + who + "; /rephrase prompt <text> sets it, /rephrase prompt default goes back):\n" + strings.TrimSuffix(p, "\n\nUser's message:\n")
 			case "default":
-				if err := dun.SetRephrasePrompt(""); err != nil {
+				if err := harness.SetRephrasePrompt(""); err != nil {
 					msg = "rephrase prompt: " + err.Error()
 				} else {
 					msg = "rephrase prompt: dun's again"
 				}
 			default:
-				if err := dun.SetRephrasePrompt(text); err != nil {
+				if err := harness.SetRephrasePrompt(text); err != nil {
 					msg = "rephrase prompt: " + err.Error()
 				} else {
 					msg = "rephrase prompt: saved (" + numfmt.Grouped(len(text)) + " chars); the user's message follows it"
@@ -564,7 +564,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 	if peers != nil {
 		// A global server change made here reaches the owner's other
 		// sessions (proto.ServersChanged); not waited for.
-		dun.OnUserServersWritten = func() {
+		harness.OnUserServersWritten = func() {
 			go func() { _, _ = peers.call(context.Background(), proto.PeerRequest{Op: "servers"}) }()
 		}
 	}
@@ -581,7 +581,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		case "view":
 			// The history, then each new entry as an agent_entry until
 			// "leave": what makes the view live while the child works.
-			h.AgentWatch(n, func(items []dun.HistoryItem) {
+			h.AgentWatch(n, func(items []harness.HistoryItem) {
 				em.emit(&proto.AgentHistory{Agent: n, Prompt: h.AgentPrompt(n), Items: historyProto(items)})
 			})
 		case "leave":
@@ -605,7 +605,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			em.emit(&proto.Notification{Text: "a message with images waits for this turn to end: an image cannot ride a tool result"})
 			return true
 		}
-		text, mid := msg.content, dun.NewMessageID()
+		text, mid := msg.content, harness.NewMessageID()
 		// Echo BEFORE Say: Say can release an exec wait, and the delivered
 		// event that follows its result names this id.
 		em.emit(&proto.UserEcho{ID: mid, Content: text, Queued: true})
@@ -616,7 +616,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 	if firstTask != "" {
 		// A task given on the command line is the whole run: it waits for
 		// the servers still starting, so it has every tool it was started
-		// with. A person typing waits for nothing (dun.Start).
+		// with. A person typing waits for nothing (harness.Start).
 		h.WaitServers(ctx)
 		turn(ctx, h, em, firstTask, nil)
 	}
@@ -697,7 +697,7 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 // takes a queued wake (or a leftover notification) and finishes, so a pending
 // entry that arrived without a wake — proactive RAG publishes straight to the
 // inbox — can't strand the loop until --timeout.
-func drainStep(ctx context.Context, h *dun.Harness, em *emitter) bool {
+func drainStep(ctx context.Context, h *harness.Harness, em *emitter) bool {
 	// A failed turn ends the drain rather than being retried. Unlike the
 	// interactive loop there is nobody left to fix anything — stdin is closed —
 	// so the pending work would fail identically forever.
@@ -723,7 +723,7 @@ func drainStep(ctx context.Context, h *dun.Harness, em *emitter) bool {
 // continueTurn runs a turn with no new user message (to process a background
 // job's completion notification, or a message buffered mid-turn) and emits its
 // events.
-func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) bool {
+func continueTurn(ctx context.Context, h *harness.Harness, em *emitter) bool {
 	em.emit(&proto.Turn{Kind: "continue"})
 	h.BeginTurnStats()
 	tctx, end := beginTurn(ctx)
@@ -733,7 +733,7 @@ func continueTurn(ctx context.Context, h *dun.Harness, em *emitter) bool {
 	turnActive.Store(false)
 	// turnErr first: a budget cut arrives as an interrupt, and is an error.
 	err = turnErr(tctx, err)
-	if errors.Is(err, dun.ErrInterrupted) {
+	if errors.Is(err, harness.ErrInterrupted) {
 		emitInterrupted(h, em, res)
 		return true // what was queued during it runs next
 	}
@@ -763,7 +763,7 @@ func settingsEvent() *proto.Settings {
 	ev := &proto.Settings{Model: engineModel, Provider: engineProvider, URL: engineURL,
 		Rephrase: enginecmd.RephraseOn, Suggest: enginecmd.SuggestMode, Effort: enginecmd.EffortLevel}
 	ev.EffortWords = enginecmd.EffortWords(enginecmd.EffortLevel)
-	if h, _ := enginecmd.EngineHarness.Load().(*dun.Harness); h != nil {
+	if h, _ := enginecmd.EngineHarness.Load().(*harness.Harness); h != nil {
 		max, from, buf, lod, nudge := h.ContextSettings()
 		ev.Context = &proto.ContextSettings{Max: max, MaxFrom: from, CompactBuffer: buf, ToolLOD: lod, RecapNudge: nudge}
 	}
@@ -774,7 +774,7 @@ func settingsEvent() *proto.Settings {
 // force; "--max 256k --compact-buffer 32k --tool-lod 4k --recap-nudge 20k",
 // any of them, each a number of tokens (characters for --tool-lod), or
 // default.
-func contextConfigCmd(ctx context.Context, h *dun.Harness, action string) (string, bool, error) {
+func contextConfigCmd(ctx context.Context, h *harness.Harness, action string) (string, bool, error) {
 	f := strings.Fields(action)
 	if len(f) == 0 {
 		return h.ContextStatus(), false, nil
@@ -782,8 +782,8 @@ func contextConfigCmd(ctx context.Context, h *dun.Harness, action string) (strin
 	changes := map[string]int{}
 	for i := 0; i < len(f); i++ {
 		k, v, hasEq := strings.Cut(strings.TrimLeft(f[i], "-"), "=")
-		if !strings.HasPrefix(f[i], "--") || !slices.Contains(dun.ContextKeys, k) {
-			return "", false, fmt.Errorf("%q: want --%s", f[i], strings.Join(dun.ContextKeys, ", --"))
+		if !strings.HasPrefix(f[i], "--") || !slices.Contains(harness.ContextKeys, k) {
+			return "", false, fmt.Errorf("%q: want --%s", f[i], strings.Join(harness.ContextKeys, ", --"))
 		}
 		if !hasEq {
 			if i+1 >= len(f) {
@@ -796,7 +796,7 @@ func contextConfigCmd(ctx context.Context, h *dun.Harness, action string) (strin
 			changes[k] = 0
 			continue
 		}
-		n, err := dun.ParseTokens(v)
+		n, err := harness.ParseTokens(v)
 		if err != nil {
 			return "", false, fmt.Errorf("--%s: %v", k, err)
 		}
@@ -849,7 +849,7 @@ func mayWake() bool { return !wakeHold.Load() || wakePass.Swap(false) }
 
 // holdWakes keeps the pending news for after dund's restart: into the
 // conversation, and dund is told.
-func holdWakes(h *dun.Harness, em *emitter) {
+func holdWakes(h *harness.Harness, em *emitter) {
 	if n := h.HoldPending(); n > 0 {
 		em.emit(&proto.WakeHeld{Count: n})
 	}
@@ -863,7 +863,7 @@ var turnActive atomic.Bool
 // turn runs one user message to completion. It reports whether the turn
 // succeeded — NOT whether the engine should stop. A failed turn never ends the
 // session: the conversation is on disk and the next message picks up from it.
-func turn(ctx context.Context, h *dun.Harness, em *emitter, task string, imgs []proto.Image) bool {
+func turn(ctx context.Context, h *harness.Harness, em *emitter, task string, imgs []proto.Image) bool {
 	// Known to be refused (no vision, nothing to describe the images): the
 	// message goes back to the user before it is shown as sent.
 	if len(imgs) > 0 {
@@ -874,7 +874,7 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string, imgs []
 	}
 	// What the user typed, before any rephrase: every client renders the
 	// message from this, not from what it sent itself.
-	mid := dun.NewMessageID()
+	mid := harness.NewMessageID()
 	em.emit(&proto.UserEcho{ID: mid, Content: task})
 	em.emit(&proto.Turn{Kind: "user"})
 	h.BeginTurnStats()
@@ -886,7 +886,7 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string, imgs []
 		// are placed by.
 		res, err := h.AskImages(tctx, task, dunImages(imgs))
 		turnActive.Store(false)
-		var refused *dun.ImageRefusedError
+		var refused *harness.ImageRefusedError
 		if errors.As(err, &refused) {
 			refuseImages(em, refused.Msg, task, imgs)
 			return true
@@ -908,10 +908,10 @@ func turn(ctx context.Context, h *dun.Harness, em *emitter, task string, imgs []
 }
 
 // endTurn reports how a user turn ended (see turn).
-func endTurn(ctx, tctx context.Context, h *dun.Harness, em *emitter, res agent.TurnResult, err error) bool {
+func endTurn(ctx, tctx context.Context, h *harness.Harness, em *emitter, res agent.TurnResult, err error) bool {
 	// turnErr first: a budget cut arrives as an interrupt, and is an error.
 	err = turnErr(tctx, err)
-	if errors.Is(err, dun.ErrInterrupted) {
+	if errors.Is(err, harness.ErrInterrupted) {
 		emitInterrupted(h, em, res)
 		return true
 	}
@@ -928,7 +928,7 @@ func endTurn(ctx, tctx context.Context, h *dun.Harness, em *emitter, res agent.T
 
 // replyID is the id of the turn's reply entry (the message event's id), or
 // "" for a turn with no reply text.
-func replyID(h *dun.Harness, reply string) string {
+func replyID(h *harness.Harness, reply string) string {
 	if strings.TrimSpace(reply) == "" {
 		return ""
 	}
@@ -939,7 +939,7 @@ func replyID(h *dun.Harness, reply string) string {
 // holds what the turn produced and a marker, and the next message continues
 // from there. The partial reply has already streamed as tokens, so there is
 // no message event; done's reason tells clients to close the turn as cut.
-func emitInterrupted(h *dun.Harness, em *emitter, res agent.TurnResult) {
+func emitInterrupted(h *harness.Harness, em *emitter, res agent.TurnResult) {
 	em.emit(usageEvent(h, res.Usage))
 	em.emit(&proto.Done{Reason: "interrupted", Detail: h.InterruptedJobs()})
 }
@@ -947,7 +947,7 @@ func emitInterrupted(h *dun.Harness, em *emitter, res agent.TurnResult) {
 // emitFailedUsage reports what a failed turn cost. A turn that ends on an
 // error (max turns, a provider failure) has still spent its rounds: without
 // this its turn_stats and spend are in no usage event.
-func emitFailedUsage(h *dun.Harness, em *emitter, res agent.TurnResult) {
+func emitFailedUsage(h *harness.Harness, em *emitter, res agent.TurnResult) {
 	if res.Usage.Turns > 0 {
 		em.emit(usageEvent(h, res.Usage))
 	}
@@ -967,7 +967,7 @@ func emitFailedUsage(h *dun.Harness, em *emitter, res agent.TurnResult) {
 // mid-tool-call and no statement of why. Both turn paths funnel through here so
 // the record cannot be attached to one of them and not the other; they had
 // already drifted apart once.
-func emitTurnError(sessionCtx context.Context, h *dun.Harness, em *emitter, err error) {
+func emitTurnError(sessionCtx context.Context, h *harness.Harness, em *emitter, err error) {
 	h.RecordTurnError(err)
 	if e := dunconfig.SetupMissing(err); e != nil {
 		err = e
@@ -983,7 +983,7 @@ func emitTurnError(sessionCtx context.Context, h *dun.Harness, em *emitter, err 
 // thing the model did, and fired on autonomous turns nobody asked for. The UI
 // decides when to ask, because the trigger depends on facts the engine cannot
 // see: whether the input box is empty, and how long the person has sat still.
-func emitSuggestions(ctx context.Context, h *dun.Harness, em *emitter) {
+func emitSuggestions(ctx context.Context, h *harness.Harness, em *emitter) {
 	if !suggestEnabled {
 		return
 	}
@@ -1005,11 +1005,11 @@ func emitSuggestions(ctx context.Context, h *dun.Harness, em *emitter) {
 // the startup prune, which refuses to delete anything holding work. This is how
 // a human says "that work is finished with", which is the only way that call
 // can safely be made.
-func closeSession(workspace, sessionID string, wt *dun.Worktree, rag dun.RagLink) string {
+func closeSession(workspace, sessionID string, wt *harness.Worktree, rag harness.RagLink) string {
 	var parts []string
 	if wt != nil && wt.Branch != "" {
-		root := dun.RepoRoot(workspace)
-		if err := dun.RemoveWorktree(root, wt.Path, wt.Branch); err != nil {
+		root := harness.RepoRoot(workspace)
+		if err := harness.RemoveWorktree(root, wt.Path, wt.Branch); err != nil {
 			parts = append(parts, "worktree NOT removed: "+err.Error())
 		} else {
 			parts = append(parts, "removed worktree "+wt.Branch)
@@ -1018,10 +1018,10 @@ func closeSession(workspace, sessionID string, wt *dun.Worktree, rag dun.RagLink
 	if sessionID != "" {
 		// Its folded history's documents first: ForgetSession removes the
 		// files that name them.
-		if err := dun.ForgetSessionFolds(rag, workspace, sessionID); err != nil {
+		if err := harness.ForgetSessionFolds(rag, workspace, sessionID); err != nil {
 			parts = append(parts, "folded history not yet removed from dund: "+err.Error())
 		}
-		dun.ForgetSession(workspace, sessionID)
+		harness.ForgetSession(workspace, sessionID)
 		parts = append(parts, "forgot session "+sessionID)
 	}
 	if len(parts) == 0 {
@@ -1032,7 +1032,7 @@ func closeSession(workspace, sessionID string, wt *dun.Worktree, rag dun.RagLink
 
 // reportHousekeeping says what was cleaned and, more importantly, what was not.
 // An abandoned worktree is the one thing here a human has to decide about.
-func reportHousekeeping(res dun.PruneResult, sessions []string) {
+func reportHousekeeping(res harness.PruneResult, sessions []string) {
 	if n := len(res.Pruned); n > 0 {
 		fmt.Fprintf(os.Stderr, "dun: pruned %s (%s)\n", textfmt.Plural(n, "stale worktree"), numfmt.HumanBytes(res.Freed))
 	}

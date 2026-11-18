@@ -31,7 +31,7 @@ Session names are as of 2026-11-08; `ListAgents` shows the current ones.
   agree. It is filled by hand (Makefile, `release:` comment).
 
 dun also probes the tool at run time (`speaksIndex` markers in
-`indexstate.go`), so a newer feature can be used before the pin moves.
+`internal/harness/indexstate.go`), so a newer feature can be used before the pin moves.
 
 ## The cascade
 

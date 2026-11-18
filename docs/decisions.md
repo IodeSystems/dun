@@ -26,7 +26,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
 - **Bound what enters the window before managing what is in it.** One `cat`
   put 255,720 characters (~64k tokens) in the window to answer a question
   whose answer was "30", and every later turn paid again. An exec result over
-  `execInlineMax` (20k characters, `exec.go`) is clipped to its start and its
+  `execInlineMax` (20k characters, `internal/harness/exec.go`) is clipped to its start and its
   end; the whole output is spilled to a file whose path is in the gap. Both
   ends survive: a failure is at the bottom, a listing is useful from the top.
   Cuts land on line boundaries, or on rune boundaries when there are no
@@ -36,7 +36,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   the cap stops it being charged.
 - **What the human sees must be what the model saw.** Tools report the call
   from inside their own wrapper, before the outer cap runs, so the TUI showed
-  a quarter-megabyte the model never read. `cappedReporter` (`recap.go`) forces
+  a quarter-megabyte the model never read. `cappedReporter` (`internal/harness/recap.go`) forces
   the clip to apply to the UI report too, and `capOnce` memoizes by content.
   Two clips would spill twice under two refs, and the human would be told to
   read a copy the model has never heard of.
@@ -52,7 +52,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   line, not the line count.
 - **Saved output is a file, named by path, not a ref** (USER 2026-11-06). A
   clipped result or a job log is written to the session's bg dir and to its
-  isolation tmp, `$TMPDIR/dun-<session>` (`isotmp.go`), the same path on the
+  isolation tmp, `$TMPDIR/dun-<session>` (`internal/harness/isotmp.go`), the same path on the
   host and under `--docker` (mounted read-only there). `file_read` and
   `exec` both open it, so `read_saved` was retired: one tool fewer on every
   request. A ref existed only because the host path did not exist inside the
@@ -62,13 +62,13 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   read `BudgetTokens: 0` as a zero-token ceiling, so the default
   (`DUN_CONTEXT_TOKENS` unset) compacted every turn: 45 folds in 29 minutes in
   one session, 5 of 50 entries surviving. A regression test pins it
-  (`compaction_test.go`, `policy_test.go`). A shaping policy must set its own
+  (`internal/harness/compaction_test.go`, `internal/harness/policy_test.go`). A shaping policy must set its own
   fields; setting only `BudgetTokens` skips the cheap rungs.
 - **Compaction is always reported.** It is the only operation that destroys
   conversation, and it once ran unreported for three days. `OnCompaction`
   produces a TUI line, stderr and an `--engine` event, with a per-turn counter so
   thrashing names itself.
-- **The model may rewrite its own recent history (`recap`, `recap.go`),
+- **The model may rewrite its own recent history (`recap`, `internal/harness/recap.go`),
   under four constraints.** It replaces a span with the account the
   conversation should have had: cheaper than compaction (no summarizer call),
   more accurate (the whole span is in view), and it fixes the record, so a
@@ -100,7 +100,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   most recent call. A `from` prefers the user message; an assistant turn that
   echoes the phrase collapsed a span to 85 characters.
 - **A removed call stays listed (stub), by default** (USER, 2026-11-08;
-  `recapstub.go`). The summary lost which commands ran and how each ended,
+  `internal/harness/recapstub.go`). The summary lost which commands ran and how each ended,
   and in long Terminal-Bench trials cheap models ran them again. Each removed
   call that `keep` and `drop` do not name becomes one line in the
   replacement: tool, arguments cut to 80 characters, outcome (an exec's from
@@ -126,7 +126,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
 - **The system prompt teaches bubbleteandmd's directive forms (Carl,
   2026-11-11).** `prompt.Format(prompt.Options{})` (Math and Diagrams off: the
   TUI shows math and mermaid as code) follows `replyFormatSystem`
-  (`replyformat.go`): 2,000 characters, about 500 tokens by chars/4, fixed text
+  (`internal/harness/replyformat.go`): 2,000 characters, about 500 tokens by chars/4, fixed text
   so it keeps the cache. On by default; off with `DUN_FORMAT_PROMPT=0`
   (`Config.NoFormatPrompt`, env only, like `DUN_USER_RULES`). Absent in a
   sub-agent (its reply goes to the parent model) and under `--non-interactive`
@@ -150,7 +150,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   A finished reply keeps its Doc; a width change makes a new Doc with a copy
   of the State (folds, tabs, focus).
 - **Tool docs prescribe only the habit that bites.** `toolDocs["node_query"]`
-  (`mcp.go`) was written from a corpus of 39 distinct failing selectors: 25 were
+  (`internal/harness/mcp.go`) was written from a corpus of 39 distinct failing selectors: 25 were
   a bare file path where an id belongs, 8 a grep pattern quoted twice. Those
   two get the first lines of the cheat sheet. The corpus is a test in
   poly-lsp-mcp (`TestSelectorCorpus_*`, outside this repo, not checked here).
@@ -158,7 +158,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   `.dun/worktrees`, so indexing the workspace root indexed 16 copies of the
   repo, and workspace-wide queries returned stale duplicates. Both ends were
   fixed (poly-lsp-mcp skips `.dun`; raglit ingest skips the worktree dirs,
-  `rag_ingest.go`). Watch for this whenever session state moves inside the tree.
+  `internal/harness/rag_ingest.go`). Watch for this whenever session state moves inside the tree.
 
 ## Delivering news to the model
 
@@ -177,7 +177,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
 - **A heartbeat reports the absence of news and must not buy a turn (USER,
   2026-08-03).** It went through `notifyAndWake`, so each reminder cost a full
   model call (and a suggestion call) to say nothing happened, starting at one
-  minute. Reminders use `notifyQuietly` (`bgjob.go`): `Aside` plus the
+  minute. Reminders use `notifyQuietly` (`internal/harness/bgjob.go`): `Aside` plus the
   `onNotify` ping so the human still sees the line. (The one exception, a
   child blocked on `ask_parent`, is gone: a child asks by ending its turn.)
 - **A request nobody asked for must be visible before it is defensible (USER,
@@ -232,7 +232,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   history with an unanswered tool call, so every later request would fail the
   same way.
 - **One retry policy, two scopes.** agentkit's `llm.Client` owns schedule and
-  budget (`RetryPolicy()`). dun's turn-scope retry (`retry.go`) reuses them.
+  budget (`RetryPolicy()`). dun's turn-scope retry (`internal/harness/retry.go`) reuses them.
   Request scope covers everything up to response headers; turn scope covers
   what it cannot, a stream that died mid-generation. A cancelled request
   arrives wrapped in `*url.Error`, which satisfies `net.Error` and looks
@@ -241,7 +241,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
 ## exec and background jobs
 
 - **Every command starts as a job; nothing blocks the session
-  (`exec.go`, `bgjob.go`).** History: a live session sat 14 minutes because the
+  (`internal/harness/exec.go`, `internal/harness/bgjob.go`).** History: a live session sat 14 minutes because the
   model ran `gh auth login` through `exec`; gh started an OAuth device flow and
   polled for a code printed into a pipe nobody read. A 5-minute kill was added,
   then replaced: a command now waits `execGrace` (30 s, the `timeout` argument
@@ -359,7 +359,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   resolved mount list so symlinks and Docker volumes cannot describe different
   sets.
 - **`/isolate none|worktree|docker|off` replaces `/docker` and `/worktree new`
-  (plan, 2026-10-27).** The sub-agents' isolation words (subisolation.go).
+  (plan, 2026-10-27).** The sub-agents' isolation words (internal/harness/subisolation.go).
   `docker` always brings a worktree: a container on the checkout runs the
   commands elsewhere but still edits the developer's files. `off` (= `none`)
   rehoists to `Harness.Home()` (the pinned ConfigDir) and keeps the worktree,
@@ -385,7 +385,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
 - **A commit message is written by the model and approved by the human (USER,
   2026-08-03).** `/worktree commit` once committed with the literal string
   "/worktree commit". Now one throwaway session (`Harness.CommitMessage`,
-  `commit.go`; never appended to the conversation) sees the porcelain status,
+  `internal/harness/commit.go`; never appended to the conversation) sees the porcelain status,
   the diff vs HEAD bounded to 24k with `--stat` always intact, and the last
   three user messages as intent. Untracked contents are omitted (a new file is
   the largest, least informative part). The result is shown with
@@ -393,7 +393,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   written once and read forever. Default Conventional Commits; per repo via
   `commit.format` / `commit.instruction` in dun.json.
 - **A worktree may be deleted when it holds no work, which is not the same as
-  a clean tree (`prune.go`).** Measured: 37 registered, 1.1 GB; by `git status`
+  a clean tree (`internal/harness/prune.go`).** Measured: 37 registered, 1.1 GB; by `git status`
   34 of 37 looked dirty, almost all from one untracked index artifact. Work =
   commits the repo's HEAD cannot reach, plus edits to tracked files, ignoring
   artifact paths (`.dun/`, `.poly-lsp-mcp/`). Merged work is not work.
@@ -453,7 +453,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   without pushing base. If advancing a local branch returns, use
   `git fetch . HEAD:<base>`, which moves the ref without a checkout.
 
-## Sub-agents (`subagent.go`)
+## Sub-agents (`internal/harness/subagent.go`)
 
 - **Purpose (USER): context offloading first, parallelism second.** A child
   does the expensive thing (fetch a page, read a 30k-line log) and returns two
@@ -647,7 +647,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   file cannot resurrect a server the project turned off. A parse error names
   its file. A commandless server is rejected at load.
 - **MCP switches resolve session, then project, then global**
-  (`mcpscope.go`): on/off, mode (standalone, or scripted = hosted in mcpshell
+  (`internal/harness/mcpscope.go`): on/off, mode (standalone, or scripted = hosted in mcpshell
   and called through `eval`), and per-tool switches. Stored mode values stay
   `direct`/`shell` because an older dun rejects any other `via` and would fail
   to load `mcp.json`. A global standalone is stored as `direct`, never as
@@ -659,7 +659,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   read from config files and the session sidecar (`canonicalServerID`); new
   writes use new ids. Model-facing tool names, raglit index names and the
   `"rag"` config key were left unchanged on purpose.
-- **Extensions are manifests (`extension.go`).** An extension is an MCP server
+- **Extensions are manifests (`internal/harness/extension.go`).** An extension is an MCP server
   plus `extension.json`: its server spec, slash commands, roles (`search`,
   `index`), hooks. Special cases (proactive search, memory, skill and rules
   indexes, the AGENTS.md guard) are lookups by role, not by server id. Bundled
@@ -667,22 +667,22 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   `ingest`/`forget` tools when the server has them, else a CLI fallback; when
   raglit adds both, dun switches with no code change. A slash name taken by an
   earlier extension or by dun itself is dropped from the later one.
-- **mcpshell is looked for on PATH, then beside dun's executable** (`missing.go`);
+- **mcpshell is looked for on PATH, then beside dun's executable** (`internal/harness/missing.go`);
   absent, dun runs with one tool less and says how to install it (`dun doctor
   --fix`). Installation by `go install` was chosen over bundling because it
   builds from source and is checked by sum.golang.org. (Release tarballs have
   since been added in `release/`; this fallback remains.)
-- **Hosted-server shell options replace, not merge** (`shellhost.go`): a later
+- **Hosted-server shell options replace, not merge** (`internal/harness/shellhost.go`): a later
   layer's `shell` block replaces a lower one's. Bad globs are dropped with a log
   line, because mcpshell exits on one and would take the shell down.
-- **Project rules are read like Claude Code** (`rules.go`): root AGENTS.md and
+- **Project rules are read like Claude Code** (`internal/harness/rules.go`): root AGENTS.md and
   CLAUDE.md, `@path` imports (relative to the importing file, depth 5, cycle
   safe, an `@token` counts only if it contains `/` or `.`). Identical content
   is included once. `/rules summary` condenses imports with one side call and
   refuses a summary that is not smaller; `/rules index` puts imports in raglit.
   One offer, once per hash, when the block exceeds ~4000 tokens.
 - **User rules files are read in every session** (USER 2026-11-10: "does not
-  read ~/AGENTS.md or ~/CLAUDE.md!!!!"; `rules.go`). `~/AGENTS.md` (or
+  read ~/AGENTS.md or ~/CLAUDE.md!!!!"; `internal/harness/rules.go`). `~/AGENTS.md` (or
   `~/agents.md`), `~/CLAUDE.md` and `~/.claude/CLAUDE.md`, in that order: the
   last is Claude Code's user file, the second is where some keep it instead
   (the owner does), so both are read; the same bytes go in once. They are a
@@ -702,7 +702,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   trial does not depend on the image's home. Each user file is also a `/rules`
   switch, so global scope off takes one out of every project.
 - **`/rules add <path> [--session|--project|--global]` makes any file a root
-  rules file** (USER 2026-11-17; `contextfiles.go`). Kept in the scope's
+  rules file** (USER 2026-11-17; `internal/harness/contextfiles.go`). Kept in the scope's
   `context-files.json` as `"add": [...]` (session when no scope is given, as
   `/rules on`): a session add relative to the workspace when inside it, a
   project or global add always absolute (the project's file is read from its
@@ -718,14 +718,14 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   A file whose `@import` was skipped because the target was already loaded
   says so on its row ("includes ~/AGENTS.md (already loaded)"), only while
   that file is read and on.
-- **Shared raglit indexes** (`attach.go`): raglit's daemon is shared and its
+- **Shared raglit indexes** (`internal/harness/attach.go`): raglit's daemon is shared and its
   watcher keeps indexes fresh; dun only reads. `/rag attach` adds a
   qualified `proj:idx` to the search selector at session, project or global
   scope (union). Attached indexes are read-only from dun. Known risk: with a
   foreign index attached, the selector replaces raglit's default, so the
   project's `shared` namespaces are not read.
 - **Images stay out of the session log.** Image parts are written to
-  `blobs/<sha256>.<ext>` and the log keeps a reference (`store.go`). A message
+  `blobs/<sha256>.<ext>` and the log keeps a reference (`internal/harness/store.go`). A message
   with images typed mid-turn waits for the turn; an image cannot ride a tool
   result. Vision is probed per model (`$DUN_HOME/vision.json`, key = provider
   URL + model); a refusal records `vision=false` and a configured `vision_model`
@@ -748,20 +748,20 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
 
 - **dund's index is the project index; raglit is an add-on.** dund
   (`internal/ragd`, raglit's engine as a Go module, reached through
-  `RagLink`, `raglink.go`) holds a project's code, docs, memories,
+  `RagLink`, `internal/harness/raglink.go`) holds a project's code, docs, memories,
   strategies and sessions indexes in every session, with no `/rag on`.
   raglit (`/rag on`) is for its own document indexes: attached ones,
   include, its UI. Reason: a feature that needs a second daemon, a login and
   `/rag on` is off in most sessions; dund already runs.
-- **One `search`.** `search` is dund's (code and docs, `codesearch.go`).
+- **One `search`.** `search` is dund's (code and docs, `internal/harness/codesearch.go`).
   raglit's search tool is `docs_search` for the model (`modelToolName`,
-  `mcp.go`); its server-side name is still `search`. Before, raglit's
+  `internal/harness/mcp.go`); its server-side name is still `search`. Before, raglit's
   `search` took the name and dund's hits were appended to its answer
   (`withCodeInDocsSearch`, removed): two indexes behind one name, and a
   session's search changed with `/rag on`. The "model-facing names left
   unchanged" rule above holds for every other tool.
 - **Folded history goes to dund's `sessions` index**
-  (`sessionindex_dund.go`). Each span a fold or a recap removes is written to
+  (`internal/harness/sessionindex_dund.go`). Each span a fold or a recap removes is written to
   `<session>.folds/<key>.md` beside the log, then synced into the project's
   `sessions` index, tagged `session:<id>` and `kind:<fold|recap>`; the model
   reads it with agentkit's `session_search`, filtered to its session's tag.
@@ -955,7 +955,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
 ## Sessions, supervision and diagnosis
 
 - **One representation, not two.** The agentkit entry list is both the model's
-  context and the TUI history (`store.go`). Writes are a full rewrite to
+  context and the TUI history (`internal/harness/store.go`). Writes are a full rewrite to
   `<path>.tmp` plus rename: a crash leaves the whole old or whole new file.
   Entries over 8 KiB go to content-addressed blobs.
 - **An EOF must name its engine.** Deliberately closing an engine (session

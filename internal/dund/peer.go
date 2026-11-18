@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -34,7 +34,7 @@ const peerTaskMax = 120
 // brief (a variable: the tests' fake engine writes no plan, and the real one
 // is under the user's dun home).
 var sessionTask = func(workspace, id string) string {
-	first, _, _ := strings.Cut(dun.PlanBrief(dun.SessionFile(workspace, id)), "\n")
+	first, _, _ := strings.Cut(harness.PlanBrief(harness.SessionFile(workspace, id)), "\n")
 	return first
 }
 

@@ -9,8 +9,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/enginecmd"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // What /mcp's table and detail read reaches the TUI through the wire: the
@@ -18,11 +18,11 @@ import (
 // renderer with a hand-made state.
 func TestServerState_ThroughTheWire(t *testing.T) {
 	at := time.UnixMilli(time.Now().UnixMilli())
-	in := dun.ServerState{ID: "vay", Running: true, Hosted: true, Tools: 3, Cost: 1200, Standalone: 900,
+	in := harness.ServerState{ID: "vay", Running: true, Hosted: true, Tools: 3, Cost: 1200, Standalone: 900,
 		Description: "the vay server", Title: "Vay", Version: "1.2.0", Instructions: "use it for vay",
 		Starting: true, StartingSeconds: 2,
-		Log: []dun.ServerLogLine{{At: at, Text: "running vay"}, {At: at, Text: "warming up", Stderr: true}}}
-	b, err := json.Marshal(enginecmd.ServersProto([]dun.ServerState{in}))
+		Log: []harness.ServerLogLine{{At: at, Text: "running vay"}, {At: at, Text: "warming up", Stderr: true}}}
+	b, err := json.Marshal(enginecmd.ServersProto([]harness.ServerState{in}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,13 +49,13 @@ func TestServerState_ThroughTheWire(t *testing.T) {
 func TestServerView_ConnMark(t *testing.T) {
 	v := &mcpServersView{spin: "⣾ "} // spinner.Dot frames end in a space
 	for _, tc := range []struct {
-		st   dun.ServerState
+		st   harness.ServerState
 		want string
 	}{
-		{dun.ServerState{Starting: true, Running: true}, "⣾"},
-		{dun.ServerState{Running: true}, stOK.Render("●")},
-		{dun.ServerState{Hosted: true}, stOK.Render("●")},
-		{dun.ServerState{}, stDisconnected.Render("○")},
+		{harness.ServerState{Starting: true, Running: true}, "⣾"},
+		{harness.ServerState{Running: true}, stOK.Render("●")},
+		{harness.ServerState{Hosted: true}, stOK.Render("●")},
+		{harness.ServerState{}, stDisconnected.Render("○")},
 	} {
 		if got := v.connMark(tc.st); got != tc.want {
 			t.Errorf("%+v: %q, want %q", tc.st, got, tc.want)

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/enginecmd"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/mcptable"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
@@ -19,7 +19,7 @@ import (
 
 // Tool servers the user can turn on and off: /rag (raglit, the add-on index) and
 // /lsp (semantic code). Neither starts on its own — see
-// dun.DefaultServers for why — so this is how a session gets them, and how a
+// harness.DefaultServers for why — so this is how a session gets them, and how a
 // machine that wants them every time says so once.
 //
 // The command is an extension's slash command (its manifest's slash.name):
@@ -28,9 +28,9 @@ import (
 // flagOf is the --rag / --lsp flag that starts a server for one run.
 func flagOf(id string) string {
 	switch id {
-	case dun.ServerDocs:
+	case harness.ServerDocs:
 		return "rag"
-	case dun.ServerCode:
+	case harness.ServerCode:
 		return "lsp"
 	}
 	return id
@@ -63,15 +63,15 @@ func (t *tristate) Set(s string) error {
 // IsBoolFlag lets the flag package accept a bare --rag (as --rag=true).
 func (t *tristate) IsBoolFlag() bool { return true }
 
-// autostartOverrides turns the --rag/--lsp flags into a dun.Config override.
+// autostartOverrides turns the --rag/--lsp flags into a harness.Config override.
 // Empty when neither was passed, which is what leaves the saved setting alone.
 func autostartOverrides(rag, lsp tristate) map[string]bool {
 	out := map[string]bool{}
 	if rag.set {
-		out[dun.ServerDocs] = rag.val
+		out[harness.ServerDocs] = rag.val
 	}
 	if lsp.set {
-		out[dun.ServerCode] = lsp.val
+		out[harness.ServerCode] = lsp.val
 	}
 	if len(out) == 0 {
 		return nil
@@ -101,14 +101,14 @@ func noAutostart(t *tristate, no bool, name string) error {
 // unless a scope flag follows, "on --project"), "unset --project|--session",
 // "restart", "auto" (the project switch on) and "manual" (the project switch
 // off; it was "stop starting it here", which off at project scope is).
-func runServerCmd(ctx context.Context, h *dun.Harness, alias, action string) string {
+func runServerCmd(ctx context.Context, h *harness.Harness, alias, action string) string {
 	if alias == enginecmd.AllServers {
 		return runAllServersCmd(ctx, h, action)
 	}
 	if verb, dir, _ := strings.Cut(strings.TrimSpace(action), " "); enginecmd.ExcludeVerb(alias, verb) {
 		return runExcludeCmd(ctx, h, alias, verb, dir)
 	}
-	if f := strings.Fields(action); alias == dun.ServerCode && lspLanguageCmd(f) {
+	if f := strings.Fields(action); alias == harness.ServerCode && lspLanguageCmd(f) {
 		msg, err := switchOp(h, "lsp", f)
 		if err != nil {
 			return "lsp: " + err.Error()
@@ -121,7 +121,7 @@ func runServerCmd(ctx context.Context, h *dun.Harness, alias, action string) str
 	id, label := alias, alias // addressed by its id
 	// The TUI opens /rag setup itself (ragsetup.go); another client
 	// reaches here.
-	if action == "setup" && alias == dun.ServerDocs {
+	if action == "setup" && alias == harness.ServerDocs {
 		return label + ": setup is a form in dun's terminal UI — /" + alias + " setup there"
 	}
 	switch action {
@@ -187,10 +187,10 @@ func runServerCmd(ctx context.Context, h *dun.Harness, alias, action string) str
 //
 // An action touches only what is RUNNING. "restart the mcp system" means bounce
 // what is up; it must not silently switch on servers this session left off,
-// because both are opt-in by design (see dun.DefaultServers) and turning one on
+// because both are opt-in by design (see harness.DefaultServers) and turning one on
 // costs a spawn plus an index build. Name it — /mcp restart <id> — to start a
 // stopped one.
-func runAllServersCmd(ctx context.Context, h *dun.Harness, action string) string {
+func runAllServersCmd(ctx context.Context, h *harness.Harness, action string) string {
 	states := h.Servers()
 	sort.Slice(states, func(i, j int) bool { return states[i].ID < states[j].ID })
 	if len(states) == 0 {
@@ -221,11 +221,11 @@ func runAllServersCmd(ctx context.Context, h *dun.Harness, action string) string
 // runMCPCmd handles the engine side of /mcp add, move, refresh, remove,
 // login and logout.
 // add's argument is the server spec as JSON (the TUI's form builds it).
-func runMCPCmd(ctx context.Context, h *dun.Harness, action string) string {
+func runMCPCmd(ctx context.Context, h *harness.Harness, action string) string {
 	verb, arg, _ := strings.Cut(action, " ")
 	switch verb {
 	case "add":
-		var spec dun.ServerSpec
+		var spec harness.ServerSpec
 		if err := json.Unmarshal([]byte(arg), &spec); err != nil {
 			return "mcp add: " + err.Error()
 		}
@@ -244,11 +244,11 @@ func runMCPCmd(ctx context.Context, h *dun.Harness, action string) string {
 		if elapsed := time.Since(t0); elapsed > time.Second {
 			msg += fmt.Sprintf(" · %s", elapsed.Round(time.Second))
 		}
-		if st, _ := stateOf(h, spec.ID); st.Via == dun.ViaShell {
+		if st, _ := stateOf(h, spec.ID); st.Via == harness.ViaShell {
 			return msg + "\n" + shellPlacementNote
 		}
 		// No docs to index is nothing to say here (/mcp refresh still says it).
-		if docs := mcpDocsLine(ctx, h, spec.ID); docs != dun.NoResources {
+		if docs := mcpDocsLine(ctx, h, spec.ID); docs != harness.NoResources {
 			msg += "\n" + docs
 		}
 		return msg
@@ -286,7 +286,7 @@ func runMCPCmd(ctx context.Context, h *dun.Harness, action string) string {
 		if err != nil {
 			return "mcp remove: " + err.Error()
 		}
-		msg := arg + ": stopped and removed from " + dun.UserServersFile()
+		msg := arg + ": stopped and removed from " + harness.UserServersFile()
 		if len(cleared) > 0 {
 			msg += "\ncleared its switches in " + strings.Join(cleared, ", ")
 		}
@@ -298,7 +298,7 @@ func runMCPCmd(ctx context.Context, h *dun.Harness, action string) string {
 // mcpToolsEvent answers control "mcptools": "" is every running server's
 // cost, one line each; "<id>" that server's tools; "toggle <id> <tool>
 // on|off" turns one on or off and answers with the new list.
-func mcpToolsEvent(h *dun.Harness, action string) *proto.McpTools {
+func mcpToolsEvent(h *harness.Harness, action string) *proto.McpTools {
 	f := strings.Fields(action)
 	ev := &proto.McpTools{Tools: []proto.McpTool{}}
 	switch {
@@ -327,7 +327,7 @@ func mcpToolsEvent(h *dun.Harness, action string) *proto.McpTools {
 }
 
 // toolCostListing is bare /mcp tools: what each running server's schemas cost.
-func toolCostListing(states []dun.ServerState) string {
+func toolCostListing(states []harness.ServerState) string {
 	var b strings.Builder
 	b.WriteString("mcp tool cost per request")
 	for _, st := range states {
@@ -343,12 +343,12 @@ func toolCostListing(states []dun.ServerState) string {
 }
 
 // heavyHint names the two ways to make a heavy server cheaper.
-func heavyHint(st dun.ServerState) string {
-	if st.Cost < dun.HeavyServerTokens || st.Via == dun.ViaShell {
+func heavyHint(st harness.ServerState) string {
+	if st.Cost < harness.HeavyServerTokens || st.Via == harness.ViaShell {
 		return ""
 	}
 	hint := "heavy: /mcp tools " + st.ID + " to hide some"
-	if st.Via == dun.ViaDirect {
+	if st.Via == harness.ViaDirect {
 		hint += ", or /mcp mode " + st.ID + " scripted"
 	}
 	return hint
@@ -356,7 +356,7 @@ func heavyHint(st dun.ServerState) string {
 
 // mcpDocsLine syncs a server's documentation into raglit's index and says
 // what happened.
-func mcpDocsLine(ctx context.Context, h *dun.Harness, id string) string {
+func mcpDocsLine(ctx context.Context, h *harness.Harness, id string) string {
 	msg, err := h.SyncMCPDocs(ctx, id)
 	if err != nil {
 		return "docs: not indexed — " + textfmt.OneLine(err.Error())
@@ -366,12 +366,12 @@ func mcpDocsLine(ctx context.Context, h *dun.Harness, id string) string {
 
 // memoriesListing renders /memories: each note's question (or its first
 // line), when it was written, and what has happened to it since.
-func memoriesListing(ms []dun.MemoryInfo, on bool) string {
+func memoriesListing(ms []harness.MemoryInfo, on bool) string {
 	if !on {
 		return "memories: off in this session (notes are kept on disk either way)"
 	}
 	if len(ms) == 0 {
-		return "memories: none for this project yet — /remember, or say \"remember, …\"; " + dun.MemoriesUsage
+		return "memories: none for this project yet — /remember, or say \"remember, …\"; " + harness.MemoriesUsage
 	}
 	var b strings.Builder
 	live, void := 0, 0
@@ -419,13 +419,13 @@ func memoriesListing(ms []dun.MemoryInfo, on bool) string {
 		}
 		fmt.Fprintf(&b, "\n  %s  · %s", title, strings.Join(tags, " · "))
 	}
-	b.WriteString("\nto fix one, tell the model (\"that note about X is wrong, it's Y\") — it refines or voids it with you as the source\n" + dun.MemoriesUsage)
+	b.WriteString("\nto fix one, tell the model (\"that note about X is wrong, it's Y\") — it refines or voids it with you as the source\n" + harness.MemoriesUsage)
 	return b.String()
 }
 
 // catalogEvent tells the UI which skills and MCP prompts are in reach, so
 // /skill can list them and each prompt can be a slash command.
-func catalogEvent(h *dun.Harness) *proto.Catalog {
+func catalogEvent(h *harness.Harness) *proto.Catalog {
 	c := &proto.Catalog{Skills: []proto.Skill{}, Prompts: []proto.Prompt{}}
 	for _, s := range h.Skills() {
 		c.Skills = append(c.Skills, proto.Skill{Name: s.Name, Description: s.Description, Source: s.Source, UserOnly: s.UserOnly})
@@ -444,13 +444,13 @@ func catalogEvent(h *dun.Harness) *proto.Catalog {
 // mcpAddHint ends a bare /mcp: how to add one is otherwise invisible.
 const mcpAddHint = "add one: /mcp add — a form: an id, then a URL (https://…) or a command (e.g. npx some-mcp), then a bearer token or an oauth client for a URL"
 
-func serverListing(states []dun.ServerState) string {
+func serverListing(states []harness.ServerState) string {
 	var b strings.Builder
 	b.WriteString("mcp servers — " + mcptable.SwitchLegend)
 	b.WriteString("\n" + mcptable.ServerTable(states, mcptable.PlainKey))
 	total, direct := 0, 0
 	for _, st := range states {
-		if st.Running && st.Via != dun.ViaShell {
+		if st.Running && st.Via != harness.ViaShell {
 			total += st.Cost
 			direct++
 		}
@@ -468,7 +468,7 @@ func serverListing(states []dun.ServerState) string {
 
 // serverStatusLine is the bare "/rag" report: what it is doing now, what it
 // will do next session, and the one command that changes each.
-func serverStatusLine(h *dun.Harness, id, label string) string {
+func serverStatusLine(h *harness.Harness, id, label string) string {
 	st, ok := stateOf(h, id)
 	if !ok {
 		return label + ": not configured"
@@ -500,9 +500,9 @@ func serverStatusLine(h *dun.Harness, id, label string) string {
 	switch {
 	case !st.Running || st.Setup == nil:
 	case len(st.Setup.Capabilities) > 0:
-		b.WriteString("\n" + dun.CapabilityTable(*st.Setup, cmd))
+		b.WriteString("\n" + harness.CapabilityTable(*st.Setup, cmd))
 	default:
-		b.WriteString("\n" + dun.SetupTable(*st.Setup))
+		b.WriteString("\n" + harness.SetupTable(*st.Setup))
 	}
 	if st.Auto {
 		b.WriteString("\n/" + cmd + " off to stop it this session · /" + cmd + " manual to keep it off in this project")
@@ -525,16 +525,16 @@ func serverStatusLine(h *dun.Harness, id, label string) string {
 
 // ingestLine is the docs server's ingest summary as a line of its own — what
 // was indexed, what was skipped and how to include it — or "".
-func ingestLine(h *dun.Harness, id string) string {
+func ingestLine(h *harness.Harness, id string) string {
 	if st, ok := stateOf(h, id); ok && st.Ingest != "" {
 		return "\n" + st.Ingest
 	}
 	return ""
 }
 
-func runningSummary(h *dun.Harness, id string) string {
+func runningSummary(h *harness.Harness, id string) string {
 	st, ok := stateOf(h, id)
-	if ok && st.Via == dun.ViaShell {
+	if ok && st.Via == harness.ViaShell {
 		return mcptable.HostedSummary(st)
 	}
 	if ok && st.Starting {
@@ -551,13 +551,13 @@ func runningSummary(h *dun.Harness, id string) string {
 const shellPlacementNote = "scripted, its schemas leave every request, but dun no longer indexes its docs (/mcp refresh), " +
 	"lists its prompts or skills, applies its tool deny-list, or renders its calls — they show as eval"
 
-func stateOf(h *dun.Harness, id string) (dun.ServerState, bool) {
+func stateOf(h *harness.Harness, id string) (harness.ServerState, bool) {
 	for _, st := range append(h.Servers(), h.BuiltinGroups()...) {
 		if st.ID == id {
 			return st, true
 		}
 	}
-	return dun.ServerState{}, false
+	return harness.ServerState{}, false
 }
 
 // ctrlCmdAsks reports whether a control command may put a question to the human
@@ -570,7 +570,7 @@ func ctrlCmdAsks(id, action string) bool {
 
 // runControlCmd handles /isolate, its old words /docker and /worktree new,
 // and /worktree's own status and commit.
-func runControlCmd(ctx context.Context, h *dun.Harness, id, action string) string {
+func runControlCmd(ctx context.Context, h *harness.Harness, id, action string) string {
 	if iso, note, ok := isolateAlias(id, action); ok {
 		return note + "\n" + runIsolateCmd(h, iso)
 	}
@@ -593,11 +593,11 @@ func runControlCmd(ctx context.Context, h *dun.Harness, id, action string) strin
 // common case — worktree isolation is opt-in — which is a true statement of the
 // isolation mode and no answer at all to the question being asked. Working in
 // place still means working in a git repo.
-func gitView(h *dun.Harness) (wt *dun.Worktree, dedicated bool) {
+func gitView(h *harness.Harness) (wt *harness.Worktree, dedicated bool) {
 	if wt := h.Worktree(); wt != nil && wt.Branch != "" {
 		return wt, true
 	}
-	inPlace, isRepo := dun.WorktreeInPlace(h.Workspace())
+	inPlace, isRepo := harness.WorktreeInPlace(h.Workspace())
 	if !isRepo {
 		return nil, false
 	}
@@ -606,7 +606,7 @@ func gitView(h *dun.Harness) (wt *dun.Worktree, dedicated bool) {
 
 // runWorktreeCmd handles /worktree [status|commit]. /worktree new is
 // /isolate worktree (isolateAlias).
-func runWorktreeCmd(ctx context.Context, h *dun.Harness, action string) string {
+func runWorktreeCmd(ctx context.Context, h *harness.Harness, action string) string {
 	switch action {
 	case "", "status":
 		view, dedicated := gitView(h)
@@ -639,7 +639,7 @@ const maxCommitRounds = 3
 //
 // MUST NOT run on the engine's control-command goroutine — it asks. See
 // Harness.AskUser and setCtrlCmd (inputstream.go).
-func runWorktreeCommit(ctx context.Context, h *dun.Harness) string {
+func runWorktreeCommit(ctx context.Context, h *harness.Harness) string {
 	view, _ := gitView(h)
 	if view == nil {
 		return "worktree: " + h.Workspace() + " is not a git repository"

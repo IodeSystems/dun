@@ -11,7 +11,7 @@ import (
 	"golang.org/x/mod/module"
 	modzip "golang.org/x/mod/zip"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/update"
 	"github.com/iodesystems/dun/release"
 )
@@ -88,7 +88,7 @@ func TestPlanTool(t *testing.T) {
 // server's message names).
 func TestSupportedModules(t *testing.T) {
 	for _, s := range release.Supported {
-		inst, ok := dun.ToolInstall[s.Name]
+		inst, ok := harness.ToolInstall[s.Name]
 		if m, _, _ := strings.Cut(inst.Module, "@"); !ok || m != s.Module {
 			t.Errorf("%s: ToolInstall %q, Supported %q", s.Name, inst.Module, s.Module)
 		}
@@ -259,7 +259,7 @@ func fakeModule(t *testing.T, proxy, mod, v string) {
 // never @latest (the proxy caches it).
 func TestToolInstallIsPinned(t *testing.T) {
 	for _, s := range release.Supported {
-		if m := dun.ToolInstall[s.Name].Module; m != s.Module+"@"+s.Recommended {
+		if m := harness.ToolInstall[s.Name].Module; m != s.Module+"@"+s.Recommended {
 			t.Errorf("%s: ToolInstall %q, want @%s", s.Name, m, s.Recommended)
 		}
 	}

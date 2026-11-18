@@ -25,11 +25,11 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/internal/enginecmd"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/openurl"
 	"github.com/iodesystems/dun/internal/spendmeter"
 	"github.com/iodesystems/dun/internal/textfmt"
@@ -400,7 +400,7 @@ func main() {
 	}
 	// The session's effort: the saved /effort level, else facets.main's.
 	var mainEffort string
-	if _, saved := dun.SavedEffort(); !saved && slices.Contains(dun.EffortLevels, mainRole.Effort) {
+	if _, saved := harness.SavedEffort(); !saved && slices.Contains(harness.EffortLevels, mainRole.Effort) {
 		mainEffort = mainRole.Effort
 		enginecmd.EffortLevel = mainEffort
 	}
@@ -421,13 +421,13 @@ func main() {
 		if *worktree || *docker != "" {
 			fatal(fmt.Errorf("--no-dir has no project to put in a worktree or a container"))
 		}
-		if absWS, err = dun.NoDirWorkspace(); err != nil {
+		if absWS, err = harness.NoDirWorkspace(); err != nil {
 			fatal(err)
 		}
 	}
 
 	if *listSessions {
-		ids := dun.ListSessions(absWS)
+		ids := harness.ListSessions(absWS)
 		if len(ids) == 0 {
 			fmt.Fprintln(os.Stderr, "dun: no saved sessions for this workspace")
 		}
@@ -474,14 +474,14 @@ func main() {
 	var sessionFile, sessionID string
 	switch {
 	case *resume != "":
-		sessionID, sessionFile = *resume, dun.SessionFile(absWS, *resume)
+		sessionID, sessionFile = *resume, harness.SessionFile(absWS, *resume)
 	case *cont:
-		if sessionID = dun.LatestSession(absWS); sessionID != "" {
-			sessionFile = dun.SessionFile(absWS, sessionID)
+		if sessionID = harness.LatestSession(absWS); sessionID != "" {
+			sessionFile = harness.SessionFile(absWS, sessionID)
 		}
 	}
 	if sessionFile == "" {
-		sessionFile, sessionID = dun.NewSessionFile(absWS)
+		sessionFile, sessionID = harness.NewSessionFile(absWS)
 	}
 	// Every command dun runs knows the session it runs in: dun session info
 	// with no id reads it (sessioninfo.go).
@@ -490,7 +490,7 @@ func main() {
 	// which re-embedded the whole workspace every session and discarded it —
 	// and made a durable index impossible by construction. raglit now resolves
 	// its own home and namespaces this workspace by PROJECT (see
-	// dun.DefaultServers), so the index outlives the session and several
+	// harness.DefaultServers), so the index outlives the session and several
 	// sessions share one.
 
 	// Register the workspace as a project on first sight, importing what an
@@ -499,14 +499,14 @@ func main() {
 	// still reads the repo's own config, it only cannot save anything.
 	if *noDir {
 		// not a project: nothing to register
-	} else if _, err := dun.EnsureProject(absWS); err != nil {
+	} else if _, err := harness.EnsureProject(absWS); err != nil {
 		fmt.Fprintf(os.Stderr, "dun: %v\n", err)
 	}
 
 	// Resolve extra mounts: local paths that must be accessible from both
 	// the worktree (symlink) and the Docker container (volume mount).
 	// Loaded from dun.json / dun.local.json and auto-discovered from go.mod.
-	mounts := dun.LoadMounts(absWS, absWS)
+	mounts := harness.LoadMounts(absWS, absWS)
 
 	// Isolation tier 1: a git worktree (with --worktree). The agent's file
 	// changes land here on a fresh branch, not on the checked-out branch.
@@ -514,18 +514,18 @@ func main() {
 	// When resuming, try to reuse the previous session's worktree so file edits
 	// are preserved across sessions.
 	effWS := absWS
-	var wt *dun.Worktree
+	var wt *harness.Worktree
 	if *worktree {
-		var w *dun.Worktree
+		var w *harness.Worktree
 		var isRepo bool
 		var werr error
 		if sessionID != "" {
 			// Resuming — try to reuse the old worktree
-			meta := dun.LoadSessionMeta(absWS, sessionID)
-			w, isRepo, werr = dun.ReuseWorktree(absWS, meta.WorktreePath, meta.Branch, mounts)
+			meta := harness.LoadSessionMeta(absWS, sessionID)
+			w, isRepo, werr = harness.ReuseWorktree(absWS, meta.WorktreePath, meta.Branch, mounts)
 		}
 		if w == nil {
-			w, isRepo, werr = dun.NewWorktree(absWS, mounts)
+			w, isRepo, werr = harness.NewWorktree(absWS, mounts)
 		}
 		if werr != nil {
 			fatal(werr)
@@ -539,7 +539,7 @@ func main() {
 		// There is nothing to learn by waiting: the path and branch are known
 		// the moment the worktree exists.
 		if sessionID != "" {
-			_ = dun.SaveSessionMeta(absWS, sessionID, dun.SessionMeta{WorktreePath: wt.Path, Branch: wt.Branch})
+			_ = harness.SaveSessionMeta(absWS, sessionID, harness.SessionMeta{WorktreePath: wt.Path, Branch: wt.Branch})
 		}
 		if !isRepo && !*prog {
 			fmt.Fprintf(os.Stderr, "dun: %s is not a git repo — working in place (no isolation)\n", absWS)
@@ -547,25 +547,25 @@ func main() {
 	} else {
 		// Without --worktree: a pass-through worktree on the checked-out
 		// directory, so branch and status are known.
-		wt, _ = dun.WorktreeInPlace(absWS)
+		wt, _ = harness.WorktreeInPlace(absWS)
 	}
 
 	// Housekeeping, once the live worktree is known so it is never a candidate:
 	// remove session trees that hold nothing, drop registrations whose directory
 	// is gone, and bound the session history. Anything holding work is reported,
 	// never removed — a branch with unpushed commits may exist nowhere else.
-	if repoRoot := dun.RepoRoot(absWS); repoRoot != "" {
+	if repoRoot := harness.RepoRoot(absWS); repoRoot != "" {
 		live := ""
 		if wt != nil {
 			live = wt.Path
 		}
-		res := dun.PruneWorktrees(repoRoot, live)
-		gone := dun.PruneSessions(absWS, repoRoot, sessionID)
+		res := harness.PruneWorktrees(repoRoot, live)
+		gone := harness.PruneSessions(absWS, repoRoot, sessionID)
 		// A pruned session's folded history leaves dund's sessions index; its
 		// span files stay, as its other archives do (dun.pruneTranscript).
 		if link := sessionRag(); link != nil {
 			for _, id := range gone {
-				if err := dun.ForgetSessionFolds(link, absWS, id); err != nil {
+				if err := harness.ForgetSessionFolds(link, absWS, id); err != nil {
 					fmt.Fprintf(os.Stderr, "dun: session %s: folded history not yet removed from dund: %v\n", id, err)
 				}
 			}
@@ -578,13 +578,13 @@ func main() {
 	// Isolation tier 2: exec runs in a Docker container (--docker IMAGE), or host.
 	// --docker=true resolves to the default image (ubuntu:24.04).
 	dockerImage := resolveDockerImage(*docker)
-	var backend dun.ExecBackend
+	var backend harness.ExecBackend
 	if dockerImage != "" {
-		backend = dun.DockerExec{Dir: effWS, Image: dockerImage, Network: *dockerNetwork, ExtraMounts: mounts, TmpDir: dun.MkIsoTmp(sessionFile)}
+		backend = harness.DockerExec{Dir: effWS, Image: dockerImage, Network: *dockerNetwork, ExtraMounts: mounts, TmpDir: harness.MkIsoTmp(sessionFile)}
 	} else {
 		// Persistent shell: exports survive between exec calls, while the
 		// working directory resets to the project root each time.
-		backend = &dun.HostShell{Dir: effWS}
+		backend = &harness.HostShell{Dir: effWS}
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -617,9 +617,9 @@ func main() {
 	// one-shot mode curClock is the run's clock and pauseClock is still the
 	// right thing to wrap the fold with; in interactive mode it's the running
 	// turn's clock.
-	dun.CompactionPause = pauseClock
+	harness.CompactionPause = pauseClock
 
-	// started holds the Harness once dun.Start returns, for the callbacks that
+	// started holds the Harness once harness.Start returns, for the callbacks that
 	// are installed on cfg before it exists. atomic because the breakdown
 	// measurement runs on its own goroutine.
 	var started atomic.Value
@@ -638,7 +638,7 @@ func main() {
 	// Every response with a cost is also a line in the machine's spend ledger
 	// ($DUN_HOME/spend, dun/ledger.go), billed to the provider, a fingerprint
 	// of the key (never the key) and the model.
-	ledger := spendmeter.NewLedger(dun.DefaultLedgerDir())
+	ledger := spendmeter.NewLedger(harness.DefaultLedgerDir())
 	spend.SetLedger(ledger, spendmeter.KeyFingerprint(effKey))
 	// Its lines name the session, so the next engine on it seeds the
 	// session's money from them (tally.go).
@@ -653,16 +653,16 @@ func main() {
 		func(u, k, model string) func(llm.Usage) { return usageFor(u, k, model, spendmeter.RoleModel) })
 	if why := dunconfig.ProviderMissing(*url, *model); why != nil {
 		runner = noProvider{why}
-		childClients = func(string, string) (dun.ChildClient, error) { return dun.ChildClient{}, why }
+		childClients = func(string, string) (harness.ChildClient, error) { return harness.ChildClient{}, why }
 	}
 	var providerNames []string
 	for _, p := range fc.ProviderList() {
 		providerNames = append(providerNames, p.Name)
 	}
-	cfg := dun.Config{
+	cfg := harness.Config{
 		// The context window set for this model is filed under it, and an
 		// OpenAI-compatible model list is asked with it (dun/window.go).
-		Endpoint: dun.Endpoint{URL: *url, Key: effKey, Model: *model},
+		Endpoint: harness.Endpoint{URL: *url, Key: effKey, Model: *model},
 		// What the harness tool and dun session info say (dun/harnessinfo.go).
 		Version: buildinfo.Version, Provider: engineProvider,
 		Workspace: effWS,
@@ -676,14 +676,14 @@ func main() {
 		Spend:     spend,
 		// Each round's tokens, time and cost, for the turn's stats and what a
 		// tool server costs (dun/roundstats.go).
-		StatsLedger:     dun.NewStatsLedger(dun.DefaultStatsDir()),
+		StatsLedger:     harness.NewStatsLedger(harness.DefaultStatsDir()),
 		ChildModel:      childRole.Model,
 		ChildProvider:   childRole.Provider,
 		ChildEffort:     childRole.Effort,
 		Effort:          mainEffort,
 		Exec:            backend,
 		Worktree:        wt,
-		CommitCfg:       dun.LoadCommit(absWS),
+		CommitCfg:       harness.LoadCommit(absWS),
 		Files:           filesConfig(absWS, *noDir),
 		NoDir:           *noDir,
 		NoTools:         *noTools,
@@ -741,7 +741,7 @@ func main() {
 	var peers *peerLink
 	if *prog {
 		em = &emitter{}
-		em.turn = newTurnTracker(em, func() *dun.Harness { h, _ := started.Load().(*dun.Harness); return h })
+		em.turn = newTurnTracker(em, func() *harness.Harness { h, _ := started.Load().(*harness.Harness); return h })
 		in = newInputStream()
 		// Under dund, the model can see and message the other live sessions
 		// (peers.go); standalone, the tools are absent.
@@ -756,17 +756,17 @@ func main() {
 		}
 		cfg.OnToken = func(s string) { em.emit(&proto.Token{Text: s}) }
 		cfg.OnReasoning = func(s string) { em.emit(&proto.Reasoning{Text: s}) }
-		cfg.OnRequest = func(r dun.RequestStat) { em.emit(requestEvent(tally.reqs, r)) }
+		cfg.OnRequest = func(r harness.RequestStat) { em.emit(requestEvent(tally.reqs, r)) }
 		// An autostart server that came up (or did not) after the session
 		// was ready. Before Start returns there is no harness to describe;
 		// the ready event that follows carries the server list instead.
 		cfg.OnServerStarted = func(id string, err error) {
-			h, _ := started.Load().(*dun.Harness)
+			h, _ := started.Load().(*harness.Harness)
 			if h == nil {
 				return
 			}
 			msg := id + ": " + runningSummary(h, id)
-			var miss *dun.MissingError
+			var miss *harness.MissingError
 			switch {
 			case errors.As(err, &miss): // a setup step, said quietly
 				msg = id + " off: " + textfmt.OneLine(err.Error())
@@ -795,7 +795,7 @@ func main() {
 				actMu.Lock()
 				actDue = false
 				actMu.Unlock()
-				if h, _ := started.Load().(*dun.Harness); h != nil {
+				if h, _ := started.Load().(*harness.Harness); h != nil {
 					em.emit(&proto.ServerEvent{Action: "activity", Servers: enginecmd.ServersProto(h.Servers()),
 						Tools: h.ToolNames(), Background: true})
 				}
@@ -804,7 +804,7 @@ func main() {
 		// A server's index build ended (dun/indexstate.go): the new state,
 		// and what dun did about it when it did something.
 		cfg.OnServerIndex = func(id, msg string) {
-			h, _ := started.Load().(*dun.Harness)
+			h, _ := started.Load().(*harness.Harness)
 			if h == nil {
 				return
 			}
@@ -813,12 +813,12 @@ func main() {
 		}
 		// The task plan changed (dun/plan.go): a screen reads it again.
 		cfg.OnPlan = func() {
-			if h, _ := started.Load().(*dun.Harness); h != nil {
+			if h, _ := started.Load().(*harness.Harness); h != nil {
 				em.emit(planEvent(h, ""))
 			}
 		}
 		cfg.OnPlanNote = func(msg string) {
-			if h, _ := started.Load().(*dun.Harness); h != nil {
+			if h, _ := started.Load().(*harness.Harness); h != nil {
 				ev := planEvent(h, "")
 				ev.Note = msg
 				em.emit(ev)
@@ -829,7 +829,7 @@ func main() {
 		cfg.OnServerSetup = func(id, msg string) {
 			go func() {
 				for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
-					if h, _ := started.Load().(*dun.Harness); h != nil {
+					if h, _ := started.Load().(*harness.Harness); h != nil {
 						em.emit(&proto.ServerEvent{ID: id, Action: "setup", Message: msg,
 							Servers: enginecmd.ServersProto(h.Servers()), Tools: h.ToolNames(), Background: true})
 						return
@@ -837,17 +837,17 @@ func main() {
 				}
 			}()
 		}
-		cfg.OnToolStart = func(c dun.ToolStart) {
+		cfg.OnToolStart = func(c harness.ToolStart) {
 			em.emit(&proto.ToolCall{CallID: c.CallID, Tool: c.Tool, Args: c.Args, Agent: c.Agent})
 		}
-		cfg.OnToolEnd = func(r dun.ToolEnd) {
+		cfg.OnToolEnd = func(r harness.ToolEnd) {
 			em.emit(&proto.ToolResult{CallID: r.CallID, Tool: r.Tool, Result: r.Result,
 				IsError: r.IsError, ElapsedMS: r.Elapsed.Milliseconds(), Agent: r.Agent})
 		}
-		cfg.OnNotify = func(text string) { em.emit(&proto.Notification{Text: text, Agent: dun.NoticeAgent(text)}) }
-		cfg.OnDelivered = func(d dun.Delivery) {
+		cfg.OnNotify = func(text string) { em.emit(&proto.Notification{Text: text, Agent: harness.NoticeAgent(text)}) }
+		cfg.OnDelivered = func(d harness.Delivery) {
 			em.emit(&proto.Delivered{IDs: d.IDs, CallID: d.CallID})
-			if h, _ := started.Load().(*dun.Harness); h != nil {
+			if h, _ := started.Load().(*harness.Harness); h != nil {
 				em.emit(&proto.Queued{Count: h.Queued()})
 			}
 		}
@@ -864,38 +864,38 @@ func main() {
 		// The whole list every time, not a delta: it is a handful of rows, and a
 		// UI that has to reconstruct state from deltas gets it wrong the first
 		// time an event is dropped.
-		cfg.OnAgents = func(as []dun.AgentInfo) { em.emit(&proto.Agents{Agents: agentsProto(as)}) }
-		cfg.OnAgentEntry = func(id int, items []dun.HistoryItem) {
+		cfg.OnAgents = func(as []harness.AgentInfo) { em.emit(&proto.Agents{Agents: agentsProto(as)}) }
+		cfg.OnAgentEntry = func(id int, items []harness.HistoryItem) {
 			em.emit(&proto.AgentEntry{Agent: id, Items: historyProto(items)})
 		}
-		cfg.OnJobs = func(js []dun.JobInfo) { em.emit(&proto.Jobs{Jobs: jobsProto(js)}) }
-		// started is filled in once dun.Start returns. The breakdown callback is
+		cfg.OnJobs = func(js []harness.JobInfo) { em.emit(&proto.Jobs{Jobs: jobsProto(js)}) }
+		// started is filled in once harness.Start returns. The breakdown callback is
 		// installed BEFORE the Harness exists and fires after it does, and the
 		// window division it wants to carry can only come from the Harness — so
 		// the reference is late-bound rather than captured. Nil-checked because
 		// an estimate can land before the assignment on a slow start.
-		cfg.OnSystemBreakdown = func(bd dun.SystemBreakdown) {
+		cfg.OnSystemBreakdown = func(bd harness.SystemBreakdown) {
 			ev := &proto.ContextCost{SystemCost: systemCost(bd, bd.Total)}
-			if hp, _ := started.Load().(*dun.Harness); hp != nil {
+			if hp, _ := started.Load().(*harness.Harness); hp != nil {
 				w := windowOf(hp.Window())
 				ev.Window = &w
 			}
 			em.emit(ev)
 		}
-		cfg.OnDocs = func(n dun.DocsNote) {
+		cfg.OnDocs = func(n harness.DocsNote) {
 			em.emit(&proto.Notification{Kind: "docs", Found: n.Found, Surfaced: n.Surfaced, Docs: docsProto(n.Docs),
 				Bytes: n.Bytes, Tokens: n.Tokens, LatencyMS: n.LatMS})
 		}
-		cfg.OnRetry = func(n dun.RetryNote) { em.emit(retryEvent(n)) }
+		cfg.OnRetry = func(n harness.RetryNote) { em.emit(retryEvent(n)) }
 		// The count, the citation and what REPLACED the span — never the removed
 		// content itself: re-rendering the churn a recap just took out would
 		// defeat the point of it. Recap no longer asks first, so this event is
 		// the only place a human learns it happened; it carries enough to judge
 		// the rewrite after the fact.
-		cfg.OnRecap = func(n dun.RecapNote) {
+		cfg.OnRecap = func(n harness.RecapNote) {
 			em.emit(&proto.Recap{Entries: n.Entries, Chars: n.Chars, Note: n.Note, Detail: n.Detail})
 		}
-		cfg.OnCompaction = func(n dun.CompactionNote) {
+		cfg.OnCompaction = func(n harness.CompactionNote) {
 			em.emit(&proto.Compaction{Text: n.String(), Subsumed: n.Subsumed,
 				TokensBefore: n.TokensBefore, TokensAfter: n.TokensAfter,
 				Turn: n.Turn, SinceLastSecs: n.SinceLastSecs, Cause: n.Cause})
@@ -911,7 +911,7 @@ func main() {
 			// working, and a question left open should never be what kills the
 			// turn that asked it.
 			return withoutClock(func() (string, error) {
-				ask := &proto.Ask{AskID: dun.NewMessageID(), CallID: em.turn.callID(), Question: q, Options: opts, Multi: multi, RecommendedAll: rec}
+				ask := &proto.Ask{AskID: harness.NewMessageID(), CallID: em.turn.callID(), Question: q, Options: opts, Multi: multi, RecommendedAll: rec}
 				if len(rec) > 0 {
 					ask.Recommended = rec[0]
 				}
@@ -932,7 +932,7 @@ func main() {
 			askMu.Lock()
 			defer askMu.Unlock()
 			return withoutClock(func() (bool, error) {
-				id := dun.NewMessageID()
+				id := harness.NewMessageID()
 				em.emit(&proto.Mount{AskID: id, Source: source, Name: name})
 				a, err := awaitAnswer(actx, in.answers, id)
 				if err != nil {
@@ -960,14 +960,14 @@ func main() {
 			fmt.Fprintf(os.Stderr, "\n  🧠 %s\n", safeErr(textfmt.Clip(textfmt.OneLine(msg), 200)))
 		}
 		cfg.OnRules = func(msg string) { fmt.Fprintf(os.Stderr, "\n  %s\n", safeErr(msg)) }
-		cfg.OnDocs = func(n dun.DocsNote) {
+		cfg.OnDocs = func(n harness.DocsNote) {
 			fmt.Fprintf(os.Stderr, "\n  🔎 %d relevant doc(s) · %d surfaced\n", n.Found, n.Surfaced)
 			for _, d := range n.Docs {
 				fmt.Fprintf(os.Stderr, "     %s  (%s)\n       %s\n", safeErr(d.Title), safeErr(d.Why()), safeErr(d.Source()))
 			}
 		}
-		cfg.OnRetry = func(n dun.RetryNote) { fmt.Fprintf(os.Stderr, "\n  %s %s\n", retryGlyph(n), n.String()) }
-		cfg.OnCompaction = func(n dun.CompactionNote) { fmt.Fprintf(os.Stderr, "\n  🗜 %s\n", n) }
+		cfg.OnRetry = func(n harness.RetryNote) { fmt.Fprintf(os.Stderr, "\n  %s %s\n", retryGlyph(n), n.String()) }
+		cfg.OnCompaction = func(n harness.CompactionNote) { fmt.Fprintf(os.Stderr, "\n  🗜 %s\n", n) }
 		cfg.Ask = func(actx context.Context, q string, opts []string, multi bool, rec []string) (string, error) {
 			return withoutClock(func() (string, error) { return humanAsk(actx, q, opts, multi, rec) })
 		}
@@ -986,7 +986,7 @@ func main() {
 	}
 
 	dropKeyEnv(fc, effKey)
-	h, err := dun.Start(ctx, cfg)
+	h, err := harness.Start(ctx, cfg)
 	if h != nil {
 		started.Store(h)
 		enginecmd.EngineHarness.Store(h)
@@ -995,7 +995,7 @@ func main() {
 			spent: func(budget, grace time.Duration) {
 				h.NoteBudget(budget, grace)
 				msg := fmt.Sprintf("turn budget %s spent — the model is told to wrap up; cut in %s",
-					dun.BudgetDur(budget), dun.BudgetDur(grace))
+					harness.BudgetDur(budget), harness.BudgetDur(grace))
 				if em != nil {
 					em.emit(&proto.Notification{Kind: "budget", Text: msg})
 				} else {
@@ -1115,17 +1115,17 @@ func main() {
 type closeCtx struct {
 	workspace string
 	sessionID string
-	wt        *dun.Worktree
-	rag       dun.RagLink // nil: DUN_MEMORY=0
+	wt        *harness.Worktree
+	rag       harness.RagLink // nil: DUN_MEMORY=0
 }
 
 // sessionRag is the session's link to dund's retrieval, nil with
 // DUN_MEMORY=0.
-func sessionRag() dun.RagLink {
+func sessionRag() harness.RagLink {
 	if os.Getenv("DUN_MEMORY") == "0" {
 		return nil
 	}
-	return dun.DundRag(dundcli.Socket(dun.DunHome()))
+	return harness.DundRag(dundcli.Socket(harness.DunHome()))
 }
 
 func fatal(err error) {
@@ -1135,11 +1135,11 @@ func fatal(err error) {
 
 // filesConfig is the workspace's file-tool settings; none for a --no-dir
 // session, which has no project files (dun/nodir.go).
-func filesConfig(ws string, noDir bool) *dun.FilesConfig {
+func filesConfig(ws string, noDir bool) *harness.FilesConfig {
 	if noDir {
-		return &dun.FilesConfig{Tools: []string{}}
+		return &harness.FilesConfig{Tools: []string{}}
 	}
-	return dun.LoadFiles(ws)
+	return harness.LoadFiles(ws)
 }
 
 // intFlagOff is an int flag for a Config field where 0 means "unset" and a

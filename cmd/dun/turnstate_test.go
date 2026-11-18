@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -16,7 +16,7 @@ import (
 func TestTurnStatePhases(t *testing.T) {
 	var buf bytes.Buffer
 	em := &emitter{w: &buf}
-	em.turn = newTurnTracker(em, func() *dun.Harness { return nil })
+	em.turn = newTurnTracker(em, func() *harness.Harness { return nil })
 	em.turn.now = func() time.Time { return time.UnixMilli(1000) }
 	for _, p := range []any{
 		&proto.Turn{Kind: "user"},

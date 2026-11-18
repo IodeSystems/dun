@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/enginecmd"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // fakeToolServer is a Streamable HTTP MCP server with one tool.
@@ -49,9 +49,9 @@ func TestRaglitAndPolyLspCommands_StatusOnOffAutoManualUnsetRestart(t *testing.T
 	t.Setenv("DUN_HOME", t.TempDir())
 	ctx := context.Background()
 	ws := t.TempDir()
-	h, err := dun.Start(ctx, dun.Config{Workspace: ws, Servers: []dun.Server{
-		{ID: dun.ServerDocs, URL: fakeToolServer(t, "search").URL, Timeout: 10},
-		{ID: dun.ServerCode, URL: fakeToolServer(t, "node_query").URL, Timeout: 10},
+	h, err := harness.Start(ctx, harness.Config{Workspace: ws, Servers: []harness.Server{
+		{ID: harness.ServerDocs, URL: fakeToolServer(t, "search").URL, Timeout: 10},
+		{ID: harness.ServerCode, URL: fakeToolServer(t, "node_query").URL, Timeout: 10},
 	}})
 	if err != nil {
 		t.Fatal(err)

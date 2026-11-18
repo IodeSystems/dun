@@ -6,7 +6,7 @@ and the workspace's code and docs indexes, `rag.md` "Built: session code and
 doc search", whenever dund is reachable) and may inject the best match into
 the prompt. A wrong injection costs context and
 misleads the model, so the rule is strict: a miss is cheaper than noise. Code:
-`notify.go` (rule and query), `surfacing.go` (labels), `extension.go`
+`internal/harness/notify.go` (rule and query), `internal/harness/surfacing.go` (labels), `internal/harness/extension.go`
 (`indexedFinder`). Constants: `surfaceFloor`, `surfaceDelta`, `coverageFloor`,
 `surfaceQueryWords`.
 

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // A running poly-lsp whose index builds says indexing on the splash and the
@@ -20,7 +20,7 @@ func TestIndexing_SplashStatusAndReport(t *testing.T) {
 				"index": index, "indexSeconds": float64(12), "tools": float64(4)},
 		}
 	}
-	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}, "servers": servers(dun.IndexBuilding)})
+	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}, "servers": servers(harness.IndexBuilding)})
 	v.event(map[string]any{"type": "settings", "model": "m", "url": "http://llm/v1"})
 	if got := stripANSI(convoText(v.m)); !strings.Contains(got, "poly-lsp indexing 12s") {
 		t.Fatalf("the splash does not say indexing:\n%s", got)
@@ -31,7 +31,7 @@ func TestIndexing_SplashStatusAndReport(t *testing.T) {
 	n := len(v.m.convo)
 	msg := "poly-lsp: the index holds .claude/worktrees/ (21,557 files, 97% of the index, 48 other git checkouts). To leave it out: /lsp exclude .claude/worktrees"
 	v.event(map[string]any{"type": "server", "id": "poly-lsp", "action": "index", "background": true,
-		"message": msg, "servers": servers(dun.IndexReady), "tools": []any{"eval", "node_query"}})
+		"message": msg, "servers": servers(harness.IndexReady), "tools": []any{"eval", "node_query"}})
 	if len(v.m.convo) <= n || !strings.Contains(stripANSI(convoText(v.m)), "the index holds .claude/worktrees/") {
 		t.Fatalf("the report is not in the conversation:\n%s", convoText(v.m))
 	}

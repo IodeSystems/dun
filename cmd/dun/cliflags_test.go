@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/iodesystems/agentkit/llm"
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // --no-rag / --no-lsp are --rag=false / --lsp=false: the same override, so the
@@ -27,7 +27,7 @@ func TestNoRagNoLsp_AreTheOffSpelling(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := autostartOverrides(rag, lsp)
-	if v, ok := got[dun.ServerDocs]; !ok || v || len(got) != 1 {
+	if v, ok := got[harness.ServerDocs]; !ok || v || len(got) != 1 {
 		t.Errorf("--no-rag: %v", got)
 	}
 	var off tristate
@@ -159,9 +159,9 @@ func TestRunHuman_AttachesMediaToTheFirstMessage(t *testing.T) {
 	img := filepath.Join(dir, "shot.png")
 	writeTestPNG(t, img)
 	c := &capture{}
-	h, err := dun.Start(context.Background(), dun.Config{Workspace: dir, Client: c, NoTools: true,
+	h, err := harness.Start(context.Background(), harness.Config{Workspace: dir, Client: c, NoTools: true,
 		SessionFile: filepath.Join(dir, "s.jsonl"),
-		Vision:      dun.VisionConfig{Key: "http://llm m", StateFile: filepath.Join(dir, "vision.json")}})
+		Vision:      harness.VisionConfig{Key: "http://llm m", StateFile: filepath.Join(dir, "vision.json")}})
 	if err != nil {
 		t.Fatal(err)
 	}

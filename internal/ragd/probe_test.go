@@ -17,8 +17,8 @@ import (
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/raglit"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -132,7 +132,7 @@ func fact(t *testing.T, caps llm.Capabilities, key string) llm.Fact {
 	t.Helper()
 	f, ok := caps.Facts[key]
 	if !ok {
-		t.Fatalf("no %s in the record: %s", key, dun.CapsReport(caps))
+		t.Fatalf("no %s in the record: %s", key, harness.CapsReport(caps))
 	}
 	if f.Source != llm.SourceProbed {
 		t.Fatalf("%s has source %s, want probed", key, f.Source)
@@ -167,9 +167,9 @@ func TestProbeEmbedRecordsItsFactsInTheCapabilityStore(t *testing.T) {
 	if got := fmt.Sprint(f.batches); got != "[1 8 32 1]" {
 		t.Errorf("batches sent %s, want [1 8 32 1]: stop at the first failure, then the same input again", got)
 	}
-	stored := dun.LoadCapsIn(caps, r.Caps.Endpoint, "emb")
+	stored := harness.LoadCapsIn(caps, r.Caps.Endpoint, "emb")
 	if stored.Facts[CapEmbedDimension].Value != "12" || stored.Facts[CapEmbedBatchMax].Value != "8" {
-		t.Errorf("stored record %s", dun.CapsReport(stored))
+		t.Errorf("stored record %s", harness.CapsReport(stored))
 	}
 	if embedDimension(caps, raglit.ModelRole{BaseURL: url, Model: "emb"}) != 12 {
 		t.Error("dund does not read the probed dimension back")

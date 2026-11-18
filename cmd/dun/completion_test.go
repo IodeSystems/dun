@@ -8,7 +8,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // Each shell's script names every subcommand, the real flags (from the flag
@@ -62,13 +62,13 @@ func TestCompletion_Scripts(t *testing.T) {
 // `dun __complete sessions` prints what --sessions lists.
 func TestCompletion_Sessions(t *testing.T) {
 	ws := t.TempDir()
-	path, id := dun.NewSessionFile(ws)
+	path, id := harness.NewSessionFile(ws)
 	_ = os.WriteFile(path, []byte(`{"role":"user","content":"hi"}`+"\n"), 0o600)
 	var out, errb strings.Builder
 	if code := completeHelper([]string{"sessions", "--workspace", ws}, &out, &errb); code != 0 {
 		t.Fatalf("exit %d: %s", code, errb.String())
 	}
-	want := strings.Join(dun.ListSessions(ws), "\n")
+	want := strings.Join(harness.ListSessions(ws), "\n")
 	if got := strings.TrimSpace(out.String()); got != want || !strings.Contains(got, id) {
 		t.Errorf("got %q, want %q (with %s)", got, want, id)
 	}

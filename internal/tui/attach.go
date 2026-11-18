@@ -16,9 +16,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/dundcli"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
@@ -160,7 +160,7 @@ func attachSession(o TuiOpts, after resumeAt) (*dunProc, error) {
 	notes, reexec := checkDundBuild(ac, sc)
 	id := o.Resume
 	if id == "" && o.Cont {
-		id = dun.LatestSession(o.Workspace)
+		id = harness.LatestSession(o.Workspace)
 	}
 	reused := false
 	if id == "" {
@@ -264,13 +264,13 @@ func attachSession(o TuiOpts, after resumeAt) (*dunProc, error) {
 // one instead.
 func reusedLine(workspace, id string) string {
 	n := 0
-	for _, it := range dun.SessionHistory(dun.SessionFile(workspace, id)) {
+	for _, it := range harness.SessionHistory(harness.SessionFile(workspace, id)) {
 		if it.Kind == "user" || it.Kind == "assistant" {
 			n++
 		}
 	}
 	age := "nothing saved yet"
-	if st, err := os.Stat(dun.SessionFile(workspace, id)); err == nil {
+	if st, err := os.Stat(harness.SessionFile(workspace, id)); err == nil {
 		age = textfmt.RelTime(st.ModTime())
 	}
 	unit := "messages"

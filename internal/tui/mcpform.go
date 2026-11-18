@@ -12,8 +12,8 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/enginecmd"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // /mcp add [preset] — a form for a new MCP server. It asks one thing: what
@@ -34,7 +34,7 @@ import (
 // /mcp mode <id> scripted, or m in /mcp — and a first server's user cannot
 // answer it.
 //
-// A preset (dun.Presets()) fills the name and the server row; typing a
+// A preset (harness.Presets()) fills the name and the server row; typing a
 // preset's name and leaving the row does the same when the server row is
 // empty.
 //
@@ -101,7 +101,7 @@ func (m *tuiModel) openMCPForm(preset ...string) tea.Cmd {
 
 // fillPreset fills the id and server rows from a preset.
 func (m *tuiModel) fillPreset(id string) bool {
-	p, ok := dun.Preset(id)
+	p, ok := harness.Preset(id)
 	if !ok {
 		return false
 	}
@@ -209,7 +209,7 @@ func mcpIDClean(s string) string {
 // A preset's name that is also a command here is not guessed at: it is said.
 func (m *tuiModel) mcpResolve() string {
 	v := strings.TrimSpace(m.mcpFields[mcpServer].Value())
-	if _, ok := dun.Preset(v); ok {
+	if _, ok := harness.Preset(v); ok {
 		if _, err := mcpLookPath(v); err == nil {
 			return v + " is a preset and a command here — /mcp add " + v + " for the preset, or the command's full path"
 		}
@@ -228,7 +228,7 @@ func (m *tuiModel) mcpFollowName() {
 		return
 	}
 	m.mcpAuto = mcpNameFrom(m.mcpFields[mcpServer].Value())
-	for _, p := range dun.Presets() {
+	for _, p := range harness.Presets() {
 		target := p.URL
 		if target == "" {
 			target = shellJoin(append([]string{p.Command}, p.Args...))
@@ -324,7 +324,7 @@ func (m *tuiModel) mcpRowErr() string {
 			return "env: " + err.Error()
 		}
 	case mcpSend:
-		if v != "" && v != dun.SendAccessToken && v != dun.SendIDToken {
+		if v != "" && v != harness.SendAccessToken && v != harness.SendIDToken {
 			return "send is access_token or id_token"
 		}
 	}
@@ -447,8 +447,8 @@ func mcpIDOK(id string) bool {
 
 // mcpFormSpec turns the form into a server spec: an http(s) address is a
 // remote server, anything else a command line split with shell quoting.
-func mcpFormSpec(id, target, bearer string) (dun.ServerSpec, error) {
-	spec := dun.ServerSpec{ID: strings.TrimSpace(id), Bearer: strings.TrimSpace(bearer)}
+func mcpFormSpec(id, target, bearer string) (harness.ServerSpec, error) {
+	spec := harness.ServerSpec{ID: strings.TrimSpace(id), Bearer: strings.TrimSpace(bearer)}
 	target = strings.TrimSpace(target)
 	if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") {
 		spec.URL = target
@@ -465,8 +465,8 @@ func mcpFormSpec(id, target, bearer string) (dun.ServerSpec, error) {
 	return spec, nil
 }
 
-// splitShell is dun.SplitShell.
-func splitShell(s string) ([]string, error) { return dun.SplitShell(s) }
+// splitShell is harness.SplitShell.
+func splitShell(s string) ([]string, error) { return harness.SplitShell(s) }
 
 // shellJoin is splitShell's inverse, quoting a word only when it needs it.
 func shellJoin(words []string) string {
@@ -515,12 +515,12 @@ func envName(k string) bool {
 // is empty (a server that answers with an OAuth challenge still gets one,
 // AddServer). An empty client id is dun's choice (dun/oauthauto.go). Scopes
 // split on spaces or commas.
-func mcpFormOAuth(clientID, scopes, issuer, send string) *dun.OAuthSpec {
+func mcpFormOAuth(clientID, scopes, issuer, send string) *harness.OAuthSpec {
 	clientID = strings.TrimSpace(clientID)
 	if clientID == "" && strings.TrimSpace(scopes+issuer+send) == "" {
 		return nil
 	}
-	o := &dun.OAuthSpec{ClientID: clientID, Issuer: strings.TrimSpace(issuer), Send: strings.TrimSpace(send)}
+	o := &harness.OAuthSpec{ClientID: clientID, Issuer: strings.TrimSpace(issuer), Send: strings.TrimSpace(send)}
 	o.Scopes = strings.FieldsFunc(scopes, func(r rune) bool { return r == ' ' || r == ',' })
 	if len(o.Scopes) == 0 {
 		o.Scopes = nil
@@ -537,7 +537,7 @@ func (m tuiModel) mcpFormPanel() string {
 		}
 		if i == mcpClient {
 			rows = append(rows, "  "+StDim.Render("oauth login: empty, dun uses its own client where the server takes it, or registers one; else a client id"),
-				"  "+StDim.Render("registered by hand, redirect URI http://127.0.0.1:"+strconv.Itoa(dun.DefaultOAuthRedirectPort)+"/oauth/callback; secret, audience and the rest go in mcp.json"))
+				"  "+StDim.Render("registered by hand, redirect URI http://127.0.0.1:"+strconv.Itoa(harness.DefaultOAuthRedirectPort)+"/oauth/callback; secret, audience and the rest go in mcp.json"))
 		}
 		row := formRow(labels[i], i == m.mcpStep, f.View())
 		if i == mcpServer {
@@ -553,7 +553,7 @@ func (m tuiModel) mcpFormPanel() string {
 	if m.mcpErr != "" {
 		rows = append(rows, "  "+StErr.Render(m.mcpErr))
 	}
-	notes := []string{"saved to " + tildePath(dun.UserServersFile()) + " for every project", "starts now"}
+	notes := []string{"saved to " + tildePath(harness.UserServersFile()) + " for every project", "starts now"}
 	if id := strings.TrimSpace(m.mcpFields[mcpID].Value()); id != "" && slices.Contains(m.serverIDs, id) {
 		notes[1] += " · replaces the " + id + " there now"
 	}

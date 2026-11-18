@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 )
@@ -34,7 +34,7 @@ func CellWord(v string) string {
 }
 
 // StateCell is "on (project)": what the server is, and which switch said so.
-func StateCell(st dun.ServerState) string {
+func StateCell(st harness.ServerState) string {
 	from := st.From
 	if from == "flag" {
 		from = "this run"
@@ -46,25 +46,25 @@ func StateCell(st dun.ServerState) string {
 }
 
 // ViaCell is "scripted (global)": the mode, and which switch said so.
-func ViaCell(st dun.ServerState) string {
-	if strings.HasPrefix(st.ID, dun.BuiltinPrefix) {
+func ViaCell(st harness.ServerState) string {
+	if strings.HasPrefix(st.ID, harness.BuiltinPrefix) {
 		return "dun's own tools"
 	}
 	if st.Via == "" {
 		return "standalone (built-in)"
 	}
-	return dun.ModeWord(st.Via) + " (" + st.ViaFrom + ")"
+	return harness.ModeWord(st.Via) + " (" + st.ViaFrom + ")"
 }
 
 // InstanceCell is "shared (global)": how many connections, and which switch
 // said so; a built-in's fixed one is marked built-in.
-func InstanceCell(st dun.ServerState) string {
-	if strings.HasPrefix(st.ID, dun.BuiltinPrefix) {
+func InstanceCell(st harness.ServerState) string {
+	if strings.HasPrefix(st.ID, harness.BuiltinPrefix) {
 		return "dun's own tools"
 	}
 	inst := st.Instance
 	if inst == "" {
-		inst = dun.InstanceShared
+		inst = harness.InstanceShared
 	}
 	if st.InstanceFrom == "" {
 		return inst + " (built-in)"
@@ -89,7 +89,7 @@ func PlainKey(word, _ string) string { return word }
 type Widths struct{ ID, Via, Instance int }
 
 // TableWidths are the widths states' rows need.
-func TableWidths(states []dun.ServerState) Widths {
+func TableWidths(states []harness.ServerState) Widths {
 	w := Widths{ID: len("server"), Via: len("mode"), Instance: len("instance")}
 	for _, st := range states {
 		w.ID = max(w.ID, len(st.ID))
@@ -124,14 +124,14 @@ func ServerHeader(cw Widths, key keyStyle) string {
 
 // ServerRow is one server's row: the switches, where it runs, what it is,
 // and what it is doing.
-func ServerRow(st dun.ServerState, cw Widths, detail string) string {
+func ServerRow(st harness.ServerState, cw Widths, detail string) string {
 	cell := func(v string) string { return "   " + CellMark(v) + "   " }
 	return textfmt.Pad(st.ID, cw.ID) + "  " + textfmt.Pad(st.Proto, protoW) + "  " + cell(st.Global) + "  " + cell(st.Project) + "  " + cell(st.Session) +
 		"  " + textfmt.Pad(ViaCell(st), cw.Via) + "  " + textfmt.Pad(InstanceCell(st), cw.Instance) + "  " + StateCell(st) + " · " + detail
 }
 
 // ServerTable is the header and a row per server, indented.
-func ServerTable(states []dun.ServerState, key keyStyle) string {
+func ServerTable(states []harness.ServerState, key keyStyle) string {
 	cw := TableWidths(states)
 	rows := []string{"  " + ServerHeader(cw, key)}
 	for _, st := range states {
@@ -144,7 +144,7 @@ func ServerTable(states []dun.ServerState, key keyStyle) string {
 const protoW = 5
 
 // ToolCost is "160 tools · ~38k tokens · 12 hidden".
-func ToolCost(st dun.ServerState) string {
+func ToolCost(st harness.ServerState) string {
 	s := textfmt.Plural(st.Tools, "tool") + " · ~" + numfmt.KTokens(st.Cost) + " tokens"
 	if st.Hidden > 0 {
 		s += fmt.Sprintf(" · %d hidden", st.Hidden)
@@ -153,24 +153,24 @@ func ToolCost(st dun.ServerState) string {
 }
 
 // ServerDetail is what a server is doing now, after its state column.
-func ServerDetail(st dun.ServerState) string {
+func ServerDetail(st harness.ServerState) string {
 	var s string
 	switch {
-	case st.Via == dun.ViaShell && st.Auto:
+	case st.Via == harness.ViaShell && st.Auto:
 		s = HostedSummary(st)
-	case st.Via == dun.ViaShell:
+	case st.Via == harness.ViaShell:
 		s = "not hosted"
 	case st.Starting:
-		s = dun.ServerRunWord(st)
-	case st.Running && st.Index == dun.IndexBuilding:
-		s = dun.ServerRunWord(st) + fmt.Sprintf(" · indexing %ds · ", int(st.IndexSeconds+0.5)) + ToolCost(st)
-	case st.Running && st.Index == dun.IndexFailed:
-		s = dun.ServerRunWord(st) + " · index failed: " + textfmt.OneLine(st.IndexErr) + " · " + ToolCost(st)
+		s = harness.ServerRunWord(st)
+	case st.Running && st.Index == harness.IndexBuilding:
+		s = harness.ServerRunWord(st) + fmt.Sprintf(" · indexing %ds · ", int(st.IndexSeconds+0.5)) + ToolCost(st)
+	case st.Running && st.Index == harness.IndexFailed:
+		s = harness.ServerRunWord(st) + " · index failed: " + textfmt.OneLine(st.IndexErr) + " · " + ToolCost(st)
 	case st.Running:
-		s = dun.ServerRunWord(st) + " · " + ToolCost(st)
+		s = harness.ServerRunWord(st) + " · " + ToolCost(st)
 	default:
 		// The state column says off; this says stopped, with its last error.
-		s = dun.ServerRunWord(st)
+		s = harness.ServerRunWord(st)
 	}
 	if st.Auth != "" {
 		s += " · " + st.Auth
@@ -180,7 +180,7 @@ func ServerDetail(st dun.ServerState) string {
 
 // HostedSummary is a shell-placed server's state: where the model finds it,
 // and whether the running shell connected it.
-func HostedSummary(st dun.ServerState) string {
+func HostedSummary(st harness.ServerState) string {
 	s := fmt.Sprintf("scripted as %s (eval: help(%q))", st.Namespace, st.Namespace)
 	switch {
 	case st.Hosted:

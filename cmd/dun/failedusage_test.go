@@ -6,14 +6,14 @@ import (
 	"testing"
 
 	"github.com/iodesystems/agentkit/agent"
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // A turn that fails after spending rounds reports them; one that spent none
 // emits nothing. Without this a max-turns failure left its rounds in no usage
 // event and the harbor adapter counted the trial at $0.
 func TestFailedTurnReportsUsage(t *testing.T) {
-	h := dun.NewTestHarness(dun.Endpoint{URL: "http://127.0.0.1:1/v1", Model: "m"})
+	h := harness.NewTestHarness(harness.Endpoint{URL: "http://127.0.0.1:1/v1", Model: "m"})
 	var buf bytes.Buffer
 	em := &emitter{w: &buf}
 	emitFailedUsage(h, em, agent.TurnResult{Usage: agent.TokenUsage{Turns: 400, Processed: 410, Cached: 73776, Generated: 63}})

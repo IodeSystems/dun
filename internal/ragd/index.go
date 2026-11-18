@@ -40,7 +40,7 @@ func indexFor(path string) string {
 const segmenterKey = "dund_code_segmenter"
 
 // Index brings q.Project's code and docs indexes in step with files, the
-// files chosen under q.Root (dun.IndexFiles: the workspace ingest rules).
+// files chosen under q.Root (harness.IndexFiles: the workspace ingest rules).
 // Each file goes to indexFor's index. A file the index does not hold, or
 // holds with other bytes (current), is queued as a job for the code+docs
 // runner, all of an index's in one transaction (EnqueueMany); a document

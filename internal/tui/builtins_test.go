@@ -8,7 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // The /mcp table lists the groups under the servers; g on one sends its
@@ -26,7 +26,7 @@ func TestMCPTable_ShowsBuiltinGroups(t *testing.T) {
 	if !strings.Contains(plain, "dun:files") || !strings.Contains(plain, "sh") {
 		t.Fatalf("table:\n%s", plain)
 	}
-	if len(m.servers) != 0 && slices.ContainsFunc(m.servers, func(s dun.ServerState) bool { return s.ID == "dun:files" }) {
+	if len(m.servers) != 0 && slices.ContainsFunc(m.servers, func(s harness.ServerState) bool { return s.ID == "dun:files" }) {
 		t.Error("a built-in group reached the server list the splash reads")
 	}
 	nm, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})

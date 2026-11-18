@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/iodesystems/agentkit/llm"
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/ragd"
 )
 
@@ -27,10 +27,10 @@ func capsControl(ctx context.Context, action string) string {
 	}
 	switch action {
 	case "", "caps":
-		return dun.CapsReport(capsClient.Capabilities())
+		return harness.CapsReport(capsClient.Capabilities())
 	case "probe", "probe " + dunconfig.FacetMain:
 		caps, err := llm.ProbeCapabilities(ctx, capsClient, llm.ProbeOpts{})
-		msg := dun.CapsReport(caps)
+		msg := harness.CapsReport(caps)
 		if err != nil {
 			msg += "\nprobe stopped: " + err.Error()
 		}
@@ -39,7 +39,7 @@ func capsControl(ctx context.Context, action string) string {
 	// Another role, as dunconfig resolves it from this engine's flags and
 	// the config's facets (docs/rag.md, Model roles).
 	if facet, ok := strings.CutPrefix(action, "probe "); ok {
-		res, err := ragd.ProbeWith(ctx, dunconfig.LoadConfig(), modelFlags, dun.CapsDir(), facet)
+		res, err := ragd.ProbeWith(ctx, dunconfig.LoadConfig(), modelFlags, harness.CapsDir(), facet)
 		if err != nil {
 			return err.Error()
 		}

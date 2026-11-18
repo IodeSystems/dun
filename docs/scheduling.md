@@ -2,7 +2,7 @@
 
 Why `/schedule`, `/loop` and `loop_ctl` are built the way they are. Code:
 `internal/dund/schedule.go` (the scheduler), `cmd/dun/schedule.go` (the
-commands, the time parser), `loopctl.go` (the tool), `proto/schedule.go`
+commands, the time parser), `internal/harness/loopctl.go` (the tool), `proto/schedule.go`
 (the wire types).
 
 Request (USER, 2026-10-27): "managers might need to push scheduled events or

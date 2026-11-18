@@ -1,0 +1,1396 @@
+package harness
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"os"
+	"path"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/iodesystems/agentkit/agent"
+	filetools "github.com/iodesystems/agentkit/files"
+	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mounttool"
+)
+
+// Tool servers start and stop while a session runs.
+//
+// Two of the three (code = poly-lsp-mcp, docs = raglit) are opt-in: they cost
+// seconds of startup and a chunk of the tool budget, and a session that never
+// touches them should not pay. That makes the tool set MUTABLE, which is the
+// whole difficulty here — an agent.Session's Tools, Dispatch, System and
+// Preparer are all derived from which servers are up, so every start/stop ends
+// in applyTools recomputing the four together. Anything that sets one of them
+// directly will be silently reverted by the next /rag or /lsp.
+//
+// Failure is not fatal, ever. A missing binary or a server that refuses to run
+// is reported (ServerState.Err) and the session carries on without that
+// family — losing an in-flight conversation because raglit is misconfigured
+// would be a worse outcome than losing search.
+
+// filterTools applies per-server deny-lists. If a server's Disable field
+// is non-empty, the tools it names are dropped; all others pass through.
+// Mirrors Claude's --disable-tools: forward-compatible, new tools pass
+// through by default. An entry is a tool name or a glob ("tts_*", path.Match).
+//
+// The deny-list is resolved per tool across the scopes (Server.toolState).
+func filterTools(tools []mcpmgr.MCPTool, specs []Server) []mcpmgr.MCPTool {
+	by := make(map[string]Server, len(specs))
+	for _, s := range specs {
+		by[s.ID] = s
+	}
+	out := make([]mcpmgr.MCPTool, 0, len(tools))
+	for _, t := range tools {
+		if on, _, _ := by[t.ServerID].toolState(t.Name); on {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// hiddenBy is the first Disable entry that hides name, or "". A malformed
+// glob still matches its own exact text.
+func hiddenBy(name string, disable []string) string {
+	for _, p := range disable {
+		if ok, err := path.Match(p, name); ok || (err != nil && p == name) {
+			return p
+		}
+	}
+	return ""
+}
+
+// ServerState is one tool server's state, for a UI.
+type ServerState struct {
+	ID      string `json:"id"`
+	Running bool   `json:"running"`
+	// Auto reports whether this server starts on its own next session.
+	Auto  bool   `json:"auto"`
+	Tools int    `json:"tools"`
+	Err   string `json:"err,omitempty"` // why the last start attempt failed
+	// Missing: Err is a MissingError — the command is not installed, a setup
+	// step rather than a failure (missing.go).
+	Missing bool `json:"missing,omitempty"`
+	// Starting is a start in flight: launched, not yet answering with its
+	// tools (Running may already be true: the handshake is done, discovery
+	// is not). StartingSeconds is how long it has been at it.
+	Starting        bool    `json:"starting,omitempty"`
+	StartingSeconds float64 `json:"startingSeconds,omitempty"`
+	StartSeconds    float64 `json:"startSeconds,omitempty"` // how long the last start took, in seconds
+	// Log is the newest of its activity log (serverlog.go), oldest first.
+	Log []ServerLogLine `json:"log,omitempty"`
+	// Via is an added server's placement: ViaDirect or ViaShell; "" for a
+	// built-in, which has no choice.
+	Via string `json:"via,omitempty"`
+	// For a shell-placed server: Hosted is true when the running shell
+	// connected it (Tools is then its tool count, Err why it did not), and
+	// Namespace is what the model calls it by.
+	Hosted    bool   `json:"hosted,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+	// Cost is what the enabled tools' schemas cost in every request (see
+	// toolTokens); Hidden is how many discovered tools Disable hides.
+	Cost   int `json:"cost,omitempty"`
+	Hidden int `json:"hidden,omitempty"`
+	// For a hosted server, in tokens at the session's measured ratio:
+	// Standalone is what its schemas would cost in every request were it not
+	// scripted (what scripting saves), Help what help("<ns>") costs once,
+	// when the model asks. 0 when the shell does not say (before mcpshell
+	// v0.5.1).
+	Standalone int `json:"standalone,omitempty"`
+	Help       int `json:"help,omitempty"`
+	// Global, Project and Session are the on/off switch at each scope
+	// ("on", "off", "" unset; Global is never unset); From is the scope that
+	// decided Auto. ViaGlobal, ViaProject and ViaSession are the placement at
+	// each scope ("direct", "shell", ""), ViaFrom the scope that decided Via.
+	// Proto is how dun reaches it: "stdio" (a command) or the URL's scheme.
+	Proto      string `json:"proto,omitempty"`
+	Global     string `json:"global,omitempty"`
+	Project    string `json:"project,omitempty"`
+	Session    string `json:"session,omitempty"`
+	From       string `json:"from,omitempty"`
+	ViaGlobal  string `json:"viaGlobal,omitempty"`
+	ViaProject string `json:"viaProject,omitempty"`
+	ViaSession string `json:"viaSession,omitempty"`
+	ViaFrom    string `json:"viaFrom,omitempty"`
+	// Instance is the resolved instance (InstanceShared, InstanceSession,
+	// InstanceAgent; a built-in's fixed one), InstanceGlobal, InstanceProject
+	// and InstanceSession the switch at each scope ("" unset), InstanceFrom
+	// the scope that decided ("" for a built-in: it is fixed).
+	Instance        string `json:"instance,omitempty"`
+	InstanceGlobal  string `json:"instanceGlobal,omitempty"`
+	InstanceProject string `json:"instanceProject,omitempty"`
+	InstanceSession string `json:"instanceSession,omitempty"`
+	InstanceFrom    string `json:"instanceFrom,omitempty"`
+	// Auth is a remote server's credentials: its OAuth login state, "static
+	// bearer", "static header" or "none"; "" for a local server.
+	Auth string `json:"auth,omitempty"`
+	// Ingest is the last workspace ingest's summary, on the server it went
+	// to (a workspace.open extension): what was indexed and what was skipped
+	// (IngestPlan.Summary). "" for every other server.
+	Ingest string `json:"ingest,omitempty"`
+	// Slash is the extension's slash command ("raglit"), "" for a server
+	// that is not an extension or has none.
+	Slash string `json:"slash,omitempty"`
+	// Index is the index a server builds after its handshake
+	// (indexstate.go): IndexBuilding, IndexReady, IndexFailed, or "" for a
+	// server that builds none or says nothing of it (an older poly-lsp-mcp).
+	// IndexSeconds is how long it has been building, or how long the build
+	// took; IndexErr why it failed; IndexFiles the files it counted.
+	// Exclude is the directories left out of it, for this project.
+	Index        string  `json:"index,omitempty"`
+	IndexSeconds float64 `json:"indexSeconds,omitempty"`
+	IndexErr     string  `json:"indexErr,omitempty"`
+	IndexFiles   int     `json:"indexFiles,omitempty"`
+	// IndexLeftOut is what the index did not look into, and why.
+	IndexLeftOut []IndexLeftOut `json:"indexLeftOut,omitempty"`
+	// IndexLeftOutBy is each reason's true count and hint.
+	IndexLeftOutBy []IndexLeftOutBy `json:"indexLeftOutBy,omitempty"`
+	// IndexAnyway: this project indexes a root that is not a project
+	// (ServerSpec.IndexAnyway).
+	IndexAnyway bool     `json:"indexAnyway,omitempty"`
+	Exclude     []string `json:"exclude,omitempty"`
+	IndexBudget string   `json:"indexBudget,omitempty"` // the project's --index-budget, "" the default
+	// Setup is the install-hint report the server sent (setupstate.go),
+	// nil from one that sends none.
+	Setup *SetupReport `json:"setup,omitempty"`
+	// What the server is: Description is dun's own line for it (a built-in's
+	// or an extension's manifest); Title, Version and Instructions are what
+	// the server said about itself in the handshake (serverInfo, and its
+	// instructions on what it is for), while it runs.
+	Description  string `json:"description,omitempty"`
+	Title        string `json:"title,omitempty"`
+	Version      string `json:"version,omitempty"`
+	Instructions string `json:"instructions,omitempty"`
+}
+
+// shellDescription is the shell's line: it is a built-in with no manifest.
+const shellDescription = "sandboxed scripting (mcpshell): one eval tool for calculations, data, files and SQL, and the host for scripted servers"
+
+// Servers reports every configured server and whether it is up, in config
+// order. Servers a config file disabled outright are not listed — they are not
+// something a session can turn on.
+func (h *Harness) Servers() []ServerState {
+	h.srvMu.Lock()
+	defer h.srvMu.Unlock()
+	counts, cost, hidden := map[string]int{}, map[string]int{}, map[string]int{}
+	by := map[string]Server{}
+	for _, s := range h.specs {
+		by[s.ID] = s
+	}
+	for _, t := range h.mgr.GetTools() {
+		if on, _, _ := by[t.ServerID].toolState(t.Name); !on {
+			hidden[t.ServerID]++
+			continue
+		}
+		counts[t.ServerID]++
+		cost[t.ServerID] += h.toolTokens(t)
+	}
+	shellUp := h.mgr.ServerStarted(ServerShell)
+	out := make([]ServerState, 0, len(h.specs))
+	for _, s := range h.specs {
+		st := ServerState{
+			ID:           s.ID,
+			Running:      h.mgr.ServerStarted(s.ID),
+			Auto:         s.Autostart,
+			Tools:        counts[s.ID],
+			Err:          h.lastErr[s.ID],
+			Missing:      h.missing[s.ID],
+			StartSeconds: h.lastStart[s.ID].Seconds(),
+			Cost:         cost[s.ID],
+			Hidden:       hidden[s.ID],
+			Auth:         h.authState(s),
+			Proto:        serverProto(s),
+			Global:       onOffWord(s.Scopes.GlobalOn(s.Via)),
+			Project:      tri(s.Scopes.Project),
+			Session:      tri(s.Scopes.Session),
+			From:         s.Scopes.OnFrom,
+			ViaGlobal:    s.Scopes.ViaGlobal,
+			ViaProject:   s.Scopes.ViaProject,
+			ViaSession:   s.Scopes.ViaSession,
+			ViaFrom:      s.Scopes.ViaFrom,
+
+			Instance:        s.Instance,
+			InstanceGlobal:  s.Scopes.InstanceGlobal,
+			InstanceProject: s.Scopes.InstanceProject,
+			InstanceSession: s.Scopes.InstanceSession,
+			InstanceFrom:    s.Scopes.InstanceFrom,
+		}
+		st.Description = h.describe(s.ID)
+		st.Log = h.serverLogTail(s.ID, serverLogShown)
+		if info, ok := h.mgr.ServerInfo(s.ID); ok && st.Running {
+			st.Title, st.Version, st.Instructions = info.Title, info.Version, strings.TrimSpace(info.Instructions)
+		}
+		if t, ok := h.starting[s.ID]; ok {
+			st.Starting, st.StartingSeconds = true, time.Since(t).Seconds()
+		}
+		if s.ID == h.ingestID {
+			st.Ingest = h.ingestNote
+		}
+		if e, ok := h.extension(s.ID); ok {
+			st.Slash = e.SlashName()
+		}
+		if st.Running {
+			h.indexOf(s.ID, &st)
+			st.Setup = h.setup[s.ID]
+		}
+		st.Exclude, st.IndexBudget, st.IndexAnyway = s.Exclude, s.IndexBudget, s.IndexAnyway
+		switch {
+		case s.Via == ViaShell:
+			st.Via, st.Namespace, st.Err, st.Tools = ViaShell, ShellNamespace(s.ID), "", 0
+			if hs, ok := h.hosted[s.ID]; ok && shellUp {
+				st.Hosted, st.Tools, st.Err = hs.Connected, hs.Tools, hs.Err
+				st.Standalone, st.Help = h.bytesToTokens(hs.SchemaBytes), h.bytesToTokens(hs.HelpBytes)
+			}
+		case !builtinServer(s.ID):
+			st.Via = ViaDirect
+		}
+		out = append(out, st)
+	}
+	return out
+}
+
+// serverProto is "stdio" for a command, else the URL's scheme.
+func serverProto(s Server) string {
+	if s.URL == "" {
+		return "stdio"
+	}
+	if scheme, _, ok := strings.Cut(s.URL, "://"); ok {
+		return strings.ToLower(scheme)
+	}
+	return "http"
+}
+
+// tri is a switch as shown: "on", "off", or "" unset.
+func tri(b *bool) string {
+	if b == nil {
+		return ""
+	}
+	return onOffWord(*b)
+}
+
+// StartServer spawns a configured server by id and rebuilds the tool set.
+// Starting one that is already running is a no-op, not a restart: a restart
+// would drop whatever state the server has built up (raglit's index, the LSP's
+// analysis) for a command the user meant as "make sure this is on".
+func (h *Harness) StartServer(ctx context.Context, id string) error {
+	h.srvMu.Lock()
+	spec, ok := h.spec(id)
+	h.srvMu.Unlock()
+	if !ok {
+		return fmt.Errorf("dun: no server %q (have %s)", id, strings.Join(ServerIDs(h.specs), ", "))
+	}
+	if h.mgr.ServerStarted(id) || h.isStarting(id) {
+		return nil
+	}
+	return h.startServer(ctx, spec)
+}
+
+// serverStartGrace is how long a session waits for its autostart servers
+// before it is ready without the ones still starting. Long enough for the
+// shell and a small repo's servers (well under a second each), short enough
+// that the person never waits on a slow one. A var for tests.
+var serverStartGrace = 1500 * time.Millisecond
+
+// waitGrace waits for wg, or for d, whichever is first. The goroutines it
+// stops waiting for keep running.
+func waitGrace(wg *sync.WaitGroup, d time.Duration) {
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(d):
+	}
+}
+
+// cancelStart stops a start of id in flight, saying why; false when none is.
+func (h *Harness) cancelStart(id string, why error) bool {
+	h.srvMu.Lock()
+	stop, ok := h.startStop[id]
+	h.srvMu.Unlock()
+	if ok {
+		stop(why)
+	}
+	return ok
+}
+
+// errSwitchedOff is why a start stops when its server is switched off.
+var errSwitchedOff = errors.New("switched off while it started")
+
+// markStarting records that a start of id is in flight, from now unless one
+// already was.
+func (h *Harness) markStarting(id string) {
+	h.srvMu.Lock()
+	if h.starting == nil {
+		h.starting = map[string]time.Time{}
+	}
+	if _, ok := h.starting[id]; !ok {
+		h.starting[id] = time.Now()
+	}
+	h.srvMu.Unlock()
+}
+
+// WaitServers waits until no server start is in flight, or ctx ends. For a
+// one-shot run, whose single task should have every tool it was started
+// with; an interactive session never waits.
+func (h *Harness) WaitServers(ctx context.Context) {
+	for {
+		h.srvMu.Lock()
+		n := len(h.starting)
+		h.srvMu.Unlock()
+		if n == 0 {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+// isStarting reports whether a start of id is in flight.
+func (h *Harness) isStarting(id string) bool {
+	h.srvMu.Lock()
+	defer h.srvMu.Unlock()
+	_, ok := h.starting[id]
+	return ok
+}
+
+// StopServer shuts a server down and rebuilds the tool set without it.
+func (h *Harness) StopServer(id string) error {
+	h.srvMu.Lock()
+	_, ok := h.spec(id)
+	h.srvMu.Unlock()
+	if !ok {
+		return fmt.Errorf("dun: no server %q", id)
+	}
+	if !h.mgr.ServerStarted(id) {
+		return nil
+	}
+	h.mgr.StopServer(id)
+	h.noteServer(id, "stopped")
+	h.markIndexBuilding(id, false)
+	h.applyTools()
+	return nil
+}
+
+// spec finds a configured server by id. Caller holds srvMu.
+func (h *Harness) spec(id string) (Server, bool) {
+	for _, s := range h.specs {
+		if s.ID == id {
+			return s, true
+		}
+	}
+	return Server{}, false
+}
+
+// startServer spawns one server, waits for its tools, and rebuilds the tool
+// set. The error it returns is also recorded, so a UI can show why a family is
+// missing long after the attempt.
+func (h *Harness) startServer(ctx context.Context, s Server) error {
+	if s.Via == ViaShell {
+		return fmt.Errorf("%s is scripted — the model calls it through eval as %s; /mcp mode %s standalone to run it on its own",
+			s.ID, ShellNamespace(s.ID), s.ID)
+	}
+	t0 := time.Now()
+	mgr := h.mgrFor(s.ID) // a child's own instance is in its own manager
+	h.markStarting(s.ID)
+	// A start can be stopped (cancelStart): switched off while it starts,
+	// it does not hold anything up for the rest of its timeout.
+	parent := ctx
+	ctx, stop := context.WithCancelCause(ctx)
+	defer stop(nil)
+	h.srvMu.Lock()
+	if h.startStop == nil {
+		h.startStop = map[string]context.CancelCauseFunc{}
+	}
+	h.startStop[s.ID] = stop
+	h.srvMu.Unlock()
+	timeout := time.Duration(s.Timeout) * time.Second
+	if timeout <= 0 {
+		timeout = 90 * time.Second
+	}
+	// The activity log (serverlog.go): each step as it happens, its stderr
+	// as it comes, and "still …" while a step takes its time.
+	phase := &startPhase{}
+	phase.set("starting")
+	done := make(chan struct{})
+	defer close(done)
+	go h.watchStart(s.ID, phase, timeout, done)
+	ext, isExt := h.extension(s.ID)
+	// A raglit with keys starts with the session's key, or not at all
+	// (raglitauth.go).
+	ragEnv, authErr := h.raglitAuth(ctx, s)
+	// raglit answers nothing until the workspace is in its index, so ingest
+	// belongs to STARTING the server (hook workspace.open), not to starting
+	// dun: a session that never turns rag on never pays for it.
+	//
+	// The guard used to be `RaglitHome != ""`, which silently became "never"
+	// the moment the per-session temp home was removed — the ingest was still
+	// called, from a branch that could no longer be taken.
+	//
+	// With the code and docs search through dund (codesearch.go), the
+	// workspace is dund's to index, and raglit keeps its own corpora only.
+	if indexed, _ := h.WorkspaceIndexed(); isExt && ext.Subscribes(HookWorkspaceOpen) && indexed && authErr == nil && h.codeLink() == nil {
+		dir := h.cfg.ConfigDir
+		if dir == "" {
+			dir = h.cfg.Workspace
+		}
+		note := ingestWorkspace(h.indexSink(ext), h.cfg.Workspace, LoadRag(dir))
+		h.srvMu.Lock()
+		h.ingestNote, h.ingestID = note, s.ID
+		h.srvMu.Unlock()
+	}
+	env := append(slices.Clone(s.Env), ragEnv...) // appended to below; never the spec's own slice
+	// Host hooks: the extension calls back into dun. poly-lsp's arms the
+	// AGENTS.md guard, a file-access hook that cancels reads/edits until the
+	// model has seen the project's rules.
+	if isExt {
+		env = append(env, hostHookEnv(ext, h.cfg.Workspace)...)
+	}
+	args := s.Args
+	if s.ID == ServerShell {
+		h.shareHosted(ctx, s.ID, phase) // before the login: a shared one is dund's to log in
+		h.loginHosted(ctx, s.ID, phase)
+		args = h.shellArgs(s) // + --mcp <file> when servers are placed in it
+		env = h.shellEnv(s, env)
+	}
+	// A local command is looked for on PATH, then beside dun (missing.go);
+	// one in neither place is not started at all.
+	command := s.Command
+	err := authErr
+	if err == nil && s.URL == "" && command != "" {
+		command, err = FindCommand(command)
+	}
+	switch {
+	case err != nil:
+		h.noteServer(s.ID, "%s", oneLine(err.Error(), 400))
+	case s.URL != "":
+		h.noteServer(s.ID, "connecting to %s (timeout %s)", logURL(s.URL), secs(timeout))
+	}
+	// A poly-lsp-mcp that builds its index after the handshake is
+	// "indexing" from its spawn until it says how the build went, and takes
+	// the project's excludes. An older one would refuse --exclude: it gets
+	// none, and no index state.
+	indexes, sup := false, IndexSupport{}
+	if s.URL == "" && err == nil {
+		indexes, sup = h.speaksIndex(s, command)
+	}
+	// dun's root guard (rootguard.go): a root of many repositories or too
+	// many files is not indexed whole.
+	excludes := s.Exclude
+	if s.URL == "" && err == nil && asksIndex(s) {
+		args, excludes = h.guardCodeRoot(s, args, excludes)
+	}
+	if indexes {
+		args = append(slices.Clone(args), excludeArgs(excludes)...)
+		// The project's startup budget, to a build that has one.
+		if sup.Budget && s.IndexBudget != "" {
+			args = append(args, "--index-budget", s.IndexBudget)
+		}
+		// The project's yes to indexing a root that is not a project, to a
+		// build that knows the flag; an older one would refuse it.
+		if sup.Anyway && s.IndexAnyway {
+			args = append(args, "--index-anyway")
+		}
+	}
+	// The /lsp language switches, to a build that takes them (lspkind.go).
+	if sup.LSP && s.ID == ServerCode {
+		args = append(slices.Clone(args), h.codeLSPArgs()...)
+	}
+	// One shared poly-lsp daemon for every session (USER 2026-10-24): one
+	// index and one child-LSP fleet per root instead of one per session
+	// (two sessions on this repo held 1.1 GB each). The process dun runs is
+	// then a proxy: it stops with the engine, and the daemon releases the
+	// root's LSPs and index after its last client (its --root-lsp-grace,
+	// --idle-roots-mb, --idle-exit). The options above travel with the
+	// proxy's open; different ones rebuild the root. A daemon before
+	// AnyRoot serves roots under its --allow alone (default $HOME) and
+	// answers any other with 403: such a build gets --daemon only for a
+	// workspace under $HOME.
+	if sup.Daemon && (sup.AnyRoot || underHome(h.cfg.Workspace)) && !slices.Contains(args, "--daemon") {
+		args = append(slices.Clone(args), "--daemon")
+	}
+	// Safe child-LSP limits, to a build that takes them (lspSafeArgs).
+	if safe := lspSafeArgs(s, sup); len(safe) > 0 {
+		args = append(slices.Clone(args), safe...)
+	}
+	h.markIndexBuilding(s.ID, indexes)
+	if s.URL == "" && err == nil {
+		h.noteServer(s.ID, "running %s (timeout %s)", commandLine(command, args), secs(timeout))
+	}
+	mcfg := mcpmgr.MCPConfig{
+		ID: s.ID, Name: s.ID, Command: command, Args: args,
+		Env: env, Timeout: int(timeout / time.Second),
+		URL: s.URL, Headers: s.Headers,
+		OnStderr: func(line string) { h.addServerLines(s.ID, []string{line}, true) },
+	}
+	// A shared server is one connection in dund for every session
+	// (servers_share.go): the engine connects to dund's endpoint for it,
+	// and dund logs in.
+	shared := err == nil && h.shareable(s)
+	if shared {
+		phase.set("asking dund for the shared connection")
+		err = h.shareStart(ctx, s, &mcfg, timeout)
+	} else {
+		h.unshare(s.ID, false)
+	}
+	// An OAuth server logs in BEFORE it connects: a login takes as long as
+	// the person does, and must not run inside the handshake's timeout.
+	if oc := h.oauthFor(s); err == nil && oc != nil && !shared {
+		phase.set("logging in (OAuth)")
+		h.noteServer(s.ID, "OAuth: checking the login")
+		err = oc.ensure(ctx)
+		mcfg.Authorization, mcfg.OnUnauthorized = oc.Authorization, oc.OnUnauthorized
+	}
+	if err == nil {
+		phase.set("waiting for the handshake")
+		th := time.Now()
+		err = mgr.StartServer(ctx, mcfg)
+		if err != nil && shared {
+			h.unshare(s.ID, true)
+		} else if err != nil {
+			err = explainStartErr(ctx, s, err)
+		} else {
+			who := ""
+			if info, ok := mgr.ServerInfo(s.ID); ok && (info.Name != "" || info.Version != "") {
+				who = " · " + strings.TrimSpace(info.Name+" "+info.Version)
+			}
+			h.noteServer(s.ID, "handshake done · %s%s", secs(time.Since(th)), who)
+		}
+	}
+	if err == nil {
+		phase.set("waiting for its tools")
+		err = waitServerTools(ctx, mgr, s.ID, timeout)
+		if err != nil {
+			mgr.StopServer(s.ID) // half-started is worse than not started
+		}
+	}
+	// Skills and prompts are read once, at start, so the tool rebuild below
+	// can list them. Only for an added server: the built-ins serve neither.
+	if err == nil && !builtinServer(s.ID) && h.parent == nil { // a child's catalog is its parent's
+		h.discoverCatalog(ctx, s.ID)
+	}
+	if err == nil && s.ID == ServerShell {
+		h.readHosted()
+	}
+	if why := context.Cause(ctx); err != nil && parent.Err() == nil && why != nil && why != context.Canceled {
+		err = fmt.Errorf("start stopped: %w", why)
+	}
+	h.srvMu.Lock()
+	delete(h.startStop, s.ID)
+	if h.missing == nil {
+		h.missing = map[string]bool{}
+	}
+	var miss *MissingError
+	h.missing[s.ID] = errors.As(err, &miss)
+	if err != nil {
+		h.lastErr[s.ID] = err.Error()
+	} else {
+		delete(h.lastErr, s.ID)
+		h.lastStart[s.ID] = time.Since(t0)
+	}
+	h.srvMu.Unlock()
+	h.noteStartDone(ctx, s.ID, t0, err)
+	// The tools join before the start stops counting as in flight: WaitServers
+	// returns once nothing is starting, and its caller wants the tools in.
+	h.applyTools()
+	h.srvMu.Lock()
+	delete(h.starting, s.ID)
+	h.srvMu.Unlock()
+	return err
+}
+
+// waitServerTools blocks until the named server has reported at least one tool,
+// its discovery has failed, or timeout. Discovery is async — StartServer
+// returning nil only means the handshake worked.
+func waitServerTools(ctx context.Context, mgr *mcpmgr.Manager, id string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if err := mgr.ServerReadyErr(id); err != nil {
+			return err
+		}
+		// A server that serves only resources or prompts has no tools to wait
+		// for: discovery finishing is the whole signal.
+		if mgr.ServerReady(id) {
+			return nil
+		}
+		for _, t := range mgr.GetTools() {
+			if t.ServerID == id {
+				return nil
+			}
+		}
+		if time.Now().After(deadline) {
+			msg := fmt.Sprintf("dun: %s: no tools discovered after %s", id, timeout)
+			if tail := mgr.ServerStderr(id); tail != "" {
+				msg += " — server stderr:\n" + tail
+			}
+			return fmt.Errorf("%s", msg)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+}
+
+// applyTools rebuilds the Session's tool set, deferring to the end of the
+// current turn if one is running. Safe from any goroutine: server commands
+// arrive on the --engine reader while a turn may be mid-flight, and rewriting
+// Session.Tools under a running turn is a data race.
+func (h *Harness) applyTools() {
+	h.applyPending.Store(true)
+	// Again while one is pending: a rebuild asked for while another rebuild
+	// held the lock is this caller's to run, not the next turn's — a server
+	// that comes up while the session is idle joins now.
+	for h.applyPending.Load() {
+		if !h.turnMu.TryLock() {
+			return // a turn, or another rebuild, holds it; it applies on the way out
+		}
+		if h.applyPending.Swap(false) {
+			h.rebuildTools()
+		}
+		h.turnMu.Unlock()
+	}
+}
+
+// rebuildTools recomputes everything derived from the running servers: the tool
+// definitions the model sees, the dispatcher that routes calls, the system
+// prompt's tool-family list, and the proactive-docs preparer. Callers hold
+// turnMu (or are in Start, before any turn can run).
+func (h *Harness) rebuildTools() {
+	if h.Session == nil {
+		return // autostart runs before the Session exists; Start applies it after
+	}
+	if h.cfg.NoTools {
+		h.useNoTools()
+		return
+	}
+	tools := filterTools(h.mcpTools(), h.specs)
+	hostedNS := h.hostedNamespaces()
+	moved := map[string]string{} // id → namespace, for servers now in the shell
+	if len(hostedNS) > 0 {
+		h.srvMu.Lock()
+		for _, s := range h.hostedSpecs() {
+			moved[s.ID] = ShellNamespace(s.ID)
+		}
+		h.srvMu.Unlock()
+	}
+	// Tell the model what changed under it, if anything. Buffered, not sent:
+	// see Harness.Aside for why a tool-set change is never worth a turn of its
+	// own. Skipped on the first build — the system prompt covers that.
+	if h.toolsInit {
+		if note := toolSetDelta(h.Tools, tools, moved); note != "" {
+			h.Aside(note)
+		}
+	}
+	h.toolsInit = true
+	h.Tools = tools
+
+	// Bridge the MCP tools + the built-in tools (exec, ask_user). Non-MCP tools
+	// are handled locally by the dispatcher wrappers; everything else routes to
+	// its MCP server.
+	cfg := h.cfg
+	// Every wrapper reports through this, so the --engine stream and the TUI carry the
+	// CLIPPED result — the one the model actually read.
+	report := h.cappedReporter(cfg.OnToolCall)
+	toolDefs := mcpToolDefs(tools)
+	var caller toolCaller = h.mgr
+	if h.ownMgr != nil {
+		caller = childCaller{h}
+	}
+	dispatch := mcpDispatcher(dunVarsCaller{caller, h}, tools, report, h.regain)
+	dispatch = withCodeGuard(dispatch, h, tools)
+	// The extensions the hooks go to, among the running servers.
+	exts := h.extensions()
+	searchers := searchExts(exts, tools)
+	// Attached indexes (attach.go): the search and get calls that name no
+	// index read them too, and the search tool says which they are.
+	attached := h.attachSelectors(searchers, tools)
+	h.srvMu.Lock()
+	describeAttached(toolDefs, searchers, h.specs, attached)
+	h.srvMu.Unlock()
+	dispatch = withAttached(dispatch, attachedTools(searchers, tools, attached))
+	// Code and docs search through dund (codesearch.go): the `search` tool,
+	// below. The docs server's search is docs_search (modelToolName), so the
+	// two never share a name.
+	code := h.codeLink()
+	mcpDefs := len(toolDefs) // after these: dun's own (builtins.go)
+	if cfg.Exec != nil {
+		toolDefs = append(toolDefs, execToolDef(!h.isChild() && !cfg.NonInteractive && !cfg.Worker))
+		// ONE backend for everything. A long command used to need a stateless
+		// backend of its own so it would not hold the shell that every other
+		// command serializes on; now it donates that shell when it is promoted
+		// (HostShell.RunPromotable), so the persistent environment is available
+		// to every command without any of them being able to block the rest.
+		startJob := func(command string) *bgJob {
+			return h.startJob(cfg.Exec, command)
+		}
+		dispatch = withExec(dispatch, cfg.Exec, report, startJob, h.spillExec, h.userWaiting, h.workEnded)
+	}
+	// File tools, rooted at the working tree. Rebuilt with the tool set, so a
+	// worktree switch (Rehoist) moves their root with exec's.
+	ft := h.fileTools()
+	if ft != nil {
+		// file_read gains whole: all of a file, bounded by the context left
+		// (wholeread.go). A dun wrapper; agentkit's caps are unchanged.
+		toolDefs = append(toolDefs, wholeReadDefs(ft.Defs(), ft.Name(filetools.Read))...)
+		dispatch = withFiles(dispatch, ft, h.tmpReaders(), h.addedNow, h.readWhole, report)
+	}
+	if cfg.Ask != nil {
+		toolDefs = append(toolDefs, askToolDef())
+		dispatch = withAsk(dispatch, cfg.Ask, report)
+	}
+	// Mount tool: only useful when exec runs inside Docker — there is no
+	// container to mount into when exec is on the host.
+	if cfg.Mount != nil && cfg.Exec != nil {
+		_, isDocker := cfg.Exec.(DockerExec)
+		if isDocker {
+			toolDefs = append(toolDefs, mounttool.Def())
+			dispatch = mounttool.Wrap(dispatch, func(ctx context.Context, source, name string) (bool, error) {
+				// Ask the user first, then apply the mount if approved.
+				ok, err := cfg.Mount(ctx, source, name)
+				if err != nil || !ok {
+					return ok, err
+				}
+				// User approved — add the mount to the running session.
+				if err := h.AddMount(source, name); err != nil {
+					return false, err
+				}
+				return true, nil
+			}, report)
+		}
+	}
+	// Every tool a session can use is listed from its first request. They
+	// used to join when they first had a use (jobs at the first background,
+	// read_saved at the first saved result, dun_list/dun_msg once another
+	// session ran, loop_ctl while a loop did), and a tool joining changes the
+	// prompt's prefix: the chat template renders the tools in the system
+	// message, so the server re-reads the whole conversation — measured once
+	// as 0 of 5,049 characters kept. A few cached tokens a request are worth
+	// less than one uncached re-read of a long session, and on llama.cpp that
+	// re-read is a stall (USER 2026-10-28).
+	//
+	// dun_list and dun_msg: a root under dund only (cfg.Peers is nil
+	// otherwise, and always for a child — see childConfig).
+	if cfg.Peers != nil && !h.isChild() && !cfg.Worker {
+		toolDefs = append(toolDefs, dunListToolDef(), dunMsgToolDef())
+		dispatch = withPeers(dispatch, cfg.Peers, report)
+	}
+	// loop_ctl: a root under dund (its scheduler runs /loop).
+	if cfg.Loops != nil && !h.isChild() && !cfg.Worker {
+		toolDefs = append(toolDefs, loopCtlToolDef())
+		dispatch = withLoopCtl(dispatch, cfg.Loops, report)
+	}
+	// Sub-agent tools are chosen by ROLE, and that choice IS the enforcement:
+	// a child never receives `agent`, so depth-1 holds with no counter to get
+	// wrong, and a root never receives `tell_parent`, so it is absent rather
+	// than being a tool that errors when called. See docs/decisions.md, "Sub-agents".
+	if h.isChild() {
+		toolDefs = append(toolDefs, tellParentToolDef())
+		dispatch = withTellParent(dispatch, h, report)
+		// ask_parent is not listed: a child asks by ending its turn. The
+		// dispatch stays as a hidden alias for old transcripts and habit.
+		dispatch = withAskParent(dispatch, h, report)
+	} else {
+		toolDefs = append(toolDefs, agentToolDef(cfg.ChildModel, cfg.ChildProvider, cfg.ChildEffort, cfg.Providers))
+		dispatch = withAgent(dispatch, h, report)
+	}
+	// jobs watches both kinds of background work (jobs.go): a command exec
+	// handed off, and a sub-agent. A child gets it for its own commands; it
+	// has no agents, so the agent params are not in its definition.
+	if cfg.Exec != nil || !h.isChild() {
+		toolDefs = append(toolDefs, jobsToolDef(cfg.Exec != nil, !h.isChild()))
+		dispatch = withJobs(dispatch, h, report)
+	}
+	// recap is available to BOTH roles, and behaves identically in both: it
+	// applies and then reports. It used to ask a root's human first — see the
+	// rules at the top of recap.go for why that prompt was removed.
+	toolDefs = append(toolDefs, recapToolDef())
+	// read_saved is not listed: saved output is a file in the isolation tmp,
+	// read with file_read (isotmp.go). withRecap still answers a call to it.
+	dispatch = withRecap(dispatch, h, report)
+	// No session tool (USER 2026-11-06): harness info is the file
+	// $DUN_HARNESS names (harnessinfo.go), and what the session is doing is
+	// its plan.
+	// memory whenever the session reaches dund's retrieval (cfg.Rag): a note
+	// is worth writing only because the proactive search brings it back, and
+	// that search is dund's now, not the docs server's (memory.go,
+	// memrecall.go). With dund down it reads the files.
+	// Strategies and constraints ride the same link, tool and recall, in
+	// their own index (notekinds.go); file_read takes their paths.
+	h.memory.Store(nil)
+	h.strategies.Store(nil)
+	var memF, stratF *memFinder
+	if l := h.memLink(); l != nil {
+		m := memoryFor(l, h.cfg.Workspace)
+		h.memory.Store(m)
+		memF = &memFinder{l: l, m: m, skip: h.listedImportant}
+		if sl := h.stratLink(); sl != nil {
+			s := strategyFor(sl, h.cfg.Workspace)
+			h.strategies.Store(s)
+			stratF = &memFinder{l: sl, m: s, skip: h.listedImportant}
+		}
+		// A child reads notes with file_read (withItemRead) but is not offered
+		// the memory tool: it works a node, it does not curate notes.
+		if !h.isChild() {
+			toolDefs = append(toolDefs, memoryToolDef())
+			dispatch = withMemory(dispatch, h, m, report)
+		}
+		dispatch = withItemRead(dispatch, h)
+	}
+	// search: the code and docs indexes, whenever the code link is up.
+	var codeF *codeFinder
+	if code != nil {
+		codeF = &codeFinder{l: code, root: func() string { return filepath.Clean(h.cfg.Workspace) }}
+		toolDefs = append(toolDefs, searchToolDef())
+		dispatch = withCodeSearch(dispatch, h, code, report)
+	}
+	// session_search: what folds and recaps took out of the context, in
+	// dund's sessions index (sessionindex_dund.go). A child searches its
+	// root's session.
+	if h.sessionIndex() != nil {
+		td, run := agent.SessionSearchTool(lateSessionIndex{h})
+		toolDefs = append(toolDefs, td)
+		dispatch = withSessionSearch(dispatch, run, report)
+	}
+	// Skills into the index, off the turn lock: raglit takes a while.
+	if e, ok := hookExt(exts, HookSkillsChanged, tools); ok {
+		go h.syncSkillIndex(h.indexSink(e))
+	}
+	// skill, when any skill is in reach: the list rides the tool's
+	// description, the body comes back from the tool.
+	// The skills that are on; listed, or left to the proactive search
+	// (skillKind).
+	if skills := h.enabledSkills(); len(skills) > 0 {
+		list := skillList(skillsUsable(skills, tools, hostedNS...))
+		if h.skillMode() == SkillsSurfaced {
+			list = skillSurfacedNote
+		}
+		if list != "" {
+			toolDefs = append(toolDefs, skillToolDef(list))
+			dispatch = withSkill(dispatch, h, report)
+		}
+	}
+	// plan: the task plan (plan.go). A root's covers the graph; a child's,
+	// only while it owns nodes of its parent's, covers those (childPlanTool;
+	// planAssign rebuilds the tools when it is given its first).
+	if !h.isChild() {
+		tg := h.planTools()
+		toolDefs = append(toolDefs, h.planDefs(tg)...)
+		dispatch = withPlan(dispatch, tg, report)
+	} else if h.cfg.Parent != nil && h.cfg.Parent.planOwns(planOwner(h.cfg.AgentID)) {
+		tg := h.childPlanTool()
+		toolDefs = append(toolDefs, childPlanDefs(tg)...)
+		dispatch = withPlan(dispatch, tg, report)
+	}
+	// Watches what every OTHER tool call produces, so a suggestion arrives at
+	// the moment churn is created rather than whenever usage is next measured.
+	dispatch = withRecapWatch(dispatch, h)
+	// The built-ins switched off in /mcp (builtins.go): left out, and refused.
+	own, dispatch := h.withBuiltinsOff(toolDefs[mcpDefs:], dispatch)
+	toolDefs = append(toolDefs[:mcpDefs:mcpDefs], own...)
+
+	// Outermost wrapper: whatever the tool returns, carry any notification that
+	// arrived while it was running back inside the result. A background job that
+	// finishes mid-turn is then reported in the result the model is already
+	// reading, instead of scheduling a turn of its own.
+	// Counts failed results toward a stall (plannudge.go). Inside the lift, so
+	// the nudge's aside rides the result that tripped it.
+	dispatch = withPlanNudge(dispatch, h)
+	// A change after the end-of-turn check re-arms it (idlecheck.go).
+	dispatch = withIdleRearm(dispatch, h)
+	dispatch = withLiftedQueue(dispatch, h)
+
+	sys := cfg.System
+	rules, rulesMode, rulesSet := "", "", rulesSet{}
+	if sys == "" {
+		sys = systemBuild(tools, cfg.Exec, cfg.Worktree, systemFiles(ft), cfg.NonInteractive,
+			!cfg.NonInteractive && !cfg.Worker && !h.isChild(), hostedNS...)
+		sys += roleSystem(h.isChild())
+		sys += h.identityLine()
+		if h.cfg.NoDir {
+			sys += noDirSystem
+		}
+		if !cfg.NonInteractive && !cfg.Worker && !h.isChild() { // a child's reply goes to its parent
+			sys += replyFormatSystem
+			sys += h.formatPromptSystem()
+		}
+		sys += h.cfg.SystemNote
+		// The workspace's root AGENTS.md and CLAUDE.md, and what they import,
+		// are standing context: the model needs the project's rules from the
+		// first message, and a system block survives compaction so a fold
+		// never drops them (rules.go).
+		_, rulesIndexed := hookExt(exts, HookRulesChanged, tools)
+		rules, rulesMode, rulesSet = h.rulesBlock(rulesIndexed)
+		sys += rules
+		// The important memories, strategies and constraints, by path
+		// (notekinds.go): in every session, with no retrieval.
+		sys += h.standingBlock()
+	}
+	if slices.ContainsFunc(toolDefs, func(d llm.ToolDef) bool { return d.Function.Name == "recap" }) {
+		sys += systemRecap
+	}
+	if slices.ContainsFunc(toolDefs, func(d llm.ToolDef) bool { return d.Function.Name == agent.SessionSearchName }) {
+		sys += systemSessionSearch
+	}
+	// agentkit's own {OUTPUT} note is off (OmitSlotInstructions); this is
+	// the shorter one, on the same terms: only when there are tools. Also
+	// under --non-interactive: the ENGINE expands the slots (agentkit expandSlots), so a
+	// script gets the output and the model does not retype it.
+	if len(toolDefs) > 0 {
+		if h.isChild() || cfg.Worker {
+			sys += systemSlotsModel
+		} else {
+			sys += systemSlots
+		}
+		sys += systemTurnLimit(h.turnLimit())
+	}
+	if cfg.Worktree != nil && cfg.Worktree.IsRepo() && cfg.Worktree.Branch != "" {
+		sys += "\n\nYou are working on branch " + cfg.Worktree.Branch + " off " + cfg.Worktree.BaseBranch + ". When you commit, use a descriptive subject line (e.g. 'fix(parser): handle nested quotes' or 'feat(tui): add /clear command') that stands on its own — the branch name is just a timestamp."
+	}
+
+	// Outermost of all, so it sees every tool including recap — recap
+	// being the one the measurement caught looping twelve deep. It must wrap the
+	// wrappers rather than be wrapped by them: a call it refuses never runs, and
+	// a refusal is the LAST thing that should be reconsidered.
+	// A call that leaves out a required parameter is answered with its
+	// tool's whole signature (toolargs.go).
+	finalDefs := toolDefs
+	dispatch = withRequiredArgs(dispatch, func() []llm.ToolDef { return finalDefs })
+	// Plan mode (plan.go): outside the wrappers so a refused call never runs,
+	// inside the loop guard so a model that keeps calling it is told to stop.
+	serverOf := make(map[string]string, len(tools))
+	for _, t := range tools {
+		serverOf[modelToolName(t)] = t.ServerID
+	}
+	dispatch = withPlanGate(dispatch, h, serverOf)
+	dispatch = withLoopGuard(dispatch, h)
+	// Outside everything: a call the turn reaches after an interrupt is not
+	// run at all (interrupt.go).
+	dispatch = withInterrupt(dispatch)
+	// Outermost: every dispatched call starts and ends (toolevents.go).
+	dispatch = withToolEvents(dispatch, h)
+
+	h.Session.Tools = toolDefs
+	names := make([]string, len(toolDefs))
+	for i, t := range toolDefs {
+		names[i] = t.Function.Name
+	}
+	sort.Strings(names)
+	h.toolNames.Store(&names)
+	h.Session.Dispatch = dispatch
+	h.Session.System = sys
+	h.Session.OnToolCalls = h.mergeForcedToolCalls
+
+	// Break the pre-conversation context into parts. Estimates land immediately
+	// so /context is never empty; the exact counts replace them when they
+	// arrive. See context_tokens.go for why this is not one number, why
+	// exactness is all-or-nothing, and why the measurement cannot block here.
+	files := rulesSet.files(rulesMode)
+	est := measureSystem(context.Background(), nil, sys, rules, rulesMode, toolDefs, tools)
+	est.Files = files
+	h.setSystemBreakdown(est)
+	go func() {
+		bd := measureSystem(context.Background(), h.client, sys, rules, rulesMode, toolDefs, tools)
+		bd.Files = files
+		h.setSystemBreakdown(bd)
+	}()
+	// The rules index follows the mode: filled in index mode, emptied of an
+	// earlier session's files otherwise. A root session's job, off the lock.
+	if e, ok := hookExt(exts, HookRulesChanged, tools); ok && !h.isChild() {
+		go h.syncRulesIndex(h.indexSink(e), rulesSet, rulesMode)
+	}
+
+	// Proactive RAG (hook turn.before): watch the conversation and inject
+	// relevant-doc pings before each turn (the extensions' search role as an
+	// agent.DocFinder). Injected notices surface via store.onNotify →
+	// OnNotify. Cleared when the server stops, or the preparer would call a
+	// dead server before every turn.
+	// The budget notice (budget.go) rides the same seam, with or without a
+	// docs server, so the preparer is never nil.
+	var docs agent.NotificationPreparer
+	if sf := newSurfacer(h.mgr, searchers, attached); sf != nil || memF != nil || codeF != nil {
+		// MinScore 0: raglit's score is BM25 or a rank fusion (hybrid), in
+		// no fixed range. What surfaces is decided by the hit's similarity
+		// or query-word coverage instead (see docsPreparer): one document
+		// per group and pass, inlined when short.
+		inner := docGroup([]*memoryStore{h.memoryStore(), h.strategyStore()}, h.skillForDoc, h.isRulesDoc)
+		group := inner
+		home, _ := os.UserHomeDir()
+		src := &hitSources{display: func(p string) string { return displayPath(p, home, h.cfg.Workspace, h.cfg.ConfigDir) }}
+		var finder agent.DocFinder
+		var fetch docBodyFunc
+		if sf != nil {
+			group = sf.group(searchers[0].ID, inner)
+			src.index, src.attached, src.meta, src.meaning = sf.idx.get, sf.attached, sf.idx.metaOf, sf.meaning
+			finder, fetch = sf.finder, sf.fetch
+			if r := searchers[0].Roles.Search; r != nil && r.Get != "" {
+				src.reader = modelToolName(mcpmgr.MCPTool{ServerID: searchers[0].ID, Name: r.Get})
+			}
+		}
+		if memF != nil {
+			finder, fetch = withMemFinder(memF, finder, fetch, src)
+		}
+		if stratF != nil {
+			finder, fetch = withMemFinder(stratF, finder, fetch, src)
+		}
+		if codeF != nil {
+			finder, fetch, group = withCodeFinder(codeF, finder, fetch, src, group)
+		}
+		docs = docsPreparer(h.store, finder, agent.FinderOpts{}, h.surfacing, h.meter.Estimate,
+			fetch, group, h.skillForDoc, src, cfg.OnDocs)
+	}
+	h.docsPrep = docs
+	h.Session.Preparer = h.withBudgetNotice(docs)
+}
+
+// toolSetDelta describes what appeared and disappeared, grouped by server, or
+// "" when nothing changed.
+//
+// Names, not schemas: the schemas themselves ride every request in the tools
+// block, so repeating them here would pay for the same bytes twice. What the
+// model cannot see there is that the set CHANGED — it reasoned two turns ago
+// about not having search, and will keep acting on that until told otherwise.
+//
+// moved maps a server now hosted in the shell to its namespace: its tools
+// leaving the list is a move, not "turned off".
+func toolSetDelta(before, after []mcpmgr.MCPTool, moved map[string]string) string {
+	was := toolsByServer(before)
+	now := toolsByServer(after)
+	var lines []string
+	for _, id := range serverOrder(was, now) {
+		added := missing(now[id], was[id])
+		removed := missing(was[id], now[id])
+		ns, isMoved := moved[id]
+		switch {
+		case isMoved && len(now[id]) == 0 && len(removed) > 0:
+			lines = append(lines, fmt.Sprintf("%s moved into the shell — call it through eval as %s.<tool>(…); help(%q) lists its commands; no longer callable directly: %s",
+				id, ns, ns, strings.Join(removed, ", ")))
+		case len(was[id]) == 0 && len(added) > 0:
+			lines = append(lines, fmt.Sprintf("%s is now available: %s", id, strings.Join(added, ", ")))
+		case len(now[id]) == 0 && len(removed) > 0:
+			lines = append(lines, fmt.Sprintf("%s was turned off; no longer callable: %s", id, strings.Join(removed, ", ")))
+		default:
+			if len(added) > 0 {
+				lines = append(lines, fmt.Sprintf("%s gained: %s", id, strings.Join(added, ", ")))
+			}
+			if len(removed) > 0 {
+				lines = append(lines, fmt.Sprintf("%s lost: %s", id, strings.Join(removed, ", ")))
+			}
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "your tools changed — " + strings.Join(lines, "; ") +
+		". Use what is there now; do not call what is gone."
+}
+
+func toolsByServer(tools []mcpmgr.MCPTool) map[string][]string {
+	out := map[string][]string{}
+	for _, t := range tools {
+		out[t.ServerID] = append(out[t.ServerID], modelToolName(t)) // the name the model calls
+	}
+	for id := range out {
+		sort.Strings(out[id])
+	}
+	return out
+}
+
+// serverOrder is every server mentioned by either side, deterministically.
+func serverOrder(a, b map[string][]string) []string {
+	seen := map[string]bool{}
+	var ids []string
+	for _, m := range []map[string][]string{a, b} {
+		for id := range m {
+			if !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// missing returns the entries of want that have are absent from have.
+func missing(want, have []string) []string {
+	in := make(map[string]bool, len(have))
+	for _, s := range have {
+		in[s] = true
+	}
+	var out []string
+	for _, s := range want {
+		if !in[s] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// ingestWorkspace lexically indexes the workspace through sink (best-effort)
+// and returns the summary the user sees (IngestPlan.Summary), "" when nothing
+// was ingested. The index is raglitIndex(workspace), in the store the serve
+// args name (raglit's --project) — the same as the serve command's, or the
+// agent searches an index nothing was ingested into. A nil sink (a server
+// that is not raglit, with no index tools) is left alone.
+func ingestWorkspace(sink *mcpDocsSink, workspace string, cfg *RagConfig) string {
+	if sink == nil {
+		return ""
+	}
+	// The root guard (rootguard.go), as for dund's code index.
+	if scan := scanRootCached(workspace); scan.TooBig() {
+		note := fmt.Sprintf("workspace ingest: %s holds %s: not ingested (dun's root guard)", workspace, scanSummary(scan))
+		log.Printf("dun: %s", note)
+		return note
+	}
+	plan := planIngest(workspace, cfg)
+	if len(plan.Files) == 0 {
+		return ""
+	}
+	summary := plan.Summary()
+	log.Printf("dun: %s", summary)
+	// The sink chunks, so a large repository cannot overflow argv. Each call
+	// queues and the daemon drains them.
+	if err := sink.ingest(raglitIndex(workspace), plan.Files); err != nil {
+		// Best-effort: proactive RAG simply has less to ping without it.
+		// Worth logging, since "search finds nothing" is otherwise
+		// unexplained.
+		log.Printf("dun: workspace ingest failed: %v", err)
+		return summary + " · ingest failed: " + err.Error()
+	}
+	return summary
+}
+
+// ingestBatch bounds one ingest's argv. Far under ARG_MAX anywhere dun runs; a
+// repo bigger than this simply queues more than once.
+const ingestBatch = 500
+
+func chunkArgs(all []string, n int) [][]string {
+	var out [][]string
+	for len(all) > n {
+		out, all = append(out, all[:n]), all[n:]
+	}
+	if len(all) > 0 {
+		out = append(out, all)
+	}
+	return out
+}
+
+// ingestTargets lists what raglit should index under the default rules;
+// planIngest (rag_ingest.go) has them.
+//
+// It used to hand over the workspace's top-level entries, which meant handing
+// over build output. Measured in this repo: a 27 MB `dun` executable and a 25 MB
+// `dun.test`, both gitignored, both sent to a pipeline that extracts, segments
+// and embeds. Inside git the list is `git ls-files --cached --others
+// --exclude-standard` (tracked files plus untracked ones .gitignore does not
+// exclude); outside git, a walk that honors .gitignore. Both are then filtered
+// by the junk, size and binary rules.
+func ingestTargets(workspace string) []string {
+	return planIngest(workspace, nil).Files
+}
+
+// builtinServer reports whether id is one of dun's own three servers: the
+// shell and the bundled extensions.
+func builtinServer(id string) bool {
+	if canonicalServerID(id) == ServerShell {
+		return true
+	}
+	_, ok := bundledExt(id)
+	return ok
+}
+
+// serverIDPattern is what /mcp add accepts as an id: it becomes the tool
+// namespace ("<id>__<tool>") and a raglit index name, so it is kept to
+// characters both allow.
+var serverIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
+
+// AddServer saves spec to the user server list ($DUN_HOME/mcp.json, every
+// workspace) with autostart on, and starts it — restarting it when one of
+// that id is running. It returns the file written; a server that saved but
+// did not start returns both the path and the error.
+func (h *Harness) AddServer(ctx context.Context, spec ServerSpec) (string, error) {
+	if !serverIDPattern.MatchString(spec.ID) {
+		return "", fmt.Errorf("an id is lowercase letters, digits, - and _ (got %q)", spec.ID)
+	}
+	if builtinServer(spec.ID) {
+		return "", fmt.Errorf("%q is a built-in server; pick another id", spec.ID)
+	}
+	if (spec.URL == "") == (spec.Command == "") {
+		return "", fmt.Errorf("a server has a url or a command, not both")
+	}
+	// A value the spec names stays explicit ("direct", "shared"): empty
+	// means unspecified, and keeps the stored entry's (PutUserServer).
+	via, err := NormalizeVia(spec.Via)
+	if err != nil {
+		return "", err
+	}
+	named := strings.TrimSpace(spec.Via) != ""
+	if spec.Via = via; named && via == "" {
+		spec.Via = ViaDirect
+	}
+	namedInstance := strings.TrimSpace(spec.Instance) != ""
+	if spec.Instance, err = NormalizeInstance(spec.Instance); err != nil {
+		return "", err
+	}
+	if namedInstance && spec.Instance == "" {
+		spec.Instance = InstanceShared
+	}
+	// Validate what will be stored: the spec with the old entry's switches
+	// filled in.
+	merged, err := keepSwitches(spec)
+	if err != nil {
+		return "", err
+	}
+	if mv, _ := NormalizeVia(merged.Via); merged.Instance == InstanceAgent && mv == ViaShell {
+		return "", fmt.Errorf("instance agent is for a standalone server: a scripted one runs in the session's shell, which a sub-agent shares")
+	}
+	// A remote server with no credentials that answers with an OAuth
+	// challenge logs in with OAuth; dun picks the client (oauthauto.go).
+	if spec.OAuth == nil && wantsOAuth(ctx, spec) {
+		spec.OAuth = &OAuthSpec{}
+	}
+	if err := checkOAuth(spec, via); err != nil {
+		return "", err
+	}
+	on := true
+	spec.Autostart = &on
+	path, err := PutUserServer(spec)
+	if err != nil {
+		return "", err
+	}
+	// Same id replaces: bounce it (or the shell hosting it) for the new
+	// definition. The other scopes' switches for it still apply.
+	h.srvMu.Lock()
+	old, had := h.spec(spec.ID)
+	h.srvMu.Unlock()
+	restart := map[string]bool{spec.ID: true}
+	if had && old.Via == ViaShell {
+		restart[ServerShell] = true
+	}
+	if err := h.reloadServers(ctx, true, restart); err != nil {
+		return path, err
+	}
+	if s, err := h.knownServer(spec.ID); err == nil && s.Autostart && s.Via != ViaShell && !h.mgr.ServerStarted(s.ID) && !h.isStarting(s.ID) {
+		return path, h.startServer(ctx, s)
+	}
+	return path, nil
+}
+
+// RemoveServer stops a server /mcp add saved and deletes it from the user
+// server list. A server some other file declares is not this command's to
+// remove. Its entries in the current project's state and in this session's
+// sidecar go too, and are returned; other projects' files are not read.
+func (h *Harness) RemoveServer(id string) ([]string, error) {
+	ok, err := RemoveUserServer(id)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("no server %q in %s — a server from dun.json is removed there", id, UserServersFile())
+	}
+	// Its stored login goes with it: a token for a server dun no longer
+	// knows is a secret with no owner.
+	_ = os.Remove(filepath.Join(OAuthDir(), id+".json"))
+	h.oauthMu.Lock()
+	delete(h.oauth, id)
+	h.oauthMu.Unlock()
+	cleared, err := removeLocalServer(h.configDir(), id)
+	if err != nil {
+		return cleared, fmt.Errorf("removed, but its project entry stays: %w", err)
+	}
+	h.srvMu.Lock()
+	_, inSession := h.sessSw[id]
+	h.srvMu.Unlock()
+	if inSession {
+		path, err := h.editSession(id, func(s *SessionServer) { *s = SessionServer{} })
+		if err != nil {
+			return cleared, fmt.Errorf("removed, but its session entry stays: %w", err)
+		}
+		if path != "" {
+			cleared = append(cleared, path)
+		}
+	}
+	if err := h.reloadServers(context.Background(), true, nil); err != nil {
+		return cleared, fmt.Errorf("removed, but %w", err)
+	}
+	if h.mgr.ServerStarted(id) { // a project file still defines it; removed is removed
+		h.mgr.StopServer(id)
+		h.applyTools()
+	}
+	return cleared, nil
+}
+
+// underHome reports whether dir is inside the home directory, symlinks
+// resolved on both sides: where poly-lsp's daemon serves roots by default.
+func underHome(dir string) bool {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" || dir == "" {
+		return false
+	}
+	real := func(p string) string {
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return r
+		}
+		return filepath.Clean(p)
+	}
+	rel, err := filepath.Rel(real(home), real(dir))
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, "../")
+}
+
+// describe is dun's own line for a server: the shell's, or its extension
+// manifest's description; "" for a server added with /mcp add (what it says
+// about itself in the handshake is its description then).
+func (h *Harness) describe(id string) string {
+	if id == ServerShell {
+		return shellDescription
+	}
+	for _, e := range h.exts {
+		if e.ID == id {
+			return e.Description
+		}
+	}
+	return ""
+}
+
+// noToolsSystem is the system prompt of a --no-tools session.
+const noToolsSystem = "You are dun (" + Icon + "), in a plain chat: this session has no tools. You cannot run commands, read or " +
+	"change files, or search; answer from what you know and from what the user tells or pastes."
+
+// useNoTools is rebuildTools for --no-tools: nothing is offered to the model
+// (no built-ins, no servers, no agent, no recap) and a call that arrives
+// anyway is refused. Callers hold turnMu, as for rebuildTools.
+func (h *Harness) useNoTools() {
+	h.toolsInit = true
+	h.Tools = nil
+	sys := h.cfg.System
+	if sys == "" {
+		sys = noToolsSystem + h.identityLine()
+		if !h.cfg.NonInteractive {
+			sys += replyFormatSystem
+			sys += h.formatPromptSystem()
+		}
+		sys += h.cfg.SystemNote
+	}
+	h.Session.Tools = nil
+	h.Session.Dispatch = func(_ context.Context, tc llm.ToolCall) (string, error) {
+		return "", fmt.Errorf("no tool %q: this session has no tools", tc.Function.Name)
+	}
+	h.Session.System = sys
+	names := []string{}
+	h.toolNames.Store(&names)
+	h.docsPrep = nil
+	h.Session.Preparer = h.withBudgetNotice(nil)
+	h.setSystemBreakdown(measureSystem(context.Background(), nil, sys, "", "", nil, nil))
+}

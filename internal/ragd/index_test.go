@@ -10,7 +10,7 @@ import (
 
 	"github.com/iodesystems/raglit"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -63,7 +63,7 @@ func indexRepo(t *testing.T) string {
 // runIndex is the rag_index handler's work: the workspace rules, then Index.
 func runIndex(t *testing.T, h *Host, root string) *proto.RagIndexed {
 	t.Helper()
-	files, _ := dun.IndexFiles(root)
+	files, _ := harness.IndexFiles(root)
 	r, err := h.Index(proto.RagIndex{Project: "dun", Root: root}, files)
 	if err != nil {
 		t.Fatal(err)

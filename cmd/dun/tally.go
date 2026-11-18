@@ -22,7 +22,7 @@ import (
 // Sources:
 //   - money: the spend ledger's lines for this session (spendmeter.Seed);
 //   - token totals, request figures and the meter's other counts: the
-//     session's stats file (<id>.stats.json, dun.StatsFile), rewritten after
+//     session's stats file (<id>.stats.json, harness.StatsFile), rewritten after
 //     every round and every turn. agentkit's tally counts this process
 //     only; the file holds the sum the next engine starts from. It is kept
 //     beside the session, not in it, because a fold or a recap removes the
@@ -91,7 +91,7 @@ type sessionTally struct {
 
 var tally = sessionTally{reqs: &proto.RequestFold{}}
 
-// statsPath is the stats file beside a session file (dun.StatsFile).
+// statsPath is the stats file beside a session file (harness.StatsFile).
 func statsPath(sessionFile string) string {
 	if sessionFile == "" {
 		return ""

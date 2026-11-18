@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/numfmt"
 )
 
@@ -52,7 +52,7 @@ func (t usageTotals) CacheRate() (float64, bool) {
 	return float64(t.Cached) / float64(t.Prompt), true
 }
 
-func (t *usageTotals) add(r dun.RoundStat) {
+func (t *usageTotals) add(r harness.RoundStat) {
 	t.Requests++
 	t.Prompt += r.Prompt
 	t.Cached += r.Cached
@@ -159,7 +159,7 @@ func readUsage(dir string, now time.Time) usageReport {
 			continue
 		}
 		for _, line := range strings.Split(string(b), "\n") {
-			var r dun.RoundStat
+			var r harness.RoundStat
 			if line == "" || json.Unmarshal([]byte(line), &r) != nil || r.Time.IsZero() {
 				continue
 			}
@@ -290,7 +290,7 @@ func usageCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "usage: dun --usage [--json] [--no-net]")
 		return 2
 	}
-	rep := readUsage(dun.DefaultStatsDir(), usageNow())
+	rep := readUsage(harness.DefaultStatsDir(), usageNow())
 	rep.Budget = readBudget(*noNet)
 	if *asJSON {
 		enc := json.NewEncoder(stdout)

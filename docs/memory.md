@@ -1,9 +1,9 @@
 # Memory
 
 Notes a later session on a project needs and cannot get from the code, the git
-history or the docs. Code: `memory.go` (tool, store, scan), `memattest.go`
-(refine, void, confirm), `memtrigger.go` (triggers), `fork.go` and `suggest.go`
-(the fork's prefix), `notify.go` (surfacing). The retrieval rule itself is in
+history or the docs. Code: `internal/harness/memory.go` (tool, store, scan), `internal/harness/memattest.go`
+(refine, void, confirm), `internal/harness/memtrigger.go` (triggers), `internal/harness/fork.go` and `internal/harness/suggest.go`
+(the fork's prefix), `internal/harness/notify.go` (surfacing). The retrieval rule itself is in
 `surfacing.md`; this file is why memory is built around it.
 
 ## The value is surfacing, not writing
@@ -19,7 +19,7 @@ without `/rag on`. With dund down, recall is a word search of the note files
 and the index catches up on the next contact.
 
 **Surfaced text is not a one-time cost.** The Entry stays in history, so it is
-re-sent every turn until compaction drops it. That is why `surfacing.go` counts
+re-sent every turn until compaction drops it. That is why `internal/harness/surfacing.go` counts
 bytes, tokens, latency and CARRIED tokens (entries still in history, per
 round; a fold stops an entry accruing), shown in `/context`. Early token
 numbers ran about 4x high until the token meter settled
@@ -119,7 +119,7 @@ been confirmed: measured twice on one task, the model wrote "3000 lines" for a
 4000-line file and the human approved it. Noticing staleness in the abstract is
 unsolvable. Noticing it while working in the code the note describes is easy:
 the model holds the evidence at exactly that moment. So **the surfacing itself
-carries the caveat and the invitation** (`notify.go`, group memory): a note
+carries the caveat and the invitation** (`internal/harness/notify.go`, group memory): a note
 "records what was true then; if the user or the code now says otherwise, fix it
 - memory action=refine (or void ...)".
 

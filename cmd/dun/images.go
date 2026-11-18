@@ -2,8 +2,8 @@ package main
 
 import (
 	"github.com/iodesystems/agentkit/llm"
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -15,8 +15,8 @@ import (
 // visionConfig is what the engine running model on url needs for images.
 // The describer is the vision role as dunconfig resolves it (facets.vision,
 // else vision_model); a role that is off is as if none were set.
-func visionConfig(vr dunconfig.Resolved, url, model string, usageFor func(url, key, model string) func(llm.Usage)) dun.VisionConfig {
-	v := dun.VisionConfig{Key: dun.VisionKey(url, model), Model: model}
+func visionConfig(vr dunconfig.Resolved, url, model string, usageFor func(url, key, model string) func(llm.Usage)) harness.VisionConfig {
+	v := harness.VisionConfig{Key: harness.VisionKey(url, model), Model: model}
 	if !vr.On() {
 		return v
 	}
@@ -27,10 +27,10 @@ func visionConfig(vr dunconfig.Resolved, url, model string, usageFor func(url, k
 }
 
 // dunImages is the wire's images as the harness takes them.
-func dunImages(imgs []proto.Image) []dun.ImageInput {
-	out := make([]dun.ImageInput, len(imgs))
+func dunImages(imgs []proto.Image) []harness.ImageInput {
+	out := make([]harness.ImageInput, len(imgs))
 	for i, im := range imgs {
-		out[i] = dun.ImageInput{Path: im.Path, Label: im.Label}
+		out[i] = harness.ImageInput{Path: im.Path, Label: im.Label}
 	}
 	return out
 }

@@ -110,7 +110,7 @@ owner's call before work starts.
 - [~] `/worklog`: start a task, fork a subtask, end one with why, view;
   the model reads a closed worklog (input, events, recaps) and writes it up
   as a clean account, with the model, effort, harness and version.
-  Built (worklog.go; `<session>.worklog.json`, accounts in
+  Built (internal/harness/worklog.go; `<session>.worklog.json`, accounts in
   `<session>.worklog/<n>-<slug>.md`). Person-driven only. Possible
   extension: let the model open and close tasks too (a tool).
 

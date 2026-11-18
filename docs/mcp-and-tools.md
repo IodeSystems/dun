@@ -2,12 +2,12 @@
 
 Why the tool-server layer is built the way it is. Short rules on startup,
 rebuilds and config files: "Tool servers and extensions" in `decisions.md`.
-Switch scopes (session, project, global): `mcpscope.go`.
+Switch scopes (session, project, global): `internal/harness/mcpscope.go`.
 
 `/rag` (USER 2026-10-28; it was `/raglit`) is the search indexes as a switch
 table: every index raglit lists (`raglit index --list --json`), each on, off
 or unset at the global, project and session scopes, the nearest scope that
-says deciding (`attach.go`, `indexkind.go`). Unset everywhere, this project's
+says deciding (`internal/harness/attach.go`, `internal/harness/indexkind.go`). Unset everywhere, this project's
 own indexes are on and every other one off. What is on is what the model's
 `docs_search`/`get_document` read when they name no index, and what proactive
 surfacing reads. Above raglit's rows is dund's project index, which has no
@@ -24,7 +24,7 @@ server's own switch stays in `/mcp`; its verbs (`setup`, `watch`, `include`,
 `workspace`, …) are `/rag <verb>`, and `/rag status` is the capability report.
 
 `/file` (USER 2026-10-28) is the paths outside the workspace the file tools
-may use, switched the same way (`fileadd.go`): each scope (`paths.json`
+may use, switched the same way (`internal/harness/fileadd.go`): each scope (`paths.json`
 global, project, and the session's sidecar) may name a path, with on/off, a
 mode (read, the default, or write) and, for a directory, index (on by
 default). The nearest scope that sets a field decides it. A read-only path
@@ -50,7 +50,7 @@ project switch still wins where it is set (USER 2026-10-28).
 (USER 2026-10-22.) Default is direct. A user-added server may instead be
 hosted inside mcpshell (`ServerSpec.Via`, `"direct"` / `"shell"`), so its tool
 schemas leave every request and the model reaches it through `eval`. Built-in
-servers cannot be moved. Code: `shellhost.go`, `servers_config.go`.
+servers cannot be moved. Code: `internal/harness/shellhost.go`, `internal/harness/servers_config.go`.
 
 - A shell-placed server is never started by mcpmgr. The shell is launched with
   `--mcp <$DUN_HOME/projects/<id>/shell-mcp.json>` (0600, removed when nothing
@@ -108,14 +108,14 @@ then an instance of its own for that tree, by the same rule as any other:
 `shared` with the tree in the key is one per workspace, and poly-lsp's
 daemon gives it a root of its own. A server not keyed on the workspace
 (raglit, a remote one) stays the parent's. A child in its parent's tree
-keeps its parent's servers, as before (`childOwn`, `servers_share.go`).
+keeps its parent's servers, as before (`childOwn`, `internal/harness/servers_share.go`).
 A child's own instances start with it and do not follow a later switch in
 the session; the next child, or the child's restart, reads the switches
 again.
 
 Not switchable: the built-in servers. Each declares its fixed instance in
 one place beside the built-in definitions (`builtinInstances`,
-`serverdefs.go`); the refusal reads it, and the `/mcp` table shows it as
+`internal/harness/serverdefs.go`); the refusal reads it, and the `/mcp` table shows it as
 `<instance> (built-in)` (USER 2026-11-06):
 
 - shell: `session`. mcpshell holds the session's `eval` state, and the
@@ -185,7 +185,7 @@ engine's exit release it. The upstream stops a grace period after its last
 client is released, so a server switched off and on, or a session resumed,
 does not pay the start again.
 
-**Auth.** dund already holds every OAuth token (`oauthbroker.go`); the
+**Auth.** dund already holds every OAuth token (`internal/harness/oauthbroker.go`); the
 gateway's upstream asks the broker directly, so an OAuth server logs in once
 for every session. A login's URL goes to the session that started the
 upstream, and to every session attached while the login waits, as the
@@ -205,11 +205,11 @@ gateway has no such server asks again once. A dund upgrade stops every
 engine, so nothing outlives it.
 
 **Code.** The gateway (endpoint, upstreams, clients, grace, OAuth through
-the broker, notification fan-out) is `gateway.go` in package dun, beside the
+the broker, notification fan-out) is `internal/harness/gateway.go` in package harness, beside the
 broker and the start code it reuses (`waitServerTools`, `brokered`); dund
 wires it (`internal/dund/mcpgw.go`: the peer ops `mcp_share` and
 `mcp_release`, `mcp_login` to the sessions, `mcp_notify` to the engines,
-release on the engine's exit). The engine's half is `servers_share.go`.
+release on the engine's exit). The engine's half is `internal/harness/servers_share.go`.
 
 - The grace is `GatewayGrace` (2 minutes; a var for tests).
 - A client is one bearer. Its MCP sessions (`Mcp-Session-Id`) are checked
@@ -262,7 +262,7 @@ on every request). The older HTTP+SSE transport and the server-initiated GET
 stream are not built. `url`, `bearer` (`$NAME` reads the environment at use,
 never written resolved) and `headers` are on the spec.
 
-OAuth (`ServerSpec.OAuth`; `mcpoauth.go`, `servers_oauth.go`). Targets that
+OAuth (`ServerSpec.OAuth`; `internal/harness/mcpoauth.go`, `internal/harness/servers_oauth.go`). Targets that
 shaped it: Snowflake's managed MCP (401 -> RFC 9728 -> RFC 8414, no dynamic
 client registration, pre-registered client and **exact** redirect URI),
 Superset (validates an external IdP's JWT; with Google that is the ID token),
@@ -273,7 +273,7 @@ and corporate tools behind a login gate.
   must cover the server URL, path prefix allowed; otherwise the login is
   refused, so one server cannot obtain a login meant for another) -> first
   authorization server -> its metadata.
-- **The client** (`oauthauto.go`; USER 2026-10-29: "auto-register dun, if
+- **The client** (`internal/harness/oauthauto.go`; USER 2026-10-29: "auto-register dun, if
   that doesn't work, we ask for clientId"). A `client_id` in the oauth block
   is used as given. With none, in order: an authorization server that says
   `client_id_metadata_document_supported` (ElevenLabs) gets dun's URL,
@@ -315,7 +315,7 @@ and corporate tools behind a login gate.
 - **Refresh**: 60 s before expiry and on a 401; if refresh fails, interactive
   login bounded at 5 min. **A 401 within 30 s of a login is an error, not
   another browser tab.**
-- **dund holds the tokens** (`oauthbroker.go`, `internal/dund/oauth.go`; USER
+- **dund holds the tokens** (`internal/harness/oauthbroker.go`, `internal/dund/oauth.go`; USER
   2026-10-29). Under dund, an engine runs no OAuth client of its own: it asks
   dund over its stdio (peer op `oauth`: token, ensure, unauthorized, login,
   logout, status), and dund keeps one client per server for every session.
@@ -337,7 +337,7 @@ and corporate tools behind a login gate.
   `MCPSHELL_AUTH_REJECTED`; without them an opaque token refused before its
   expiry is handed back unchanged. Each hosted OAuth server is logged in
   before the shell starts, since mcpshell gives auth_cmd 30 s.
-- **Login gate diagnosis** (`mcpgate.go`): a server behind Google IAP,
+- **Login gate diagnosis** (`internal/harness/mcpgate.go`): a server behind Google IAP,
   Cloudflare Access or oauth2-proxy answers with a redirect or an HTML login
   page, which used to surface as a JSON decode error or a discovery timeout.
   An unauthenticated `initialize` is sent without following redirects; a 3xx
@@ -353,13 +353,13 @@ and corporate tools behind a login gate.
 (USER 2026-10-21.) Agent Skills plus MCP-served ones; docs ingested on add and
 on refresh; servers saved for every project; HTTP transport built in agentkit.
 
-- **Docs** (`mcpdocs.go`): a server's text resources are copied into
+- **Docs** (`internal/harness/mcpdocs.go`): a server's text resources are copied into
   `$DUN_HOME/mcp-docs/<id>/` and raglit index `mcp-<id>`, so the proactive
   search surfaces the matching one without the model knowing to call a tool.
   The copy runs on `/mcp add` and `/mcp refresh <id>` only, not every session:
   listing and reading every resource is network traffic nobody asked for.
   A resource the server stops listing is forgotten.
-- **Skills** (`skills.go`): the format is Agent Skills (a directory with
+- **Skills** (`internal/harness/skills.go`): the format is Agent Skills (a directory with
   `SKILL.md`, frontmatter name and description). Only name and description ride
   each request; the body costs tokens when the model calls `skill`. Sources
   lowest first: `~/.claude/skills`, `$DUN_HOME/skills`, MCP resources
@@ -376,7 +376,7 @@ on refresh; servers saved for every project; HTTP transport built in agentkit.
 
 ## File tools
 
-`agentkit/files` is mounted in `rebuildTools` next to exec (`files.go`):
+`agentkit/files` is mounted in `rebuildTools` next to exec (`internal/harness/files.go`):
 `file_read`, `file_edit`, `file_write` on by default; `file_grep`,
 `file_list`, `file_delete` and `file_move` opt in. USER wanted a toolset "minimal,
 configurable, but efficient and complete". Why: without them the model reads
@@ -412,7 +412,7 @@ receipt of an edit.
 
 (USER 2026-10-22.) "we don't want to pollute git trees and we cannot tell
 people to use dun": no `.dun/` created in a repo, no `.gitignore` entry asked of
-anyone. Code: `project.go`, `servers_config.go` (`serverConfigPaths`).
+anyone. Code: `internal/harness/project.go`, `internal/harness/servers_config.go` (`serverConfigPaths`).
 
 - `$DUN_HOME/projects.json` maps an absolute source dir to an id, written
   temp-and-rename under flock. State lives in `$DUN_HOME/projects/<id>/`
@@ -457,7 +457,7 @@ alone from `t` (`/mcp toggle dun:files file_write off`). The nearest scope
 decides: a tool's own switch, then its group's; unset everywhere, on.
 `dun:core` (exec, ask_user) is shown but cannot be
 switched off. A tool switched off leaves the definitions and is refused if
-called. Stored in `builtins.json` at each scope (builtins.go). A switch
+called. Stored in `builtins.json` at each scope (internal/harness/builtins.go). A switch
 changes the listed tools, the prompt's prefix: the server re-reads the
 conversation once.
 
@@ -470,9 +470,9 @@ v0.4.0), its child language server found or not (with the install hint),
 where the language comes from (builtin, user, project), off by default,
 format on edit.
 
-- **Switches** (`lspkind.go`): each language on, off or unset at the global,
+- **Switches** (`internal/harness/lspkind.go`): each language on, off or unset at the global,
   project and session scopes, in `lsp.json` like the other kinds
-  (switches.go). Unset, a language is on unless poly-lsp-mcp has it off by
+  (internal/harness/switches.go). Unset, a language is on unless poly-lsp-mcp has it off by
   default. At spawn, a language switched off becomes `--lsp-off`, one off by
   default and switched on `--lsp-on`, to a build whose `mcp --help` lists
   them (`IndexSupport.LSP`). A change restarts a running code server. With no
@@ -502,11 +502,11 @@ cap, a didOpen of every file, a whole-root index bounded only by the 30 s
 PSI stop that does nothing on macOS) are fixed in poly-lsp v0.5.1. dun's
 guards, which hold with or without those fixes:
 
-- **No budget raise** (`indexstate.go` retryIndex). An index out of budget
+- **No budget raise** (`internal/harness/indexstate.go` retryIndex). An index out of budget
   gets the obvious excludes (they can only shrink the index), else nothing:
   dun gives the person `/lsp exclude`, `include`, `budget`, and never raises
   `--index-budget` itself.
-- **Child limits** (`lspsafe.go`): `--lsp-roots single`, to a build whose
+- **Child limits** (`internal/harness/lspsafe.go`): `--lsp-roots single`, to a build whose
   `mcp --help` lists it. dun's interim `--lsp-max-rss-mb 2048` and
   `--lsp-idle-stop 5m` are gone: v0.5.1 bounds the daemon by default (4
   children, RSS budgets, 10 min idle), the proxy ignores those flags with
@@ -514,12 +514,12 @@ guards, which hold with or without those fixes:
   `lsp_roots` in the server spec (project or global); dun writes none. The
   settings `lsp_max_rss_mb` and `lsp_idle_stop` are removed; a config that
   still has them loads, and the keys are ignored.
-- **index-anyway is the person's** (`indexanyway.go`). A not-a-project root
+- **index-anyway is the person's** (`internal/harness/indexanyway.go`). A not-a-project root
   gets a line, not a question: an answer to `Config.Ask` can come from a
   model (`dun mcp`'s `dun_answer`) or a pipe. Only `/lsp index-anyway on`
   (a server command from a client) or the config file sets it; no tool does.
   Headless runs are always "not now".
-- **Root guard** (`rootguard.go`, `codeguard.go`). Before poly-lsp starts on
+- **Root guard** (`internal/harness/rootguard.go`, `internal/harness/codeguard.go`). Before poly-lsp starts on
   a root, dun counts repos to depth 3 and files to 50,000 (`git ls-files`
   in a repo, else a walk that skips what poly-lsp skips; 3 s at most). With
   3+ repos or over 50,000 files, poly-lsp starts on an empty placeholder
@@ -528,7 +528,7 @@ guards, which hold with or without those fixes:
   refused with the repo list. `index_anyway` lifts it. Cost, measured: 4 ms
   on dun's repo (860 files), 0.6 ms on 20 small repos, 0.6 s on a directory
   of 115 repos past the file cap (warm cache).
-- **dund's code index** (`codesearch.go` codeIndexRoot) and the raglit
+- **dund's code index** (`internal/harness/codesearch.go` codeIndexRoot) and the raglit
   workspace ingest skip a root the guard finds too big; logged once.
 - `dun doctor` shows `poly-lsp-mcp status --json`: per root, the child LSPs
   running, their RSS, and the index's files.

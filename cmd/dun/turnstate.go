@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -22,11 +22,11 @@ type turnTracker struct {
 	mu  sync.Mutex
 	st  proto.TurnState
 	em  *emitter
-	h   func() *dun.Harness // nil until the harness exists
+	h   func() *harness.Harness // nil until the harness exists
 	now func() time.Time
 }
 
-func newTurnTracker(em *emitter, h func() *dun.Harness) *turnTracker {
+func newTurnTracker(em *emitter, h func() *harness.Harness) *turnTracker {
 	return &turnTracker{st: proto.TurnState{Phase: proto.PhaseIdle, Queued: []proto.QueuedMsg{}},
 		em: em, h: h, now: time.Now}
 }
@@ -93,7 +93,7 @@ func affectsTurn(payload any) (queue, ok bool) {
 	return false, false
 }
 
-func queuedProto(qs []dun.QueuedMsg) []proto.QueuedMsg {
+func queuedProto(qs []harness.QueuedMsg) []proto.QueuedMsg {
 	out := make([]proto.QueuedMsg, 0, len(qs))
 	for _, q := range qs {
 		out = append(out, proto.QueuedMsg{ID: q.ID, Text: q.Text})

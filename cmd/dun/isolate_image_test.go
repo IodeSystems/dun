@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 func TestParseImageArg(t *testing.T) {
@@ -77,7 +77,7 @@ func TestIsolateImage(t *testing.T) {
 	dockerAvailable(t, nil)
 	repo := isoRepo(t)
 	h := isoHarness(t, repo)
-	if got := ctl(h, "isolate", "docker image"); !strings.HasSuffix(got, dun.DefaultIsolationImage) {
+	if got := ctl(h, "isolate", "docker image"); !strings.HasSuffix(got, harness.DefaultIsolationImage) {
 		t.Errorf("default: %q", got)
 	}
 	built := stubDocker(t, false, nil)
@@ -117,7 +117,7 @@ func TestIsolateImage_Live(t *testing.T) {
 	h := isoHarness(t, isoRepo(t))
 	ctl(h, "isolate", "docker")
 	ctl(h, "isolate", "docker image alpine:3")
-	if d, ok := h.ExecBackend().(dun.DockerExec); !ok || d.Image != "alpine:3" {
+	if d, ok := h.ExecBackend().(harness.DockerExec); !ok || d.Image != "alpine:3" {
 		t.Errorf("backend %+v", h.ExecBackend())
 	}
 	if !strings.Contains(ctl(h, "isolate", ""), "image alpine:3") {

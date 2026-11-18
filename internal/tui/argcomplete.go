@@ -10,8 +10,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/textfmt"
 )
 
@@ -243,19 +243,19 @@ func mcpArgCands(m *tuiModel, kind string) ([]argChoice, string) {
 		}
 		return out, "servers"
 	case "preset":
-		for _, p := range dun.Presets() {
+		for _, p := range harness.Presets() {
 			add(p.ID, p.Description)
 		}
 		return out, "presets"
 	case "mode":
-		add(dun.ModeStandalone, "its own tools, schemas in every request")
-		add(dun.ModeScripted, "in mcpshell, called through eval, schemas out of the prompt")
+		add(harness.ModeStandalone, "its own tools, schemas in every request")
+		add(harness.ModeScripted, "in mcpshell, called through eval, schemas out of the prompt")
 		add("unset", "clear this scope's mode")
 		return out, "modes"
 	case "instance":
-		add(dun.InstanceShared, "one connection in dund for every session (the default)")
-		add(dun.InstanceSession, "this session's own connection, shared with its sub-agents")
-		add(dun.InstanceAgent, "one more connection for each sub-agent")
+		add(harness.InstanceShared, "one connection in dund for every session (the default)")
+		add(harness.InstanceSession, "this session's own connection, shared with its sub-agents")
+		add(harness.InstanceAgent, "one more connection for each sub-agent")
 		add("unset", "clear this scope's instance")
 		return out, "instances"
 	case "tool":

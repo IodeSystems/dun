@@ -5,19 +5,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/enginecmd"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
 // A user's extension cannot shadow a command either — the engine's or
 // the TUI's own: it loads without its slash command, and says so.
 func TestExtensionsDoNotShadowCommands(t *testing.T) {
-	ext := func(id, slash string) dun.Extension {
-		return dun.Extension{ID: id, Source: dun.ExtUser, Slash: &dun.ExtSlash{Name: slash,
-			Commands: map[string]dun.ExtSlashCmd{"greet": {ExtStep: dun.ExtStep{Tool: "greet", Args: map[string]any{"name": "{{arg}}"}}}}}}
+	ext := func(id, slash string) harness.Extension {
+		return harness.Extension{ID: id, Source: harness.ExtUser, Slash: &harness.ExtSlash{Name: slash,
+			Commands: map[string]harness.ExtSlashCmd{"greet": {ExtStep: harness.ExtStep{Tool: "greet", Args: map[string]any{"name": "{{arg}}"}}}}}}
 	}
-	exts, refused := engineExtensions(append(dun.BundledExtensions(), ext("a", "mcp"), ext("b", "help"), ext("c", "ext"), ext("hello", "hello")))
+	exts, refused := engineExtensions(append(harness.BundledExtensions(), ext("a", "mcp"), ext("b", "help"), ext("c", "ext"), ext("hello", "hello")))
 	if len(refused) != 3 {
 		t.Errorf("refused: %v", refused)
 	}
@@ -64,7 +64,7 @@ func TestExtensionsDoNotShadowCommands(t *testing.T) {
 }
 
 func TestCommandListShowsState(t *testing.T) {
-	l := enginecmd.CommandList([]dun.ServerState{{ID: dun.ServerDocs, Running: true, Auto: true}}, dun.IsoDocker)
+	l := enginecmd.CommandList([]harness.ServerState{{ID: harness.ServerDocs, Running: true, Auto: true}}, harness.IsoDocker)
 	got := map[string]string{}
 	for _, c := range l.Items {
 		got[c.Name] = c.State + "/" + c.Detail
@@ -226,7 +226,7 @@ func TestJobsListing(t *testing.T) {
 	if got := jobsListing(nil, now); got != "no background jobs are running" {
 		t.Errorf("empty: %q", got)
 	}
-	got := jobsListing([]dun.JobInfo{
+	got := jobsListing([]harness.JobInfo{
 		{ID: 3, Command: "go test ./...", Started: now.Unix() - 125, Last: "ok  pkg/a 1.2s"},
 		{ID: 5, Command: "sleep 30", Started: now.Unix() - 7},
 	}, now)
@@ -258,12 +258,12 @@ func TestParseWatchAndAttach(t *testing.T) {
 		list         bool
 	}
 	for in, want := range map[string]att{
-		"":              {"", dun.ScopeSession, true},
-		"--list":        {"", dun.ScopeSession, true},
-		"x":             {"x", dun.ScopeSession, false},
-		"p:x --project": {"p:x", dun.ScopeProject, false},
-		"--global p:x":  {"p:x", dun.ScopeGlobal, false},
-		"x --session":   {"x", dun.ScopeSession, false},
+		"":              {"", harness.ScopeSession, true},
+		"--list":        {"", harness.ScopeSession, true},
+		"x":             {"x", harness.ScopeSession, false},
+		"p:x --project": {"p:x", harness.ScopeProject, false},
+		"--global p:x":  {"p:x", harness.ScopeGlobal, false},
+		"x --session":   {"x", harness.ScopeSession, false},
 	} {
 		i, s, l, err := parseAttach(strings.Fields(in))
 		if err != nil || (att{i, s, l}) != want {

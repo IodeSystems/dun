@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -23,21 +23,21 @@ var shareTimeout = 6 * time.Minute
 
 type gatewayHolder struct {
 	mu sync.Mutex
-	gw *dun.Gateway
+	gw *harness.Gateway
 }
 
 // get is the gateway, made first when create; nil when none was made.
-func (h *gatewayHolder) get(create bool) *dun.Gateway {
+func (h *gatewayHolder) get(create bool) *harness.Gateway {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.gw == nil && create {
-		h.gw = dun.NewGateway(oauthBroker())
+		h.gw = harness.NewGateway(oauthBroker())
 	}
 	return h.gw
 }
 
 // gateway is the service's, started on first use.
-func (s *Service) gateway() *dun.Gateway { return s.gwh.get(true) }
+func (s *Service) gateway() *harness.Gateway { return s.gwh.get(true) }
 
 // mcpShare answers mcp_share and mcp_release for ses's engine eng.
 func (s *Service) mcpShare(ses *session, eng Engine, op string, req *proto.McpShareReq) (*proto.McpShareRep, error) {
@@ -46,13 +46,13 @@ func (s *Service) mcpShare(ses *session, eng Engine, op string, req *proto.McpSh
 		gw.Release(req.Release)
 		return nil, nil
 	}
-	var sr dun.ShareRequest
+	var sr harness.ShareRequest
 	if err := json.Unmarshal([]byte(req.Request), &sr); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), shareTimeout)
 	defer cancel()
-	g, err := gw.Share(ctx, dun.GatewayClient{Session: ses.id, Engine: eng,
+	g, err := gw.Share(ctx, harness.GatewayClient{Session: ses.id, Engine: eng,
 		Login: func(id, url string) {
 			ses.log.Append(proto.NewEvent(&proto.McpLogin{Server: id, URL: url, Phase: proto.LoginStarted}))
 		},

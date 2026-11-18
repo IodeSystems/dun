@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -37,7 +37,7 @@ func TestListIncludesTranscriptsOnDisk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir := dun.RootDir(ws)
+	dir := harness.RootDir(ws)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestListIncludesTranscriptsOnDisk(t *testing.T) {
 	}
 }
 
-// The on-disk listing follows dun.SessionAsked: a cleared session (notices
+// The on-disk listing follows harness.SessionAsked: a cleared session (notices
 // only, archive holds the ask) is listed; a notices-only one is not.
 func TestListOnDiskUsesSessionAsked(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
@@ -99,7 +99,7 @@ func TestListOnDiskUsesSessionAsked(t *testing.T) {
 	if _, err := svc.Create(alice, ws, nil, ""); err != nil {
 		t.Fatal(err)
 	}
-	dir := dun.RootDir(ws)
+	dir := harness.RootDir(ws)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}

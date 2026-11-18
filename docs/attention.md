@@ -37,7 +37,7 @@ turn, and what changes.
 
 ## What exists
 
-### The queue (`queue.go`)
+### The queue (`internal/harness/queue.go`)
 
 Every message for the model goes into one buffer, `h.queue`. The kinds and
 whether each may start a turn (`queuedPolicies`, field `causesTurn`):
@@ -62,7 +62,7 @@ Delivery, cheapest first:
 A notify starts a turn through `h.wake`: the engine's loop, and in `--engine` mode
 `drainStep` (cmd/dun/engine.go), block on it while background work runs.
 
-### Keyed, escalating and turn-scoped asides (branch `idle-check`, `asidettl.go`)
+### Keyed, escalating and turn-scoped asides (branch `idle-check`, `internal/harness/asidettl.go`)
 
 `AsideWith(text, AsideOpts{Key, EscalateAfter, TurnScoped})`:
 
@@ -79,7 +79,7 @@ A notify starts a turn through `h.wake`: the engine's loop, and in `--engine` mo
 - **TurnScoped.** Dropped when the next turn starts. Used by the turn-limit
   warning, which describes only the turn that queued it.
 
-### Background jobs (`bgjob.go`, `jobs.go`)
+### Background jobs (`internal/harness/bgjob.go`, `internal/harness/jobs.go`)
 
 | Trigger | The model gets | Kind |
 |---|---|---|
@@ -94,14 +94,14 @@ keeps printing (a spinner) while doing no work is never flagged. There is no
 trigger on an error line; the pattern filter was removed in the jobs rework, and
 `every_bytes` is the coarse stand-in.
 
-### Child agents (`subagent.go`)
+### Child agents (`internal/harness/subagent.go`)
 
 - A child's report (it finished, or it asks something) is a notify to the parent.
 - While it works, a quiet reminder with its status is a keyed aside that
   escalates, like a job's.
 - `agent({id, tell})` steers it.
 
-### The plan (`plan.go`, `docs/taskplan.md`)
+### The plan (`internal/harness/plan.go`, `docs/taskplan.md`)
 
 - At the start of each turn, the open plan is an aside, "[plan] ...", keyed
   "plan" (on `idle-check`).
@@ -119,7 +119,7 @@ trigger on an error line; the pattern filter was removed in the jobs rework, and
   the first): the board cannot show what the user changed, and a dropped node
   only disappears from it.
 
-### End of turn (`idlecheck.go`, agentkit `Session.OnIdle`; branch `idle-check`)
+### End of turn (`internal/harness/idlecheck.go`, agentkit `Session.OnIdle`; branch `idle-check`)
 
 - `--non-interactive`: when a turn that used tools tries to end, the model gets
   the checklist once: list each stated requirement, check each by running it
@@ -140,7 +140,7 @@ trigger on an error line; the pattern filter was removed in the jobs rework, and
 
 ### 1. Delayed settle (interactive)
 
-Built on branch `settle` (`settle.go`; `--settle-delay`, `DUN_SETTLE_DELAY`, control `presence`).
+Built on branch `settle` (`internal/harness/settle.go`; `--settle-delay`, `DUN_SETTLE_DELAY`, control `presence`).
 
 When a turn that used tools ends, a settle timer starts (proposed: 2 minutes).
 
@@ -179,7 +179,7 @@ When a turn that used tools ends, a settle timer starts (proposed: 2 minutes).
 ### 2. The plan board, and plan notifies
 
 - The plan board is **one keyed aside**, replaced on every change by anyone,
-  never a pile of change notes. Built on branch `settle` (`planBoard`, `plan.go`).
+  never a pile of change notes. Built on branch `settle` (`planBoard`, `internal/harness/plan.go`).
 - These plan events become **notifies**, because each needs a decision:
   - a node became ready and no child owns it (the frontier moved);
   - a node is blocked;

@@ -1,0 +1,66 @@
+package harness
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/iodesystems/agentkit/mcpmgr"
+)
+
+// A notice that is JSON (mcpshell's hosted sizes) goes to the server's
+// activity log, not to the conversation; prose still reaches the model.
+func TestServerNotice_JSONToTheLog(t *testing.T) {
+	h := &Harness{}
+	var told []string
+	h.cfg.OnNotify = func(s string) { told = append(told, s) }
+	h.noteServerNotification(mcpmgr.Notification{ServerID: "shell", Method: "notifications/message",
+		Params: map[string]any{"level": "info", "logger": "mcpshell/hosted", "data": `{"servers":[{"ns":"vay","tools":112}]}`}})
+	if len(told) != 0 {
+		t.Errorf("a JSON notice reached the conversation: %v", told)
+	}
+	if log := h.serverLogTail("shell", 5); len(log) != 1 || !strings.Contains(log[0].Text, `notice: {"servers"`) {
+		t.Errorf("not in the log: %+v", log)
+	}
+}
+
+// /rephrase prompt: dun's until one is saved; saved, it leads the request;
+// default goes back.
+func TestRephrasePrompt(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	if p, own := RephrasePrompt(); own || p != rephraseInstruction {
+		t.Fatal("not dun's by default")
+	}
+	if err := SetRephrasePrompt("Make it terse."); err != nil {
+		t.Fatal(err)
+	}
+	if p, own := RephrasePrompt(); !own || !strings.HasPrefix(p, "Make it terse.") || !strings.HasSuffix(p, "User's message:\n") {
+		t.Errorf("saved: %q", p)
+	}
+	if err := SetRephrasePrompt(""); err != nil {
+		t.Fatal(err)
+	}
+	if _, own := RephrasePrompt(); own {
+		t.Error("default did not go back")
+	}
+}
+
+// Unqueue gives back the person's queued messages, oldest first, and
+// leaves the rest of the queue (an aside) alone.
+func TestUnqueue(t *testing.T) {
+	h := &Harness{}
+	h.SayAs("m1", "fix the typo")
+	h.SayAs("m2", "in main.go")
+	h.noteMu.Lock()
+	h.queue = append(h.queue, queued{kind: queuedAside, text: "an aside"})
+	h.noteMu.Unlock()
+	got := h.Unqueue()
+	if len(got) != 2 || got[0] != (QueuedMsg{ID: "m1", Text: "fix the typo"}) || got[1] != (QueuedMsg{ID: "m2", Text: "in main.go"}) {
+		t.Errorf("unqueued %v", got)
+	}
+	if len(h.queue) != 1 || h.queue[0].kind != queuedAside {
+		t.Errorf("left %+v", h.queue)
+	}
+	if again := h.Unqueue(); len(again) != 0 {
+		t.Errorf("twice: %v", again)
+	}
+}

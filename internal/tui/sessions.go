@@ -8,7 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
@@ -37,7 +37,7 @@ func resumeSlash(m *tuiModel, args []string) tea.Cmd {
 	if len(args) > 0 {
 		return m.switchSession(args[0])
 	}
-	m.sessions = dun.ListSessionInfo(m.workspace)
+	m.sessions = harness.ListSessionInfo(m.workspace)
 	m.addServiceSessions()
 	if len(m.sessions) == 0 {
 		m.append(StDim.Render("no saved sessions yet"))
@@ -60,12 +60,12 @@ func resumeSlash(m *tuiModel, args []string) tea.Cmd {
 
 // orderSessions sorts infos by the rule dund lists in (proto.SortSessions).
 // dund's own last-activity time wins over the file's where it has the session.
-func orderSessions(infos []dun.SessionInfo, live map[string]bool, list []proto.SessionSummary) []dun.SessionInfo {
+func orderSessions(infos []harness.SessionInfo, live map[string]bool, list []proto.SessionSummary) []harness.SessionInfo {
 	active := map[string]string{}
 	for _, s := range list {
 		active[s.ID] = s.LastActive
 	}
-	byID := map[string]dun.SessionInfo{}
+	byID := map[string]harness.SessionInfo{}
 	rows := make([]proto.SessionSummary, 0, len(infos))
 	for _, in := range infos {
 		byID[in.ID] = in
@@ -76,7 +76,7 @@ func orderSessions(infos []dun.SessionInfo, live map[string]bool, list []proto.S
 		rows = append(rows, proto.SessionSummary{ID: in.ID, Running: live[in.ID], LastActive: la})
 	}
 	proto.SortSessions(rows)
-	out := make([]dun.SessionInfo, 0, len(rows))
+	out := make([]harness.SessionInfo, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, byID[r.ID])
 	}
@@ -97,7 +97,7 @@ func (m *tuiModel) addServiceSessions() {
 	for _, s := range m.sessions {
 		have[s.ID] = true
 	}
-	infos := map[string][]dun.SessionInfo{} // per workspace, read once
+	infos := map[string][]harness.SessionInfo{} // per workspace, read once
 	for _, s := range list {
 		m.sessLive[s.ID] = s.Running
 		if have[s.ID] || s.Workspace == m.workspace {
@@ -105,9 +105,9 @@ func (m *tuiModel) addServiceSessions() {
 		}
 		m.sessWS[s.ID] = s.Workspace
 		if _, ok := infos[s.Workspace]; !ok {
-			infos[s.Workspace] = dun.ListSessionInfo(s.Workspace)
+			infos[s.Workspace] = harness.ListSessionInfo(s.Workspace)
 		}
-		info := dun.SessionInfo{ID: s.ID}
+		info := harness.SessionInfo{ID: s.ID}
 		for _, in := range infos[s.Workspace] {
 			if in.ID == s.ID {
 				info = in

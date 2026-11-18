@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -301,11 +301,11 @@ func TestServerOAuthCommand(t *testing.T) {
 	go NewServer(svc, UnixPeer).Serve(ln)
 
 	a := dial(t, sock)
-	spec := dun.MarshalOAuthSpec(dun.OAuthSpec{ClientID: "c"})
+	spec := harness.MarshalOAuthSpec(harness.OAuthSpec{ClientID: "c"})
 	a.send("o1", "", &proto.OAuthCmd{OAuthReq: proto.OAuthReq{Op: "status", ID: "eleven", URL: "https://x.example/mcp", Spec: spec}})
 	ev := a.until(func(ev proto.Event) bool { return ev.Re == "o1" })
 	r, ok := ev.Payload.(*proto.OAuthResult)
-	if !ok || r.Error != "" || dun.UnmarshalOAuthStatus(r.Status).LoggedIn {
+	if !ok || r.Error != "" || harness.UnmarshalOAuthStatus(r.Status).LoggedIn {
 		t.Fatalf("status: %+v", ev.Payload)
 	}
 	a.send("o2", "nope", &proto.OAuthCmd{OAuthReq: proto.OAuthReq{Op: "status", ID: "eleven", URL: "https://x.example/mcp", Spec: spec}})

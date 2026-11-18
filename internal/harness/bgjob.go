@@ -1,0 +1,821 @@
+package harness
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/iodesystems/dun/internal/heartbeat"
+	"github.com/iodesystems/dun/internal/procstat"
+)
+
+// Background jobs — what a long command looks like while it is still running.
+//
+// A background job used to be ONE event. `startBackground` called Run, which
+// buffered everything, and nothing reached the model until the process exited:
+// `sleep 10; echo hi; sleep 30` delivered "hi" at t≈40s. A job that died in its
+// second second and a job still working looked identical for as long as it ran
+// — the same shape as the foreground hang that motivated the exec deadline,
+// except a deadline is exactly what a background job must not have.
+//
+// Two changes. Output streams to a FILE, and the path goes to the model, so a
+// 50k-line build log is grep-able instead of spent on the context window. And
+// the model can ask to hear about a job WHILE it runs — bounded, because
+// streaming without a bound is worse than silence: an unfiltered `go build`
+// would narrate itself into the context window one line at a time.
+
+// bgTailBytes is how much of a log the completion notice and a monitor read
+// carry inline. Enough to see the failure; the file has the rest.
+const bgTailBytes = 4000
+
+// bgMonitor is what a job is allowed to say while it runs. The zero value is
+// the old behaviour — silent until it exits — which stays the DEFAULT: a job
+// nobody asked about should not spend context.
+//
+// A progress report says THAT output was written and how much, never the
+// output itself (USER 2026-11-06: "No output, just notifying the change,
+// xbytes/lines written to combined stdioe"): the text is in the job's log,
+// read with file_read. The throttle is bytes or time, whichever comes first.
+type bgMonitor struct {
+	// EveryBytes reports once this many unreported bytes are written; 0 = no
+	// byte threshold.
+	EveryBytes int
+	// EverySecs reports new output at most this often; 0 = no time threshold.
+	// With neither set, nothing is reported until the job finishes.
+	EverySecs int
+	// Mute silences the job completely, INCLUDING its completion. For a job
+	// whose answer stopped mattering — the model moved on, the check was
+	// superseded — where the notification is pure noise.
+	Mute bool
+}
+
+// bgJob is one background command: its log, its monitor settings, and whatever
+// it has produced so far.
+type bgJob struct {
+	id      int
+	command string
+	logPath string
+	started time.Time
+	h       *Harness
+
+	// hb is the "still running" reminder (internal/heartbeat). Debounced by anything
+	// this job says, which is why every notification goes through j.notify.
+	hb *heartbeat.Beat
+
+	// promoteCh is closed when the job goes background; it is what donates the
+	// shell (HostShell.RunPromotable). doneCh is closed when the command
+	// returns, and is what the tool call waits on for its grace.
+	promoteCh chan struct{}
+	doneCh    chan struct{}
+
+	// ctx is what the command runs under; cancel is how a kill ends it (the
+	// backend turns cancellation into SIGTERM, then SIGKILL, for the whole
+	// process group — see bgkill.go). Not the turn's context: an interrupt
+	// must not kill a job.
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	mu      sync.Mutex
+	mon     bgMonitor
+	log     io.WriteCloser // dualLog: the bg dir and the isolation tmp (isotmp.go)
+	early   []byte         // output held in memory while the job has no log file yet
+	partial []byte         // bytes since the last newline: the last line is not complete yet
+	written int64
+	lines   int64 // newlines written in all
+	// What the next progress report counts: bytes and lines since the last
+	// one, and when that was. reportAt fires a due time-throttled report when
+	// no more output arrives to trigger it.
+	pendBytes, pendLines int64
+	reportedAt           time.Time
+	reportAt             *time.Timer
+	done                 bool
+	bg                   bool // promoted: has a number, a row in the pane, and a voice
+	settled              bool // someone has claimed the result — inline or background
+	res                  ExecResult
+	ended                time.Time
+	last                 string // the last non-empty complete line of output (/jobs shows it)
+
+	// pgid is the process group the command runs in, once a host backend
+	// reported it (notePGID); 0 unknown (docker). usage reads it.
+	pgid int
+	// outAt is when the command last printed anything; zero before it has.
+	outAt time.Time
+
+	// killedBy is who asked for the kill ("user", "model"), and killAfter how
+	// long the job had run then. Set once, by kill.
+	killedBy  string
+	killAfter time.Duration
+}
+
+// bgEarlyMax bounds the in-memory buffer a not-yet-promoted job keeps. Its
+// output is already being accumulated into the ExecResult the tool call will
+// return, so this is a second copy; past the cap a promoted job's log simply
+// begins at the promotion point.
+const bgEarlyMax = 1 << 20
+
+// Write is the tee end of ExecBackend.Run: the command's combined output
+// arrives here as it is produced. Everything goes to the log; only complete,
+// matching lines are candidates for a progress report, because half a line
+// tells the model nothing and a regexp cannot judge one.
+func (j *bgJob) Write(p []byte) (int, error) {
+	j.mu.Lock()
+	if j.log != nil {
+		_, _ = j.log.Write(p)
+	} else if len(j.early) < bgEarlyMax {
+		j.early = append(j.early, p...)
+	}
+	j.written += int64(len(p))
+	j.outAt = time.Now()
+	nl := int64(bytes.Count(p, []byte{'\n'}))
+	j.lines += nl
+	j.pendBytes += int64(len(p))
+	j.pendLines += nl
+
+	j.partial = append(j.partial, p...)
+	if i := lastNewline(j.partial); i >= 0 {
+		if l := lastLine(j.partial[:i+1]); l != "" {
+			j.last = l
+		}
+		j.partial = append([]byte(nil), j.partial[i+1:]...)
+	}
+	note := j.reportLocked(false)
+	j.armReportLocked()
+	j.mu.Unlock()
+
+	// Notify outside the lock: it takes the harness's queue lock and may call
+	// out to a UI callback, and nothing good comes of holding a job's lock
+	// across either.
+	if note != "" {
+		j.notify(note)
+	}
+	return len(p), nil
+}
+
+// notify is every word this job says to the model, and the ONE place the
+// heartbeat's debounce is reset. Hooking it here rather than at each event
+// means a new kind of report cannot forget to count as a sign of life — and the
+// reminder itself deliberately does NOT go through here, or it would reset the
+// silence it is reporting on.
+func (j *bgJob) notify(text string) {
+	if j.hb != nil {
+		j.hb.Spoke()
+	}
+	j.h.notifyAndWake(text)
+}
+
+// reportLocked returns the progress note to send, if one is due, and resets
+// what it counts. Due: EveryBytes unreported bytes, or EverySecs since the
+// last report with something new. The note says how much was written and
+// where, not what: the text is the log's.
+func (j *bgJob) reportLocked(timeUp bool) string {
+	if j.mon.Mute || j.pendBytes == 0 || !j.bg {
+		return ""
+	}
+	since := time.Since(j.reportedAt)
+	byBytes := j.mon.EveryBytes > 0 && j.pendBytes >= int64(j.mon.EveryBytes)
+	byTime := j.mon.EverySecs > 0 && (timeUp || since >= time.Duration(j.mon.EverySecs)*time.Second)
+	if !byBytes && !byTime {
+		return ""
+	}
+	note := fmt.Sprintf("background job #%d — `%s` (still running, %s): +%s, +%s written to its "+
+		"combined stdout/stderr since the last report (%s, %s in all).\n%s",
+		j.id, j.command, roundDur(time.Since(j.started)), procstat.Bytes(float64(j.pendBytes)), linesOf(j.pendLines),
+		procstat.Bytes(float64(j.written)), linesOf(j.lines), j.logLine())
+	j.pendBytes, j.pendLines, j.reportedAt = 0, 0, time.Now()
+	if j.reportAt != nil {
+		j.reportAt.Stop()
+		j.reportAt = nil
+	}
+	return note
+}
+
+func linesOf(n int64) string {
+	if n == 1 {
+		return "1 line"
+	}
+	return fmt.Sprintf("%d lines", n)
+}
+
+// armReportLocked schedules the time-throttled report for output that arrived
+// before EverySecs was up: without it, a burst followed by silence would wait
+// for more output (or the end) to be reported.
+func (j *bgJob) armReportLocked() {
+	if j.mon.EverySecs <= 0 || j.mon.Mute || j.pendBytes == 0 || j.reportAt != nil || j.done || !j.bg {
+		return
+	}
+	wait := time.Duration(j.mon.EverySecs)*time.Second - time.Since(j.reportedAt)
+	j.reportAt = time.AfterFunc(max(wait, 0), func() {
+		j.mu.Lock()
+		j.reportAt = nil
+		note := ""
+		if !j.done {
+			note = j.reportLocked(true)
+		}
+		j.mu.Unlock()
+		if note != "" {
+			j.notify(note)
+		}
+	})
+}
+
+// finish records the outcome and releases whoever is waiting on it. If the job
+// was already promoted it also announces itself, because a background job's
+// completion is news; a provisional job's is not — the tool call that started
+// it is still holding the line and gets the result as its own return value.
+func (j *bgJob) finish(res ExecResult) {
+	j.mu.Lock()
+	// A kill is the verdict unless the command beat it with a clean exit.
+	if j.killedBy != "" && res.Failed() {
+		res.Killed = fmt.Sprintf("killed by the %s after %s", j.killedBy, roundDur(j.killAfter))
+	}
+	j.done, j.res, j.ended = true, res, time.Now()
+	if j.reportAt != nil {
+		j.reportAt.Stop() // the completion notice says the rest
+		j.reportAt = nil
+	}
+	if j.log != nil {
+		if res.Killed != "" {
+			_, _ = fmt.Fprintf(j.log, "\n[dun: %s; it and everything it started were stopped]\n", res.Killed)
+		}
+		_ = j.log.Close()
+		j.log = nil
+	}
+	bg := j.bg
+	j.mu.Unlock()
+
+	if j.cancel != nil {
+		j.cancel() // releases the context; the command is already gone
+	}
+	j.h.bgMu.Lock()
+	delete(j.h.bgLive, j)
+	j.h.bgMu.Unlock()
+	// doneCh closes LAST: whoever it wakes (a kill waiting on the job) may look
+	// for the completion notice at once. Closed before the notice was queued,
+	// the kill's caller sometimes found none under load.
+	defer close(j.doneCh)
+	if !bg {
+		return
+	}
+	j.h.bgMu.Lock()
+	j.h.bgRun--
+	j.h.bgMu.Unlock()
+	// Pushed even for a MUTED job: `mute` silences the model, not the human,
+	// and a row stuck on "running" forever is the bug the pane exists to stop.
+	j.h.jobsChanged()
+	if note := j.completionNote(); note != "" {
+		if j.hb != nil {
+			j.hb.Spoke()
+		}
+		j.h.notifyEnded(note)
+	}
+}
+
+// completionNote is the sentence a finished background job says, or "" for a
+// muted one. Split out of finish so the wording is testable without running a
+// command.
+func (j *bgJob) completionNote() string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.mon.Mute {
+		return ""
+	}
+	return fmt.Sprintf("background job #%d %s — `%s` (%s)\n%s\n%s",
+		j.id, outcome(j.res), j.command, roundDur(j.ended.Sub(j.started)),
+		j.logLine(), tailOf(j.res.Output, bgTailBytes))
+}
+
+// settle decides ONCE who reports this command: the tool call that started it,
+// or the background machinery. It returns the result and true when the answer
+// is already in hand; otherwise it promotes the job and returns false.
+//
+// The decision is made under j.mu against j.done, so it cannot race finish: a
+// command that completed a microsecond before the grace expired is reported
+// inline, and one that completes a microsecond after is reported by the job it
+// has by then become. Exactly one of the two speaks.
+func (j *bgJob) settle() (ExecResult, bool) {
+	j.mu.Lock()
+	if j.settled {
+		// Already decided. A job can be promoted before it runs (newJobStarted,
+		// or a slow command promoted on the fly), so a later read of the same
+		// job must not promote a second time.
+		res, bg := j.res, j.bg
+		j.mu.Unlock()
+		return res, !bg
+	}
+	if j.done {
+		res := j.res
+		j.settled = true
+		j.mu.Unlock()
+		return res, true
+	}
+	j.settled, j.bg = true, true
+	j.h.bgMu.Lock()
+	j.h.bgSeq++
+	j.id = j.h.bgSeq
+	j.h.bgRun++
+	if j.h.bgJobs == nil {
+		j.h.bgJobs = map[int]*bgJob{}
+	}
+	j.h.bgJobs[j.id] = j
+	j.h.bgMu.Unlock()
+	// Inside the lock, so the number and the log exist before finish can read
+	// j.bg and start talking about them.
+	j.openLogLocked()
+	j.mu.Unlock()
+
+	// Donate the shell. From here the command runs on its own and the next
+	// exec gets a fresh shell instead of queueing behind this one.
+	close(j.promoteCh)
+	j.h.jobsChanged()
+	go j.heartbeat()
+	return ExecResult{}, false
+}
+
+// openLogLocked gives a newly promoted job its log file and flushes into it
+// everything the job has already produced. A provisional job writes to memory
+// instead: a file per `ls` would bury the session directory in thousands of
+// them, and nothing would ever read one.
+//
+// Caller must hold j.mu.
+func (j *bgJob) openLogLocked() {
+	dir := j.h.bgLogDir()
+	if dir == "" {
+		return
+	}
+	f, path := j.h.createBoth(fmt.Sprintf("job-%d.log", j.id))
+	if f == nil {
+		// A log we cannot open is not worth failing the job over — the output
+		// still reaches the model, it is just not grep-able.
+		return
+	}
+	if len(j.early) > 0 {
+		_, _ = f.Write(j.early)
+		j.early = nil
+	}
+	j.log, j.logPath = f, path
+}
+
+// handoffNotice is what the model reads when a command outlives its grace.
+//
+// It has two jobs, and the wording is doing both deliberately. Say the command
+// is not dead — the reflex on seeing anything other than output is to run it
+// again, which is how one slow build becomes three. And name the ONE place its
+// answer will come from, so the model stops thinking about it until then.
+//
+// "Ending your turn is safe" is said outright: a Terminal-Bench model told only
+// "do other work or end your turn" ran `sleep 280` three times beside its job
+// and killed it at 33 min. Every driver waits for a running job and wakes the
+// model with its completion (cmd/dun engine.go runLoop and drainStep,
+// human.go). The progress line names the one blind spot: a monitor counts
+// only stdout/stderr, and that run sent its output to files.
+//
+// A sub-agent is the exception: its run ends with its turn (subAgent.work does
+// not wait for jobs), so a finish after that reaches it only when its parent
+// tells it more. It is told that instead of being told it is safe.
+func (j *bgJob) handoffNotice(waited time.Duration) string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	wait := "Do not sleep or poll for it. Do other work or end your turn: ending your turn is safe, " +
+		"the run waits for the job and wakes you when it finishes. "
+	if j.h != nil && j.h.parent != nil {
+		wait = "Do not poll for it. If you end your turn, your run ends: the job keeps running, and its " +
+			"finish reaches you only when your parent tells you more. "
+	}
+	return fmt.Sprintf(
+		"`%s` is still running after %s (not killed, not failed): background job #%d. %s"+
+			"For progress reports, call jobs({job: %d, every_secs: 60}) or every_bytes. They count only "+
+			"what the command prints to stdout/stderr; progress written to a file is not seen, so print it to stdout. %s",
+		j.command, roundDur(waited), j.id, wait, j.id, j.logLine())
+}
+
+// logLine cites the job's log by path, in the session's isolation tmp: the
+// same file on the host and under --docker (isotmp.go), read with file_read.
+// It was a ref read with read_saved while the path named a host file the
+// container could not open.
+func (j *bgJob) logLine() string {
+	if j.logPath == "" {
+		return "(no log file)"
+	}
+	return "Output: " + j.logPath + " (file_read)."
+}
+
+// status is the one-line answer to "what is job N doing?".
+func (j *bgJob) status() string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.done {
+		return fmt.Sprintf("#%d %s in %s — `%s`", j.id, outcome(j.res), roundDur(j.ended.Sub(j.started)), j.command)
+	}
+	return fmt.Sprintf("#%d RUNNING for %s (%d bytes out) — `%s`",
+		j.id, roundDur(time.Since(j.started)), j.written, j.command)
+}
+
+func outcome(r ExecResult) string {
+	switch {
+	case r.Killed != "":
+		return "was " + r.Killed + " (it did not fail on its own)"
+	case r.Err != "":
+		return "FAILED to run (" + r.Err + ")"
+	case r.Code != 0:
+		return fmt.Sprintf("FAILED (exit %d)", r.Code)
+	}
+	return "succeeded"
+}
+
+// tailOf keeps the END of a log: a failure is at the bottom, and the top of a
+// build is the part nobody needs.
+func tailOf(s string, max int) string {
+	s = strings.TrimRight(s, "\n")
+	if len(s) <= max {
+		if s == "" {
+			return "(no output)"
+		}
+		return s
+	}
+	cut := s[len(s)-max:]
+	if i := strings.IndexByte(cut, '\n'); i >= 0 {
+		cut = cut[i+1:]
+	}
+	return "…(truncated — see the log file)\n" + cut
+}
+
+func lastNewline(b []byte) int {
+	for i := len(b) - 1; i >= 0; i-- {
+		if b[i] == '\n' {
+			return i
+		}
+	}
+	return -1
+}
+
+func roundDur(d time.Duration) time.Duration { return d.Round(time.Second) }
+
+// notifyAndWake is Notify plus the driver poke, which every background report
+// needs and nothing else does.
+func (h *Harness) notifyAndWake(text string) {
+	h.Notify(text)
+	select {
+	case h.wake <- struct{}{}:
+	default: // wake is buffered; a full buffer just means a turn is already due
+	}
+}
+
+// notifyEnded is notifyAndWake for an END of background work: a job's
+// completion or a sub-agent's report. It also releases an exec waiting out its
+// grace (workEnded), so the model reads the news now, inside that exec's
+// result, instead of after the wait.
+//
+// Queued BEFORE the release: the released exec's result lifts the queue
+// (liftQueued), and that is the only delivery. The note is drained there, so
+// flushQueued never publishes it a second time; the leftover wake runs a
+// Continue with nothing pending, which is a no-op.
+func (h *Harness) notifyEnded(text string) {
+	h.Notify(text)
+	h.noteMu.Lock()
+	if h.endWaitCh != nil {
+		close(h.endWaitCh)
+		h.endWaitCh = nil
+	}
+	h.noteMu.Unlock()
+	select {
+	case h.wake <- struct{}{}:
+	default:
+	}
+}
+
+// workEnded is ready once a background job or a sub-agent's run ends after
+// the call. An exec adds it to its wait, as it adds userWaiting.
+//
+// Only an end counts. A progress report or a quiet reminder is not a reason to
+// stop a command the model chose to wait for; a finish is, because the model
+// may be waiting for exactly that (a Terminal-Bench model ran `sleep 280`
+// beside its job). A muted job says nothing and so releases nothing. The
+// exec's own command does not count: it is provisional while it is waited on,
+// and a provisional job's finish is the exec's own result.
+//
+// Unlike userWaiting it is not ready for a notice queued BEFORE the call: that
+// notice rides this exec's result anyway, and releasing at once would turn
+// every quick command after a finish into a job.
+func (h *Harness) workEnded() <-chan struct{} {
+	h.noteMu.Lock()
+	defer h.noteMu.Unlock()
+	if h.endWaitCh == nil {
+		h.endWaitCh = make(chan struct{})
+	}
+	return h.endWaitCh
+}
+
+// notifyQuietly is what a REMINDER gets: the human sees it immediately, the
+// model reads it whenever it next runs a turn anyway, and it never buys a turn
+// of its own.
+//
+// The distinction matters because a heartbeat is not news. It reports the
+// ABSENCE of news — "still running, still quiet" — and routing it through
+// notifyAndWake made that absence cost a full turn: the wake ran continueTurn,
+// which called the model, which (until this change) also bought a suggestion
+// call. A session with one long job and nobody typing therefore billed two
+// requests per heartbeat, on a schedule that starts at one minute, for saying
+// that nothing had happened.
+//
+// Aside is the existing primitive for exactly this — see Harness.Aside: it can
+// never CAUSE a turn, and it waits indefinitely if none comes, which is the
+// correct fate for a reminder nobody needed. The onNotify ping is kept so the
+// human still sees the line the moment it fires.
+func (h *Harness) notifyQuietly(text string) { h.notifyQuietlyWith(text, AsideOpts{}) }
+
+// notifyQuietlyWith is notifyQuietly with an aside's delivery rule
+// (asidettl.go): a heartbeat is keyed, so the newer one replaces the older,
+// and escalates, so an agent asleep on a silent job is woken to decide.
+func (h *Harness) notifyQuietlyWith(text string, o AsideOpts) {
+	h.AsideWith(text, o)
+	if cb := h.store.notifyCallback(); cb != nil {
+		cb(text)
+	}
+}
+
+// bgLogDir is where job logs live: beside the session file when there is one,
+// so a resumed session's logs are still findable, else a temp dir.
+func (h *Harness) bgLogDir() string {
+	dir := filepath.Join(os.TempDir(), "dun-bg")
+	if h.cfg.SessionFile != "" {
+		dir = filepath.Join(filepath.Dir(h.cfg.SessionFile), "bg")
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return ""
+	}
+	return dir
+}
+
+// startJob launches command and returns immediately. The job starts
+// PROVISIONAL: no number, no log file, no row in the pane, no voice — because
+// most commands finish in seconds and none of that would ever be read. If it is
+// still running when the caller's grace runs out, settle promotes it into a
+// real background job; if it finishes first it stays invisible and its output
+// is returned inline as an ordinary tool result.
+//
+// One machine for both, on purpose. There is no separate foreground runner that
+// can block forever: what used to hold a session silent for ten minutes is now
+// just a job nobody promoted yet.
+func (h *Harness) startJob(backend ExecBackend, command string) *bgJob {
+	j := h.newJob(command)
+	j.run(backend)
+	return j
+}
+
+// newJobStarted is the test seam for a job that is promoted BEFORE it runs —
+// the direct equivalent of what a slow command becomes on the fly.
+func (h *Harness) newJobStarted(backend ExecBackend, command string) *bgJob {
+	j := h.newJob(command)
+	j.settle() // nothing is running yet, so this always promotes
+	j.run(backend)
+	return j
+}
+
+// newJob builds a provisional job. It is not running until run is called.
+func (h *Harness) newJob(command string) *bgJob {
+	ctx, cancel := context.WithCancel(context.Background())
+	j := &bgJob{
+		command: command, started: time.Now(), h: h, hb: heartbeat.New(),
+		promoteCh: make(chan struct{}), doneCh: make(chan struct{}),
+		cancel: cancel,
+	}
+	j.ctx = withPGIDSink(ctx, func(pgid int) {
+		j.mu.Lock()
+		j.pgid = pgid
+		j.mu.Unlock()
+	})
+	h.bgMu.Lock()
+	if h.bgLive == nil {
+		h.bgLive = map[*bgJob]struct{}{}
+	}
+	h.bgLive[j] = struct{}{}
+	h.bgMu.Unlock()
+	return j
+}
+
+// run starts the command. No time limit here, ever: the grace lives in the tool
+// call, which can walk away from it; the command itself is allowed to take as
+// long as it takes.
+func (j *bgJob) run(backend ExecBackend) {
+	go func() {
+		j.finish(runPromotable(j.ctx, backend, j.command, j, j.promoteCh))
+	}()
+}
+
+// runPromotable runs command on backend, letting it hand over its shell if it
+// has one to hand over. A stateless backend (HostExec, DockerExec) gives every
+// command its own process already, so there is nothing to donate and nothing
+// queued behind it — promotion is simply not its concern.
+func runPromotable(ctx context.Context, backend ExecBackend, command string, w io.Writer, promote <-chan struct{}) ExecResult {
+	if p, ok := backend.(PromotableExec); ok {
+		return p.RunPromotable(ctx, command, w, promote)
+	}
+	return backend.Run(ctx, command, w)
+}
+
+// heartbeat says "still running" on the bgHeartbeats schedule until the job
+// finishes. One goroutine per job, which exits with it.
+//
+// A MUTED job stays silent here too: `ignore` means the model stopped caring
+// about this job's outcome, and a heartbeat is precisely the outcome-adjacent
+// noise it asked not to hear. The human still sees the row in the pane, which
+// is where a muted job is supposed to remain visible.
+func (j *bgJob) heartbeat() {
+	if j.hb == nil {
+		return
+	}
+	j.hb.Run(
+		func() bool {
+			j.mu.Lock()
+			defer j.mu.Unlock()
+			return j.done
+		},
+		func(quiet time.Duration) {
+			j.mu.Lock()
+			muted, written := j.mon.Mute, j.written
+			j.mu.Unlock()
+			// A muted job stays silent here too: `mute` means the model stopped
+			// caring about this job's outcome, and a reminder is exactly that
+			// noise. The human still sees the row in the pane.
+			if muted {
+				return
+			}
+			out := "no new output"
+			if written > 0 {
+				out = fmt.Sprintf("%d bytes of output, none new", written)
+			}
+			// What its processes are doing tells working from wedged better
+			// than silence does (USER 2026-10-28): busy on CPU, waiting on
+			// IO, or every process asleep.
+			read := "Nothing is necessarily wrong; this is so a wedged job does not look like a working one."
+			if line, verdict, ok := j.usage(quiet); ok {
+				read = "Its processes: " + line + "."
+				if verdict != "" {
+					read += " " + verdict + "."
+				}
+			}
+			// notifyQuietly, NOT j.notify: the reminder must not reset the
+			// silence it is reporting on, and must not buy a turn to report it
+			// — a job being quiet is not a reason to call the model.
+			j.h.notifyQuietlyWith(fmt.Sprintf(
+				"exec #%d is STILL RUNNING, quiet for %s — `%s` (%s).\n%s\n%s",
+				j.id, roundDur(quiet), j.command, out, j.logLine(), read),
+				AsideOpts{Key: fmt.Sprintf("job:%d:quiet", j.id), EscalateAfter: j.h.asideEscalate()})
+		},
+	)
+}
+
+// JobInfo is one background job as the UI sees it. The counterpart of
+// AgentInfo, and deliberately the same shape of thing: the two together are the
+// session's activity, and the pane that shows them does not care which is which.
+//
+// Times are UNIX SECONDS, not a pre-computed elapsed. A job is pushed on start
+// and on finish and not in between — pushing per output chunk would fire on
+// every write of a build log — so a duration computed at push time would sit
+// frozen on screen for the whole run. The UI ticks its own clock against these.
+type JobInfo struct {
+	ID      int    `json:"id"`
+	Command string `json:"command"`
+	Log     string `json:"log,omitempty"`
+	State   string `json:"state"` // running · ok · failed · error · killed
+	Bytes   int64  `json:"bytes"`
+	Started int64  `json:"started"`
+	Ended   int64  `json:"ended,omitempty"` // 0 while running
+	Code    int    `json:"code,omitempty"`
+	// Muted is jobs' `ignore` — a job whose completion the model asked
+	// not to hear about. Shown because a silenced job is a choice, and an
+	// invisible silenced job is indistinguishable from a lost one.
+	Muted bool `json:"muted,omitempty"`
+	// Last is the job's last line of output so far.
+	Last string `json:"last,omitempty"`
+	// PGID is the process group the command runs in, for inspecting it
+	// (internal/procstat); 0 unknown.
+	PGID int `json:"pgid,omitempty"`
+}
+
+// info snapshots a job under its lock.
+func (j *bgJob) info() JobInfo {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	out := JobInfo{
+		ID: j.id, Command: j.command, Log: j.logPath, State: "running",
+		Bytes: j.written, Started: j.started.Unix(), Muted: j.mon.Mute, Last: j.last, PGID: j.pgid,
+	}
+	if j.done {
+		out.State, out.Code, out.Ended = jobState(j.res), j.res.Code, j.ended.Unix()
+	}
+	return out
+}
+
+// jobState is outcome() as a token rather than a sentence — the same verdict,
+// but one the UI can switch on instead of matching prose.
+func jobState(r ExecResult) string {
+	switch {
+	case r.Killed != "":
+		return "killed"
+	case r.Err != "":
+		return "error"
+	case r.Code != 0:
+		return "failed"
+	}
+	return "ok"
+}
+
+// Jobs is every background job this session has started, oldest first.
+func (h *Harness) Jobs() []JobInfo {
+	list := h.bgJobList()
+	out := make([]JobInfo, 0, len(list))
+	for _, j := range list {
+		out = append(out, j.info())
+	}
+	return out
+}
+
+// jobsChanged pushes the job list to the UI, on the same terms as
+// agentsChanged: every transition a human would want to see. Start and finish
+// are the only ones — progress is a byte count, and a pane that repainted on
+// every chunk of a build log would be a firehose, not a monitor.
+func (h *Harness) jobsChanged() {
+	if h == nil || h.cfg.OnJobs == nil {
+		return
+	}
+	h.cfg.OnJobs(h.Jobs())
+}
+
+// spillExec saves a foreground result too large to hand the model whole, and
+// returns the path. Beside the background job logs, because it is the same kind
+// of thing: output that exists, is wanted occasionally, and must not be paid
+// for on every turn.
+func (h *Harness) spillExec(command, output string) string {
+	h.bgMu.Lock()
+	h.bgSeq++
+	n := h.bgSeq
+	h.bgMu.Unlock()
+	body := fmt.Sprintf("$ %s\n\n%s", command, output)
+	return h.saveBoth(fmt.Sprintf("exec-%d.out", n), []byte(body))
+}
+
+// bgJobByID looks a job up for the jobs tool.
+func (h *Harness) bgJobByID(id int) *bgJob {
+	h.bgMu.Lock()
+	defer h.bgMu.Unlock()
+	return h.bgJobs[id]
+}
+
+// bgJobList is every job this session has started, oldest first.
+func (h *Harness) bgJobList() []*bgJob {
+	h.bgMu.Lock()
+	defer h.bgMu.Unlock()
+	out := make([]*bgJob, 0, len(h.bgJobs))
+	for _, j := range h.bgJobs {
+		out = append(out, j)
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].id < out[b].id })
+	return out
+}
+
+func describeMonitor(m bgMonitor) string {
+	if m.Mute {
+		return "monitor: MUTED (no progress, no completion notice)"
+	}
+	parts := []string{"completion notice on"}
+	var every []string
+	if m.EveryBytes > 0 {
+		every = append(every, procstat.Bytes(float64(m.EveryBytes)))
+	}
+	if m.EverySecs > 0 {
+		every = append(every, fmt.Sprintf("%ds", m.EverySecs))
+	}
+	if len(every) > 0 {
+		parts = append(parts, "a report of how much was written every "+strings.Join(every, " or "))
+	} else {
+		parts = append(parts, "no progress reports")
+	}
+	return "monitor: " + strings.Join(parts, ", ")
+}
+
+// usage is what the job's processes are doing, for the model: the group's
+// line and a verdict (internal/procstat). quiet is how long it has printed
+// nothing. A first sample has no rates, so it samples again a moment later.
+// ok is false when the group is unknown (a docker job) or the job is done.
+func (j *bgJob) usage(quiet time.Duration) (line, verdict string, ok bool) {
+	j.mu.Lock()
+	pgid, done := j.pgid, j.done
+	j.mu.Unlock()
+	if pgid == 0 || done {
+		return "", "", false
+	}
+	u := j.h.procs.Sample(pgid)
+	if !u.Rated && len(u.Procs) > 0 {
+		time.Sleep(300 * time.Millisecond)
+		u = j.h.procs.Sample(pgid)
+	}
+	return u.Line(), u.Verdict(quiet), true
+}

@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/enginecmd"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
@@ -22,7 +22,7 @@ import (
 // entries to this list.
 
 // commandsEvent is the list, with the current state of each toggle.
-func commandsEvent(h *dun.Harness) *proto.Commands {
+func commandsEvent(h *harness.Harness) *proto.Commands {
 	exts, _ := engineExtensions(h.Extensions())
 	return enginecmd.CommandList(h.Servers(), isolationMode(h), exts...)
 }
@@ -71,7 +71,7 @@ func isJobID(s string) bool {
 
 // jobsCmd carries out /jobs for every client: action "" lists the running
 // jobs, "kill <n>" and "kill all" end them. The answer is the message shown.
-func jobsCmd(h *dun.Harness, action string) string {
+func jobsCmd(h *harness.Harness, action string) string {
 	f := strings.Fields(action)
 	if len(f) == 0 {
 		return jobsListing(h.RunningJobs(), time.Now())
@@ -93,15 +93,15 @@ func jobsCmd(h *dun.Harness, action string) string {
 
 // jobsListing is bare /jobs: one line per running job — id, command, age,
 // and its last line of output.
-func jobsListing(jobs []dun.JobInfo, now time.Time) string {
+func jobsListing(jobs []harness.JobInfo, now time.Time) string {
 	if len(jobs) == 0 {
 		return "no background jobs are running"
 	}
 	lines := []string{fmt.Sprintf("%d running (/jobs kill <n> to stop one):", len(jobs))}
 	for _, j := range jobs {
-		line := "  " + dun.JobLine(j, now)
+		line := "  " + harness.JobLine(j, now)
 		if j.Last != "" {
-			line += " ⟩ " + dun.ShortCommand(j.Last, 80)
+			line += " ⟩ " + harness.ShortCommand(j.Last, 80)
 		}
 		lines = append(lines, line)
 	}
@@ -116,7 +116,7 @@ type slashRoutes struct {
 	reply   func(msg string) // an answer that is not a command's own event
 	// exts are the extensions whose slash commands route (engineExtensions);
 	// nil is the bundled ones.
-	exts []dun.Extension
+	exts []harness.Extension
 }
 
 // routeSlash carries out one slash line ("raglit on", "/remember the tests are
@@ -139,7 +139,7 @@ func routeSlash(line string, r slashRoutes) {
 	}
 	exts := r.exts
 	if exts == nil {
-		exts = dun.BundledExtensions()
+		exts = harness.BundledExtensions()
 	}
 	for _, e := range exts {
 		if e.SlashName() != name {
@@ -163,7 +163,7 @@ func routeSlash(line string, r slashRoutes) {
 			return
 		}
 		// /lsp add|remove: a command line for poly-lsp-mcp, its case kept.
-		if e.ID == dun.ServerCode && (arg(0) == "add" || arg(0) == "remove") {
+		if e.ID == harness.ServerCode && (arg(0) == "add" || arg(0) == "remove") {
 			r.server(e.ID, arg(0)+" "+strings.Join(args[1:], " "))
 			return
 		}
@@ -206,19 +206,19 @@ func routeSlash(line string, r slashRoutes) {
 			}
 			r.control("mcptools", id)
 		case "mode", "via", "move":
-			if _, err := dun.NormalizeVia(arg(2)); len(args) < 3 || len(args) > 4 || (err != nil && arg(2) != "unset") {
+			if _, err := harness.NormalizeVia(arg(2)); len(args) < 3 || len(args) > 4 || (err != nil && arg(2) != "unset") {
 				r.reply("usage: /mcp mode <id> standalone|scripted|unset [--global|--project|--session] (bare: this session; via and move, shell and direct are the same)")
 				return
 			}
 			r.control("mcp", "mode "+strings.Join(lowerAll(args[1:]), " "))
 		case "default":
-			if _, err := dun.NormalizeVia(arg(1)); len(args) != 2 || err != nil {
+			if _, err := harness.NormalizeVia(arg(1)); len(args) != 2 || err != nil {
 				r.reply("usage: /mcp default standalone|scripted — the mode of a server no scope sets one for (every project)")
 				return
 			}
 			r.control("mcp", "default "+arg(1))
 		case "instance":
-			if _, err := dun.NormalizeInstance(arg(2)); len(args) < 3 || len(args) > 4 || (err != nil && arg(2) != "unset") {
+			if _, err := harness.NormalizeInstance(arg(2)); len(args) < 3 || len(args) > 4 || (err != nil && arg(2) != "unset") {
 				r.reply("usage: /mcp instance <id> shared|session|agent|unset [--global|--project|--session] (bare: this session)")
 				return
 			}
@@ -334,7 +334,7 @@ func routeSlash(line string, r slashRoutes) {
 		switch {
 		case len(args) == 0:
 			r.control(name, "")
-		case (arg(0) == dun.RulesFull || arg(0) == dun.RulesSummary || arg(0) == dun.RulesIndex) &&
+		case (arg(0) == harness.RulesFull || arg(0) == harness.RulesSummary || arg(0) == harness.RulesIndex) &&
 			(len(args) == 1 || len(args) == 2 && strings.HasPrefix(args[1], "--")):
 			r.control(name, strings.Join(append([]string{arg(0)}, args[1:]...), " "))
 		case (arg(0) == "on" || arg(0) == "off" || arg(0) == "unset" || arg(0) == "mode" || arg(0) == "add" || arg(0) == "remove") && len(args) >= 2:

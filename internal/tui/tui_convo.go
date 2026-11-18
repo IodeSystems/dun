@@ -6,7 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/numfmt"
 )
 
@@ -69,12 +69,12 @@ func (m *tuiModel) showSavedConversation() {
 	m.offlineShown = true
 	id := m.opts.Resume
 	if id == "" && m.opts.Cont {
-		id = dun.LatestSession(m.opts.Workspace)
+		id = harness.LatestSession(m.opts.Workspace)
 	}
 	if id == "" {
 		return
 	}
-	hist := dun.SessionHistory(dun.SessionFile(m.opts.Workspace, id))
+	hist := harness.SessionHistory(harness.SessionFile(m.opts.Workspace, id))
 	if len(hist) == 0 {
 		return
 	}

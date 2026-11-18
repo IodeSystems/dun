@@ -63,7 +63,7 @@ type PeerReply struct {
 }
 
 // McpShareReq asks dund's gateway for a shared server's endpoint: Request
-// is dun.ShareRequest as JSON (the resolved spec, the instance, the agent
+// is harness.ShareRequest as JSON (the resolved spec, the instance, the agent
 // number). For "mcp_release", Release is the bearer given back.
 type McpShareReq struct {
 	Request string `json:"request,omitempty"`
@@ -91,7 +91,7 @@ type McpNotify struct {
 // after a login if it has none ("ensure"), for a new one because the
 // server refused the last ("unauthorized"), or to log in, log out or say
 // the login's state ("login", "logout", "status"). Spec is the server's
-// oauth block as dun.OAuthSpec, its client secret resolved. A login's URL
+// oauth block as harness.OAuthSpec, its client secret resolved. A login's URL
 // goes to the asking session as an mcp_login event.
 type OAuthReq struct {
 	Op  string `json:"op"`
@@ -105,7 +105,7 @@ type OAuthReq struct {
 }
 
 // OAuthResult answers an OAuthReq: the Authorization header value ("" for
-// none), the login's state as dun.OAuthStatus, and for "logout" whether a
+// none), the login's state as harness.OAuthStatus, and for "logout" whether a
 // token was revoked.
 type OAuthResult struct {
 	Authorization string `json:"authorization,omitempty"`

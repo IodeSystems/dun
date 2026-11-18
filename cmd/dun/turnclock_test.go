@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // pauseClock is nil-safe when no turn is running: it must not panic and must
@@ -91,7 +91,7 @@ func TestTurnClock_SoftThenCut(t *testing.T) {
 		t.Fatal("cut before the grace ran out")
 	}
 	<-c.ctx.Done()
-	var cut dun.BudgetCut
+	var cut harness.BudgetCut
 	if !errors.As(context.Cause(c.ctx), &cut) || cut.Budget != 30*time.Millisecond || cut.Grace != 150*time.Millisecond {
 		t.Fatalf("cause = %v, want the budget cut", context.Cause(c.ctx))
 	}
@@ -161,12 +161,12 @@ func TestGraceFor(t *testing.T) {
 // the budget; a user's interrupt on a live turn stays an interrupt.
 func TestTurnErr_BudgetCutIsNotTheUser(t *testing.T) {
 	tctx, cancel := context.WithCancelCause(context.Background())
-	cancel(dun.BudgetCut{Budget: 30 * time.Minute, Grace: 6 * time.Minute})
-	got := turnErr(tctx, dun.ErrInterrupted)
-	if errors.Is(got, dun.ErrInterrupted) || !strings.Contains(got.Error(), "30m budget plus 6m grace") {
+	cancel(harness.BudgetCut{Budget: 30 * time.Minute, Grace: 6 * time.Minute})
+	got := turnErr(tctx, harness.ErrInterrupted)
+	if errors.Is(got, harness.ErrInterrupted) || !strings.Contains(got.Error(), "30m budget plus 6m grace") {
 		t.Fatalf("got %v, want the budget named", got)
 	}
-	if got := turnErr(context.Background(), dun.ErrInterrupted); !errors.Is(got, dun.ErrInterrupted) {
+	if got := turnErr(context.Background(), harness.ErrInterrupted); !errors.Is(got, harness.ErrInterrupted) {
 		t.Fatalf("a user's interrupt became %v", got)
 	}
 }

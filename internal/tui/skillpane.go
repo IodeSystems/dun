@@ -15,7 +15,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // The skill reader (owner, 2026-10-27): enter on a skill in /skill opens a
@@ -257,11 +257,11 @@ func (p *skillPane) expand(d *skillDoc, file, text string, depth int, seen map[s
 	}
 	var b strings.Builder
 	at := 0
-	for _, r := range dun.SkillRefs(text) {
+	for _, r := range harness.SkillRefs(text) {
 		b.WriteString(text[at:r.Start])
 		at = r.End
 		if r.Include {
-			inc, ok := dun.SkillIncludePath(r.Target)
+			inc, ok := harness.SkillIncludePath(r.Target)
 			body, have := d.includes[inc]
 			switch {
 			case !ok:
@@ -270,8 +270,8 @@ func (p *skillPane) expand(d *skillDoc, file, text string, depth int, seen map[s
 				b.WriteString(rule("included above: " + inc))
 			case !have:
 				b.WriteString(rule("include not found: " + inc))
-			case depth >= dun.SkillIncludeDepth:
-				b.WriteString(rule(fmt.Sprintf("not included: %s (deeper than %d)", inc, dun.SkillIncludeDepth)))
+			case depth >= harness.SkillIncludeDepth:
+				b.WriteString(rule(fmt.Sprintf("not included: %s (deeper than %d)", inc, harness.SkillIncludeDepth)))
 			default:
 				seen[inc] = true
 				b.WriteString(rule("included: " + inc))
@@ -280,7 +280,7 @@ func (p *skillPane) expand(d *skillDoc, file, text string, depth int, seen map[s
 			}
 			continue
 		}
-		target, ok := dun.SkillLinkPath(file, r.Target, func(f string) bool { return d.files[f] })
+		target, ok := harness.SkillLinkPath(file, r.Target, func(f string) bool { return d.files[f] })
 		if !ok || r.Bare && !d.files[target] { // a word with a dot, not a file
 			b.WriteString(text[r.Start:r.End])
 			continue

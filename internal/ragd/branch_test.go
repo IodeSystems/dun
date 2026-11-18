@@ -9,8 +9,8 @@ import (
 
 	"github.com/iodesystems/raglit"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/fsutil"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -70,7 +70,7 @@ func branchRepo(t *testing.T) (main, wt string) {
 // and a wait for the jobs of the index or branch it wrote.
 func indexAt(t *testing.T, h *Host, root string) *proto.RagIndexed {
 	t.Helper()
-	files, _ := dun.IndexFiles(root)
+	files, _ := harness.IndexFiles(root)
 	r, err := h.Index(proto.RagIndex{Project: "dun", Root: root}, files)
 	if err != nil {
 		t.Fatal(err)
@@ -206,7 +206,7 @@ func TestWorktreeNeedsItsMainIndexed(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	h := open(t, t.TempDir())
 	_, wt := branchRepo(t)
-	files, _ := dun.IndexFiles(wt)
+	files, _ := harness.IndexFiles(wt)
 	if _, err := h.Index(proto.RagIndex{Project: "dun", Root: wt}, files); err == nil {
 		t.Fatal("a worktree indexed with no main checkout index")
 	}

@@ -23,7 +23,7 @@ import (
 //     user and host names, e-mail addresses and token-shaped strings. Its
 //     output is prered/, and the prompt is built from it, so the model never
 //     sees what this pass can find.
-//  2. The model (the session's own, through the engine: dun.RepaintReport)
+//  2. The model (the session's own, through the engine: harness.Harness.RepaintReport)
 //     replaces paths, names and conversation text, keeping every row's width
 //     and every escape code, and writes explanation.md.
 //  3. The same deterministic scan over what came back. A hit is a leak, and

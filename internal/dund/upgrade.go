@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -809,12 +809,12 @@ const notContinued = " This was not continued automatically, and no sub-agent wa
 // crashedMidTurn reports whether a session's transcript was cut mid-turn
 // recently (a variable: the tests' fake engine writes no transcript).
 var crashedMidTurn = func(workspace, id string) bool {
-	f := dun.SessionFile(workspace, id)
+	f := harness.SessionFile(workspace, id)
 	st, err := os.Stat(f)
 	if err != nil || time.Since(st.ModTime()) > crashWindow {
 		return false
 	}
-	return dun.EndedMidTurn(f)
+	return harness.EndedMidTurn(f)
 }
 
 // resumeFlagged wakes every session the last stop flagged: its engine

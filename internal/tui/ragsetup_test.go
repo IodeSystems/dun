@@ -13,9 +13,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/enginecmd"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // ragDoctorJSON is a `raglit doctor --json`: semantic search off (on when
@@ -355,9 +355,9 @@ func TestRagSetup_DaemonRefusal(t *testing.T) {
 
 // /mcp info's raglit row says semantic search is off.
 func TestMCPInfo_SemanticOff(t *testing.T) {
-	var rep dun.SetupReport
+	var rep harness.SetupReport
 	_ = json.Unmarshal([]byte(ragDoctorJSON("", "")), &rep)
-	st := []dun.ServerState{{ID: "raglit", Slash: "raglit", Running: true, Auto: true, Tools: 4, Setup: &rep}}
+	st := []harness.ServerState{{ID: "raglit", Slash: "raglit", Running: true, Auto: true, Tools: 4, Setup: &rep}}
 	if s := plainInfo(enginecmd.McpInfoIn{Servers: st}); !strings.Contains(s, "  raglit  running · built-in · 4 tools · semantic search off\n") {
 		t.Errorf("%s", s)
 	}

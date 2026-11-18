@@ -8,28 +8,28 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/enginecmd"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/mcptable"
 )
 
-func tableStates() []dun.ServerState {
-	return []dun.ServerState{
-		{ID: "playwright", Proto: "stdio", Auto: true, Via: dun.ViaShell, ViaFrom: dun.ScopeGlobal, ViaGlobal: dun.ViaShell,
-			Global: "on", From: dun.ScopeGlobal, Instance: dun.InstanceShared, InstanceFrom: dun.ScopeGlobal},
-		{ID: "figma", Proto: "http", Auto: true, Running: true, Tools: 3, Via: dun.ViaDirect, ViaFrom: dun.ScopeSession,
-			ViaSession: dun.ViaDirect, Global: "off", Project: "on", From: dun.ScopeProject,
-			Instance: dun.InstanceAgent, InstanceSession: dun.InstanceAgent, InstanceFrom: dun.ScopeSession},
-		{ID: dun.ServerShell, Proto: "stdio", Global: "on", Session: "off", From: dun.ScopeSession, Instance: dun.InstanceSession},
+func tableStates() []harness.ServerState {
+	return []harness.ServerState{
+		{ID: "playwright", Proto: "stdio", Auto: true, Via: harness.ViaShell, ViaFrom: harness.ScopeGlobal, ViaGlobal: harness.ViaShell,
+			Global: "on", From: harness.ScopeGlobal, Instance: harness.InstanceShared, InstanceFrom: harness.ScopeGlobal},
+		{ID: "figma", Proto: "http", Auto: true, Running: true, Tools: 3, Via: harness.ViaDirect, ViaFrom: harness.ScopeSession,
+			ViaSession: harness.ViaDirect, Global: "off", Project: "on", From: harness.ScopeProject,
+			Instance: harness.InstanceAgent, InstanceSession: harness.InstanceAgent, InstanceFrom: harness.ScopeSession},
+		{ID: harness.ServerShell, Proto: "stdio", Global: "on", Session: "off", From: harness.ScopeSession, Instance: harness.InstanceSession},
 		// Mode set at global and overridden by the project; instance set at global.
-		{ID: "acme", Proto: "http", Auto: true, Via: dun.ViaDirect, ViaFrom: dun.ScopeProject, ViaGlobal: dun.ViaShell, ViaProject: dun.ViaDirect,
-			Global: "on", From: dun.ScopeGlobal, Instance: dun.InstanceSession, InstanceGlobal: dun.InstanceSession, InstanceFrom: dun.ScopeGlobal},
+		{ID: "acme", Proto: "http", Auto: true, Via: harness.ViaDirect, ViaFrom: harness.ScopeProject, ViaGlobal: harness.ViaShell, ViaProject: harness.ViaDirect,
+			Global: "on", From: harness.ScopeGlobal, Instance: harness.InstanceSession, InstanceGlobal: harness.InstanceSession, InstanceFrom: harness.ScopeGlobal},
 		// Nothing sets a mode: the scripted global default decides.
-		{ID: "dflt", Proto: "http", Auto: true, Via: dun.ViaShell, ViaFrom: dun.ViaFromDefault,
-			Global: "on", From: dun.ScopeGlobal, Instance: dun.InstanceShared, InstanceFrom: dun.ScopeGlobal},
+		{ID: "dflt", Proto: "http", Auto: true, Via: harness.ViaShell, ViaFrom: harness.ViaFromDefault,
+			Global: "on", From: harness.ScopeGlobal, Instance: harness.InstanceShared, InstanceFrom: harness.ScopeGlobal},
 		// The default is scripted, but its instance is agent: standalone, and why.
-		{ID: "dagent", Proto: "http", Auto: true, Via: dun.ViaDirect, ViaFrom: dun.ViaFromDefaultAgent,
-			Global: "on", From: dun.ScopeGlobal, Instance: dun.InstanceAgent, InstanceGlobal: dun.InstanceAgent, InstanceFrom: dun.ScopeGlobal},
+		{ID: "dagent", Proto: "http", Auto: true, Via: harness.ViaDirect, ViaFrom: harness.ViaFromDefaultAgent,
+			Global: "on", From: harness.ScopeGlobal, Instance: harness.InstanceAgent, InstanceGlobal: harness.InstanceAgent, InstanceFrom: harness.ScopeGlobal},
 	}
 }
 
@@ -77,7 +77,7 @@ func TestMCPServersView_Keys(t *testing.T) {
 	m.openMCPServers()
 	list := []any{}
 	for _, st := range tableStates() {
-		b, _ := json.Marshal(enginecmd.ServersProto([]dun.ServerState{st})[0])
+		b, _ := json.Marshal(enginecmd.ServersProto([]harness.ServerState{st})[0])
 		var o map[string]any
 		_ = json.Unmarshal(b, &o)
 		list = append(list, o)
@@ -145,7 +145,7 @@ func openedTable(t *testing.T) (*tuiModel, *bytes.Buffer) {
 	m.openMCPServers()
 	list := []any{}
 	for _, st := range tableStates() {
-		b, _ := json.Marshal(enginecmd.ServersProto([]dun.ServerState{st})[0])
+		b, _ := json.Marshal(enginecmd.ServersProto([]harness.ServerState{st})[0])
 		var o map[string]any
 		_ = json.Unmarshal(b, &o)
 		list = append(list, o)
@@ -284,7 +284,7 @@ func TestPalette_MCPScopeCompletion(t *testing.T) {
 // A server's detail says what it is and what it says about itself, whether
 // it is on and which switch decided, in words, and how to list its tools.
 func TestServerBody_InWords(t *testing.T) {
-	st := dun.ServerState{ID: "poly-lsp", Auto: false, Global: "off", From: dun.ScopeGlobal,
+	st := harness.ServerState{ID: "poly-lsp", Auto: false, Global: "off", From: harness.ScopeGlobal,
 		Description: "semantic code navigation and edits (poly-lsp-mcp)"}
 	b := serverBody(st, "stopped")
 	for _, want := range []string{"semantic code navigation and edits (poly-lsp-mcp)",
@@ -293,8 +293,8 @@ func TestServerBody_InWords(t *testing.T) {
 			t.Errorf("lacks %q:\n%s", want, b)
 		}
 	}
-	st = dun.ServerState{ID: "vay", Auto: true, Running: true, Global: "off", Session: "on", From: dun.ScopeSession,
-		Via: dun.ViaShell, ViaFrom: dun.ScopeProject, Tools: 112, Standalone: 38000,
+	st = harness.ServerState{ID: "vay", Auto: true, Running: true, Global: "off", Session: "on", From: harness.ScopeSession,
+		Via: harness.ViaShell, ViaFrom: harness.ScopeProject, Tools: 112, Standalone: 38000,
 		Title: "Vay Platform", Version: "2.3.1", Instructions: "Use vay to query orders.\nPrefer batch calls."}
 	b = serverBody(st, "")
 	for _, want := range []string{"Vay Platform", "version 2.3.1", "it says: Use vay to query orders.\n  Prefer batch calls.",

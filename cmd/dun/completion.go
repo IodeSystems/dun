@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // `dun completion [bash|zsh|fish]` prints a completion script for
@@ -62,7 +62,7 @@ func completeHelper(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return 1
 	}
-	for _, id := range dun.ListSessions(abs) {
+	for _, id := range harness.ListSessions(abs) {
 		fmt.Fprintln(stdout, id)
 	}
 	return 0

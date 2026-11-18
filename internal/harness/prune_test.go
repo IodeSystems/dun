@@ -1,0 +1,442 @@
+package harness
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/iodesystems/agentkit/agent"
+)
+
+// pruneRepo is a repo with a worktree per named branch, so a test can say what
+// each one holds.
+func pruneRepo(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	gitrun(t, repo, "init", "-q")
+	gitrun(t, repo, "config", "user.email", "t@t")
+	gitrun(t, repo, "config", "user.name", "t")
+	os.WriteFile(filepath.Join(repo, "a.txt"), []byte("hello\n"), 0o644)
+	gitrun(t, repo, "add", ".")
+	gitrun(t, repo, "commit", "-qm", "init")
+	return repo
+}
+
+func addWorktree(t *testing.T, repo, name string) string {
+	t.Helper()
+	path := filepath.Join(repo, ".dun", "worktrees", name)
+	gitrun(t, repo, "worktree", "add", "-q", "-b", name, path)
+	return path
+}
+
+// backdate makes a worktree look untouched, past the live-session grace period.
+// Both the directory and git's index, since liveness is the newer of the two.
+func backdate(t *testing.T, path string) {
+	t.Helper()
+	old := time.Now().Add(-2 * liveGrace)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if dir, err := git("", "-C", path, "rev-parse", "--git-dir"); err == nil {
+		g := strings.TrimSpace(dir)
+		if !filepath.IsAbs(g) {
+			g = filepath.Join(path, g)
+		}
+		_ = os.Chtimes(filepath.Join(g, "index"), old, old)
+	}
+}
+
+// The criterion is "holds no WORK", not "git status is clean". Measured on
+// dun's own repo: by the clean-tree test 34 of 37 trees looked dirty — almost
+// all from one untracked index artifact — so a status-based prune would have
+// reclaimed three of thirty-seven.
+func TestPrune_RemovesOnlyTreesHoldingNothing(t *testing.T) {
+	repo := pruneRepo(t)
+	addWorktree(t, repo, "empty")
+	artifact := addWorktree(t, repo, "artifact-only")
+	edited := addWorktree(t, repo, "edited")
+	committed := addWorktree(t, repo, "committed")
+
+	// Untracked artifacts are not work: an index cache is not a reason to keep
+	// a gigabyte.
+	os.MkdirAll(filepath.Join(artifact, ".poly-lsp-mcp"), 0o755)
+	os.WriteFile(filepath.Join(artifact, ".poly-lsp-mcp", "cache.gob"), []byte("x"), 0o644)
+	// An edit to a TRACKED file is.
+	os.WriteFile(filepath.Join(edited, "a.txt"), []byte("changed\n"), 0o644)
+	// So is a commit.
+	os.WriteFile(filepath.Join(committed, "b.txt"), []byte("new\n"), 0o644)
+	gitrun(t, committed, "add", ".")
+	gitrun(t, committed, "commit", "-qm", "work")
+
+	for _, w := range ScanWorktrees(repo) {
+		backdate(t, w.Path)
+	}
+	res := PruneWorktrees(repo, "")
+
+	pruned := map[string]bool{}
+	for _, w := range res.Pruned {
+		pruned[filepath.Base(w.Path)] = true
+	}
+	if !pruned["empty"] || !pruned["artifact-only"] {
+		t.Errorf("a tree holding nothing must be pruned, got %v", pruned)
+	}
+	if pruned["edited"] || pruned["committed"] {
+		t.Fatalf("a tree holding work must NEVER be pruned, got %v", pruned)
+	}
+	abandoned := map[string]bool{}
+	for _, w := range res.Abandoned {
+		abandoned[filepath.Base(w.Path)] = true
+	}
+	if !abandoned["edited"] || !abandoned["committed"] {
+		t.Errorf("work that was kept must be reported, got %v", abandoned)
+	}
+	// The branch goes with the tree — keeping it just moves the clutter
+	// somewhere less visible.
+	if out, _ := git("", "-C", repo, "branch", "--list", "empty"); strings.TrimSpace(out) != "" {
+		t.Error("a pruned tree's branch should be deleted too")
+	}
+	if out, _ := git("", "-C", repo, "branch", "--list", "committed"); strings.TrimSpace(out) == "" {
+		t.Error("a kept tree's branch must survive")
+	}
+}
+
+// Work that already landed is not work: if the repo's HEAD can reach the
+// commits, the tree is disposable.
+func TestPrune_MergedWorkIsDisposable(t *testing.T) {
+	repo := pruneRepo(t)
+	path := addWorktree(t, repo, "landed")
+	os.WriteFile(filepath.Join(path, "c.txt"), []byte("done\n"), 0o644)
+	gitrun(t, path, "add", ".")
+	gitrun(t, path, "commit", "-qm", "landed work")
+	gitrun(t, repo, "merge", "-q", "landed")
+	backdate(t, path)
+
+	res := PruneWorktrees(repo, "")
+	if len(res.Abandoned) != 0 {
+		t.Fatalf("merged work should not be reported as abandoned: %+v", res.Abandoned)
+	}
+	if len(res.Pruned) != 1 {
+		t.Fatalf("a tree whose commits already landed is disposable, got %+v", res.Pruned)
+	}
+}
+
+// The live session's own tree is never a candidate.
+func TestPrune_KeepsTheLiveWorktree(t *testing.T) {
+	repo := pruneRepo(t)
+	live := addWorktree(t, repo, "live")
+
+	if res := PruneWorktrees(repo, live); len(res.Pruned) != 0 {
+		t.Fatalf("the session's own worktree must survive its own prune: %+v", res.Pruned)
+	}
+	if _, err := os.Stat(live); err != nil {
+		t.Fatal("the live worktree was removed")
+	}
+}
+
+// git keeps a registration forever after its directory disappears — one such
+// entry was already present on the machine this was written on.
+func TestPrune_ClearsDeadRegistrations(t *testing.T) {
+	repo := pruneRepo(t)
+	path := addWorktree(t, repo, "vanished")
+	os.RemoveAll(path)
+
+	res := PruneWorktrees(repo, "")
+	if len(res.Pruned) != 1 || !res.Pruned[0].Missing {
+		t.Fatalf("a registration with no directory should be cleared: %+v", res.Pruned)
+	}
+	out, _ := git("", "-C", repo, "worktree", "list")
+	if strings.Contains(out, "vanished") {
+		t.Errorf("the dead registration survived: %q", out)
+	}
+}
+
+// Trees dun did not create are none of its business.
+func TestPrune_IgnoresWorktreesDunDidNotMake(t *testing.T) {
+	repo := pruneRepo(t)
+	outside := filepath.Join(t.TempDir(), "mine")
+	gitrun(t, repo, "worktree", "add", "-q", "-b", "mine", outside)
+	backdate(t, outside)
+
+	if res := PruneWorktrees(repo, ""); len(res.Pruned) != 0 || len(res.Abandoned) != 0 {
+		t.Fatalf("a human's worktree must be invisible to the pruner: %+v", res)
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Fatal("the pruner removed a worktree it did not create")
+	}
+}
+
+// The session window is bounded, but a session whose branch still holds work
+// keeps its transcript: that is how you find out what the branch was FOR.
+func TestPruneSessions_KeepsTheNewestAndAnythingExplainingWork(t *testing.T) {
+	repo := pruneRepo(t)
+	root := t.TempDir()
+	t.Setenv("DUN_HOME", root)
+
+	dir := RootDir(repo)
+	os.MkdirAll(dir, 0o755)
+	var ids []string
+	for i := 0; i < keepSessions+5; i++ {
+		id := "2026080" + string(rune('0'+i%10)) + "-" + strings.Repeat("0", 5) + string(rune('a'+i))
+		ids = append(ids, id)
+		os.WriteFile(filepath.Join(dir, id+".jsonl"), []byte("{}\n"), 0o644)
+	}
+	// The OLDEST session owns a worktree that still holds work.
+	oldest := ids[0]
+	path := addWorktree(t, repo, "still-working")
+	os.WriteFile(filepath.Join(path, "a.txt"), []byte("changed\n"), 0o644)
+	backdate(t, path)
+	if err := SaveSessionMeta(repo, oldest, SessionMeta{WorktreePath: path, Branch: "still-working"}); err != nil {
+		t.Fatal(err)
+	}
+
+	removed := PruneSessions(repo, repo, "")
+	if len(removed) == 0 {
+		t.Fatal("nothing was pruned from a list well over the window")
+	}
+	for _, id := range removed {
+		if id == oldest {
+			t.Fatal("a session explaining an abandoned worktree must be kept")
+		}
+	}
+	if len(ListSessions(repo)) <= keepSessions {
+		t.Log("window respected")
+	}
+}
+
+// /close is the explicit, destructive counterpart to the prune: the human says
+// this work is finished with, so it goes — and cannot come back from /resume.
+func TestForgetSession_LeavesNothingToResume(t *testing.T) {
+	repo := t.TempDir()
+	t.Setenv("DUN_HOME", t.TempDir())
+	dir := RootDir(repo)
+	os.MkdirAll(dir, 0o755)
+
+	id := "20260801-120000"
+	os.WriteFile(filepath.Join(dir, id+".jsonl"), []byte("{}\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, id+".sub1.jsonl"), []byte("{}\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, id+".harness.json"), []byte("{}\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, id+".sub1.harness.json"), []byte("{}\n"), 0o644)
+	SaveSessionMeta(repo, id, SessionMeta{Branch: "gone"})
+	os.MkdirAll(filepath.Join(dir, "overflow", id), 0o700)
+	os.WriteFile(filepath.Join(dir, "overflow", id, "eval-1.txt"), []byte("x"), 0o600)
+	os.MkdirAll(filepath.Join(dir, "overflow", id+".sub1"), 0o700)
+	keep := filepath.Join(dir, "overflow", id+"0") // another session sharing the prefix
+	os.MkdirAll(keep, 0o700)
+
+	ForgetSession(repo, id)
+
+	for _, id := range ListSessions(repo) {
+		t.Fatalf("a closed session must not be resumable, still listed: %q", id)
+	}
+	if _, err := os.Stat(filepath.Join(dir, id+".sub1.jsonl")); err == nil {
+		t.Error("a child's transcript should go with its parent's")
+	}
+	for _, f := range []string{id + ".harness.json", id + ".sub1.harness.json"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
+			t.Errorf("%s must go: attribution would answer from a closed session", f)
+		}
+	}
+	for _, d := range []string{id, id + ".sub1"} {
+		if _, err := os.Stat(filepath.Join(dir, "overflow", d)); err == nil {
+			t.Errorf("the shell's saved output %q should go with the session", d)
+		}
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Error("another session's overflow dir must stay")
+	}
+}
+
+// A machine runs several dun sessions at once — four, while this was being
+// written. PruneWorktrees is told which tree is the CALLER's, and a concurrent
+// session's tree holding nothing yet is exactly what would be deleted out from
+// under it. Recency stands in for liveness.
+func TestPrune_SparesARecentlyTouchedTree(t *testing.T) {
+	repo := pruneRepo(t)
+	fresh := addWorktree(t, repo, "someone-elses-live-session")
+
+	// Not the caller's tree, holds nothing, and would be deleted on age alone.
+	if res := PruneWorktrees(repo, ""); len(res.Pruned) != 0 {
+		t.Fatalf("a tree touched seconds ago must not be pruned: %+v", res.Pruned)
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Fatal("a live session's worktree was removed")
+	}
+
+	// Backdate it past the grace period and it becomes a candidate.
+	backdate(t, fresh)
+	if res := PruneWorktrees(repo, ""); len(res.Pruned) != 1 {
+		t.Fatalf("an old tree holding nothing should be pruned: %+v", res.Pruned)
+	}
+}
+
+// An index is named <directory>-<branch>, so one is minted per worktree per
+// branch — and on disk it is a directory of a few MB that nothing else deletes.
+// The name has to be derivable AFTER the tree is gone, since the worktree is
+// removed before the index is dropped.
+func TestIndexNameFor_SurvivesTheTreeItNames(t *testing.T) {
+	got := indexNameFor("/repo/.dun/worktrees/dun-worktree-123", "dun/1785677812")
+	if got != "dun-worktree-123-dun-1785677812" {
+		t.Fatalf("index name = %q", got)
+	}
+	// It must agree with what the docs server was actually started with, or the
+	// drop names an index nobody created and the real one leaks.
+	if live := raglitIndex("/repo/wt"); live != indexNameFor("/repo/wt", "") {
+		t.Errorf("detached-HEAD naming disagrees: %q vs %q", live, indexNameFor("/repo/wt", ""))
+	}
+	// Nothing sane to name → say nothing rather than delete something else.
+	for _, bad := range []string{"", "/", "."} {
+		if n := indexNameFor(bad, "b"); n != "" && bad != "" {
+			t.Errorf("indexNameFor(%q) = %q, want empty", bad, n)
+		}
+	}
+}
+
+// A session with entries but no user message, old enough not to be live, is
+// removed, its sidecars left; a fresh one, an asked one, the live one and an
+// unreadable one are kept.
+func TestPruneSessions_RemovesUnaskedSessions(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ws := t.TempDir()
+	dir := RootDir(ws)
+	os.MkdirAll(dir, 0o755)
+	old := time.Now().Add(-time.Hour)
+	write := func(id, body string, age time.Time) {
+		p := filepath.Join(dir, id+".jsonl")
+		os.WriteFile(p, []byte(body), 0o644)
+		os.Chtimes(p, age, age)
+	}
+	notice := `{"Kind":"notification","Content":"ready"}` + "\n"
+	write("20261022-100000", notice, old)                                    // unasked, old: removed
+	write("20261022-100000.sub1", notice, old)                               // its sidecar: an automatic prune leaves it
+	write("20261022-100001", `{"Kind":"user","Content":"fix it"}`+"\n", old) // asked: kept
+	write("20261022-100002", notice, time.Now())                             // unasked but fresh: kept
+	write("20261022-100003", notice, old)                                    // the live one: kept
+	write("20261022-100004", "not json\n", old)                              // unreadable: kept
+
+	removed := PruneSessions(ws, ws, "20261022-100003")
+	if strings.Join(removed, ",") != "20261022-100000" {
+		t.Fatalf("removed %v", removed)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "20261022-100000.sub1.jsonl")); err != nil {
+		t.Errorf("an automatic prune removed a sidecar: %v", err)
+	}
+}
+
+// /clear sets the transcript aside and starts one that holds only notices.
+// Judged by that alone, the session looked unasked and the prune deleted it
+// with the archive — the conversation /clear promised to keep (2026-11-14).
+// The archive's user message makes the session asked: both survive.
+func TestPruneSessions_KeepsAClearedSession(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ws := t.TempDir()
+	path, id := NewSessionFile(ws)
+	ctx := context.Background()
+	s, _ := openSessionStore(path)
+	s.Append(ctx, "x", agent.Entry{ID: "1", Kind: agent.KindUser, Content: "fix it"})
+	s.Append(ctx, "x", agent.Entry{ID: "2", Kind: agent.KindAssistant, Content: "fixed"})
+	s.Reset()
+	s.Append(ctx, "x", agent.Entry{ID: "3", Kind: agent.KindNotification, Content: "cleared"})
+	cleared, _ := filepath.Glob(filepath.Join(RootDir(ws), id+".cleared.*.jsonl"))
+	if len(cleared) != 1 {
+		t.Fatalf("cleared copies: %v", cleared)
+	}
+	old := time.Now().Add(-time.Hour)
+	for _, p := range append(cleared, path) {
+		os.Chtimes(p, old, old)
+	}
+
+	if removed := PruneSessions(ws, ws, ""); len(removed) != 0 {
+		t.Fatalf("removed %v", removed)
+	}
+	for _, p := range append(cleared, path) {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("%s: %v", filepath.Base(p), err)
+		}
+	}
+}
+
+// The same for a recap archive, and for a transcript emptied after it (0
+// bytes): the archive's message keeps the session.
+func TestPruneSessions_KeepsASessionWhoseRecapWasAsked(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ws := t.TempDir()
+	dir := RootDir(ws)
+	os.MkdirAll(dir, 0o755)
+	old := time.Now().Add(-time.Hour)
+	write := func(name, body string) string {
+		p := filepath.Join(dir, name)
+		os.WriteFile(p, []byte(body), 0o644)
+		os.Chtimes(p, old, old)
+		return p
+	}
+	notice := `{"Kind":"notification","Content":"recapped"}` + "\n"
+	asked := `{"Kind":"user","Content":"fix it"}` + "\n"
+	files := []string{
+		write("20261114-100000.jsonl", notice),
+		write("20261114-100000.recap1.jsonl", asked),
+		write("20261114-100001.jsonl", ""),
+		write("20261114-100001.recap1.jsonl", asked),
+	}
+
+	if removed := PruneSessions(ws, ws, ""); len(removed) != 0 {
+		t.Fatalf("removed %v", removed)
+	}
+	for _, p := range files {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("%s: %v", filepath.Base(p), err)
+		}
+	}
+}
+
+// A session killed before its first message, with no archive that holds one,
+// is still pruned (USER 2026-10-22; whether it should be kept is open), and
+// its archives are left.
+func TestPruneSessions_UnaskedArchivesDoNotKeepASession(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ws := t.TempDir()
+	dir := RootDir(ws)
+	os.MkdirAll(dir, 0o755)
+	old := time.Now().Add(-time.Hour)
+	notice := `{"Kind":"notification","Content":"ready"}` + "\n"
+	for _, n := range []string{"20261114-100000.jsonl", "20261114-100000.cleared.20261114T100000.jsonl"} {
+		p := filepath.Join(dir, n)
+		os.WriteFile(p, []byte(notice), 0o644)
+		os.Chtimes(p, old, old)
+	}
+	if removed := PruneSessions(ws, ws, ""); strings.Join(removed, ",") != "20261114-100000" {
+		t.Fatalf("removed %v", removed)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "20261114-100000.cleared.20261114T100000.jsonl")); err != nil {
+		t.Errorf("the archive went with an automatic prune: %v", err)
+	}
+}
+
+// The window cap removes old asked sessions' transcripts, never their
+// archives.
+func TestPruneSessions_CapLeavesArchives(t *testing.T) {
+	repo := pruneRepo(t)
+	t.Setenv("DUN_HOME", t.TempDir())
+	dir := RootDir(repo)
+	os.MkdirAll(dir, 0o755)
+	asked := `{"Kind":"user","Content":"fix it"}` + "\n"
+	var ids []string
+	for i := 0; i < keepSessions+1; i++ {
+		id := fmt.Sprintf("20261114-1000%02d", i)
+		ids = append(ids, id)
+		os.WriteFile(filepath.Join(dir, id+".jsonl"), []byte(asked), 0o644)
+	}
+	oldest := ids[0]
+	archive := filepath.Join(dir, oldest+".cleared.20261114T100000.jsonl")
+	os.WriteFile(archive, []byte(asked), 0o644)
+
+	if removed := PruneSessions(repo, repo, ""); strings.Join(removed, ",") != oldest {
+		t.Fatalf("removed %v", removed)
+	}
+	if _, err := os.Stat(archive); err != nil {
+		t.Errorf("the cap removed an archive: %v", err)
+	}
+}

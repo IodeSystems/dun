@@ -12,9 +12,9 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
@@ -97,13 +97,13 @@ func (m tuiModel) statusSections(w int) []statusSection {
 	// did not say), after the model it applies to.
 	eff := m.effort
 	if eff == "" {
-		eff = dun.EffortDefault
+		eff = harness.EffortDefault
 	}
 	for i, s := range out {
 		if s.label == "model" {
 			words := m.effortWords
 			if words == "" {
-				words = dun.EffortAbout[eff]
+				words = harness.EffortAbout[eff]
 			}
 			row := statusSection{label: "effort", value: eff + StDim.Render(" · "+words+" · /effort")}
 			out = append(out[:i+1], append([]statusSection{row}, out[i+1:]...)...)
@@ -146,9 +146,9 @@ func (m tuiModel) toolsValue(w int) string {
 			trouble = append(trouble, st.ID+StDim.Render(" not installed"))
 		case st.Err != "":
 			trouble = append(trouble, st.ID+" "+StErr.Render("did not start"))
-		case st.Running && st.Index == dun.IndexBuilding:
+		case st.Running && st.Index == harness.IndexBuilding:
 			trouble = append(trouble, st.ID+StDim.Render(" indexing"+m.indexingFor(st.ID)))
-		case st.Running && st.Index == dun.IndexFailed:
+		case st.Running && st.Index == harness.IndexFailed:
 			trouble = append(trouble, st.ID+" "+StErr.Render("index failed"))
 		}
 	}
@@ -167,7 +167,7 @@ func (m tuiModel) toolsValue(w int) string {
 // server added later goes at the end, and a state changing rewrites a
 // server's words where they are — nothing on the row moves over (run 5:
 // "notes" sorted before "shell" and pushed it right).
-func (m tuiModel) splashServers() []dun.ServerState {
+func (m tuiModel) splashServers() []harness.ServerState {
 	out := sortedServers(m.servers)
 	at := func(id string) int {
 		if i := slices.Index(m.srvOrder, id); i >= 0 {
@@ -184,13 +184,13 @@ func (m tuiModel) splashServers() []dun.ServerState {
 // running, off — so a narrow row starts with what works; then by name. A
 // new slice: model copies share the old.
 func (m *tuiModel) noteServerOrder() {
-	var fresh []dun.ServerState
+	var fresh []harness.ServerState
 	for _, st := range sortedServers(m.servers) {
 		if !slices.Contains(m.srvOrder, st.ID) {
 			fresh = append(fresh, st)
 		}
 	}
-	rank := func(st dun.ServerState) int {
+	rank := func(st harness.ServerState) int {
 		switch {
 		case st.Starting:
 			return 0
@@ -211,7 +211,7 @@ func (m *tuiModel) noteServerOrder() {
 
 // isExtension is a server the extensions row is for: one with a switch
 // (/rag) that is not a built-in server.
-func isExtension(st dun.ServerState) bool { return st.Slash != "" && !builtinServer[st.ID] }
+func isExtension(st harness.ServerState) bool { return st.Slash != "" && !builtinServer[st.ID] }
 
 // startedFor is " 12s": how long a starting server has been at it, on this
 // clock (noteStarting), or "…" when the TUI has not seen it start.
@@ -222,7 +222,7 @@ func (m tuiModel) startedFor(id string) string {
 	return "…"
 }
 
-func sortedServers(states []dun.ServerState) []dun.ServerState {
+func sortedServers(states []harness.ServerState) []harness.ServerState {
 	sorted := slices.Clone(states)
 	sort.SliceStable(sorted, func(a, b int) bool { return sorted[a].ID < sorted[b].ID })
 	return sorted
@@ -281,7 +281,7 @@ func (m tuiModel) toolTokens() int {
 	}
 	n := s.systemShared
 	for _, p := range s.systemParts {
-		if p.Name != dun.SkillsPart {
+		if p.Name != harness.SkillsPart {
 			n += p.Tokens
 		}
 	}
@@ -292,7 +292,7 @@ func (m tuiModel) toolTokens() int {
 func (m tuiModel) skillTokens() int {
 	n := 0
 	for _, p := range m.ctxStats.systemParts {
-		if p.Name == dun.SkillsPart {
+		if p.Name == harness.SkillsPart {
 			n += p.Tokens
 		}
 	}
@@ -381,7 +381,7 @@ func (m tuiModel) contextParts(w, rows int) []string {
 	var builtin, mcp, skills, servers int
 	for _, p := range s.systemParts {
 		switch {
-		case p.Name == dun.SkillsPart:
+		case p.Name == harness.SkillsPart:
 			skills += p.Tokens
 		case strings.HasPrefix(p.Name, "mcp: "):
 			mcp += p.Tokens
@@ -419,7 +419,7 @@ func (m tuiModel) builtinToolCount() int {
 		n--
 	}
 	for _, st := range m.servers {
-		if st.Running && st.Via != dun.ViaShell {
+		if st.Running && st.Via != harness.ViaShell {
 			n -= st.Tools
 		}
 	}
@@ -882,9 +882,9 @@ func (m tuiModel) statusDetail(w int) string {
 	for _, st := range sortedServers(m.servers) {
 		state := StDim.Render("off")
 		switch {
-		case st.Via == dun.ViaShell && st.Hosted: // scripted: its tools are in the shell's eval (USER 2026-10-27: was "off")
+		case st.Via == harness.ViaShell && st.Hosted: // scripted: its tools are in the shell's eval (USER 2026-10-27: was "off")
 			state = stOK.Render("scripted in the shell") + StDim.Render(" · "+textfmt.Plural(st.Tools, "tool"))
-		case st.Via == dun.ViaShell && st.Auto:
+		case st.Via == harness.ViaShell && st.Auto:
 			state = StDim.Render("scripted · not hosted (the shell is down, or could not start it)")
 		case st.Starting:
 			state = StDim.Render("starting" + m.startedFor(st.ID))

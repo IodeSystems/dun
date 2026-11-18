@@ -21,8 +21,8 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/textfmt"
 )
 
@@ -57,7 +57,7 @@ var ragSetupOrder = []string{"embed", "identity", "vision", "segment", "audio"}
 var ragRoleKind = map[string]string{"embed": "embeddings", "identity": "", "vision": "images", "segment": "", "audio": "speech"}
 
 // RaglitBin finds the raglit the engine runs. A variable for tests.
-var RaglitBin = func() (string, error) { return dun.FindCommand("raglit") }
+var RaglitBin = func() (string, error) { return harness.FindCommand("raglit") }
 
 // raglitRoot is where the shared daemon keeps its config.json, as raglit
 // resolves it (raglit.DefaultRoot).
@@ -73,17 +73,17 @@ func raglitRoot() string {
 
 // RaglitDoctor runs `raglit doctor --json` (args after it) and reads it;
 // an error for a raglit without it.
-func RaglitDoctor(timeout time.Duration, args ...string) (dun.RaglitDoctor, []byte, error) {
+func RaglitDoctor(timeout time.Duration, args ...string) (harness.RaglitDoctor, []byte, error) {
 	bin, err := RaglitBin()
 	if err != nil {
-		return dun.RaglitDoctor{}, nil, err
+		return harness.RaglitDoctor{}, nil, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, append([]string{"doctor", "--json"}, args...)...)
-	cmd.Env = append(os.Environ(), dun.RaglitTokenEnv()...) // a raglit with keys (dun/raglitauth.go)
+	cmd.Env = append(os.Environ(), harness.RaglitTokenEnv()...) // a raglit with keys (dun/raglitauth.go)
 	out, _ := cmd.Output()
-	d, ok := dun.ParseRaglitDoctor(out)
+	d, ok := harness.ParseRaglitDoctor(out)
 	if !ok {
 		if ctx.Err() != nil {
 			return d, out, fmt.Errorf("raglit doctor --json did not answer in %s", timeout)
@@ -292,7 +292,7 @@ func planRagSetup(cur ragSettings, picks map[string]ragPick, dunProvs []dunconfi
 		if !done {
 			dp, found := findProvider(dunProvs, pk.provider)
 			if !found {
-				return pl, fmt.Errorf("%s: dun has no provider %q", dun.RagRoleName(role), pk.provider)
+				return pl, fmt.Errorf("%s: dun has no provider %q", harness.RagRoleName(role), pk.provider)
 			}
 			var err error
 			if name, err = pl.provide(dp); err != nil {
@@ -450,7 +450,7 @@ func (pl ragPlan) patchConfig(path string) error {
 
 // ragOnNow is what the report after a save says: the capabilities on now
 // that were off before, and the ones still off.
-func ragOnNow(before, after dun.SetupReport) string {
+func ragOnNow(before, after harness.SetupReport) string {
 	was := map[string]bool{}
 	for _, c := range before.Capabilities {
 		was[c.Name] = c.On
@@ -486,11 +486,11 @@ func ragOnNow(before, after dun.SetupReport) string {
 // ragSetup is the open /rag setup.
 type ragSetup struct {
 	loading bool // asking raglit; the screens open when it answers
-	doc     dun.RaglitDoctor
+	doc     harness.RaglitDoctor
 	cur     ragSettings
 	target  ragTarget
-	roles   []dun.SetupRole // the screens, in ragSetupOrder
-	step    int             // the role on screen; len(roles) is the summary
+	roles   []harness.SetupRole // the screens, in ragSetupOrder
+	step    int                 // the role on screen; len(roles) is the summary
 	picks   map[string]ragPick
 	provs   []dunconfig.ProviderConfig // dun's, as /model lists them
 	list    pickList
@@ -503,7 +503,7 @@ type ragSetup struct {
 
 // ragLoadedMsg is raglit's report and settings, or why there are none.
 type ragLoadedMsg struct {
-	doc    dun.RaglitDoctor
+	doc    harness.RaglitDoctor
 	cur    ragSettings
 	target ragTarget
 	err    error
@@ -618,7 +618,7 @@ func (r *ragSetup) ragChoices() []ragChoice {
 	}
 	none := "none — off"
 	if role.FallsBackTo != "" {
-		none = "none — use " + dun.RagRoleName(role.FallsBackTo) + "'s model"
+		none = "none — use " + harness.RagRoleName(role.FallsBackTo) + "'s model"
 	}
 	out = append(out, ragChoice{pick: ragPick{}, label: none, now: cur.Model == ""})
 	want := ragRoleKind[role.Role]
@@ -765,7 +765,7 @@ func (r *ragSetup) changes() []string {
 		if pk.model == cur.Model && (pk.model == "" || r.sameProvider(pk.provider, cur.Provider)) {
 			continue
 		}
-		out = append(out, fmt.Sprintf("%s: %s → %s", dun.RagRoleName(ro.Role), was, to))
+		out = append(out, fmt.Sprintf("%s: %s → %s", harness.RagRoleName(ro.Role), was, to))
 	}
 	return out
 }
@@ -876,7 +876,7 @@ func (m tuiModel) ragSetupPanel() string {
 		return strings.Join(rows, "\n")
 	}
 	role := r.roles[r.step]
-	head := fmt.Sprintf("raglit setup · %s (%d of %d)", dun.RagRoleName(role.Role), r.step+1, len(r.roles))
+	head := fmt.Sprintf("raglit setup · %s (%d of %d)", harness.RagRoleName(role.Role), r.step+1, len(r.roles))
 	rows := []string{stHeader.Render(head)}
 	if role.Adds != "" {
 		rows = append(rows, listIndent+StDim.Render(role.Adds))

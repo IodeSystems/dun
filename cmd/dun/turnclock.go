@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // The turn budget bounds DUN's work, not the human's.
@@ -128,9 +128,9 @@ func (c *turnClock) fire(gen int) {
 	c.over = true
 	c.mu.Unlock()
 	// The mark first, while what the turn is doing can still be read; then the
-	// cancel, whose cause (dun.BudgetCut) the harness takes as an interrupt.
+	// cancel, whose cause (harness.BudgetCut) the harness takes as an interrupt.
 	c.mark(true)
-	c.cancel(dun.BudgetCut{Budget: c.budget, Grace: c.grace})
+	c.cancel(harness.BudgetCut{Budget: c.budget, Grace: c.grace})
 }
 
 // letGoLocked stops the timer and makes any fire already scheduled stale.
@@ -239,15 +239,15 @@ func pauseClock() (resume func()) {
 // words have to say which decision it was — a reader who sees a retryable-
 // looking error with no retries behind it reasonably concludes retries ran out.
 //
-// A budget cut reaches here as dun.ErrInterrupted (the harness recorded it
+// A budget cut reaches here as harness.ErrInterrupted (the harness recorded it
 // through its interrupt path) and is reported as the budget: it was not the
 // user.
 func turnErr(tctx context.Context, err error) error {
 	if err == nil || tctx.Err() == nil {
 		return err
 	}
-	var budget dun.BudgetCut
-	if errors.Is(err, dun.ErrInterrupted) && errors.As(context.Cause(tctx), &budget) {
+	var budget harness.BudgetCut
+	if errors.Is(err, harness.ErrInterrupted) && errors.As(context.Cause(tctx), &budget) {
 		return budget
 	}
 	// A real failure that merely landed on a turn already cut off keeps its own

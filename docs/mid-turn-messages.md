@@ -5,7 +5,7 @@ wait for the turn to finish. Instead, it's **buffered and lifted into the next
 tool result**, so the model reads it inside the running turn — no extra
 round-trip, no assistant message stacked on another.
 
-## Engine Side (`harness.go`)
+## Engine Side (`internal/harness/harness.go`)
 
 ### `Harness.Say(text string)`
 

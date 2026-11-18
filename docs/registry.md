@@ -11,10 +11,10 @@ registry carries extensions, MCP presets and tool pins.
 
 An extension manifest (`examples/extensions/raglit/extension.json`) names
 the tool's arguments, which of its tools are hidden, and the tools and CLI
-verbs its slash commands call. It is compiled into dun (`extension.go`,
+verbs its slash commands call. It is compiled into dun (`internal/harness/extension.go`,
 go:embed). When raglit renames a tool, every dun before the fix is broken
 until a dun release ships the new manifest. The same holds for the MCP
-presets (`mcppresets.go`) and the tool pins (`release/supported.go`,
+presets (`internal/harness/mcppresets.go`) and the tool pins (`release/supported.go`,
 `release/deps.json`): a raglit point release needed a dun release to be
 recommended.
 
@@ -105,7 +105,7 @@ key (`release/minisign.pub`, with the updater's key rotation).
 
 1. Done: `internal/registry`: the format, npm ranges (Masterminds/semver),
    verify, the cache, which entry fits.
-2. Done: dun reads it (`registry.go`, `cmd/dun/registry.go`). The cached
+2. Done: dun reads it (`internal/harness/registry.go`, `cmd/dun/registry.go`). The cached
    index is installed at process start; an engine refreshes it in the
    background for the next start, so a session's manifests never change
    under it. Only the bundled extensions' ids are overlaid (a registry

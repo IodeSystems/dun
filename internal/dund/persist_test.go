@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -16,7 +16,7 @@ import (
 func realAsked(t *testing.T) {
 	askedMu.Lock()
 	fake := askedIn
-	askedIn = dun.SessionAsked
+	askedIn = harness.SessionAsked
 	askedMu.Unlock()
 	t.Cleanup(func() {
 		askedMu.Lock()
@@ -29,7 +29,7 @@ func realAsked(t *testing.T) {
 // prune's ten minutes.
 func writeTranscript(t *testing.T, ws, name, body string) {
 	t.Helper()
-	dir := dun.RootDir(ws)
+	dir := harness.RootDir(ws)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -88,10 +88,10 @@ func TestClearedSessionIsKeptOnStopAndLoad(t *testing.T) {
 		t.Fatalf("after reload: %v", got)
 	}
 	// And the engine's prune agrees: nothing of either is removed.
-	if removed := dun.PruneSessions(ws, ws, ""); len(removed) != 0 {
+	if removed := harness.PruneSessions(ws, ws, ""); len(removed) != 0 {
 		t.Fatalf("prune removed %v", removed)
 	}
-	if _, err := os.Stat(filepath.Join(dun.RootDir(ws), cleared+".cleared.20261114T100000.jsonl")); err != nil {
+	if _, err := os.Stat(filepath.Join(harness.RootDir(ws), cleared+".cleared.20261114T100000.jsonl")); err != nil {
 		t.Fatal(err)
 	}
 }

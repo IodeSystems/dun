@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 )
@@ -25,19 +25,19 @@ import (
 // is the question a savings hint answers. A scripted server has no part: its
 // schemas are not in the request (mcpshell's eval description is fixed text),
 // and what it does cost is its name in one sentence of the system prompt
-// (dun.HostedLine), priced here at the engine's four characters a token.
+// (harness.HostedLine), priced here at the engine's four characters a token.
 
 // McpInfoIn is what /mcp info reads.
 type McpInfoIn struct {
-	Servers []dun.ServerState
-	Parts   []dun.ContextPart // the context's parts; a server's is "mcp: <id>"
-	Counted bool              // the parts are in: the first count lands after the start
-	Exact   bool              // the parts were counted, not estimated
-	Window  int               // the model's window; 0 unknown
+	Servers []harness.ServerState
+	Parts   []harness.ContextPart // the context's parts; a server's is "mcp: <id>"
+	Counted bool                  // the parts are in: the first count lands after the start
+	Exact   bool                  // the parts were counted, not estimated
+	Window  int                   // the model's window; 0 unknown
 	// What the schemas cost over the stats ledger's recent rounds, and the
 	// endpoint's measured prefill speed (dun/roundstats.go); zero when
 	// nothing has been recorded or measured.
-	Usage       dun.StatsSummary
+	Usage       harness.StatsSummary
 	UsageDays   int
 	Speed       float64
 	SpeedRounds int
@@ -56,11 +56,11 @@ func McpInfo(in McpInfoIn) string {
 			total += p.Tokens
 		}
 	}
-	var shell *dun.ServerState
+	var shell *harness.ServerState
 	idW := 0
 	for i, st := range in.Servers {
 		idW = max(idW, len(st.ID))
-		if st.ID == dun.ServerShell {
+		if st.ID == harness.ServerShell {
 			shell = &in.Servers[i]
 		}
 	}
@@ -69,15 +69,15 @@ func McpInfo(in McpInfoIn) string {
 	var scripted, hosted []string
 	for _, st := range in.Servers {
 		f := []string{infoState(st, shellUp), infoMode(st.Via)}
-		on := st.Running || (st.Via == dun.ViaShell && st.Auto && shellUp && st.Err == "")
+		on := st.Running || (st.Via == harness.ViaShell && st.Auto && shellUp && st.Err == "")
 		if on && st.Tools > 0 {
 			f = append(f, fact(textfmt.Plural(st.Tools, "tool")))
 		}
 		switch {
 		case !in.Counted || !on:
-		case st.Via == dun.ViaShell && st.Standalone > 0:
+		case st.Via == harness.ViaShell && st.Standalone > 0:
 			f = append(f, fact("0 tokens")+" (standalone "+fact("~"+numfmt.TokN(st.Standalone))+")")
-		case st.Via == dun.ViaShell:
+		case st.Via == harness.ViaShell:
 			f = append(f, fact("0 tokens"))
 		default:
 			f = append(f, fact(est+numfmt.TokN(cost[st.ID])+" tokens"))
@@ -86,15 +86,15 @@ func McpInfo(in McpInfoIn) string {
 			if n := len(st.Setup.MissingLSPs()); n > 0 {
 				f = append(f, fact(textfmt.Plural(n, "language server")+" missing")) // /lsp lists them
 			}
-			if st.Setup.CapabilityOff(dun.CapSemantic) {
+			if st.Setup.CapabilityOff(harness.CapSemantic) {
 				f = append(f, fact("semantic search off")) // /rag says why, /rag setup turns it on
 			}
 		}
 		rows = append(rows, "  "+textfmt.Pad(st.ID, idW)+"  "+strings.Join(f, " · "))
-		if st.Via == dun.ViaShell {
+		if st.Via == harness.ViaShell {
 			scripted = append(scripted, st.ID)
 			if on {
-				hosted = append(hosted, dun.ShellNamespace(st.ID)) // as hostedNamespaces names them
+				hosted = append(hosted, harness.ShellNamespace(st.ID)) // as hostedNamespaces names them
 			}
 		}
 	}
@@ -114,7 +114,7 @@ func McpInfo(in McpInfoIn) string {
 		rows = append(rows, costRows(in, cost)...)
 	}
 	if shell != nil {
-		rows = append(rows, shellRows(shell, shellUp, in, est, cost[dun.ServerShell], scripted, hosted)...)
+		rows = append(rows, shellRows(shell, shellUp, in, est, cost[harness.ServerShell], scripted, hosted)...)
 	}
 	if hints := scriptHints(in, cost, shellUp, hosted); len(hints) > 0 {
 		rows = append(rows, "to save tokens:")
@@ -125,7 +125,7 @@ func McpInfo(in McpInfoIn) string {
 
 // shellRows say what scripted mode is and what it costs: the shell's one
 // eval tool, and the sentence that names the servers it hosts.
-func shellRows(shell *dun.ServerState, shellUp bool, in McpInfoIn, est string, evalTok int, scripted, hosted []string) []string {
+func shellRows(shell *harness.ServerState, shellUp bool, in McpInfoIn, est string, evalTok int, scripted, hosted []string) []string {
 	rows := []string{"scripted mode: the shell (mcpshell) hosts a server's tools in its one eval tool, called as <ns>.<tool>(…); " +
 		"their schemas leave every request, and help(\"<ns>\") lists them when the model asks"}
 	var cost string
@@ -137,7 +137,7 @@ func shellRows(shell *dun.ServerState, shellUp bool, in McpInfoIn, est string, e
 	default:
 		cost = "the shell's eval: " + fact(est+numfmt.TokN(evalTok)+" tokens")
 		if len(hosted) > 0 {
-			cost += " · the line naming its servers: " + fact("~"+numfmt.TokN(numfmt.EstimateTok(dun.HostedLine(hosted)))+" tokens")
+			cost += " · the line naming its servers: " + fact("~"+numfmt.TokN(numfmt.EstimateTok(harness.HostedLine(hosted)))+" tokens")
 		}
 	}
 	if len(scripted) == 0 {
@@ -153,7 +153,7 @@ func shellRows(shell *dun.ServerState, shellUp bool, in McpInfoIn, est string, e
 // it in the hosted sentence adds. The shell's own eval is not counted
 // against it — it is in the request already, or the row says to turn it on.
 //
-// The mark is dun.HeavyServerTokens (5000), the one /mcp tools draws its
+// The mark is harness.HeavyServerTokens (5000), the one /mcp tools draws its
 // "heavy" hint at, so the two never disagree about which server is heavy.
 // Under it the move is not worth what a scripted server gives up (docs
 // indexing, prompts and skills, the tool deny-list, its call renderers —
@@ -166,11 +166,11 @@ func scriptHints(in McpInfoIn, cost map[string]int, shellUp bool, hosted []strin
 	for _, st := range in.Servers {
 		n := cost[st.ID]
 		// ViaDirect: an added server; a built-in has no mode.
-		if st.Via != dun.ViaDirect || !st.Running || n < dun.HeavyServerTokens {
+		if st.Via != harness.ViaDirect || !st.Running || n < harness.HeavyServerTokens {
 			continue
 		}
-		after := append(slices.Clone(hosted), dun.ShellNamespace(st.ID))
-		line := numfmt.EstimateTok(dun.HostedLine(after)) - numfmt.EstimateTok(dun.HostedLine(hosted))
+		after := append(slices.Clone(hosted), harness.ShellNamespace(st.ID))
+		line := numfmt.EstimateTok(harness.HostedLine(after)) - numfmt.EstimateTok(harness.HostedLine(hosted))
 		row := "  " + fact("/mcp mode "+st.ID+" scripted") + " — saves " + fact("~"+numfmt.TokN(n-line)+" tokens")
 		if !shellUp {
 			row += ", with the shell on (/mcp on shell)"
@@ -183,7 +183,7 @@ func scriptHints(in McpInfoIn, cost map[string]int, shellUp bool, hosted []strin
 // infoState is what a server is doing, in the splash's words: running,
 // starting (for how long), did not start (and why), or off. A scripted
 // server runs when the shell does.
-func infoState(st dun.ServerState, shellUp bool) string {
+func infoState(st harness.ServerState, shellUp bool) string {
 	switch {
 	case st.Starting:
 		if st.StartingSeconds > 0 {
@@ -192,9 +192,9 @@ func infoState(st dun.ServerState, shellUp bool) string {
 		return "starting…"
 	case st.Err != "":
 		return fact("did not start:") + " " + textfmt.OneLine(st.Err)
-	case st.Via == dun.ViaShell && st.Auto && !shellUp:
+	case st.Via == harness.ViaShell && st.Auto && !shellUp:
 		return "waits for the shell"
-	case st.Via == dun.ViaShell && st.Auto, st.Via != dun.ViaShell && st.Running:
+	case st.Via == harness.ViaShell && st.Auto, st.Via != harness.ViaShell && st.Running:
 		return "running"
 	}
 	return "off"
@@ -210,7 +210,7 @@ func infoMode(via string) string {
 	if via == "" {
 		return "built-in"
 	}
-	return dun.ModeWord(via)
+	return harness.ModeWord(via)
 }
 
 // McpHelp is /mcp help: the actions, one line each, from the command's own
@@ -309,16 +309,16 @@ func costRows(in McpInfoIn, cost map[string]int) []string {
 	for _, st := range in.Servers {
 		su := u.Servers[st.ID]
 		switch {
-		case st.Via == dun.ViaShell && st.Standalone > 0:
+		case st.Via == harness.ViaShell && st.Standalone > 0:
 			row := "  " + st.ID + ": scripted, saves " + fact("~"+numfmt.TokN(st.Standalone)+" tokens") + " in every request"
 			if su != nil && su.SavedRounds > 0 {
 				row += "; " + fact(textfmt.Plural(su.SavedRounds, "request")) + " would have processed them: " + fact("~"+numfmt.TokN(su.Saved)+" tokens") + spent(su.Saved)
 			}
 			if st.Help > 0 {
-				row += " · help(\"" + dun.ShellNamespace(st.ID) + "\") " + fact("~"+numfmt.TokN(st.Help)) + " once, when the model asks"
+				row += " · help(\"" + harness.ShellNamespace(st.ID) + "\") " + fact("~"+numfmt.TokN(st.Help)) + " once, when the model asks"
 			}
 			rows = append(rows, row)
-		case st.Via != dun.ViaShell && cost[st.ID] > 0 && su != nil && su.Processed > 0:
+		case st.Via != harness.ViaShell && cost[st.ID] > 0 && su != nil && su.Processed > 0:
 			rows = append(rows, "  "+st.ID+": its "+fact("~"+numfmt.TokN(cost[st.ID]))+" of schemas, processed in "+fact(textfmt.Plural(su.Processed, "request"))+": "+
 				fact("~"+numfmt.TokN(su.Tokens)+" tokens")+spent(su.Tokens))
 		}

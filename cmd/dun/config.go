@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // reasoningDialects are the values a provider's "reasoning" takes.
@@ -97,12 +97,12 @@ func providerLabel(fc dunconfig.DunConfig, u string) string {
 // configured retries, and its spend reaches the same meter as the parent's, the
 // ledger line naming the provider and model it ran on (dun/spend.go,
 // dun/ledger.go).
-func clientCache(fc dunconfig.DunConfig, url, key string, tune func(c *llm.Client, url string), usageFor func(url, key, model string) func(llm.Usage)) func(provider, model string) (dun.ChildClient, error) {
+func clientCache(fc dunconfig.DunConfig, url, key string, tune func(c *llm.Client, url string), usageFor func(url, key, model string) func(llm.Usage)) func(provider, model string) (harness.ChildClient, error) {
 	var mu sync.Mutex
-	cache := map[string]dun.ChildClient{}
-	return func(provider, model string) (dun.ChildClient, error) {
+	cache := map[string]harness.ChildClient{}
+	return func(provider, model string) (harness.ChildClient, error) {
 		if strings.TrimSpace(model) == "" {
-			return dun.ChildClient{}, fmt.Errorf("no model named")
+			return harness.ChildClient{}, fmt.Errorf("no model named")
 		}
 		u, k := url, key
 		if provider != "" {
@@ -112,7 +112,7 @@ func clientCache(fc dunconfig.DunConfig, url, key string, tune func(c *llm.Clien
 				for _, p := range fc.ProviderList() {
 					names = append(names, p.Name)
 				}
-				return dun.ChildClient{}, fmt.Errorf("provider %q is not logged in (logged in: %s)", provider, strings.Join(names, ", "))
+				return harness.ChildClient{}, fmt.Errorf("provider %q is not logged in (logged in: %s)", provider, strings.Join(names, ", "))
 			}
 			u, k = p.URL, p.Key
 		}
@@ -127,7 +127,7 @@ func clientCache(fc dunconfig.DunConfig, url, key string, tune func(c *llm.Clien
 			tune(c, u)
 		}
 		c.OnUsage = usageFor(u, k, model)
-		cc := dun.ChildClient{Runner: c, Endpoint: dun.Endpoint{URL: u, Key: k, Model: model}}
+		cc := harness.ChildClient{Runner: c, Endpoint: harness.Endpoint{URL: u, Key: k, Model: model}}
 		cache[id] = cc
 		return cc, nil
 	}
@@ -138,7 +138,7 @@ func clientCache(fc dunconfig.DunConfig, url, key string, tune func(c *llm.Clien
 func tuneClient(fc dunconfig.DunConfig, c *llm.Client, url string) {
 	// What this (endpoint, model) is known to do, from DUN_HOME, and what it
 	// learns from here (capstore.go). effort_off is pinned there.
-	dun.TrackCaps(c, effortOff(fc, url))
+	harness.TrackCaps(c, effortOff(fc, url))
 	// How /effort's level reaches the model (agentkit's reasoning dialects):
 	// a LiteLLM proxy in front of OpenRouter names neither in its address.
 	if d, err := reasoningDialect(fc, url); err != nil {
@@ -147,7 +147,7 @@ func tuneClient(fc dunconfig.DunConfig, c *llm.Client, url string) {
 		c.SetReasoningDialect(d)
 	}
 	if fc.Retry5xxAttempts > 0 {
-		c.Retry5xxAttempts = fc.Retry5xxAttempts // /retry attempts; the env wins, in dun.Start (retry.go)
+		c.Retry5xxAttempts = fc.Retry5xxAttempts // /retry attempts; the env wins, in harness.Start (retry.go)
 	}
 	if rb, tb, reqSet, turnSet := parseRetryBudgets(fc); reqSet || turnSet {
 		if reqSet {

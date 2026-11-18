@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
@@ -41,35 +41,35 @@ var dockerProbe = func() error {
 }
 
 // isolationMode is the session's isolation now: none, worktree or docker.
-func isolationMode(h *dun.Harness) string {
+func isolationMode(h *harness.Harness) string {
 	if wt := h.Worktree(); wt != nil && wt.Branch != "" {
 		if h.IsDocker() {
-			return dun.IsoDocker
+			return harness.IsoDocker
 		}
-		return dun.IsoWorktree
+		return harness.IsoWorktree
 	}
 	if h.IsDocker() {
 		// Docker on the checkout: only an old /docker on could do this, or
 		// a session resumed from one. Reported as what it is.
-		return dun.IsoDocker
+		return harness.IsoDocker
 	}
-	return dun.IsoNone
+	return harness.IsoNone
 }
 
 // runIsolateCmd handles /isolate [none|worktree|docker|off] and
 // /isolate docker image [<image | Dockerfile | directory>].
-func runIsolateCmd(h *dun.Harness, action string) string {
+func runIsolateCmd(h *harness.Harness, action string) string {
 	if rest, ok := strings.CutPrefix(action, "docker image"); ok && (rest == "" || rest[0] == ' ') {
 		return isolateImage(h, strings.TrimSpace(rest))
 	}
 	switch action {
 	case "", "status":
 		return isolateStatus(h) + "\n" + isolateUsage
-	case dun.IsoNone, "off":
+	case harness.IsoNone, "off":
 		return isolateOff(h)
-	case dun.IsoWorktree:
+	case harness.IsoWorktree:
 		return isolateWorktree(h, false)
-	case dun.IsoDocker:
+	case harness.IsoDocker:
 		return isolateWorktree(h, true)
 	default:
 		return "isolate: unknown " + strconv.Quote(action) + "\n" + isolateUsage
@@ -150,7 +150,7 @@ func isolateBuilds(id, action string) bool {
 }
 
 // isolateImage handles /isolate docker image [arg].
-func isolateImage(h *dun.Harness, arg string) string {
+func isolateImage(h *harness.Harness, arg string) string {
 	if arg == "" {
 		return "isolate: docker image " + h.DockerImage()
 	}
@@ -177,7 +177,7 @@ func isolateImage(h *dun.Harness, arg string) string {
 }
 
 // imageNote says what the new image affects now.
-func imageNote(h *dun.Harness) string {
+func imageNote(h *harness.Harness) string {
 	if h.IsDocker() {
 		return "commands now run in it"
 	}
@@ -193,7 +193,7 @@ func tailLines(s string, n int) string {
 }
 
 // isolateStatus is one line: where the files are and where commands run.
-func isolateStatus(h *dun.Harness) string {
+func isolateStatus(h *harness.Harness) string {
 	wt := h.Worktree()
 	dedicated := wt != nil && wt.Branch != ""
 	where := "in place: " + h.Workspace()
@@ -206,15 +206,15 @@ func isolateStatus(h *dun.Harness) string {
 		}
 		return "isolate: docker — " + where + "; commands in a container (image " + dockerImage(h) + ")"
 	}
-	mode := dun.IsoNone
+	mode := harness.IsoNone
 	if dedicated {
-		mode = dun.IsoWorktree
+		mode = harness.IsoWorktree
 	}
 	return "isolate: " + mode + " — " + where + "; commands on this machine"
 }
 
-func dockerImage(h *dun.Harness) string {
-	if d, ok := h.ExecBackend().(dun.DockerExec); ok {
+func dockerImage(h *harness.Harness) string {
+	if d, ok := h.ExecBackend().(harness.DockerExec); ok {
 		return d.Image
 	}
 	return h.DockerImage()
@@ -222,10 +222,10 @@ func dockerImage(h *dun.Harness) string {
 
 // isolateWorktree moves the session into a worktree (a fresh one unless it is
 // in one already) and sets where commands run: Docker or this machine.
-func isolateWorktree(h *dun.Harness, docker bool) string {
-	mode := dun.IsoWorktree
+func isolateWorktree(h *harness.Harness, docker bool) string {
+	mode := harness.IsoWorktree
 	if docker {
-		mode = dun.IsoDocker
+		mode = harness.IsoDocker
 	}
 	if wt := h.Worktree(); wt != nil && wt.Branch != "" && h.IsDocker() == docker {
 		return "isolate: already " + mode + "\n" + isolateStatus(h)
@@ -243,7 +243,7 @@ func isolateWorktree(h *dun.Harness, docker bool) string {
 		h.Rehoist(wt.Path, wt, docker)
 		return "isolate: " + mode + " — kept the worktree\n" + isolateStatus(h)
 	}
-	if _, isRepo := dun.WorktreeInPlace(h.Workspace()); !isRepo {
+	if _, isRepo := harness.WorktreeInPlace(h.Workspace()); !isRepo {
 		return "isolate: " + mode + " refused — " + h.Workspace() + " is not in a git repository, and a worktree needs one"
 	}
 	// The mounts are the session's, not nil. A worktree lives under
@@ -252,7 +252,7 @@ func isolateWorktree(h *dun.Harness, docker bool) string {
 	// with nil, the first build inside a worktree made mid-session failed
 	// on a dependency that resolves fine at startup. The same list Docker
 	// mounts, so both see one set of paths.
-	newWt, isRepo, err := dun.NewWorktree(h.Workspace(), h.Mounts())
+	newWt, isRepo, err := harness.NewWorktree(h.Workspace(), h.Mounts())
 	if err != nil {
 		return "isolate: " + mode + " failed — " + textfmt.OneLine(err.Error())
 	}
@@ -265,13 +265,13 @@ func isolateWorktree(h *dun.Harness, docker bool) string {
 
 // isolateOff goes back to the checkout, commands on this machine. A worktree
 // the session leaves stays on disk, and the reply says where.
-func isolateOff(h *dun.Harness) string {
-	if isolationMode(h) == dun.IsoNone {
+func isolateOff(h *harness.Harness) string {
+	if isolationMode(h) == harness.IsoNone {
 		return "isolate: already in place\n" + isolateStatus(h)
 	}
 	left := h.Worktree()
 	home := h.Home()
-	inPlace, _ := dun.WorktreeInPlace(home)
+	inPlace, _ := harness.WorktreeInPlace(home)
 	h.Rehoist(home, inPlace, false)
 	msg := "isolate: off — " + strings.TrimPrefix(isolateStatus(h), "isolate: none — ")
 	if left != nil && left.Branch != "" {
@@ -285,7 +285,7 @@ func isolateOff(h *dun.Harness) string {
 // every client: the command list (/isolate's state), and, when the session
 // moved, where it is now, as at start, so dund's dun_list shows the worktree
 // and every client the branch. Back in place, the branch is empty.
-func isolateEvents(h *dun.Harness, wsBefore, isoBefore string) []any {
+func isolateEvents(h *harness.Harness, wsBefore, isoBefore string) []any {
 	var out []any
 	if isolationMode(h) != isoBefore {
 		out = append(out, commandsEvent(h))
@@ -308,11 +308,11 @@ func isolateAlias(id, action string) (iso, note string, ok bool) {
 	case id == "docker" && (action == "" || action == "status"):
 		return "", "/docker is /isolate now", true
 	case id == "docker" && action == "on":
-		return dun.IsoDocker, "/docker on is /isolate docker now: a worktree, its commands in Docker", true
+		return harness.IsoDocker, "/docker on is /isolate docker now: a worktree, its commands in Docker", true
 	case id == "docker" && action == "off":
 		return "off", "/docker off is /isolate off now", true
 	case id == "worktree" && action == "new":
-		return dun.IsoWorktree, "/worktree new is /isolate worktree now", true
+		return harness.IsoWorktree, "/worktree new is /isolate worktree now", true
 	}
 	return "", "", false
 }

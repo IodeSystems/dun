@@ -60,13 +60,13 @@ What ragcore means here:
 **Present but unused by dund**: the root package also holds `acl.go`,
 `keys.go` and `Registry` (many indexes, ACL, admin). Store does not depend on
 them (`Open(path)` and `OpenIndex(home, name)` work without a Registry), so dund
-uses Store and the queue directly. Not checked: whether `worker.go`/`queue.go`
+uses Store and the queue directly. Not checked: whether `worker.go`/`internal/harness/queue.go`
 assume a Registry for multi-index scheduling; one index may need a small
 single-store adapter. The `attestations` table stays in the schema, unused.
 
 **Not used from ragcore** (USER: "doesn't really need attestation"): attestation,
 HTTP API, auth, UI, MCP server. Attestation is a judgment layer above
-retrieval. dun's memory already keeps its own log (`memattest.go` writes
+retrieval. dun's memory already keeps its own log (`internal/harness/memattest.go` writes
 `<note>.md.attest.jsonl` in raglit's `attest.Entry` shape), and the raglit
 server keeps its own over ragcore. What attestation needs from the core is a
 stable content id per fragment and "does this id still exist", which any
@@ -190,7 +190,7 @@ global/{memories,strategies}/
 ```
 
 Each index is its own raglit Home (`raglit.OpenHome`). The project slug is
-the caller's: dun's `raglitProject` (serverdefs.go, package `dun`), which
+the caller's: dun's `raglitProject` (internal/harness/serverdefs.go, package `dun`), which
 dund cannot import, so dund only checks it (`[a-z0-9._-]`, not `global`).
 An index is made on its first ingest. At start, dund opens the indexes on
 disk, so jobs queued before a restart run. A search or job list of an index
@@ -342,8 +342,8 @@ replaced embedder is not written (`TestReembedWhileAJobRuns`, `-race`).
 
 The memory tool and memory recall use dund; `/rag on` is not needed for
 them. Code and doc search are unchanged (raglit, `/rag on`). Code:
-`raglink.go` (the socket client), `memrecall.go` (search, degraded mode,
-sync), `memory.go` (the tool).
+`internal/harness/raglink.go` (the socket client), `internal/harness/memrecall.go` (search, degraded mode,
+sync), `internal/harness/memory.go` (the tool).
 
 - **Link.** A session dials dund's socket (`Socket(DUN_HOME)`) for each
   call, under dund or as a standalone `dun --engine`. `DUN_MEMORY=0`: no memory
@@ -407,7 +407,7 @@ Code: `internal/ragd/index.go`, `internal/ragd/codeseg.go`,
   `poly-lsp-mcp/segment@v0.5.0 gotreesitter@…`. It is `Models.Code` of the
   code+docs runner only; the memories+strategies runner has none. Binary:
   55.5 MB → 65.9 MB (stripped, linux/amd64, +10.4 MB).
-- **Files.** The workspace ingest rules (`rag_ingest.go`: git's file list or
+- **Files.** The workspace ingest rules (`internal/harness/rag_ingest.go`: git's file list or
   a walk that honors `.gitignore`, dependency and build directories, the
   directory and file size limits, binary files, the `rag` section of
   dun.json). dund calls `dun.IndexFiles(root)`; ragd does not import package
@@ -453,8 +453,8 @@ Code: `internal/ragd/index.go`, `internal/ragd/codeseg.go`,
 
 ## Built: session code and doc search
 
-Code: `codesearch.go`, `raglink.go` (`Index`), `servers_runtime.go` (the
-wiring), `notify.go` (the groups' kind and pointer).
+Code: `internal/harness/codesearch.go`, `internal/harness/raglink.go` (`Index`), `internal/harness/servers_runtime.go` (the
+wiring), `internal/harness/notify.go` (the groups' kind and pointer).
 
 - **Index.** A root session sends `rag_index {project, root: workspace}`
   when it starts and again when each turn ends (`turnThenTriggers`, with or
@@ -496,13 +496,13 @@ wiring), `notify.go` (the groups' kind and pointer).
 
 ## Built: sessions index
 
-USER 2026-11-17. Code: `sessionindex_dund.go`, `internal/ragd/ragd.go`
-(`projectIndexes`), `servers_runtime.go` (the tool).
+USER 2026-11-17. Code: `internal/harness/sessionindex_dund.go`, `internal/ragd/ragd.go`
+(`projectIndexes`), `internal/harness/servers_runtime.go` (the tool).
 
 - **Index.** `<project>/sessions`, a project's only (global refuses it), on
   the memory runner (prose, small; a bulk code ingest does not hold it up).
 - **Put.** agentkit's `SessionIndex.Put`, after a fold (the Shaper) or a
-  recap (`recap.go`): the span is written to `<session>.folds/<key>.md`
+  recap (`internal/harness/recap.go`): the span is written to `<session>.folds/<key>.md`
   beside the root session's log (a sub-agent's go under its root's), then
   `rag_sync` of every span file in the directory, each tagged
   `session:<id>` and `kind:<fold|recap>`, titled by the span's first
@@ -540,7 +540,7 @@ USER 2026-11-09: worktrees are raglit branches. Code: `internal/ragd/branch.go`,
   root as walked (a symlink inside the tree is not resolved). Applied to the
   `rag_index` root (`ragIndex` walks the canonical root), the files given to
   `Host.Index` (`canonFiles`), the search `root` and `path_prefix`
-  (`canonPrefix`), and the session's root (`codesearch.go`). Why: raglit
+  (`canonPrefix`), and the session's root (`internal/harness/codesearch.go`). Why: raglit
   translates worktree paths by string prefix and resolves no symlinks, and
   `WorktreeOf` returns git's resolved path; `/tmp` is a symlink on macOS.
   Documents an index got before this rule under another spelling are not

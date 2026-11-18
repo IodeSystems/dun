@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/enginecmd"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/tui"
 	"github.com/iodesystems/dun/proto"
 )
@@ -25,7 +25,7 @@ import (
 // offers. A user's or project's that would shadow one of dun's commands, the
 // engine's or the TUI's own, keeps its server and hooks and loses the slash
 // command; refused says which.
-func engineExtensions(all []dun.Extension) (ok []dun.Extension, refused []string) {
+func engineExtensions(all []harness.Extension) (ok []harness.Extension, refused []string) {
 	taken := map[string]bool{}
 	for _, c := range enginecmd.OwnCommands("") {
 		taken[c.Name] = true
@@ -34,7 +34,7 @@ func engineExtensions(all []dun.Extension) (ok []dun.Extension, refused []string
 		taken[c.Name] = true
 	}
 	for _, e := range all {
-		if n := e.SlashName(); n != "" && e.Source != dun.ExtBundled && taken[n] {
+		if n := e.SlashName(); n != "" && e.Source != harness.ExtBundled && taken[n] {
 			refused = append(refused, fmt.Sprintf("%s: slash.name: /%s is dun's own command; loaded without a slash command", e.ID, n))
 			e.Slash = nil
 		}
@@ -44,7 +44,7 @@ func engineExtensions(all []dun.Extension) (ok []dun.Extension, refused []string
 }
 
 // extListing is /ext: every extension, then the manifests that did not load.
-func extListing(h *dun.Harness) string {
+func extListing(h *harness.Harness) string {
 	exts, refused := engineExtensions(h.Extensions())
 	running := map[string]bool{}
 	for _, st := range h.Servers() {
@@ -96,7 +96,7 @@ func extListing(h *dun.Harness) string {
 			b.WriteString("\n    " + e.Description)
 		}
 	}
-	errs := append(h.ExtensionErrors(), dun.RegistryErrors()...)
+	errs := append(h.ExtensionErrors(), harness.RegistryErrors()...)
 	if len(errs) > 0 || len(refused) > 0 {
 		b.WriteString("\nnot loaded:")
 		for _, e := range errs {
@@ -106,19 +106,19 @@ func extListing(h *dun.Harness) string {
 			b.WriteString("\n  " + r)
 		}
 	}
-	fmt.Fprintf(&b, "\nadd one: %s/<id>/%s, or .dun/extensions/<id>/ in a project (examples/extensions in dun's repo)", dun.UserExtensionsDir(), dun.ExtensionFile)
+	fmt.Fprintf(&b, "\nadd one: %s/<id>/%s, or .dun/extensions/<id>/ in a project (examples/extensions in dun's repo)", harness.UserExtensionsDir(), harness.ExtensionFile)
 	return b.String()
 }
 
 // extensionsEvent is every extension for a UI's /ext list.
-func extensionsEvent(h *dun.Harness) *proto.Extensions {
+func extensionsEvent(h *harness.Harness) *proto.Extensions {
 	exts, refused := engineExtensions(h.Extensions())
 	ev := &proto.Extensions{Items: []proto.ExtItem{}, Errors: refused,
-		AddPath: dun.UserExtensionsDir() + "/<id>/" + dun.ExtensionFile}
+		AddPath: harness.UserExtensionsDir() + "/<id>/" + harness.ExtensionFile}
 	for _, e := range h.ExtensionErrors() {
 		ev.Errors = append(ev.Errors, e.Error())
 	}
-	for _, e := range dun.RegistryErrors() { // an entry that fit and did not load: the built-in one is in use
+	for _, e := range harness.RegistryErrors() { // an entry that fit and did not load: the built-in one is in use
 		ev.Errors = append(ev.Errors, e.Error())
 	}
 	for _, e := range exts {
@@ -175,14 +175,14 @@ func parseWatch(args []string) (dir, index string, err error) {
 // parseAttach reads "<index> [--session|--project|--global]" (bare: the
 // session); no index, or --list, lists.
 func parseAttach(args []string) (index, scope string, list bool, err error) {
-	scope = dun.ScopeSession
+	scope = harness.ScopeSession
 	for _, a := range args {
 		if a == "--list" || a == "-l" {
 			list = true
 			continue
 		}
 		if strings.HasPrefix(a, "-") {
-			s, ok := dun.ParseScope(a)
+			s, ok := harness.ParseScope(a)
 			if !ok {
 				return "", "", false, fmt.Errorf("unknown flag %s", a)
 			}
@@ -199,7 +199,7 @@ func parseAttach(args []string) (index, scope string, list bool, err error) {
 
 // extIndexCmd carries out /<slash> watch|attach|detach for extension id;
 // the answer is the message shown.
-func extIndexCmd(ctx context.Context, h *dun.Harness, verb, id, rest string) string {
+func extIndexCmd(ctx context.Context, h *harness.Harness, verb, id, rest string) string {
 	slash := id
 	for _, e := range h.Extensions() {
 		if e.ID == id && e.SlashName() != "" {
@@ -251,7 +251,7 @@ func extIndexCmd(ctx context.Context, h *dun.Harness, verb, id, rest string) str
 }
 
 // attachListing is bare /<slash> attach: each attached index and its scopes.
-func attachListing(h *dun.Harness, id, slash string) string {
+func attachListing(h *harness.Harness, id, slash string) string {
 	at, err := h.Attachments(id)
 	if err != nil {
 		return "error: " + err.Error()
@@ -270,15 +270,15 @@ func attachListing(h *dun.Harness, id, slash string) string {
 // workspaceCmd is /<slash> workspace [on|off] [--session|--project|--global]:
 // whether the workspace is read into an index; bare says. The scope is the
 // project's unless named (USER 2026-10-27).
-func workspaceCmd(h *dun.Harness, slash string, args []string) string {
+func workspaceCmd(h *harness.Harness, slash string, args []string) string {
 	usage := "usage: /" + slash + " workspace [on|off] [--session|--project|--global]"
-	scope, set := dun.ScopeProject, ""
+	scope, set := harness.ScopeProject, ""
 	for _, a := range args {
 		switch {
 		case a == "on" || a == "off":
 			set = a
 		case strings.HasPrefix(a, "-"):
-			s, ok := dun.ParseScope(a)
+			s, ok := harness.ParseScope(a)
 			if !ok {
 				return usage + " — unknown flag " + a
 			}

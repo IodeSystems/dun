@@ -20,10 +20,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/dundcli"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/internal/tui"
@@ -45,7 +45,7 @@ import (
 // <module>@<the version this dun supports>` (release.Supported; built from
 // source, checked against the Go checksum database) when Go is on PATH,
 // beside dun when that directory is writable — where the engine looks after
-// PATH (dun.FindCommand). Nothing is downloaded from anywhere else.
+// PATH (harness.FindCommand). Nothing is downloaded from anywhere else.
 //
 // Each binary's origin is said too (release, go install, a checkout), read
 // from its build info: it decides how that binary updates. A tool older
@@ -270,7 +270,7 @@ func (d *doctor) tools() {
 	_, svcInstalled := dundcli.ServiceFile(dundcli.ServiceUnit)
 	for _, t := range doctorTools {
 		level := t.level
-		p, err := dun.FindCommand(t.name)
+		p, err := harness.FindCommand(t.name)
 		if err != nil {
 			p, err = d.install(t.name)
 		}
@@ -278,7 +278,7 @@ func (d *doctor) tools() {
 			what := "not installed (not on PATH or beside dun)"
 			if t.need != "" {
 				what += ", needed only for " + t.need
-			} else if inst, ok := dun.ToolInstall[t.name]; ok {
+			} else if inst, ok := harness.ToolInstall[t.name]; ok {
 				what += ": " + inst.Lost
 			}
 			d.add(level, "tool", t.name+": "+what, toolFix(t.name, err))
@@ -323,7 +323,7 @@ func (d *doctor) install(name string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("go install %s: %w", mod, err)
 	}
-	p, err := dun.FindCommand(name)
+	p, err := harness.FindCommand(name)
 	if err != nil && dir == "" {
 		return "", fmt.Errorf("installed into go's bin directory (go env GOBIN, else $(go env GOPATH)/bin), which is not on PATH: put it on PATH")
 	}
@@ -337,7 +337,7 @@ var (
 
 // toolFix is the install step for a tool that is not there.
 func toolFix(name string, err error) string {
-	inst, ok := dun.ToolInstall[name]
+	inst, ok := harness.ToolInstall[name]
 	if a, _, pinned := pinnedTool(name); pinned && errors.Is(err, errNotFixed) {
 		return "dun doctor --fix (downloads " + name + " " + a.Version + " from its release; the sha256 is pinned in this build)"
 	}
@@ -373,7 +373,7 @@ func besideDun(p string) bool {
 
 // polyLSP names the poly-lsp-mcp the engines run — the one on the
 // service's PATH when the service sets one, else this shell's — and whether
-// it speaks the index protocol (dun.IndexProtocol): an initialize that
+// it speaks the index protocol (harness.IndexProtocol): an initialize that
 // answers before the index is built, and --exclude. An older build makes the
 // code server "starting" for as long as its index takes.
 func (d *doctor) polyLSP() {
@@ -490,7 +490,7 @@ func (d *doctor) polyLSPLanguages(bin string) {
 	cmd := exec.CommandContext(ctx, bin, "doctor", "--json", "--root", ".")
 	cmd.Env = append(os.Environ(), "LSP_REBUILD_DONE=1")
 	out, _ := cmd.Output() // exit 1 is "found a problem", with the JSON all the same
-	if rep, ok := dun.ParseDoctorLanguages(out); ok {
+	if rep, ok := harness.ParseDoctorLanguages(out); ok {
 		d.addLanguages(rep)
 	}
 	d.addToolUpdate("poly-lsp-mcp", parsePolyUpdate(out))
@@ -498,9 +498,9 @@ func (d *doctor) polyLSPLanguages(bin string) {
 
 // addLanguages is a warn per missing language server; a language that is
 // tree-sitter only by design is fine and left out.
-func (d *doctor) addLanguages(rep dun.SetupReport) {
+func (d *doctor) addLanguages(rep harness.SetupReport) {
 	for _, l := range rep.MissingLSPs() {
-		detail := fmt.Sprintf("%s missing for %s (%s)", l.LSP.Name, dun.LangName(l.Lang), textfmt.Plural(l.Files, "file"))
+		detail := fmt.Sprintf("%s missing for %s (%s)", l.LSP.Name, harness.LangName(l.Lang), textfmt.Plural(l.Files, "file"))
 		fix := "install it, or leave it: dun works from tree-sitter alone"
 		if l.Install != nil {
 			fix = l.Install.Cmd
@@ -529,7 +529,7 @@ func (d *doctor) raglit() {
 }
 
 // addRaglit is the findings for one raglit report.
-func (d *doctor) addRaglit(rep dun.RaglitDoctor) {
+func (d *doctor) addRaglit(rep harness.RaglitDoctor) {
 	for _, c := range rep.Capabilities {
 		if c.On {
 			continue
@@ -538,7 +538,7 @@ func (d *doctor) addRaglit(rep dun.RaglitDoctor) {
 		if c.Needs != "" {
 			detail += " — needs " + c.Needs
 		}
-		d.add("ok", "raglit", detail, dun.RagHow(c.How, "rag"))
+		d.add("ok", "raglit", detail, harness.RagHow(c.How, "rag"))
 	}
 	for _, e := range rep.Extractors {
 		if e.Found {
@@ -564,7 +564,7 @@ func (d *doctor) addRaglit(rep dun.RaglitDoctor) {
 
 // polyLSPAt is polyLSP's finding for the binary bin, found on where.
 func (d *doctor) polyLSPAt(bin, where string) {
-	sup, resolved, err := dun.IndexProtocol(bin)
+	sup, resolved, err := harness.IndexProtocol(bin)
 	switch {
 	case err != nil:
 		d.add("warn", "poly-lsp", resolved+" (on "+where+"): could not ask it: "+textfmt.OneLine(err.Error()), "update it (poly-lsp: make install)")

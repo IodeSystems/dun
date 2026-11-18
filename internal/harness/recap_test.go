@@ -1,0 +1,639 @@
+package harness
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+	"unicode/utf8"
+
+	"github.com/iodesystems/agentkit/agent"
+	"github.com/iodesystems/agentkit/llm"
+)
+
+// convo builds a conversation: a user message, then churn, then the live recap
+// call the model is inside when it asks for this.
+func convo() []agent.Entry {
+	at := int64(0)
+	e := func(k agent.EntryKind, content, callID, tool string) agent.Entry {
+		at++
+		return agent.Entry{ID: "e" + string(rune('a'+at)), Kind: k, Content: content,
+			ToolCallID: callID, ToolName: tool, CreatedAt: at}
+	}
+	return []agent.Entry{
+		e(agent.KindUser, "make the parser handle nested quotes", "", ""),
+		e(agent.KindAssistant, "let me try regex", "", ""),
+		e(agent.KindToolCall, `{"command":"go test"}`, "c1", "exec"),
+		e(agent.KindToolResult, strings.Repeat("FAIL output ", 500), "c1", "exec"),
+		e(agent.KindAssistant, "that was wrong, trying a stack", "", ""),
+		e(agent.KindToolCall, `{"command":"go test"}`, "c2", "exec"),
+		e(agent.KindToolResult, "ok", "c2", "exec"),
+		e(agent.KindAssistant, "recapping now", "", ""),
+		e(agent.KindToolCall, `{"from":"nested quotes"}`, "c9", "recap"),
+	}
+}
+
+// The span is everything after the anchor, and the churn is what goes.
+func TestPlanRecap_ReplacesTheSpanAfterTheAnchor(t *testing.T) {
+	sp, err := planRecap(convo(), "nested quotes", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sp.Anchor == nil || !strings.Contains(sp.Anchor.Content, "nested quotes") {
+		t.Fatalf("anchor should be the user message, got %+v", sp.Anchor)
+	}
+	if sp.Chars < 5000 {
+		t.Errorf("the big tool result should dominate the saving, got %d chars", sp.Chars)
+	}
+	for _, e := range sp.Subsumes {
+		if e.ToolCallID == "c9" {
+			t.Fatal("the live recap call must never be subsumed — its own result would be orphaned")
+		}
+	}
+}
+
+// The one shape a provider rejects outright is a call without its result. A
+// kept id keeps BOTH halves; an unkept one loses both.
+func TestPlanRecap_KeepsToolPairsWhole(t *testing.T) {
+	sp, err := planRecap(convo(), "nested quotes", []string{"c2"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept := map[string]int{}
+	for _, e := range sp.Kept {
+		kept[e.ToolCallID]++
+	}
+	if kept["c2"] != 2 {
+		t.Errorf("a kept call must keep its call AND its result, got %d entries", kept["c2"])
+	}
+	dropped := map[string]int{}
+	for _, e := range sp.Subsumes {
+		if e.ToolCallID != "" {
+			dropped[e.ToolCallID]++
+		}
+	}
+	if dropped["c1"] != 2 {
+		t.Errorf("an unkept call must lose both halves, got %d", dropped["c1"])
+	}
+	if dropped["c2"] != 0 {
+		t.Error("a kept call must not also appear in the removed set")
+	}
+}
+
+func TestPlanRecap_RefusesWhatItCannotAnchor(t *testing.T) {
+	if _, err := planRecap(convo(), "a phrase nobody said", nil, nil); err == nil {
+		t.Error("an unmatched anchor must be an error, not a silent whole-conversation wipe")
+	}
+	// No from: the span starts at the user's latest message.
+	sp, err := planRecap(convo(), "", nil, nil)
+	if err != nil || sp.Anchor == nil || sp.Anchor.Kind != agent.KindUser {
+		t.Fatalf("no from should anchor on the latest user message, got %+v %v", sp.Anchor, err)
+	}
+	// The anchor is matched from the END backwards, so the most recent wins.
+	sp, err = planRecap(convo(), "go test", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sp.Anchor.ToolCallID != "c2" {
+		t.Errorf("the LAST match should anchor, got %q", sp.Anchor.ToolCallID)
+	}
+}
+
+// End to end against a real store: the churn leaves the context, the summary
+// takes its place, the removed entries are on disk, and the citation never
+// reaches the model.
+func TestRecap_MovesChurnToDiskAndOutOfContext(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir()) // the stubs' result files
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.jsonl")
+	st, err := openSessionStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &Harness{store: st, cfg: Config{SessionFile: path}}
+	for _, e := range convo() {
+		st.appendSilent(e)
+	}
+	before, _ := st.Context(context.Background(), "dun")
+
+	sp, err := planRecap(before, "nested quotes", []string{"c2"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	note, err := h.applyRecap(sp, "The parser needed a stack, not a regex. Done and tested.")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	after, _ := st.Context(context.Background(), "dun")
+	text := ""
+	for _, e := range after {
+		text += e.Content
+		if e.Kind == kindRecap {
+			t.Error("the citation must be filtered out of the model's context")
+		}
+	}
+	if strings.Contains(text, "FAIL output") {
+		t.Error("the churn is still in context")
+	}
+	if !strings.Contains(text, "a stack, not a regex") {
+		t.Error("the summary did not take its place")
+	}
+	if !strings.Contains(text, "make the parser handle nested quotes") {
+		t.Error("the anchor itself must survive — the span starts AFTER it")
+	}
+	// The kept pair survives whole, and the live call is still there to receive
+	// its result.
+	var c2, c9 int
+	for _, e := range after {
+		switch e.ToolCallID {
+		case "c2":
+			c2++
+		case "c9":
+			c9++
+		}
+	}
+	if c2 != 2 || c9 != 1 {
+		t.Errorf("kept pair=%d live call=%d — both must survive", c2, c9)
+	}
+
+	// Nothing was destroyed: the sidecar holds what left.
+	side := filepath.Join(dir, "s.recap1.jsonl")
+	data, err := os.ReadFile(side)
+	if err != nil {
+		t.Fatalf("the removed entries must be on disk: %v", err)
+	}
+	if !strings.Contains(string(data), "FAIL output") {
+		t.Error("the sidecar should hold the churn — it is the evidence for fixing the tooling")
+	}
+	if !strings.Contains(note, "s.recap1.jsonl") {
+		t.Errorf("the citation must name where the churn went: %q", note)
+	}
+}
+
+// Recap stays in the current turn: a span never crosses a user message, so a
+// correction typed between turns can never become the model's paraphrase.
+func TestPlanRecap_StaysInTheCurrentTurn(t *testing.T) {
+	entries := append(convo()[:7:7],
+		agent.Entry{ID: "u2", Kind: agent.KindUser, Content: "no — keep the regex for single quotes"},
+		agent.Entry{ID: "a2", Kind: agent.KindAssistant, Content: "ok"},
+		agent.Entry{ID: "t2", Kind: agent.KindToolCall, Content: `{"command":"go vet"}`, ToolCallID: "c3", ToolName: "exec"},
+		agent.Entry{ID: "r2", Kind: agent.KindToolResult, Content: "vet ok", ToolCallID: "c3", ToolName: "exec"},
+		agent.Entry{ID: "a3", Kind: agent.KindAssistant, Content: "recapping"},
+		agent.Entry{ID: "t9", Kind: agent.KindToolCall, Content: `{}`, ToolCallID: "c9", ToolName: "recap"},
+	)
+	sp, err := planRecap(entries, "", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sp.Anchor == nil || sp.Anchor.ID != "u2" {
+		t.Fatalf("the span should start after the latest user message, got %+v", sp.Anchor)
+	}
+	for _, e := range sp.Subsumes {
+		if e.Kind == agent.KindUser || strings.Contains(e.Content, "FAIL output") {
+			t.Fatalf("the span reached into an earlier turn: %+v", e)
+		}
+	}
+	_, err = planRecap(entries, "nested quotes", nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "current turn") {
+		t.Fatalf("a from before the latest user message must be refused and say why, got %v", err)
+	}
+	// The user's message itself may be quoted: it is the turn's start.
+	if sp, err := planRecap(entries, "keep the regex", nil, nil); err != nil || sp.Anchor.ID != "u2" {
+		t.Fatalf("quoting the latest user message should anchor on it, got %+v %v", sp.Anchor, err)
+	}
+}
+
+// Words the user typed mid-turn ride a tool result (liftQueued). When that
+// result is recapped they go into the summary word for word, in order, and
+// nothing else lifted with them does.
+func TestRecap_KeepsWhatTheUserSaidMidTurnVerbatim(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir()) // the stubs' result files
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	st, _ := openSessionStore(path)
+	h := &Harness{store: st, cfg: Config{SessionFile: path}}
+	entries := convo()
+	entries[3].Content += "\n\n[user] not the lexer — the parser\nline two" +
+		"\n\n[background] job 2 finished" +
+		"\n\n[user] and keep it under 100 lines"
+	for _, e := range entries {
+		st.appendSilent(e)
+	}
+	out := h.runRecap(context.Background(), "", "Switched to a stack; tests pass.", nil, nil)
+	if strings.Contains(out, "ERROR") {
+		t.Fatal(out)
+	}
+	after, _ := st.Context(context.Background(), "dun")
+	var summary string
+	for _, e := range after {
+		if strings.Contains(e.Content, "Switched to a stack") {
+			summary = e.Content
+		}
+	}
+	want := "Switched to a stack; tests pass.\n\nThe user said, during this span (verbatim):\n" +
+		"1. \"not the lexer — the parser\\nline two\"\n2. \"and keep it under 100 lines\""
+	// The stub list follows the user's words (recapstub.go).
+	summary, _, _ = strings.Cut(summary, "\n\n"+recapStubHead)
+	if summary != want {
+		t.Fatalf("summary as stored:\n%s\nwant:\n%s", summary, want)
+	}
+}
+
+// After the task is done, a recap result that says "continue" sent the model
+// back to check its work again (USER 2026-10-27 benchmark).
+func TestRecap_ResultSaysToAnswerWhenDone(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir()) // the stubs' result files
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	st, _ := openSessionStore(path)
+	h := &Harness{store: st, cfg: Config{SessionFile: path}}
+	for _, e := range convo() {
+		st.appendSilent(e)
+	}
+	out := h.runRecap(context.Background(), "", "done", nil, nil)
+	if !strings.Contains(out, "If the task is done, answer now") || strings.Contains(out, "Continue from here") {
+		t.Fatalf("result: %q", out)
+	}
+}
+
+// Recap never asks — not even with an Ask configured — and what it did is
+// REPORTED instead: the count in Note, and the replacement text in Detail.
+// Visibility after the fact is the whole of the trade for dropping the prompt.
+func TestRecap_AppliesWithoutAskingAndReports(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir()) // the stubs' result files
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	st, _ := openSessionStore(path)
+	var note RecapNote
+	h := &Harness{store: st, cfg: Config{
+		SessionFile: path,
+		Ask: func(_ context.Context, q string, _ []string, _ bool, _ []string) (string, error) {
+			t.Errorf("recap must not ask; it asked %q", q)
+			return "leave it alone", nil
+		},
+		OnRecap: func(n RecapNote) { note = n },
+	}}
+	for _, e := range convo() {
+		st.appendSilent(e)
+	}
+	before, _ := st.Context(context.Background(), "dun")
+
+	out := h.runRecap(context.Background(), "nested quotes", "a summary", nil, nil)
+	if strings.Contains(out, "ERROR") || strings.Contains(out, "declined") {
+		t.Fatalf("recap should have applied: %q", out)
+	}
+	after, _ := st.Context(context.Background(), "dun")
+	if len(after) >= len(before) {
+		t.Fatalf("recap did not shrink the conversation: %d → %d", len(before), len(after))
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(path), "s.recap1.jsonl")); err != nil {
+		t.Errorf("the removed entries must be on disk: %v", err)
+	}
+	if note.Entries == 0 || note.Note == "" {
+		t.Errorf("the UI must be told the count and the citation: %+v", note)
+	}
+	if !strings.Contains(note.Detail, "Removed") || !strings.Contains(note.Detail, "a summary") {
+		t.Errorf("the detail must carry the count AND the replacement: %q", note.Detail)
+	}
+}
+
+// The same, with no Ask configured at all — a sub-agent.
+func TestRecap_ChildRecapsWithoutAsking(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir()) // the stubs' result files
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	st, _ := openSessionStore(path)
+	h := &Harness{store: st, cfg: Config{SessionFile: path}} // no Ask: a child
+	for _, e := range convo() {
+		st.appendSilent(e)
+	}
+	out := h.runRecap(context.Background(), "nested quotes", "the answer is a stack", nil, nil)
+	if strings.Contains(out, "ERROR") || strings.Contains(out, "declined") {
+		t.Fatalf("a child should recap freely: %q", out)
+	}
+	after, _ := st.Context(context.Background(), "dun")
+	text := ""
+	for _, e := range after {
+		text += e.Content
+	}
+	if strings.Contains(text, "FAIL output") {
+		t.Error("the child's churn should be gone")
+	}
+	_ = time.Now
+}
+
+// The model cannot see tool_call ids — they are protocol-level and never appear
+// in its context. Live run: it invented "exec_2", matched nothing, and silently
+// lost the one result it had asked to keep. So keep takes a tool NAME or a
+// phrase from the call's arguments, and anything that matches nothing is SAID.
+func TestPlanRecap_KeepMatchesWhatTheModelCanActuallySee(t *testing.T) {
+	// A bare tool NAME keeps only that tool's MOST RECENT call. Keeping every
+	// call of it preserved the 255,720-character `cat` the recap existed to
+	// remove — measured on the first run where a model recapped unprompted, and
+	// the model reaches for the name it knows rather than a phrase.
+	byName, err := planRecap(convo(), "nested quotes", []string{"exec"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept := 0
+	for _, e := range byName.Kept {
+		if e.ToolName == "exec" {
+			kept++
+		}
+	}
+	if kept != 2 { // the latest call and its result, not every exec ever run
+		t.Errorf("a bare tool name should keep only the most recent call, got %d entries", kept)
+	}
+	// …and the big early result is NOT rescued by naming the tool.
+	rescued := false
+	for _, e := range byName.Kept {
+		if e.ToolCallID == "c1" {
+			rescued = true
+		}
+	}
+	if rescued {
+		t.Error("naming a tool must not preserve its oldest, largest result")
+	}
+
+	byArgs, err := planRecap(convo(), "nested quotes", []string{"go test"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(byArgs.Kept) < 2 {
+		t.Errorf("a phrase from the arguments should keep that call, got %d", len(byArgs.Kept))
+	}
+
+	// The failure that actually happened: an id the model made up.
+	invented, err := planRecap(convo(), "nested quotes", []string{"exec_2"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(invented.Unmatched) != 1 || invented.Unmatched[0] != "exec_2" {
+		t.Fatalf("an unmatched keep term must be reported, got %v", invented.Unmatched)
+	}
+	if !strings.Contains(invented.report("s"), "matched nothing") {
+		t.Error("the human must be told a keep term was not honoured")
+	}
+}
+
+// The recap call's own arguments quote the keep terms, so it matched itself and
+// the confirmation read "keeping the exec, recap calls" — true, and confusing.
+// It is kept unconditionally anyway.
+func TestPlanRecap_KeepDoesNotMatchTheRecapCallItself(t *testing.T) {
+	sp, err := planRecap(convo(), "nested quotes", []string{"from"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range sp.KeptCalls {
+		if name == "recap" {
+			t.Fatalf("the live call must not appear in the kept list: %v", sp.KeptCalls)
+		}
+	}
+}
+
+// The two shapes worth catching, named by the USER: a big result just landed,
+// or the same tool is being hammered. Both are churn at the moment it is made,
+// which is when a suggestion is worth anything.
+func TestRecapCue_FiresOnTheShapeOfTheChurn(t *testing.T) {
+	call := func(tool string) agent.Entry {
+		return agent.Entry{Kind: agent.KindToolCall, ToolName: tool, Content: "{}"}
+	}
+	result := func(tool string, n int) agent.Entry {
+		return agent.Entry{ID: "r" + tool + fmt.Sprint(n), Kind: agent.KindToolResult,
+			ToolName: tool, Content: strings.Repeat("x", n)}
+	}
+
+	// Flailing that COSTS something: three exec calls in a row whose results are
+	// worth removing.
+	cue, ok := recapCueFor([]agent.Entry{call("exec"), result("exec", 5000), call("exec"), result("exec", 5000)}, "exec", 10)
+	if !ok || !strings.Contains(cue.detail, "3 times in a row") {
+		t.Fatalf("repetition should be caught: %+v ok=%v", cue, ok)
+	}
+
+	// …but cheap repetition is not churn. Found by dogfooding on a real task:
+	// three node_query calls returning 44, 112 and 375 characters fired the cue,
+	// and the model was RIGHT to ignore it. A suggestion that is correct to
+	// ignore teaches the model to ignore suggestions.
+	if _, ok := recapCueFor([]agent.Entry{call("node_query"), result("node_query", 44),
+		call("node_query"), result("node_query", 112)}, "node_query", 375); ok {
+		t.Error("repetition with nothing to reclaim must stay silent")
+	}
+
+	// Two in a row is still a plan.
+	if _, ok := recapCueFor([]agent.Entry{call("exec"), result("exec", 10)}, "exec", 10); ok {
+		t.Error("two calls of the same tool must not read as flailing")
+	}
+
+	// A large result the model has since moved past — moving past it is what
+	// the current call proves.
+	big := []agent.Entry{call("exec"), result("exec", 300000), call("eval"), result("eval", 20)}
+	cue, ok = recapCueFor(big, "eval", 20)
+	if !ok || !strings.Contains(cue.detail, "300000-character exec result") {
+		t.Fatalf("a superseded large result should be named: %+v ok=%v", cue, ok)
+	}
+
+	// Nothing large, nothing repeated: say nothing.
+	if _, ok := recapCueFor([]agent.Entry{call("exec"), result("exec", 50)}, "eval", 20); ok {
+		t.Error("an ordinary exchange must not be nudged")
+	}
+}
+
+// A suggestion is made once. Repeating it every call is how a useful signal
+// becomes something the model learns to skip.
+func TestRecapCue_NeverRepeatsItself(t *testing.T) {
+	st, _ := openSessionStore("")
+	h := &Harness{store: st, wake: make(chan struct{}, 1)}
+	st.appendSilent(agent.Entry{Kind: agent.KindUser, Content: "count the errors in big.log please"})
+	st.appendSilent(agent.Entry{ID: "big1", Kind: agent.KindToolResult, ToolName: "exec",
+		Content: strings.Repeat("x", 300000)})
+
+	h.watchRecap("eval", 20)
+	first := h.notes()
+	if len(first) != 1 {
+		t.Fatalf("the first superseded large result should be raised, got %d", len(first))
+	}
+	if !strings.Contains(first[0], "recap({summary:") || strings.Contains(first[0], "from:") {
+		t.Errorf("the suggestion must carry the call, with no anchor to misquote: %q", first[0])
+	}
+	h.watchRecap("eval", 20)
+	if n := h.notes(); len(n) != 0 {
+		t.Errorf("the same cue must not be raised twice: %q", n)
+	}
+}
+
+// The window-size fallback, for churn with no shape.
+func TestRecapNudge_ArrivesWhenItIsExpensiveAndNamesTheOffender(t *testing.T) {
+	st, _ := openSessionStore("")
+	h := &Harness{store: st, wake: make(chan struct{}, 1)}
+	st.appendSilent(agent.Entry{Kind: agent.KindUser, Content: "how many lines in big.log contain ERROR and why"})
+	st.appendSilent(agent.Entry{Kind: agent.KindToolResult, ToolName: "exec", Content: strings.Repeat("log line ", 30000)})
+
+	// Below the threshold: a small session is never nagged.
+	h.maybeNudgeRecap(1000)
+	if n := h.notes(); len(n) != 0 {
+		t.Fatalf("a small window must not be nudged: %q", n)
+	}
+
+	h.maybeNudgeRecap(40000)
+	notes := h.notes()
+	if len(notes) != 1 {
+		t.Fatalf("a large window should earn exactly one reminder, got %d", len(notes))
+	}
+	msg := notes[0]
+	if !strings.Contains(msg, "from exec") {
+		t.Errorf("the reminder must name what is filling the window: %q", msg)
+	}
+	if !strings.Contains(msg, "~40000 tokens") {
+		t.Errorf("the fallback is about SIZE, so it must say the size: %q", msg)
+	}
+	if !strings.Contains(msg, "recap({summary:") {
+		t.Errorf("it must show the call, not just mention the idea: %q", msg)
+	}
+
+	// Repeating it every chat round past the threshold would be nagging.
+	h.maybeNudgeRecap(41000)
+	if n := h.notes(); len(n) != 0 {
+		t.Errorf("the same reminder must not repeat without real growth: %q", n)
+	}
+	h.maybeNudgeRecap(60000)
+	if n := h.notes(); len(n) != 1 {
+		t.Errorf("real growth should earn a fresh reminder, got %d", len(n))
+	}
+}
+
+// A big window with no single offender is compaction's problem, not recap's:
+// there is nothing specific to point at, and vague advice is what already
+// failed.
+func TestRecapNudge_SilentWithNoSingleOffender(t *testing.T) {
+	st, _ := openSessionStore("")
+	h := &Harness{store: st, wake: make(chan struct{}, 1)}
+	for i := 0; i < 50; i++ {
+		st.appendSilent(agent.Entry{Kind: agent.KindAssistant, Content: strings.Repeat("x", 500)})
+	}
+	h.maybeNudgeRecap(40000)
+	if n := h.notes(); len(n) != 0 {
+		t.Errorf("no single large entry means nothing to name: %q", n)
+	}
+}
+
+// The cap is universal (USER): nothing about the harm is specific to exec. A
+// node_read of a big file, a search with many hits and an eval returning a big
+// structure all cost the same window, so the cap lives around EVERY tool.
+func TestRecapWatch_CapsEveryTool(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	dir := t.TempDir()
+	st, _ := openSessionStore(filepath.Join(dir, "s.jsonl"))
+	h := &Harness{store: st, wake: make(chan struct{}, 1), cfg: Config{SessionFile: filepath.Join(dir, "s.jsonl")}}
+
+	huge := strings.Repeat("{\"hit\": \"result line\"},\n", 20000)
+	inner := func(context.Context, llm.ToolCall) (string, error) { return huge, nil }
+	d := withRecapWatch(inner, h)
+
+	var tc llm.ToolCall
+	tc.Function.Name, tc.Function.Arguments = "search", "{}"
+	out, err := d(context.Background(), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) > execInlineMax+400 {
+		t.Fatalf("a non-exec tool went uncapped: %d characters", len(out))
+	}
+	// Structured output is clipped too, knowingly: an unbounded result would
+	// only have to start with "{" to reopen the hole.
+	if !strings.Contains(out, "characters elided") {
+		t.Errorf("the gap must say what happened: %q", out[:200])
+	}
+	// A PATH in the isolation tmp, read with file_read (isotmp.go).
+	m := regexp.MustCompile(`saved to (\S+) — read it with file_read`).FindStringSubmatch(out)
+	if m == nil {
+		t.Fatalf("the gap must name the saved file and how to read it: %q", out[len(out)-300:])
+	}
+	if b, err := os.ReadFile(m[1]); err != nil || !strings.Contains(string(b), "result line") {
+		t.Errorf("the named file does not hold the result: %v", err)
+	}
+}
+
+// A byte-boundary cut on multibyte text produces invalid UTF-8 — corruption
+// that can break the transport, not merely read badly. The line-boundary trim
+// does not help when there are no lines.
+func TestCapExecOutput_NeverSplitsARune(t *testing.T) {
+	out := strings.Repeat("héllo wörld ☃ ", 4000) // no newlines at all
+	got := capExecOutput(out, "eval", nil)
+	if utf8.ValidString(got) != true {
+		t.Fatal("clipping produced invalid UTF-8")
+	}
+	if len(got) > execInlineMax+400 {
+		t.Errorf("unlined output must still be clipped, got %d", len(got))
+	}
+}
+
+// The -p stream used to carry the RAW result while the model got the clipped
+// one, so the TUI rendered a quarter-megabyte the model had never read. Both
+// sides must see the same text — and it must spill ONCE, or the human is told
+// to read a copy the model has never heard of.
+func TestCappedReporter_ShowsTheHumanWhatTheModelSaw(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	dir := t.TempDir()
+	st, _ := openSessionStore(filepath.Join(dir, "s.jsonl"))
+	h := &Harness{store: st, wake: make(chan struct{}, 1), cfg: Config{SessionFile: filepath.Join(dir, "s.jsonl")}}
+
+	var reported string
+	report := h.cappedReporter(func(_ string, _ map[string]any, result string) { reported = result })
+
+	huge := strings.Repeat("output line\n", 30000)
+	inner := func(_ context.Context, _ llm.ToolCall) (string, error) {
+		report("exec", map[string]any{"command": "cat big"}, huge) // as each wrapper does
+		return huge, nil
+	}
+	var tc llm.ToolCall
+	tc.Function.Name, tc.Function.Arguments = "exec", `{"command":"cat big"}`
+	toModel, err := withRecapWatch(inner, h)(context.Background(), tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reported != toModel {
+		t.Fatalf("the human and the model must see the same text (%d vs %d chars)", len(reported), len(toModel))
+	}
+	saved, _ := filepath.Glob(filepath.Join(h.bgLogDir(), "exec-*.out"))
+	if len(saved) != 1 {
+		t.Fatalf("capping twice must not spill twice, got %d saved files", len(saved))
+	}
+}
+
+// read_saved is retired: saved output is a file read with file_read. It is not
+// listed, and a call to it (an old transcript's habit) says where things are.
+func TestReadSaved_Retired(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	h, err := Start(context.Background(), Config{Workspace: t.TempDir(), Servers: []Server{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	if slices.Contains(h.ToolNames(), "read_saved") {
+		t.Fatalf("still listed: %v", h.ToolNames())
+	}
+	d := withRecap(nil, h, nil)
+	for _, args := range []string{`{}`, `{"ref":"r1","grep":"x"}`} {
+		var tc llm.ToolCall
+		tc.Function.Name, tc.Function.Arguments = "read_saved", args
+		if out, _ := d(context.Background(), tc); !strings.Contains(out, "file_read") {
+			t.Errorf("%s: %q", args, out)
+		}
+	}
+}
+
+// A suggestion names only what recap can reach: a big result from an earlier
+// turn is compaction's, so it raises nothing.
+func TestRecapCue_OnlyForThisTurn(t *testing.T) {
+	entries := []agent.Entry{
+		{Kind: agent.KindUser, Content: "read big.log"},
+		{ID: "old", Kind: agent.KindToolResult, ToolName: "exec", Content: strings.Repeat("x", 300000)},
+		{Kind: agent.KindUser, Content: "now fix the test"},
+		{Kind: agent.KindToolCall, ToolName: "exec", Content: "{}"},
+	}
+	if cue, ok := recapCueFor(entries, "exec", 20); ok {
+		t.Errorf("a big result from an earlier turn raised %q", cue.detail)
+	}
+}

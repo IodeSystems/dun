@@ -4,22 +4,22 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/enginecmd"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // /mcp info's poly-lsp row counts the language servers it is missing, and
 // says nothing of a server that sent no report or has none missing.
 func TestMCPInfo_LanguageServerMissing(t *testing.T) {
-	miss := func(n int) *dun.SetupReport {
-		r := &dun.SetupReport{Languages: []dun.SetupLang{{Lang: "markdown", Files: 3}}}
+	miss := func(n int) *harness.SetupReport {
+		r := &harness.SetupReport{Languages: []harness.SetupLang{{Lang: "markdown", Files: 3}}}
 		for i := 0; i < n; i++ {
-			r.Languages = append(r.Languages, dun.SetupLang{Lang: "go", Files: 9, LSP: &dun.SetupLSP{Name: "gopls"}})
+			r.Languages = append(r.Languages, harness.SetupLang{Lang: "go", Files: 9, LSP: &harness.SetupLSP{Name: "gopls"}})
 		}
 		return r
 	}
 	for _, c := range []struct {
-		setup *dun.SetupReport
+		setup *harness.SetupReport
 		want  string
 	}{
 		{miss(1), "  poly-lsp  running · built-in · 4 tools · ~300 tokens · 1 language server missing\n"},
@@ -27,8 +27,8 @@ func TestMCPInfo_LanguageServerMissing(t *testing.T) {
 		{miss(0), "  poly-lsp  running · built-in · 4 tools · ~300 tokens\n"},
 		{nil, "  poly-lsp  running · built-in · 4 tools · ~300 tokens\n"},
 	} {
-		srv := []dun.ServerState{{ID: "poly-lsp", Running: true, Auto: true, Tools: 4, Setup: c.setup}}
-		s := plainInfo(enginecmd.McpInfoIn{Servers: srv, Parts: []dun.ContextPart{{Name: "mcp: poly-lsp", Tokens: 300}}, Counted: true})
+		srv := []harness.ServerState{{ID: "poly-lsp", Running: true, Auto: true, Tools: 4, Setup: c.setup}}
+		s := plainInfo(enginecmd.McpInfoIn{Servers: srv, Parts: []harness.ContextPart{{Name: "mcp: poly-lsp", Tokens: 300}}, Counted: true})
 		if !strings.Contains(s, c.want) {
 			t.Errorf("want %q in:\n%s", c.want, s)
 		}

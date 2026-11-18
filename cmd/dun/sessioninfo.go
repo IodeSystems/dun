@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // `dun session <id> info [--context]` (USER 2026-10-27): what dun is in a
@@ -93,7 +93,7 @@ func sessionCmd(args []string) int {
 		fmt.Fprintln(os.Stderr, name+":", err)
 		return 1
 	}
-	var in dun.HarnessInfo
+	var in harness.HarnessInfo
 	if err := json.Unmarshal(b, &in); err != nil {
 		fmt.Fprintln(os.Stderr, name+":", err)
 		return 1
@@ -117,7 +117,7 @@ func sessionCmd(args []string) int {
 
 // attribution renders the record as what a commit or PR names. Every field
 // must be known: a guess in a commit is worse than a refusal.
-func attribution(in dun.HarnessInfo, format string) (string, error) {
+func attribution(in harness.HarnessInfo, format string) (string, error) {
 	f := []struct{ name, val string }{
 		{"harness", in.Harness}, {"harness_version", in.Version}, {"model_id", in.Model}, {"effort", in.Effort},
 	}

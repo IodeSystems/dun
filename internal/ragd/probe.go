@@ -21,8 +21,8 @@ import (
 	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/math/fixed"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // probe.go: the model-role probes (docs/rag.md, slice 3). Each runs on
@@ -62,7 +62,7 @@ func (p ProbeResult) Report() string {
 	if p.Caps.Model == "" {
 		return p.Said
 	}
-	s := p.Said + "\n" + dun.CapsReport(p.Caps)
+	s := p.Said + "\n" + harness.CapsReport(p.Caps)
 	if p.Err != nil {
 		s += "\nprobe stopped: " + p.Err.Error()
 	}
@@ -167,12 +167,12 @@ func probeClient(role raglit.ModelRole) *llm.Client {
 func probeRole(ctx context.Context, capsDir, name string, role raglit.ModelRole) (llm.Capabilities, error) {
 	c := probeClient(role)
 	snap := c.Capabilities()
-	rec := dun.LoadCapsIn(capsDir, snap.Endpoint, snap.Model)
+	rec := harness.LoadCapsIn(capsDir, snap.Endpoint, snap.Model)
 	if name == dunconfig.FacetIdentity {
 		// The chat probes, as /model probe runs them.
 		c.SetCapabilities(rec)
 		caps, err := llm.ProbeCapabilities(ctx, c, llm.ProbeOpts{})
-		if serr := dun.StoreCapsIn(capsDir, caps); serr != nil && err == nil {
+		if serr := harness.StoreCapsIn(capsDir, caps); serr != nil && err == nil {
 			err = serr
 		}
 		return caps, err
@@ -193,7 +193,7 @@ func probeRole(ctx context.Context, capsDir, name string, role raglit.ModelRole)
 		}
 		rec.Facts[k] = f
 	}
-	if serr := dun.StoreCapsIn(capsDir, rec); serr != nil && err == nil {
+	if serr := harness.StoreCapsIn(capsDir, rec); serr != nil && err == nil {
 		err = serr
 	}
 	return rec, err
@@ -431,7 +431,7 @@ func embedDimension(capsDir string, role raglit.ModelRole) int {
 		return 0
 	}
 	snap := llm.NewClient(role.BaseURL, "", role.Model).Capabilities()
-	n, err := strconv.Atoi(dun.LoadCapsIn(capsDir, snap.Endpoint, snap.Model).Facts[CapEmbedDimension].Value)
+	n, err := strconv.Atoi(harness.LoadCapsIn(capsDir, snap.Endpoint, snap.Model).Facts[CapEmbedDimension].Value)
 	if err != nil {
 		return 0
 	}

@@ -8,8 +8,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
@@ -43,7 +43,7 @@ type contextStats struct {
 	resultsTruncated int // how many were LOD-truncated
 
 	// How the window is divided, and how well that division is understood. See
-	// dun.WindowBudget: /context used to itemise the pre-conversation cost in
+	// harness.WindowBudget: /context used to itemise the pre-conversation cost in
 	// five rows and be unable to say how big the window was, so a reader could
 	// see WHAT was expensive and never whether it was close to the wall.
 	window         int
@@ -65,13 +65,13 @@ type contextStats struct {
 	systemExact  bool
 	systemPrompt int
 	systemShared int
-	systemParts  []dun.ContextPart
+	systemParts  []harness.ContextPart
 	// The project rules' share of systemPrompt and their /rules mode ("" =
 	// no rules).
 	systemRules     int
 	systemRulesMode string
 	// systemFiles are the context files in systemRules, each estimated.
-	systemFiles []dun.ContextPart
+	systemFiles []harness.ContextPart
 
 	// Out-of-band delivery: messages typed mid-turn that were queued into
 	// a running turn rather than starting a new one.

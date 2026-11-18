@@ -108,7 +108,7 @@ an `/effort` level (empty: the saved level).
 
 ## Spend meter
 
-Code: `spend.go`, `ledger.go`. Source: agentkit reads what a gateway reports
+Code: `internal/harness/spend.go`, `ledger.go`. Source: agentkit reads what a gateway reports
 (`Usage.Cost`, `Limits`, `KeyBudget`) and calls `Client.OnUsage` per response.
 
 - `SpendMeter.Note` is attached to the main client **and every client the
@@ -138,7 +138,7 @@ Code: `spend.go`, `ledger.go`. Source: agentkit reads what a gateway reports
 
 ## Cache statistics
 
-Code: `cachestats.go`. The question behind it (USER 2026-10-20): was a cache
+Code: `internal/harness/cachestats.go`. The question behind it (USER 2026-10-20): was a cache
 miss ours (we rewrote the prefix) or the server's (the slot was taken)?
 
 - Each build is compared with the previous one: leading byte-identical messages
@@ -178,7 +178,7 @@ miss ours (we rewrote the prefix) or the server's (the slot was taken)?
 
 ## Shaper policy
 
-- `shaperPolicy(window)` (`harness.go`) builds the policy by hand instead of
+- `shaperPolicy(window)` (`internal/harness/harness.go`) builds the policy by hand instead of
   using agentkit's `PolicyFor`: `PolicyFor(0)` is an empty policy, and dun
   builds its Shaper before the window is known, which would drop the
   LOD (truncate old results) rung for sessions that start without a window.
@@ -195,7 +195,7 @@ miss ours (we rewrote the prefix) or the server's (the slot was taken)?
   first message is the brief, while a root session's may be "hi" or a pasted
   log, and a pinned entry rides every round.
 
-## Re-heading (`rehead.go`)
+## Re-heading (`internal/harness/rehead.go`)
 
 Measured first, over dun's own sessions (`tools/rereads.py`, 99 sessions,
 3 530 read calls: exec `cat/head/tail/sed/nl`, `node_read`, `get_document`):

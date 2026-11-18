@@ -1,0 +1,155 @@
+package harness
+
+import (
+	"context"
+	"time"
+
+	"github.com/iodesystems/agentkit/agent"
+	"github.com/iodesystems/agentkit/llm"
+)
+
+// Live reasoning. agentkit streams the model's reasoning on every chunk
+// (llm.StreamChunk.Reasoning) and stamps the round's whole text on the entry
+// it produced, but its loop has no callback for the deltas — only
+// OnAssistantToken, for the reply. A UI that wants to show thinking AS it
+// happens has to read the stream itself.
+//
+// reasoningTee is that reader: it sits between the Session and the LLM,
+// forwards every chunk unchanged, and reports each reasoning delta on the
+// way past. Only the TURN's rounds go through it. The side calls that borrow
+// Session.Runner (suggest, rephrase, commit messages, the memory fork) call
+// untee first: their thinking is not the conversation's, and showing it
+// would put a suggestion's reasoning in the middle of a reply.
+
+type reasoningTee struct {
+	agent.LLMRunner
+	on func(string)
+	// round, when set, records what each round streams, for an interrupt to
+	// save (interrupt.go). Every ChatStream call through the tee is a round of
+	// the turn: side calls untee first.
+	round *roundCapture
+	// req, when set, measures each round's speed (reqstats.go).
+	req *reqMeter
+	// force, when set, may force a plan call on this request: it returns the
+	// options to send, nil for as they are (plannudge.go).
+	force func(tools []llm.ToolDef, opts *llm.ChatOpts) *llm.ChatOpts
+}
+
+// teeTurn is the turn's runner: teed for live reasoning (when on is set) and
+// for the interrupt's partial capture.
+func (h *Harness) teeTurn(r agent.LLMRunner, on func(string)) agent.LLMRunner {
+	if r == nil {
+		return r
+	}
+	h.req = h.newReqMeter()
+	return &reasoningTee{LLMRunner: r, on: on, round: &h.round, req: h.req, force: h.planForceOpts}
+}
+
+// untee is the runner under a tee, for a call that is not the turn's.
+func untee(r agent.LLMRunner) agent.LLMRunner {
+	if t, ok := r.(*reasoningTee); ok {
+		return t.LLMRunner
+	}
+	return r
+}
+
+func (t *reasoningTee) ChatStream(ctx context.Context, msgs []llm.Message, tools []llm.ToolDef, opts *llm.ChatOpts) (<-chan llm.StreamChunk, error) {
+	// A turn already cut (an interrupt during a tool call) does not start
+	// another round.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	t.req.begin() // the request is sent from here: ttft counts from now
+	var in <-chan llm.StreamChunk
+	var err error
+	if forced := t.forced(tools, opts); forced != nil {
+		in, err = planForcedStream(ctx, t.LLMRunner, msgs, tools, opts, forced)
+	} else {
+		in, err = t.LLMRunner.ChatStream(ctx, msgs, tools, opts)
+	}
+	if err != nil || in == nil {
+		t.req.end()
+		return in, err
+	}
+	if t.round != nil {
+		t.round.begin()
+	}
+	out := make(chan llm.StreamChunk, cap(in))
+	go func() {
+		defer close(out)
+		defer t.req.end()
+		sawDone := false
+		var held []llm.StreamChunk
+		for c := range in {
+			if t.round != nil {
+				t.round.add(c)
+			}
+			t.req.chunk(c)
+			if c.Reasoning != "" && t.on != nil {
+				t.on(c.Reasoning)
+			}
+			sawDone = sawDone || c.Done
+			if c.Done {
+				// The client's usage hook (spend, round stats) runs when the
+				// stream ends, after this chunk. A reader that stops at Done
+				// would close the turn before the round is priced, so the
+				// final chunk waits for the stream's close. Every one: a
+				// stream can end twice (the finish chunk with the usage, then
+				// [DONE]), and the reader takes the usage from the first.
+				held = append(held, c)
+				continue
+			}
+			select {
+			case out <- c:
+			case <-ctx.Done():
+				// The reader may have gone. Drain, so the producer under us is
+				// not left blocked on a send nobody will take.
+				go func() {
+					for range in {
+					}
+				}()
+				if !sawDone {
+					cancelled(ctx, out)
+				}
+				return
+			}
+		}
+		t.req.end() // after the usage hook, before the reader sees Done
+		if len(held) > 0 {
+			for _, c := range held {
+				select {
+				case out <- c:
+				case <-ctx.Done():
+					return
+				}
+			}
+			return
+		}
+		if ctx.Err() != nil && !sawDone {
+			cancelled(ctx, out)
+		}
+	}()
+	return out, nil
+}
+
+func (t *reasoningTee) forced(tools []llm.ToolDef, opts *llm.ChatOpts) *llm.ChatOpts {
+	if t.force == nil {
+		return nil
+	}
+	return t.force(tools, opts)
+}
+
+// teeGrace is how long the tee offers a cancelled stream's error to a reader
+// that may already have gone.
+const teeGrace = time.Second
+
+// cancelled tells a reader still ranging over out that the stream was cut.
+// A plain close would read as a finished round: agentkit would persist the
+// partial text as the reply and end the turn as if it had succeeded, which is
+// what an interrupt is NOT.
+func cancelled(ctx context.Context, out chan<- llm.StreamChunk) {
+	select {
+	case out <- llm.StreamChunk{Error: "stream cut: " + context.Cause(ctx).Error()}:
+	case <-time.After(teeGrace):
+	}
+}

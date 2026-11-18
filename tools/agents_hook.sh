@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # tools/agents_hook.sh — HUMAN-MAINTAINED COPY of the AGENTS.md guard.
 #
-# This file is the reference for the script that agents_hook.go embeds in the
+# This file is the reference for the script that internal/harness/agents_hook.go embeds in the
 # binary and arms on the code server at startup. The two MUST stay in sync:
 # agentsHookScript (the Go const) is what actually runs. If you change one,
 # change the other. To regenerate this file from the Go const:
-#   python3 -c "import re; s=open('agents_hook.go').read(); print(s[s.index('const agentsHookScript = `')+27:s.rindex('`', s.index('const agentsHookScript = `')+27]))" > /tmp/x
+#   python3 -c "import re; s=open('internal/harness/agents_hook.go').read(); print(s[s.index('const agentsHookScript = `')+27:s.rindex('`', s.index('const agentsHookScript = `')+27]))" > /tmp/x
 # (or just edit both together.)
 #
 # Invoked by poly-lsp-mcp as:  agents_hook.sh <op> <absPath>

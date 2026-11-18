@@ -7,7 +7,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/mcptable"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
@@ -46,7 +46,7 @@ func hotKey(word, key string) string {
 
 // mcpServersView is the table's rows, as the last server event gave them.
 type mcpServersView struct {
-	rows     []dun.ServerState
+	rows     []harness.ServerState
 	details  []string
 	viaScope string // the scope m and i write, once M picked one; "" is auto: each row's deciding scope
 	pickVia  bool   // M was pressed: the next g/p/s picks viaScope
@@ -56,9 +56,9 @@ type mcpServersView struct {
 
 func (v *mcpServersView) setWidth(w int) { v.width = w }
 
-func (v *mcpServersView) selectedServer(cur int) (dun.ServerState, bool) {
+func (v *mcpServersView) selectedServer(cur int) (harness.ServerState, bool) {
 	if cur < 0 || cur >= len(v.rows) {
-		return dun.ServerState{}, false
+		return harness.ServerState{}, false
 	}
 	return v.rows[cur], true
 }
@@ -69,7 +69,7 @@ func (v *mcpServersView) lines(_ *tuiModel, w int) []string {
 	up, starting, failed, cost, scripted, servers, groups := 0, 0, 0, 0, 0, 0, 0
 	for _, st := range v.rows {
 		cost += st.Cost
-		if strings.HasPrefix(st.ID, dun.BuiltinPrefix) { // dun's own tools: a group, not a server
+		if strings.HasPrefix(st.ID, harness.BuiltinPrefix) { // dun's own tools: a group, not a server
 			groups++
 			continue
 		}
@@ -82,7 +82,7 @@ func (v *mcpServersView) lines(_ *tuiModel, w int) []string {
 		case st.Auto && st.Err != "":
 			failed++
 		}
-		if st.Via == dun.ViaShell && st.Hosted {
+		if st.Via == harness.ViaShell && st.Hosted {
 			scripted++
 		}
 	}
@@ -112,7 +112,7 @@ func (v *mcpServersView) lines(_ *tuiModel, w int) []string {
 var stDisconnected = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
 
 // connMark is a row's first cell: is it connected, or on its way.
-func (v *mcpServersView) connMark(st dun.ServerState) string {
+func (v *mcpServersView) connMark(st harness.ServerState) string {
 	switch {
 	case st.Starting: // the status spinner's frame, its trailing space cut
 		return strings.TrimRight(v.spin, " ")
@@ -156,15 +156,15 @@ func (v *mcpServersView) page() pageDoc {
 // global when none does (nothing is set, the global default decides, or it is
 // fixed).
 func scopeOf(from string) string {
-	if s, ok := dun.ParseScope(from); ok && len(from) > 1 {
+	if s, ok := harness.ParseScope(from); ok && len(from) > 1 {
 		return s
 	}
-	return dun.ScopeGlobal
+	return harness.ScopeGlobal
 }
 
 // modeScope is where m writes for st: the scope M picked, else the one
 // deciding its mode.
-func (v *mcpServersView) modeScope(st dun.ServerState) string {
+func (v *mcpServersView) modeScope(st harness.ServerState) string {
 	if v.viaScope != "" {
 		return v.viaScope
 	}
@@ -172,7 +172,7 @@ func (v *mcpServersView) modeScope(st dun.ServerState) string {
 }
 
 // instanceScope is where i writes for st.
-func (v *mcpServersView) instanceScope(st dun.ServerState) string {
+func (v *mcpServersView) instanceScope(st harness.ServerState) string {
 	if v.viaScope != "" {
 		return v.viaScope
 	}
@@ -184,11 +184,11 @@ func (v *mcpServersView) instanceScope(st dun.ServerState) string {
 // the switch's values there; word names it.
 func overrideNote(scope, word, project, session string) string {
 	switch {
-	case scope == dun.ScopeSession:
+	case scope == harness.ScopeSession:
 		return ""
 	case session != "":
 		return "the session's " + word + " (" + session + ") still decides — M s then m/i unsets it"
-	case scope == dun.ScopeGlobal && project != "":
+	case scope == harness.ScopeGlobal && project != "":
 		return "the project's " + word + " (" + project + ") still decides — M p then m/i unsets it"
 	}
 	return ""
@@ -201,7 +201,7 @@ func (v *mcpServersView) hint(cur int) string {
 		return StDim.Render("mode scope: ") + hotKey("global", "g") + StDim.Render(" · ") + hotKey("project", "p") +
 			StDim.Render(" · ") + hotKey("session", "s") + StDim.Render(" · esc cancel")
 	}
-	ms, is := dun.ScopeGlobal, dun.ScopeGlobal
+	ms, is := harness.ScopeGlobal, harness.ScopeGlobal
 	if st, ok := v.selectedServer(cur); ok {
 		ms, is = v.modeScope(st), v.instanceScope(st)
 	} else if v.viaScope != "" {
@@ -213,8 +213,8 @@ func (v *mcpServersView) hint(cur int) string {
 }
 
 // serverStates reads a server event's list.
-func serverStates(list []any) ([]dun.ServerState, []string) {
-	var out []dun.ServerState
+func serverStates(list []any) ([]harness.ServerState, []string) {
+	var out []harness.ServerState
 	var details []string
 	for _, s := range list {
 		o, ok := s.(map[string]any)
@@ -226,15 +226,15 @@ func serverStates(list []any) ([]dun.ServerState, []string) {
 		running, _ := o["running"].(bool)
 		starting, _ := o["starting"].(bool)
 		missing, _ := o["missing"].(bool)
-		var log []dun.ServerLogLine
+		var log []harness.ServerLogLine
 		if ls, ok := o["log"].([]any); ok {
 			for _, l := range ls {
 				lo, _ := l.(map[string]any)
 				se, _ := lo["stderr"].(bool)
-				log = append(log, dun.ServerLogLine{At: time.UnixMilli(int64(evNum(lo["at"]))), Text: str(lo["text"]), Stderr: se})
+				log = append(log, harness.ServerLogLine{At: time.UnixMilli(int64(evNum(lo["at"]))), Text: str(lo["text"]), Stderr: se})
 			}
 		}
-		out = append(out, dun.ServerState{ID: str(o["id"]), Auto: auto, Running: running, Hosted: hosted, Log: log, Err: str(o["err"]), Missing: missing,
+		out = append(out, harness.ServerState{ID: str(o["id"]), Auto: auto, Running: running, Hosted: hosted, Log: log, Err: str(o["err"]), Missing: missing,
 			Starting: starting, StartingSeconds: evNum(o["startingSeconds"]),
 			Via: str(o["via"]), Proto: str(o["proto"]), Global: str(o["global"]), Project: str(o["project"]), Session: str(o["session"]),
 			From: str(o["from"]), ViaGlobal: str(o["viaGlobal"]), ViaProject: str(o["viaProject"]),
@@ -315,36 +315,36 @@ func nextTri(v string) string {
 // at global follows the default mode.
 func nextVia(v string) string {
 	switch v {
-	case dun.ViaShell:
-		return dun.ViaDirect
-	case dun.ViaDirect:
+	case harness.ViaShell:
+		return harness.ViaDirect
+	case harness.ViaDirect:
 		return "unset"
 	}
-	return dun.ViaShell
+	return harness.ViaShell
 }
 
 // nextInstance is shared → session → agent → unset → shared; global has no
 // unset.
 func nextInstance(v, scope string) string {
 	switch v {
-	case dun.InstanceShared:
-		return dun.InstanceSession
-	case dun.InstanceSession:
-		return dun.InstanceAgent
-	case dun.InstanceAgent:
-		if scope == dun.ScopeGlobal {
-			return dun.InstanceShared
+	case harness.InstanceShared:
+		return harness.InstanceSession
+	case harness.InstanceSession:
+		return harness.InstanceAgent
+	case harness.InstanceAgent:
+		if scope == harness.ScopeGlobal {
+			return harness.InstanceShared
 		}
 		return "unset"
 	}
-	return dun.InstanceShared
+	return harness.InstanceShared
 }
 
 // serverKey handles a key on the table; false leaves it to the pager.
 func (m *tuiModel) serverKey(v *mcpServersView, k string) bool {
 	if v.pickVia {
 		v.pickVia = false
-		if s, ok := dun.ParseScope(k); ok && len(k) == 1 {
+		if s, ok := harness.ParseScope(k); ok && len(k) == 1 {
 			v.viaScope = s
 		}
 		return true
@@ -375,7 +375,7 @@ func (m *tuiModel) serverKey(v *mcpServersView, k string) bool {
 	case "g", "p", "s":
 		line = switchLine(st, k)
 	case "m":
-		if strings.HasPrefix(st.ID, dun.BuiltinPrefix) {
+		if strings.HasPrefix(st.ID, harness.BuiltinPrefix) {
 			m.flashText, m.flashUntil = st.ID+" is dun's own tools: they have no mode — t lists them", time.Now().Add(flashFor)
 			return true
 		}
@@ -383,23 +383,23 @@ func (m *tuiModel) serverKey(v *mcpServersView, k string) bool {
 			m.flashText, m.flashUntil = st.ID+" is built in: it is always standalone", time.Now().Add(flashFor)
 			return true
 		}
-		if st.ViaFrom == dun.ViaFromDefaultAgent {
+		if st.ViaFrom == harness.ViaFromDefaultAgent {
 			m.flashText, m.flashUntil = st.ID+": instance agent keeps it standalone — press i to change the instance first", time.Now().Add(flashFor)
 			return true
 		}
 		scope := v.modeScope(st)
-		cur := map[string]string{dun.ScopeGlobal: st.ViaGlobal, dun.ScopeProject: st.ViaProject, dun.ScopeSession: st.ViaSession}[scope]
-		if scope == dun.ScopeGlobal && cur == "" && st.ViaFrom == dun.ViaFromDefault {
-			cur = dun.ViaShell // nothing set globally: the scripted default is the value shown
+		cur := map[string]string{harness.ScopeGlobal: st.ViaGlobal, harness.ScopeProject: st.ViaProject, harness.ScopeSession: st.ViaSession}[scope]
+		if scope == harness.ScopeGlobal && cur == "" && st.ViaFrom == harness.ViaFromDefault {
+			cur = harness.ViaShell // nothing set globally: the scripted default is the value shown
 		}
 		next := nextVia(cur)
 		if next != "unset" {
-			next = dun.ModeWord(next)
+			next = harness.ModeWord(next)
 			note = overrideNote(scope, "mode", st.ViaProject, st.ViaSession)
 		}
 		line = "mcp mode " + st.ID + " " + next + " --" + scope
 	case "i":
-		if strings.HasPrefix(st.ID, dun.BuiltinPrefix) {
+		if strings.HasPrefix(st.ID, harness.BuiltinPrefix) {
 			m.flashText, m.flashUntil = st.ID+" is dun's own tools: they have no instance — t lists them", time.Now().Add(flashFor)
 			return true
 		}
@@ -408,9 +408,9 @@ func (m *tuiModel) serverKey(v *mcpServersView, k string) bool {
 			return true
 		}
 		scope := v.instanceScope(st)
-		cur := map[string]string{dun.ScopeGlobal: st.InstanceGlobal, dun.ScopeProject: st.InstanceProject, dun.ScopeSession: st.InstanceSession}[scope]
-		if scope == dun.ScopeGlobal && cur == "" {
-			cur = dun.InstanceShared
+		cur := map[string]string{harness.ScopeGlobal: st.InstanceGlobal, harness.ScopeProject: st.InstanceProject, harness.ScopeSession: st.InstanceSession}[scope]
+		if scope == harness.ScopeGlobal && cur == "" {
+			cur = harness.InstanceShared
 		}
 		next := nextInstance(cur, scope)
 		if next != "unset" {
@@ -432,13 +432,13 @@ func (m *tuiModel) serverKey(v *mcpServersView, k string) bool {
 // switchLine is the command g, p or s sends for a server: g turns its
 // global switch on or off, p and s cycle the project's and the session's
 // unset → on → off.
-func switchLine(st dun.ServerState, k string) string {
+func switchLine(st harness.ServerState, k string) string {
 	if k == "g" {
 		return "mcp " + map[bool]string{true: "off", false: "on"}[st.Global == "on"] + " " + st.ID + " --global"
 	}
-	scope, cur := dun.ScopeProject, st.Project
+	scope, cur := harness.ScopeProject, st.Project
 	if k == "s" {
-		scope, cur = dun.ScopeSession, st.Session
+		scope, cur = harness.ScopeSession, st.Session
 	}
 	return "mcp " + nextTri(cur) + " " + st.ID + " --" + scope
 }
@@ -447,7 +447,7 @@ func switchLine(st dun.ServerState, k string) string {
 // line for it, and what it says about itself while it runs), whether it is
 // on and which switch decided, its mode, its tools and what they cost, and
 // the detail line the engine sent.
-func serverBody(st dun.ServerState, detail string) string {
+func serverBody(st harness.ServerState, detail string) string {
 	var rows []string
 	what := st.Description
 	if st.Title != "" && !strings.EqualFold(st.Title, st.ID) {
@@ -470,13 +470,13 @@ func serverBody(st dun.ServerState, detail string) string {
 	if st.Via != "" {
 		rows = append(rows, "mode: "+modeSentence(st))
 	}
-	if st.Instance != "" && !strings.HasPrefix(st.ID, dun.BuiltinPrefix) {
+	if st.Instance != "" && !strings.HasPrefix(st.ID, harness.BuiltinPrefix) {
 		rows = append(rows, "instance: "+instanceSentence(st))
 	}
 	if st.Tools > 0 {
 		t := textfmt.Plural(st.Tools, "tool")
 		switch {
-		case st.Via == dun.ViaShell:
+		case st.Via == harness.ViaShell:
 			t += " inside the shell's eval, 0 tokens in every request"
 			if st.Standalone > 0 {
 				t += " (~" + numfmt.TokN(st.Standalone) + " standalone)"
@@ -494,21 +494,21 @@ func serverBody(st dun.ServerState, detail string) string {
 
 // switchSentence says whether a server is on and which switch decided, in
 // words, and the switches that did not.
-func switchSentence(st dun.ServerState) string {
-	where := map[string]string{dun.ScopeGlobal: "for every project", dun.ScopeProject: "for this project",
-		dun.ScopeSession: "for this session", "flag": "by this run's flags"}
+func switchSentence(st harness.ServerState) string {
+	where := map[string]string{harness.ScopeGlobal: "for every project", harness.ScopeProject: "for this project",
+		harness.ScopeSession: "for this session", "flag": "by this run's flags"}
 	s := textfmt.OnOff(st.Auto)
 	if w, ok := where[st.From]; ok {
 		s += ": switched " + textfmt.OnOff(st.Auto) + " " + w
 	}
 	var also []string
-	if st.Project != "" && st.From != dun.ScopeProject {
+	if st.Project != "" && st.From != harness.ScopeProject {
 		also = append(also, "this project says "+st.Project)
 	}
-	if st.Session != "" && st.From != dun.ScopeSession {
+	if st.Session != "" && st.From != harness.ScopeSession {
 		also = append(also, "this session says "+st.Session)
 	}
-	if st.From == dun.ScopeGlobal && len(also) == 0 {
+	if st.From == harness.ScopeGlobal && len(also) == 0 {
 		s += ", nothing set for this project or session"
 	}
 	if len(also) > 0 {
@@ -518,34 +518,34 @@ func switchSentence(st dun.ServerState) string {
 }
 
 // modeSentence is a placed server's mode, in words.
-func modeSentence(st dun.ServerState) string {
-	s := dun.ModeWord(st.Via)
-	if st.Via == dun.ViaShell {
-		s += ": its tools are called inside the shell's eval as " + dun.ShellNamespace(st.ID) + ".<tool>(…), and their schemas stay out of every request"
+func modeSentence(st harness.ServerState) string {
+	s := harness.ModeWord(st.Via)
+	if st.Via == harness.ViaShell {
+		s += ": its tools are called inside the shell's eval as " + harness.ShellNamespace(st.ID) + ".<tool>(…), and their schemas stay out of every request"
 	} else {
 		s += ": its tools are sent with every request"
 	}
 	switch st.ViaFrom {
 	case "":
-	case dun.ViaFromDefault:
+	case harness.ViaFromDefault:
 		s += " (the default for a server with no mode set — /mcp default standalone changes it)"
-	case dun.ViaFromDefaultAgent:
+	case harness.ViaFromDefaultAgent:
 		s += " (the default is scripted, but its instance is agent: a scripted server runs in the session's shell, which a sub-agent shares)"
 	default:
-		s += " (set " + map[string]string{dun.ScopeGlobal: "for every project", dun.ScopeProject: "for this project", dun.ScopeSession: "for this session"}[st.ViaFrom] + ")"
+		s += " (set " + map[string]string{harness.ScopeGlobal: "for every project", harness.ScopeProject: "for this project", harness.ScopeSession: "for this session"}[st.ViaFrom] + ")"
 	}
 	return s + " — m changes it"
 }
 
 // instanceSentence is a server's instance, in words.
-func instanceSentence(st dun.ServerState) string {
-	if fixed, why, ok := dun.BuiltinInstance(st.ID); ok {
+func instanceSentence(st harness.ServerState) string {
+	if fixed, why, ok := harness.BuiltinInstance(st.ID); ok {
 		return fixed + ", fixed: " + why + " (built in)"
 	}
 	s := st.Instance + ": " + map[string]string{
-		dun.InstanceShared:  "one connection in dund for every session and sub-agent that resolves it the same",
-		dun.InstanceSession: "this session's own connection, which its sub-agents share",
-		dun.InstanceAgent:   "this session's own connection, and one more for each sub-agent",
+		harness.InstanceShared:  "one connection in dund for every session and sub-agent that resolves it the same",
+		harness.InstanceSession: "this session's own connection, which its sub-agents share",
+		harness.InstanceAgent:   "this session's own connection, and one more for each sub-agent",
 	}[st.Instance]
-	return s + " (set " + map[string]string{dun.ScopeGlobal: "for every project", dun.ScopeProject: "for this project", dun.ScopeSession: "for this session"}[st.InstanceFrom] + ") — i changes it"
+	return s + " (set " + map[string]string{harness.ScopeGlobal: "for every project", harness.ScopeProject: "for this project", harness.ScopeSession: "for this session"}[st.InstanceFrom] + ") — i changes it"
 }

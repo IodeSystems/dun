@@ -7,13 +7,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // /mcp on|off on a group of dun's own tools works like a server's switch.
 func TestMCPSwitch_BuiltinGroup(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	h, err := dun.Start(context.Background(), dun.Config{Workspace: t.TempDir(), SessionFile: filepath.Join(t.TempDir(), "s.jsonl"), Servers: []dun.Server{}})
+	h, err := harness.Start(context.Background(), harness.Config{Workspace: t.TempDir(), SessionFile: filepath.Join(t.TempDir(), "s.jsonl"), Servers: []harness.Server{}})
 	if err != nil {
 		t.Fatal(err)
 	}

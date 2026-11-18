@@ -7,7 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/textfmt"
 )
 
@@ -30,21 +30,21 @@ type extView struct {
 	items   []extItem
 	errors  []string
 	addPath string
-	servers map[string]dun.ServerState // by id, from the last server event
+	servers map[string]harness.ServerState // by id, from the last server event
 	spin    string
 	width   int
 }
 
 func (v *extView) setWidth(w int) { v.width = w }
 
-func (v *extView) server(id string) (dun.ServerState, bool) {
+func (v *extView) server(id string) (harness.ServerState, bool) {
 	st, ok := v.servers[id]
 	return st, ok
 }
 
-func (v *extView) selectedServer(cur int) (dun.ServerState, bool) {
+func (v *extView) selectedServer(cur int) (harness.ServerState, bool) {
 	if cur < 0 || cur >= len(v.items) {
-		return dun.ServerState{}, false
+		return harness.ServerState{}, false
 	}
 	st, ok := v.server(v.items[cur].id)
 	st.ID = v.items[cur].id
@@ -71,7 +71,7 @@ func (v *extView) lines(_ *tuiModel, w int) []string {
 }
 
 // state is a row's state in words: starting, running and its tools, off.
-func (v *extView) state(st dun.ServerState, ok bool) string {
+func (v *extView) state(st harness.ServerState, ok bool) string {
 	switch {
 	case !ok:
 		return "no server"
@@ -168,8 +168,8 @@ func (m *tuiModel) extPaging() *extView {
 	return v
 }
 
-func (m *tuiModel) serverMap() map[string]dun.ServerState {
-	out := make(map[string]dun.ServerState, len(m.servers))
+func (m *tuiModel) serverMap() map[string]harness.ServerState {
+	out := make(map[string]harness.ServerState, len(m.servers))
 	for _, st := range m.servers {
 		out[st.ID] = st
 	}

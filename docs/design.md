@@ -27,7 +27,7 @@ Other docs: `README.md` (use), `decisions.md` (why the code is the way it is),
 dun adds what none of them has: the TUI, the session service, the worktree and
 Docker lifecycle, the `exec` tool, sub-agents, and system-prompt
 composition. The tool composition itself is small: `mcpToolDefs` and
-`mcpDispatcher` (`mcp.go`) merge the servers' tools into one agentkit session.
+`mcpDispatcher` (`internal/harness/mcp.go`) merge the servers' tools into one agentkit session.
 
 ## Architecture
 
@@ -38,7 +38,7 @@ clients: TUI (cmd/dun) · browser · phone (mobile/)
 dund — session service (internal/dund). Owns sessions; they outlive clients.
    │  stdio, line-delimited JSON (docs/event-protocol.md)
    ▼
-engine: `dun --engine` — one process per session (harness.go)
+engine: `dun --engine` — one process per session (internal/harness/harness.go)
    ├─ agentkit Session + LLM client (any OpenAI-compatible endpoint)
    ├─ git worktree of the repo (isolated mutable surface; opt out: --no-worktree)
    ├─ mcpmgr spawns tool servers on the host over stdio JSON-RPC:
@@ -60,7 +60,7 @@ engine: `dun --engine` — one process per session (harness.go)
   mcpshell ("scripted" mode) to save context; see `decisions.md`.
 - Servers are declarative: built-in defaults, then `dun.json` (committed,
   describes the project), then `dun.local.json` (gitignored, describes this
-  machine), then Go-set values. The extension manifest (`extension.go`) says
+  machine), then Go-set values. The extension manifest (`internal/harness/extension.go`) says
   how a server plays a role (search, index) and which slash commands it adds.
 - Per-workspace state lives in `.dun/` (worktrees, local config).
   Per-user state lives in `$DUN_HOME` (default `~/.dun`): config, sessions,

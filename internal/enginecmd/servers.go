@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/mcptable"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
@@ -14,11 +14,11 @@ import (
 // SlashOf is the slash command of st's extension, or "" for a server with
 // none. A state built without one (a test's) falls back to the bundled
 // extension of its id.
-func SlashOf(st dun.ServerState) string {
+func SlashOf(st harness.ServerState) string {
 	if st.Slash != "" {
 		return st.Slash
 	}
-	for _, e := range dun.BundledExtensions() {
+	for _, e := range harness.BundledExtensions() {
 		if e.ID == st.ID {
 			return e.SlashName()
 		}
@@ -27,7 +27,7 @@ func SlashOf(st dun.ServerState) string {
 }
 
 // AllServers is the id /mcp uses to address every configured server at once.
-// Not a legal server id (ids come from config and from dun.DefaultServers), so
+// Not a legal server id (ids come from config and from harness.DefaultServers), so
 // it cannot collide with one.
 const AllServers = "*"
 
@@ -45,7 +45,7 @@ func LoginLine(server, url string) string {
 // The optional extras that are simply off (a server with a switch, /rag,
 // /lsp) are not here: the client's splash and /status say them, with
 // the command that turns each on (proto.ServerState.Slash).
-func ServerHint(states []dun.ServerState) string {
+func ServerHint(states []harness.ServerState) string {
 	var lines []string
 	for _, st := range states {
 		if st.Running {
@@ -55,7 +55,7 @@ func ServerHint(states []dun.ServerState) string {
 			}
 			continue
 		}
-		if st.Via == dun.ViaShell {
+		if st.Via == harness.ViaShell {
 			if st.Err != "" {
 				lines = append(lines, fmt.Sprintf("%s (scripted) did not connect: %s", st.ID, textfmt.OneLine(st.Err)))
 			}
@@ -77,7 +77,7 @@ func ServerHint(states []dun.ServerState) string {
 }
 
 // ServersProto renders server states for an event.
-func ServersProto(states []dun.ServerState) []proto.ServerState {
+func ServersProto(states []harness.ServerState) []proto.ServerState {
 	out := make([]proto.ServerState, 0, len(states))
 	for _, st := range states {
 		out = append(out, proto.ServerState{ID: st.ID, Running: st.Running, Auto: st.Auto, Tools: st.Tools, Err: st.Err, Missing: st.Missing, Auth: st.Auth,
@@ -92,7 +92,7 @@ func ServersProto(states []dun.ServerState) []proto.ServerState {
 	return out
 }
 
-func logProto(lines []dun.ServerLogLine) []proto.ServerLogLine {
+func logProto(lines []harness.ServerLogLine) []proto.ServerLogLine {
 	out := make([]proto.ServerLogLine, 0, len(lines))
 	for _, l := range lines {
 		out = append(out, proto.ServerLogLine{At: l.At.UnixMilli(), Text: l.Text, Stderr: l.Stderr})

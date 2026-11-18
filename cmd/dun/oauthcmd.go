@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/internal/enginecmd"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -40,7 +40,7 @@ func oauthCmd(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
 	}
-	spec, err := dun.DecodeOAuthAuthSpec(*specB64)
+	spec, err := harness.DecodeOAuthAuthSpec(*specB64)
 	if err != nil {
 		fmt.Fprintln(stderr, "dun oauth token:", err)
 		return 2
@@ -50,8 +50,8 @@ func oauthCmd(args []string, stdout, stderr io.Writer) int {
 	defer cancel()
 	auth, err := oauthFromDund(ctx, spec, *session, retry)
 	if errors.Is(err, errNoDund) {
-		s := dun.Server{ID: spec.ID, URL: spec.URL, OAuth: &spec.OAuth}
-		auth, err = dun.OAuthTokenHere(ctx, s, retry,
+		s := harness.Server{ID: spec.ID, URL: spec.URL, OAuth: &spec.OAuth}
+		auth, err = harness.OAuthTokenHere(ctx, s, retry,
 			func(id, url string) { fmt.Fprintln(stderr, enginecmd.LoginLine(id, url)) }, nil)
 	}
 	if err == nil && auth == "" {
@@ -68,8 +68,8 @@ func oauthCmd(args []string, stdout, stderr io.Writer) int {
 var errNoDund = errors.New("no dund")
 
 // oauthFromDund asks dund over its socket; errNoDund when none answers.
-func oauthFromDund(ctx context.Context, spec dun.OAuthAuthSpec, session string, retry bool) (string, error) {
-	c, err := net.DialTimeout("unix", dundcli.Socket(dun.DunHome()), 2*time.Second)
+func oauthFromDund(ctx context.Context, spec harness.OAuthAuthSpec, session string, retry bool) (string, error) {
+	c, err := net.DialTimeout("unix", dundcli.Socket(harness.DunHome()), 2*time.Second)
 	if err != nil {
 		return "", errNoDund
 	}
@@ -81,7 +81,7 @@ func oauthFromDund(ctx context.Context, spec dun.OAuthAuthSpec, session string, 
 	o.ClientSecret = resolveRef(o.ClientSecret)
 	enc, dec := json.NewEncoder(c), json.NewDecoder(c)
 	ask := func(op string) (string, error) {
-		req := proto.OAuthReq{Op: op, ID: spec.ID, URL: spec.URL, Spec: dun.MarshalOAuthSpec(o)}
+		req := proto.OAuthReq{Op: op, ID: spec.ID, URL: spec.URL, Spec: harness.MarshalOAuthSpec(o)}
 		if op == "unauthorized" {
 			if r := os.Getenv("MCPSHELL_AUTH_REJECTED"); r != "" {
 				req.Rejected = "Bearer " + r

@@ -16,49 +16,49 @@ The Shaper's rungs, per build (agentkit v0.29.0 `agent/shaper.go:302-423`):
 render, then LOD, then the host's Rehead, then a fold (at most 4 attempts).
 Every rung waits for the **target**: budget minus 10k headroom
 (`shaper.go:137`), where budget = window − (32,768 output + 2,048 margin)
-(`shaping.go:221-235`, `outbudget.go:42,48,77`). On a 188k window that is
+(`internal/harness/shaping.go:221-235`, `internal/harness/outbudget.go:42,48,77`). On a 188k window that is
 about 143k. On a window of 1M or so (DeepSeek V4.1 flash reached 279k
 without a fold) only the bounding rungs ever run.
 
 - **Bound what enters [D, M].** exec clips at 20k characters, head and tail,
-  the whole output in a file (`exec.go:130`; one task 456,772 → 32,916
+  the whole output in a file (`internal/harness/exec.go:130`; one task 456,772 → 32,916
   tokens, `decisions.md:25-35`). `MaxToolResultChars` 64k bounds one result
   of any age (`agent/policy.go:48`). Grep returns a window around a match;
   `file_read at:N` pages unlined output. The whole-read gate asks for a
   recap past a quarter of the room (`reading.md:49-110`). None of these
   touch the cached prefix.
-- **recap (`recap.go`) [D, M].** The model replaces a span of the current
+- **recap (`internal/harness/recap.go`) [D, M].** The model replaces a span of the current
   turn; no summarizer call; the cache breaks only from the span's start,
-  which is recent. Removed calls stay as one-line stubs (`recapstub.go`),
+  which is recent. Removed calls stay as one-line stubs (`internal/harness/recapstub.go`),
   the span goes to `<session>.recapN.jsonl`. Cues: the same tool 3+ times in
   a row costing 4k+ characters, a 20k+ result the model has moved past, a
-  window of 20k+ tokens (then +15k) holding a 4k+ item (`recap.go:675-805`).
+  window of 20k+ tokens (then +15k) holding a 4k+ item (`internal/harness/recap.go:675-805`).
   Measured unprompted: active context 65,056 → 1,057 tokens
   (`decisions.md:113-118`). Stubs exist because cheap models re-ran commands
   after a recap in Terminal-Bench (`decisions.md:101-112`).
-- **LOD [D].** Older results over 4,000 characters (`window.go:113`) become
-  stubs; exec keeps both ends (`shaping.go:259`). The boundary moves 24
+- **LOD [D].** Older results over 4,000 characters (`internal/harness/window.go:113`) become
+  stubs; exec keeps both ends (`internal/harness/shaping.go:259`). The boundary moves 24
   entries at a time (`shaper.go:120`), so the cache breaks about once per
   eight turns, not every turn.
-- **Rehead (`rehead.go`) [M].** Older copies of a re-read target become
+- **Rehead (`internal/harness/rehead.go`) [M].** Older copies of a re-read target become
   stubs, just before a fold, so the cache breaks once for both. Basis: 42%
   of 3,530 read calls re-read the exact target, 46% of read bytes
   (`tools/rereads.py`).
 - **Fold (agentkit `compactOldest`, `shaper.go:426-541`) [D].** Keeps the
   pristine tail only: the last 6 user/assistant messages and 4 tool calls
-  (`shaping.go:276-277`), widened so no result loses its call. Everything
+  (`internal/harness/shaping.go:276-277`), widened so no result loses its call. Everything
   older becomes one summary of folded/8 tokens within [500, 8192], at most
   60% of target (`shaper.go:794-801`). The summarizer is told the open plan
-  and the work in flight (`fold.go:31-41`); after the fold an aside lists
-  what is still running (`fold.go:79-125`); the folded span goes to the
+  and the work in flight (`internal/harness/fold.go:31-41`); after the fold an aside lists
+  what is still running (`internal/harness/fold.go:79-125`); the folded span goes to the
   session index: a file `<session>.folds/<key>.md` beside the log, synced
   into dund's `sessions` index, read back with `session_search`
-  (`sessionindex_dund.go`, `rag.md` "Built: sessions index"). The first user message is pinned for
-  children only (`harness.go:833`).
+  (`internal/harness/sessionindex_dund.go`, `rag.md` "Built: sessions index"). The first user message is pinned for
+  children only (`internal/harness/harness.go:833`).
   **The current ask (2026-11-17).** On a long tool-heavy turn the pristine
   tail fills with tool entries, so the turn's user message lands in the older
   part and the fold subsumed it ("Your message carried no task"). dun side
-  (`fold.go`): `noteAsk` remembers the latest `KindUser` entry (asides,
+  (`internal/harness/fold.go`): `noteAsk` remembers the latest `KindUser` entry (asides,
   notices and settle prompts are notifications, so they never count) and
   adds it to the plan as a node in progress, once per ask id, before the fold
   runs (`foldTask` is the hook); the fold is told the ask and must write
@@ -71,10 +71,10 @@ without a fold) only the bounding rungs ever run.
   itself (request to the agentkit owner). The fold call has its own system prompt
   ("You are a compaction worker", `shaper.go:808`), so it reads the raw
   history **uncached**; the next round re-reads the new prompt uncached too.
-- **Rescue and overflow [D].** `rescue.go` folds when the endpoint refuses a
-  prompt (≤2 passes, each entry's head only); `overflow.go` folds on a
+- **Rescue and overflow [D].** `internal/harness/rescue.go` folds when the endpoint refuses a
+  prompt (≤2 passes, each entry's head only); `internal/harness/overflow.go` folds on a
   length cut only when the room left is under one reservation.
-- **Sub-agents [D].** Context offloading first (`subagent.go:23-34`): the
+- **Sub-agents [D].** Context offloading first (`internal/harness/subagent.go:23-34`): the
   child's tokens die with it.
 
 Not present: a `/compact`, a fold at a task boundary, a quality ceiling
@@ -86,7 +86,7 @@ below the window, a cold-cache trigger, a fold that reuses the cache.
   opencode. It says itself that a session's later context is not measured.
 - `docs/measured/session-short-*.json`: short scripted sessions, prompt and
   cached tokens per request.
-- `cachestats.go`: per build, the prefix kept and the rewrite cause; append
+- `internal/harness/cachestats.go`: per build, the prefix kept and the rewrite cause; append
   rounds hit 98.5% on llama.cpp (`providers-and-cost.md:139-162`).
 - **Terminal-Bench trials (`examples/harbor/jobs`) [M, 2026-11-14].** 357
   trials in 25 jobs: **1 compaction in all of them**; median peak context
@@ -173,7 +173,7 @@ What other agents do:
 ## Trigger points and strategies
 
 - **Elide before summarizing [M].** Tool output is the mass (84% in
-  JetBrains; 122k of 180k in `rescue.go:47`). Removing an old result with a
+  JetBrains; 122k of 180k in `internal/harness/rescue.go:47`). Removing an old result with a
   path to it costs no call and does not lengthen the run; a summary is
   lossy, costs a call, and does.
 - **A token ceiling for quality, not a fraction of the window [O].** 80% of
@@ -187,7 +187,7 @@ What other agents do:
 - **When the cache is cold [O].** After a gap longer than the cache's TTL
   (Anthropic 5 min, 1 h optional; Fireworks not documented), the next
   request pays the whole prompt anyway, so a fold costs only its summary.
-  `cachestats.go` already knows the gap.
+  `internal/harness/cachestats.go` already knows the gap.
 - **Always keep [D, M]:** the task or current objective verbatim, the plan,
   in-flight work, user corrections, **the files changed** (Factory's weakest
   dimension, and the re-run finding behind stubs), unresolved errors, the
@@ -270,9 +270,9 @@ Token counts are diagnostics, not results.
 ### What dun logs and lacks
 
 Logged: per round prompt, cached, cache write, completion, latency, cost,
-prefix, recaps (`roundstats.go:41-72`); per build the prefix kept and the
-rewrite cause (`cachestats.go`, not in the ledger); the compaction note
-(`compaction.go:12-20`); sidecars; Harbor rewards.
+prefix, recaps (`internal/harness/roundstats.go:41-72`); per build the prefix kept and the
+rewrite cause (`internal/harness/cachestats.go`, not in the ledger); the compaction note
+(`internal/harness/compaction.go:12-20`); sidecars; Harbor rewards.
 
 Lacking: a shrink event in the ledger (kind, tokens before and after, the
 prefix the next build keeps); a turn outcome; a repeat marker on calls; the

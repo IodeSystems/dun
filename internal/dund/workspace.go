@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // userHome is the home directory paths without a leading slash are read
@@ -119,10 +119,10 @@ func (s *Service) Workspaces(principal string, disk bool) []Workspace {
 		}
 	}
 	if disk {
-		root := dun.SessionsDir()
+		root := harness.SessionsDir()
 		entries, _ := os.ReadDir(root)
 		dec := newRootDecoder()
-		tmpName := filepath.Base(dun.RootDir(os.TempDir())) + "-"
+		tmpName := filepath.Base(harness.RootDir(os.TempDir())) + "-"
 		for _, e := range entries {
 			if !e.IsDir() || !strings.HasPrefix(e.Name(), "-") {
 				continue
@@ -185,7 +185,7 @@ func newestTranscript(dir string) time.Time {
 	return newest
 }
 
-// rootDecoder turns a dun.RootDir name back into the directory it was made
+// rootDecoder turns a harness.RootDir name back into the directory it was made
 // from. The encoding ("/" to "-", " " to "_") loses information — a "-" may
 // have been a "/" or a "-" — so the name is matched against the directories
 // that exist, one level at a time. Directory listings are cached for one
@@ -205,7 +205,7 @@ func (d *rootDecoder) decode(name string) (string, bool) {
 		return "", false
 	}
 	// The usual case, a path with no "-" or " " in it, costs one stat.
-	if p := "/" + strings.ReplaceAll(rest, "-", "/"); isDir(p) && filepath.Base(dun.RootDir(p)) == name {
+	if p := "/" + strings.ReplaceAll(rest, "-", "/"); isDir(p) && filepath.Base(harness.RootDir(p)) == name {
 		return p, true
 	}
 	return d.walk("/", rest, 0)

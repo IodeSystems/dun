@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
@@ -133,7 +133,7 @@ func (m tuiModel) serversStartingTail() string {
 		tail = fmt.Sprintf(" · %s starting %s", names, time.Since(since).Round(time.Second))
 	}
 	for _, st := range sortedServers(m.servers) {
-		if st.Running && st.Index == dun.IndexBuilding {
+		if st.Running && st.Index == harness.IndexBuilding {
 			tail += " · " + st.ID + " indexing" + m.indexingFor(st.ID)
 		}
 	}
@@ -181,7 +181,7 @@ func (m *tuiModel) noteStarting(list []any) {
 		}
 		id := str(o["id"])
 		// Indexing, the same way: from the engine's seconds, then on.
-		if o["running"] == true && o["index"] == dun.IndexBuilding {
+		if o["running"] == true && o["index"] == harness.IndexBuilding {
 			if t, ok := m.idxSince[id]; ok {
 				idx[id] = t
 			} else {

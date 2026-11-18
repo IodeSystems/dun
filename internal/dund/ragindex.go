@@ -5,13 +5,13 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/fsutil"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/ragd"
 	"github.com/iodesystems/dun/proto"
 )
 
-// ragIndex walks q.Root with the workspace ingest rules (dun.IndexFiles,
+// ragIndex walks q.Root with the workspace ingest rules (harness.IndexFiles,
 // which ragd cannot import) and hands the files to the code and docs
 // indexes. An empty project is the root's slug. The root is walked as
 // fsutil.Canon spells it, so every path under it is spelled one way. A
@@ -26,15 +26,15 @@ func ragIndex(h *ragd.Host, q proto.RagIndex) (*proto.RagIndexed, error) {
 	}
 	q.Root = fsutil.Canon(q.Root)
 	if q.Project == "" {
-		q.Project = dun.ProjectSlug(q.Root)
+		q.Project = harness.ProjectSlug(q.Root)
 	}
 	if main, ok := h.Worktree(q.Root); ok && !h.Indexed(q.Project) {
-		files, _ := dun.IndexFiles(main)
+		files, _ := harness.IndexFiles(main)
 		if _, err := h.Index(proto.RagIndex{Project: q.Project, Root: main}, files); err != nil {
 			return nil, fmt.Errorf("rag: index the main checkout %s first: %w", main, err)
 		}
 	}
-	files, summary := dun.IndexFiles(q.Root)
+	files, summary := harness.IndexFiles(q.Root)
 	out, err := h.Index(q, files)
 	if err != nil {
 		return nil, err

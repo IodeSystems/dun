@@ -24,7 +24,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -383,9 +383,9 @@ func (s *Service) List(principal string) []proto.SessionSummary {
 		out = append(out, ses.summary())
 	}
 	for _, ws := range wss {
-		// Newest id first, asked-in only (dun.SessionAsked), no sidecars.
+		// Newest id first, asked-in only (harness.SessionAsked), no sidecars.
 		// Registry sessions are skipped after the limit: they count toward it.
-		for _, id := range dun.ListAskedSessions(ws, diskPerWorkspace) {
+		for _, id := range harness.ListAskedSessions(ws, diskPerWorkspace) {
 			if have[ws+"\x00"+id] {
 				continue
 			}

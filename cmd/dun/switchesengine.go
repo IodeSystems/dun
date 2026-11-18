@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -13,7 +13,7 @@ import (
 // kind's view; "<kind> on|off|unset <name or glob> [--scope]" and "<kind>
 // mode <mode|unset> [--scope]" change it first (session scope when none is
 // given, as /mcp's switches) and say what they did.
-func switchesEvent(h *dun.Harness, action string) *proto.Switches {
+func switchesEvent(h *harness.Harness, action string) *proto.Switches {
 	f := strings.Fields(action)
 	if len(f) == 0 {
 		return &proto.Switches{Message: "switches: which kind? (skills)"}
@@ -41,7 +41,7 @@ func switchesEvent(h *dun.Harness, action string) *proto.Switches {
 }
 
 // switchOp runs one operation on a kind.
-func switchOp(h *dun.Harness, kind string, f []string) (string, error) {
+func switchOp(h *harness.Harness, kind string, f []string) (string, error) {
 	verb, rest := f[0], f[1:]
 	if kind == "lsp" && (verb == "add" || verb == "remove") {
 		return h.LSPEdit(context.Background(), verb, rest)
@@ -50,7 +50,7 @@ func switchOp(h *dun.Harness, kind string, f []string) (string, error) {
 		if len(rest) == 0 {
 			return "", errUsage(kind, "mode <mode|unset> [--global|--project|--session]")
 		}
-		scope, err := scopeArg(rest[1:], dun.ScopeSession)
+		scope, err := scopeArg(rest[1:], harness.ScopeSession)
 		if err != nil {
 			return "", err
 		}
@@ -63,7 +63,7 @@ func switchOp(h *dun.Harness, kind string, f []string) (string, error) {
 	if verb != "on" && verb != "off" && verb != "unset" || len(rest) == 0 {
 		return "", errUsage(kind, "on|off|unset <name or glob> [--global|--project|--session] · mode <mode|unset> [--scope]")
 	}
-	scope, err := scopeArg(rest[1:], dun.ScopeSession)
+	scope, err := scopeArg(rest[1:], harness.ScopeSession)
 	if err != nil {
 		return "", err
 	}
@@ -91,12 +91,12 @@ func errUsage(kind, usage string) error {
 // cost and the mode; a bare mode word sets the project's mode (as /rules
 // always did) or, with a scope, that scope's; add|remove <path> [--scope]
 // makes a file a root file or takes it back; the rest are the switches'.
-func rulesCmd(ctx context.Context, h *dun.Harness, action string) (string, error) {
+func rulesCmd(ctx context.Context, h *harness.Harness, action string) (string, error) {
 	f := strings.Fields(action)
 	switch {
 	case len(f) == 0:
 		return h.RulesStatus(), nil
-	case f[0] == dun.RulesFull || f[0] == dun.RulesSummary || f[0] == dun.RulesIndex:
+	case f[0] == harness.RulesFull || f[0] == harness.RulesSummary || f[0] == harness.RulesIndex:
 		if len(f) == 1 {
 			return h.SetRulesMode(ctx, f[0])
 		}
@@ -105,7 +105,7 @@ func rulesCmd(ctx context.Context, h *dun.Harness, action string) (string, error
 		if len(f) < 2 {
 			return "", errUsage("rules", f[0]+" <path> [--global|--project|--session]")
 		}
-		scope, err := scopeArg(f[2:], dun.ScopeSession)
+		scope, err := scopeArg(f[2:], harness.ScopeSession)
 		if err != nil {
 			return "", err
 		}
@@ -119,9 +119,9 @@ func rulesCmd(ctx context.Context, h *dun.Harness, action string) (string, error
 
 // skillFileEvent answers the control command "skillfile": action is JSON
 // {"skill", "file"}; the file is read by the engine, confined to the
-// skill's folder (dun.SkillFile), so a client attached through dund reads
+// skill's folder (harness.Harness.SkillFile), so a client attached through dund reads
 // the engine's disk, not its own.
-func skillFileEvent(ctx context.Context, h *dun.Harness, action string) *proto.SkillFile {
+func skillFileEvent(ctx context.Context, h *harness.Harness, action string) *proto.SkillFile {
 	var req struct{ Skill, File string }
 	if err := json.Unmarshal([]byte(action), &req); err != nil {
 		return &proto.SkillFile{Error: "skillfile: the action is JSON {skill, file}: " + err.Error()}

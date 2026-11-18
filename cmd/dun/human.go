@@ -10,14 +10,14 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // runHuman streams a single task, then drains any background jobs it started
 // (their completion notifications trigger follow-up turns).
-func runHuman(ctx context.Context, h *dun.Harness, task, workspace string, imgs []dun.ImageInput, noTools bool) (reply string) {
+func runHuman(ctx context.Context, h *harness.Harness, task, workspace string, imgs []harness.ImageInput, noTools bool) (reply string) {
 	h.WaitServers(ctx) // a one-shot task has every tool it was started with
 	if noTools {
 		fmt.Fprintln(os.Stderr, "dun: no tools (--no-tools): a plain chat")

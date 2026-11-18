@@ -7,10 +7,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
-func pickerModel(t *testing.T, sessions ...dun.SessionInfo) tuiModel {
+func pickerModel(t *testing.T, sessions ...harness.SessionInfo) tuiModel {
 	t.Helper()
 	m := buildModel(2, 2)
 	m.sessions = sessions
@@ -22,8 +22,8 @@ func pickerModel(t *testing.T, sessions ...dun.SessionInfo) tuiModel {
 // the opening ask because that is how a conversation is recognised.
 func TestSessionPanel_ShowsWhatIdentifiesASession(t *testing.T) {
 	m := pickerModel(t,
-		dun.SessionInfo{ID: "20260730-153842", ModTime: time.Now().Add(-2 * time.Hour), Entries: 17, Preview: "why is compaction thrashing", Last: "ship the fix"},
-		dun.SessionInfo{ID: "20260729-195624", ModTime: time.Now().Add(-26 * time.Hour), Entries: 50},
+		harness.SessionInfo{ID: "20260730-153842", ModTime: time.Now().Add(-2 * time.Hour), Entries: 17, Preview: "why is compaction thrashing", Last: "ship the fix"},
+		harness.SessionInfo{ID: "20260729-195624", ModTime: time.Now().Add(-26 * time.Hour), Entries: 50},
 	)
 	m.sessionID = "20260729-195624"
 	panel := stripANSI(m.sessionPanel())
@@ -41,7 +41,7 @@ func TestSessionPanel_ShowsWhatIdentifiesASession(t *testing.T) {
 
 func TestSessionPicker_Navigation(t *testing.T) {
 	m := pickerModel(t,
-		dun.SessionInfo{ID: "a"}, dun.SessionInfo{ID: "b"}, dun.SessionInfo{ID: "c"},
+		harness.SessionInfo{ID: "a"}, harness.SessionInfo{ID: "b"}, harness.SessionInfo{ID: "c"},
 	)
 	down := tea.KeyPressMsg{Code: tea.KeyDown}
 	nm, _ := m.Update(down)
@@ -125,14 +125,14 @@ func TestStaleEOF_IsNotACrash(t *testing.T) {
 // --pick: the picker is open at start, no session is attached until it is
 // answered; esc starts a new session, enter resumes the chosen one.
 func TestPick_OpensPickerAtStart(t *testing.T) {
-	m := pickerModel(t, dun.SessionInfo{ID: "a"}, dun.SessionInfo{ID: "b"})
+	m := pickerModel(t, harness.SessionInfo{ID: "a"}, harness.SessionInfo{ID: "b"})
 	m.pickAtStart = true
 	nm, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = nm.(tuiModel)
 	if m.picking || m.pickAtStart || cmd == nil {
 		t.Errorf("esc should close the picker and attach a new session: picking=%v pickAtStart=%v cmd=%v", m.picking, m.pickAtStart, cmd != nil)
 	}
-	m = pickerModel(t, dun.SessionInfo{ID: "a"}, dun.SessionInfo{ID: "b"})
+	m = pickerModel(t, harness.SessionInfo{ID: "a"}, harness.SessionInfo{ID: "b"})
 	m.pickAtStart = true
 	nm, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = nm.(tuiModel)

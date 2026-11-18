@@ -1,8 +1,8 @@
 # Memories, strategies and constraints
 
-Built. Code: `notekinds.go` (kinds, names, the standing list, the
-`file_read` paths, `/memories`), `memory.go` (the tool and the store),
-`memrecall.go` (dund link, sync, recall). Related: `memory.md`, `rag.md`
+Built. Code: `internal/harness/notekinds.go` (kinds, names, the standing list, the
+`file_read` paths, `/memories`), `internal/harness/memory.go` (the tool and the store),
+`internal/harness/memrecall.go` (dund link, sync, recall). Related: `memory.md`, `rag.md`
 ("Built: slice 5"), `surfacing.md`, `reading.md`.
 
 ## What they are
@@ -18,7 +18,7 @@ user-authored kind is called **constraint**, not rule.
 | strategy | an approach that worked and will work again | the model, `/memories add`; the learning phase, as a candidate |
 | constraint | a rule the user set for how to work | the user (`/memories add`), or the model when the user states it |
 
-**Not the rules files.** dun's rules feature (`rules.go`: the user's and the
+**Not the rules files.** dun's rules feature (`internal/harness/rules.go`: the user's and the
 workspace's AGENTS.md and CLAUDE.md and their `@imports`, `/rules`) is unchanged and
 separate. A rules file is a whole document the user maintains in the
 repo; a constraint is one short named item in dun's own store. The name
@@ -129,7 +129,7 @@ depend on dund.
 
 ## Learning phase (first slice, built)
 
-Code: `learn.go`; the streak is `plannudge.go`'s. Churn → resolved
+Code: `internal/harness/learn.go`; the streak is `internal/harness/plannudge.go`'s. Churn → resolved
 candidate → lesson, written as a strategy the user reviews.
 
 Constraints (USER 2026-11-09): lessons are generic (no task names, paths,
@@ -148,7 +148,7 @@ resolved episode, never per round; lessons from resolutions only.
   nothing. The streak keeps its last 6 failed calls, each clipped (240
   bytes of the command or arguments, 320 of the result).
 - **Stall episode** (USER 2026-11-09). The stalled-plan nudge fired
-  (`plannudge.go`), then the main agent's plan moved (a node added, or its
+  (`internal/harness/plannudge.go`), then the main agent's plan moved (a node added, or its
   status, details, done_when or needs changed). It holds the rounds stalled,
   the open nodes the nudge named, the last 6 calls before it, and the move.
   Same cap, same gate.
@@ -156,7 +156,7 @@ resolved episode, never per round; lessons from resolutions only.
   held in the session (at most 12; the oldest go), and the lesson calls
   are made only when the task verifies:
   - the turn ended without an error, after an end-of-turn check in that
-    turn (`idlecheck.go`: the requirement checklist, or the open-nodes
+    turn (`internal/harness/idlecheck.go`: the requirement checklist, or the open-nodes
     note), and the main agent's plan has a done node and none open
     (dropped counts as closed: a dropped approach replaced by another is
     normal). The checklist has no structured answer, so "all met" is the

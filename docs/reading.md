@@ -1,9 +1,9 @@
 # Reading: virtual paths and a budgeted whole read
 
 Built: the item paths (`memory:`, `strategy:`, `constraint:`; `strategies.md`,
-`notekinds.go`) and the whole read (section 2, `wholeread.go`). Not built:
-`doc:` paths. Code: agentkit `files/read.go` (the caps), dun `wholeread.go`
-(the whole read), `recap.go` (large-result cues), `exec.go` (clipping). Related: `rag.md` (what
+`internal/harness/notekinds.go`) and the whole read (section 2, `internal/harness/wholeread.go`). Not built:
+`doc:` paths. Code: agentkit `files/read.go` (the caps), dun `internal/harness/wholeread.go`
+(the whole read), `internal/harness/recap.go` (large-result cues), `internal/harness/exec.go` (clipping). Related: `rag.md` (what
 the virtual paths would read), `memory.md`.
 
 ## What exists
@@ -17,7 +17,7 @@ the virtual paths would read), `memory.md`.
 - Recall by reference was retired (`read_saved`, 0cd5c73): a clipped result now
   names a path. `recap` only compresses the conversation; it recalls nothing
   (USER 2026-11-08: "we killed it as a recall").
-- `recap.go` already cues a recap for a large result once the model has moved
+- `internal/harness/recap.go` already cues a recap for a large result once the model has moved
   on (`largeResultChars`, 20000).
 
 ## 1. Virtual paths
@@ -66,7 +66,7 @@ The refusal says the numbers ("X is N tokens; M are free") and then:
    If X is larger than a child's whole window, say to narrow instead.
 3. **Narrow**: grep it first, or read a range.
 
-### As built (`wholeread.go`)
+### As built (`internal/harness/wholeread.go`)
 
 - **Wrapper, not agentkit.** `withFiles` routes the call as before (tree, tmp,
   `/file` paths) and hands a `whole` read to `Harness.readWhole`, which pages
@@ -123,7 +123,7 @@ through agentkit-f2.
 ## Open
 
 - The thresholds (5k tokens, a quarter of the room, the reply reserve) are
-  starting points; measure on real sessions (`wholeread.go`'s consts).
+  starting points; measure on real sessions (`internal/harness/wholeread.go`'s consts).
 - A child's window is assumed equal to this session's; a child on another
   model may have another.
 - Whether `doc:` reads go through dund's socket (rag.md) or the session's own

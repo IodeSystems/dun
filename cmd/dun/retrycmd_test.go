@@ -9,8 +9,8 @@ import (
 
 	"github.com/iodesystems/agentkit/llm"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // /retry: presets and knobs set the client at once, and the config saved
@@ -92,7 +92,7 @@ func TestLoadPrices(t *testing.T) {
 func TestContextConfigCmd(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	t.Setenv("DUN_MAX_OUTPUT_TOKENS", "")
-	h := dun.NewTestHarness(dun.Endpoint{URL: "https://litellm.corp/v1", Model: "deepseek-1017"})
+	h := harness.NewTestHarness(harness.Endpoint{URL: "https://litellm.corp/v1", Model: "deepseek-1017"})
 	t.Cleanup(func() {
 		_, _, _ = contextConfigCmd(context.Background(), h, "--compact-buffer default --tool-lod default --recap-nudge default")
 	})

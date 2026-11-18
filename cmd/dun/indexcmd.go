@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/enginecmd"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 )
@@ -17,7 +17,7 @@ import (
 // is the undo of what dun decided, and exclude the redo of what it offered.
 
 // runExcludeCmd applies /<slash> exclude|include <dir>.
-func runExcludeCmd(ctx context.Context, h *dun.Harness, id, verb, dir string) string {
+func runExcludeCmd(ctx context.Context, h *harness.Harness, id, verb, dir string) string {
 	slash := id
 	if st, ok := stateOf(h, id); ok && enginecmd.SlashOf(st) != "" {
 		slash = enginecmd.SlashOf(st)
@@ -56,7 +56,7 @@ func runExcludeCmd(ctx context.Context, h *dun.Harness, id, verb, dir string) st
 }
 
 // runBudgetCmd applies /<slash> budget [<budget>|default].
-func runBudgetCmd(ctx context.Context, h *dun.Harness, id, slash, budget string) string {
+func runBudgetCmd(ctx context.Context, h *harness.Harness, id, slash, budget string) string {
 	cur := h.IndexBudget(id)
 	if cur == "" {
 		cur = "the server's default"
@@ -85,7 +85,7 @@ func runBudgetCmd(ctx context.Context, h *dun.Harness, id, slash, budget string)
 }
 
 // runAnywayCmd applies /<slash> index-anyway [on|off].
-func runAnywayCmd(ctx context.Context, h *dun.Harness, id, slash, arg string) string {
+func runAnywayCmd(ctx context.Context, h *harness.Harness, id, slash, arg string) string {
 	cur := h.IndexAnyway(id)
 	state := map[bool]string{true: "on", false: "off"}[cur]
 	arg = strings.ToLower(strings.TrimSpace(arg))
@@ -113,7 +113,7 @@ func runAnywayCmd(ctx context.Context, h *dun.Harness, id, slash, arg string) st
 }
 
 // excludesNow is what id's index leaves out now, as a phrase.
-func excludesNow(h *dun.Harness, id string) string {
+func excludesNow(h *harness.Harness, id string) string {
 	ex := h.IndexExcludes(id)
 	if len(ex) == 0 {
 		return "nothing is excluded"
@@ -123,15 +123,15 @@ func excludesNow(h *dun.Harness, id string) string {
 
 // indexStatus is bare /lsp's lines on the index: its state and what it
 // leaves out, or "" for a server with neither.
-func indexStatus(st dun.ServerState, slash string) string {
+func indexStatus(st harness.ServerState, slash string) string {
 	var lines []string
 	switch {
 	case !st.Running:
-	case st.Index == dun.IndexBuilding:
+	case st.Index == harness.IndexBuilding:
 		lines = append(lines, fmt.Sprintf("index: building · %ds", int(st.IndexSeconds+0.5)))
-	case st.Index == dun.IndexReady:
+	case st.Index == harness.IndexReady:
 		lines = append(lines, fmt.Sprintf("index: ready · %s files · %.1fs", numfmt.Grouped(st.IndexFiles), st.IndexSeconds))
-	case st.Index == dun.IndexFailed:
+	case st.Index == harness.IndexFailed:
 		lines = append(lines, "index: failed — "+textfmt.OneLine(st.IndexErr))
 	}
 	// What the index left out, by reason: the advanced user's answer to
@@ -154,7 +154,7 @@ func indexStatus(st dun.ServerState, slash string) string {
 		}
 		lines = append(lines, "  a path named inside one is still read · /"+slash+" exclude|include <dir> changes the rest")
 	}
-	if st.Index == dun.IndexFailed && strings.HasPrefix(st.IndexErr, "not a project") && !st.IndexAnyway {
+	if st.Index == harness.IndexFailed && strings.HasPrefix(st.IndexErr, "not a project") && !st.IndexAnyway {
 		lines = append(lines, "  /"+slash+" index-anyway on indexes it regardless")
 	}
 	if st.IndexAnyway {
@@ -177,7 +177,7 @@ const leftOutExamples = 3
 // totals: "  minified: 3 files — hint · e.g. a.min.js, b.min.js". The list
 // holds at most 20 entries per reason, so the count is the total's and the
 // examples are a few of the list's.
-func leftOutByLines(by []dun.IndexLeftOutBy, list []dun.IndexLeftOut) []string {
+func leftOutByLines(by []harness.IndexLeftOutBy, list []harness.IndexLeftOut) []string {
 	lines := []string{"left out of the index:"}
 	for _, r := range by {
 		l := fmt.Sprintf("  %s: %d %s", r.Reason, r.Count, leftOutUnit(r.Reason, r.Count))

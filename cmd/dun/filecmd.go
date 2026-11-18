@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // fileUsage is /file's grammar.
@@ -13,7 +13,7 @@ const fileUsage = "/file add <path> [--global|--project|--session] [--write] [--
 
 // fileCmd runs /file <action>: a path outside the workspace, opened at a
 // scope, read or write, indexed or not (dun/fileadd.go). Bare, the list.
-func fileCmd(h *dun.Harness, action string) (string, error) {
+func fileCmd(h *harness.Harness, action string) (string, error) {
 	f := strings.Fields(strings.TrimSpace(action))
 	if len(f) == 0 {
 		return fileList(h), nil
@@ -35,7 +35,7 @@ func fileCmd(h *dun.Harness, action string) (string, error) {
 			}
 		}
 	}
-	scope, err := scopeArg(flags, dun.ScopeSession)
+	scope, err := scopeArg(flags, harness.ScopeSession)
 	if err != nil {
 		return "", err
 	}
@@ -50,7 +50,7 @@ func fileCmd(h *dun.Harness, action string) (string, error) {
 	}
 	switch verb {
 	case "add":
-		return h.AddPath(path, scope, dun.PathOptions{Write: write, NoIndex: noIndex})
+		return h.AddPath(path, scope, harness.PathOptions{Write: write, NoIndex: noIndex})
 	case "remove", "unset":
 		return h.RemovePath(path, scope)
 	case "off", "on":
@@ -67,7 +67,7 @@ func fileCmd(h *dun.Harness, action string) (string, error) {
 }
 
 // fileList is bare /file for a client without the table.
-func fileList(h *dun.Harness) string {
+func fileList(h *harness.Harness) string {
 	es := h.AddedEntries()
 	if len(es) == 0 {
 		return "no paths outside the workspace are open to dun · " + fileUsage

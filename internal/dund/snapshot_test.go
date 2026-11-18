@@ -3,7 +3,7 @@ package dund
 import (
 	"testing"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -40,7 +40,7 @@ func TestSnapshotStateIsMarkedReplayed(t *testing.T) {
 
 // What a snapshot's items hold is not replayed after it again.
 func TestAfterSnapshotDropsWhatTheItemsHold(t *testing.T) {
-	items := []dun.HistoryItem{
+	items := []harness.HistoryItem{
 		{Kind: "user", ID: "u1", Content: "hi"},
 		{Kind: "tool_call", CallID: "c1", Tool: "exec"},
 		{Kind: "tool_result", CallID: "c1", Tool: "exec"},
@@ -69,7 +69,7 @@ func TestAfterSnapshotDropsWhatTheItemsHold(t *testing.T) {
 // items hold is dropped by its id, the next one (same text, new id) is not.
 // An old engine's reply (no id) falls back to the text rule.
 func TestAfterSnapshotDedupesRepliesByID(t *testing.T) {
-	items := []dun.HistoryItem{
+	items := []harness.HistoryItem{
 		{Kind: "user", ID: "u1", Content: "ping"},
 		{Kind: "assistant", ID: "r1", Content: "pong"},
 	}

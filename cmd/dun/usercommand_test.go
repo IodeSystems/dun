@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -15,7 +15,7 @@ import (
 func TestRecordReplies_SpellsCommandsAsTyped(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	sf := filepath.Join(t.TempDir(), "s.jsonl")
-	h, err := dun.Start(context.Background(), dun.Config{Workspace: t.TempDir(), SessionFile: sf, NoTools: true})
+	h, err := harness.Start(context.Background(), harness.Config{Workspace: t.TempDir(), SessionFile: sf, NoTools: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,11 +25,11 @@ func TestRecordReplies_SpellsCommandsAsTyped(t *testing.T) {
 	rec(&proto.ControlEvent{ID: "slash", Action: "rag status", Message: "raglit: running"})
 	rec(&proto.ControlEvent{ID: "ext", Action: "view", Message: "the list"})
 	rec(&proto.ControlEvent{ID: "unqueue", Action: "", Message: "[]"})
-	rec(&proto.ServerEvent{ID: dun.ServerDocs, Action: "start", Message: "raglit up"})
-	rec(&proto.ServerEvent{ID: dun.ServerDocs, Action: "on", Message: "raglit: on for this session"})
+	rec(&proto.ServerEvent{ID: harness.ServerDocs, Action: "start", Message: "raglit up"})
+	rec(&proto.ServerEvent{ID: harness.ServerDocs, Action: "on", Message: "raglit: on for this session"})
 	h.Close()
 	var lines []string
-	for _, it := range dun.SessionHistory(sf) {
+	for _, it := range harness.SessionHistory(sf) {
 		if it.Kind == "command" {
 			l, _, _ := strings.Cut(it.Content, "\n")
 			lines = append(lines, l)

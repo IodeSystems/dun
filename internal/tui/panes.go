@@ -7,7 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // A pushed screen (docs/panes.md): panes stacked between the head row and
@@ -310,15 +310,15 @@ type serverLogPane struct {
 // serverPicker is a view whose rows are servers: the log pane shows the
 // selected one's.
 type serverPicker interface {
-	selectedServer(cur int) (dun.ServerState, bool)
+	selectedServer(cur int) (harness.ServerState, bool)
 }
 
 // selected is the list's selected server.
-func (p *serverLogPane) selected(m *tuiModel) (dun.ServerState, bool) {
+func (p *serverLogPane) selected(m *tuiModel) (harness.ServerState, bool) {
 	if v, ok := m.pg.id.(serverPicker); ok && m.paging {
 		return v.selectedServer(m.pg.cur)
 	}
-	return dun.ServerState{}, false
+	return harness.ServerState{}, false
 }
 
 // lines is the selected server's log, wrapped to w.

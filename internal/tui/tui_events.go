@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/iodesystems/bubbleteandmd"
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/enginecmd"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
@@ -1074,12 +1074,12 @@ func sortedKeys(m map[string]any) []string {
 // evParts decodes the context breakdown rows off a usage event. A row that is
 // missing or malformed is dropped rather than rendered as zero, because a
 // zero-token MCP server on the /context table reads as a real measurement.
-func evParts(v any) []dun.ContextPart {
+func evParts(v any) []harness.ContextPart {
 	rows, ok := v.([]any)
 	if !ok {
 		return nil
 	}
-	out := make([]dun.ContextPart, 0, len(rows))
+	out := make([]harness.ContextPart, 0, len(rows))
 	for _, r := range rows {
 		m, ok := r.(map[string]any)
 		if !ok {
@@ -1089,7 +1089,7 @@ func evParts(v any) []dun.ContextPart {
 		if name == "" {
 			continue
 		}
-		out = append(out, dun.ContextPart{Name: name, Tokens: int(evNum(m["tokens"]))})
+		out = append(out, harness.ContextPart{Name: name, Tokens: int(evNum(m["tokens"]))})
 	}
 	return out
 }

@@ -13,7 +13,7 @@ import (
 	"golang.org/x/mod/semver"
 	"golang.org/x/sys/unix"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/internal/update"
 	"github.com/iodesystems/dun/release"
@@ -141,7 +141,7 @@ func (d *doctor) toolOrigin(name, p string) {
 		fix := ""
 		if o.Kind == update.GoInstall {
 			fix = "to update: go install " + o.Module + "@latest"
-			if inst, ok := dun.ToolInstall[name]; ok {
+			if inst, ok := harness.ToolInstall[name]; ok {
 				fix = "to update: go install " + inst.Module
 			}
 		}
@@ -193,7 +193,7 @@ func supportedTool(name string) (release.Tool, bool) {
 	if !ok {
 		return s, false
 	}
-	if t, rok := dun.RegistryTool(name); rok {
+	if t, rok := harness.RegistryTool(name); rok {
 		if semver.Compare(t.Min, s.Min) > 0 {
 			s.Min = t.Min
 		}
@@ -210,7 +210,7 @@ func installModule(name string) string {
 	if s, ok := supportedTool(name); ok {
 		return s.Module + "@" + s.Recommended
 	}
-	return dun.ToolInstall[name].Module
+	return harness.ToolInstall[name].Module
 }
 
 // repoURL is a module's repository page: its path's first three elements.
@@ -278,7 +278,7 @@ func toolWarnings() []string {
 	d := &doctor{}
 	var out []string
 	for _, t := range release.Supported {
-		p, err := dun.FindCommand(t.Name)
+		p, err := harness.FindCommand(t.Name)
 		if err != nil {
 			continue // missing: the server's own start says so
 		}

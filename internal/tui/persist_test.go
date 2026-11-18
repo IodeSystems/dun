@@ -11,7 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // /exit tells dund this client is leaving; /persist sends its mode; the
@@ -87,7 +87,7 @@ func TestReadyNamesNoTools(t *testing.T) {
 func TestOfflineShowsTheSavedConversation(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	ws := t.TempDir()
-	dir := dun.RootDir(ws)
+	dir := harness.RootDir(ws)
 	os.MkdirAll(dir, 0o755)
 	id := "20261022-120000"
 	os.WriteFile(filepath.Join(dir, id+".jsonl"), []byte(`{"Kind":"user","Content":"what broke the build"}`+"\n"+

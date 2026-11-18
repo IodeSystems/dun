@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/harness"
 	dunreg "github.com/iodesystems/dun/internal/registry"
 	"github.com/iodesystems/dun/internal/update"
 	"github.com/iodesystems/dun/release"
@@ -52,7 +52,7 @@ func useRegistry() {
 		return
 	}
 	if ix, err := s.Load(); err == nil {
-		dun.UseRegistry(ix, buildinfo.Version)
+		harness.UseRegistry(ix, buildinfo.Version)
 	}
 }
 

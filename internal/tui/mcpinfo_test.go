@@ -6,26 +6,26 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/enginecmd"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/numfmt"
 )
 
 // infoServers: the shell, a heavy standalone server, a light one, a
 // scripted one, one that did not start, and an extension that is off.
-func infoServers() []dun.ServerState {
-	return []dun.ServerState{
+func infoServers() []harness.ServerState {
+	return []harness.ServerState{
 		{ID: "shell", Running: true, Auto: true, Tools: 1},
-		{ID: "notes", Running: true, Auto: true, Tools: 12, Via: dun.ViaDirect},
-		{ID: "tiny", Running: true, Auto: true, Tools: 2, Via: dun.ViaDirect},
-		{ID: "corp", Auto: true, Tools: 30, Via: dun.ViaShell, Hosted: true},
-		{ID: "figma", Auto: true, Via: dun.ViaDirect, Err: "connect: connection refused"},
+		{ID: "notes", Running: true, Auto: true, Tools: 12, Via: harness.ViaDirect},
+		{ID: "tiny", Running: true, Auto: true, Tools: 2, Via: harness.ViaDirect},
+		{ID: "corp", Auto: true, Tools: 30, Via: harness.ViaShell, Hosted: true},
+		{ID: "figma", Auto: true, Via: harness.ViaDirect, Err: "connect: connection refused"},
 		{ID: "raglit", Slash: "raglit"},
 	}
 }
 
-func infoParts() []dun.ContextPart {
-	return []dun.ContextPart{{Name: "built-in tools", Tokens: 1600},
+func infoParts() []harness.ContextPart {
+	return []harness.ContextPart{{Name: "built-in tools", Tokens: 1600},
 		{Name: "mcp: shell", Tokens: 1100}, {Name: "mcp: notes", Tokens: 5200}, {Name: "mcp: tiny", Tokens: 300}}
 }
 
@@ -41,7 +41,7 @@ func TestMCPInfo_Rows(t *testing.T) {
 	// Moving notes adds ", notes" to the hosted sentence: what it saves is
 	// its part less that.
 	hosted := []string{"corp"}
-	line := numfmt.EstimateTok(dun.HostedLine(append(hosted, "notes"))) - numfmt.EstimateTok(dun.HostedLine(hosted))
+	line := numfmt.EstimateTok(harness.HostedLine(append(hosted, "notes"))) - numfmt.EstimateTok(harness.HostedLine(hosted))
 	if line <= 0 || line > 3 {
 		t.Fatalf("naming one more server costs %d tokens", line)
 	}
@@ -55,7 +55,7 @@ func TestMCPInfo_Rows(t *testing.T) {
 		"  figma   did not start: connect: connection refused · standalone\n",
 		"  raglit  off · built-in\n",
 		"  total ~6.6k tokens in every request, 21% of the 32k window\n",
-		"the shell's eval: ~1.1k tokens · the line naming its servers: ~" + numfmt.TokN(numfmt.EstimateTok(dun.HostedLine(hosted))) + " tokens · scripted: corp\n",
+		"the shell's eval: ~1.1k tokens · the line naming its servers: ~" + numfmt.TokN(numfmt.EstimateTok(harness.HostedLine(hosted))) + " tokens · scripted: corp\n",
 		"to save tokens:\n" + save,
 	} {
 		if !strings.Contains(s, want) {
@@ -94,10 +94,10 @@ func TestMCPInfo_Quiet(t *testing.T) {
 func TestMCPInfo_ShellOff(t *testing.T) {
 	srv := infoServers()
 	srv[0].Running = false
-	srv = append(srv, dun.ServerState{ID: "snow", Running: true, Auto: true, Tools: 40, Via: dun.ViaDirect, Auth: "logged in"})
-	parts := append(infoParts(), dun.ContextPart{Name: "mcp: snow", Tokens: 9000})
+	srv = append(srv, harness.ServerState{ID: "snow", Running: true, Auto: true, Tools: 40, Via: harness.ViaDirect, Auth: "logged in"})
+	parts := append(infoParts(), harness.ContextPart{Name: "mcp: snow", Tokens: 9000})
 	s := plainInfo(enginecmd.McpInfoIn{Servers: srv, Parts: parts, Counted: true})
-	line := numfmt.EstimateTok(dun.HostedLine([]string{"notes"}))
+	line := numfmt.EstimateTok(harness.HostedLine([]string{"notes"}))
 	for _, want := range []string{
 		"  corp    waits for the shell · scripted\n",
 		"the shell is off — /mcp on shell · scripted: corp\n",
@@ -163,8 +163,8 @@ func TestPalette_MCPInfoCompletion(t *testing.T) {
 func TestMCPInfo_Savings(t *testing.T) {
 	servers := infoServers()
 	servers[3].Standalone, servers[3].Help = 38000, 1600
-	usage := dun.StatsSummary{Rounds: 412, Processed: 31, Prompt: 4_000_000, Cached: 3_600_000, Cost: 0.5, Currency: "USD", CostTokens: 1_000_000,
-		Servers: map[string]*dun.ServerUsage{"notes": {Rounds: 412, Processed: 31, Tokens: 161200}, "corp": {SavedRounds: 31, Saved: 1_178_000}}}
+	usage := harness.StatsSummary{Rounds: 412, Processed: 31, Prompt: 4_000_000, Cached: 3_600_000, Cost: 0.5, Currency: "USD", CostTokens: 1_000_000,
+		Servers: map[string]*harness.ServerUsage{"notes": {Rounds: 412, Processed: 31, Tokens: 161200}, "corp": {SavedRounds: 31, Saved: 1_178_000}}}
 	s := plainInfo(enginecmd.McpInfoIn{Servers: servers, Parts: infoParts(), Counted: true, Window: 32000,
 		Usage: usage, UsageDays: 7, Speed: 6700, SpeedRounds: 20})
 	for _, want := range []string{

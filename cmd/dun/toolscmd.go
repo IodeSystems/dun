@@ -7,9 +7,9 @@ import (
 	"io"
 	"time"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/internal/depver"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/update"
 )
 
@@ -90,7 +90,7 @@ func toolsCmd(args []string, stdout, stderr io.Writer) int {
 		s.MaxAge = 0
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		if ix, _, err := s.Refresh(ctx); err == nil && ix != nil {
-			dun.UseRegistry(ix, buildinfo.Version)
+			harness.UseRegistry(ix, buildinfo.Version)
 		}
 		cancel()
 	}
@@ -120,7 +120,7 @@ func toolRows(upgrade bool) []toolRow {
 			continue
 		}
 		r := toolRow{Name: t.name, Pin: pinFor(t.name)}
-		p, err := dun.FindCommand(t.name)
+		p, err := harness.FindCommand(t.name)
 		if err != nil {
 			r.Missing = true
 			if fixTools[t.name] {

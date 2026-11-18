@@ -92,7 +92,7 @@ answer; record them (versions, commits, breaking notes) before going on.
      copy a hash you did not compute;
    - the tool's registry entry (`site/registry/v1/tools/<tool>/*.json`)
      `recommended`;
-   - dun's notes on the tool's surface if it changed (e.g. `mcp.go`'s eval
+   - dun's notes on the tool's surface if it changed (e.g. `internal/harness/mcp.go`'s eval
      notes for mcpshell).
 3. **dun.** All pins committed as `chore(release): …`. Then:
    - `GOWORK=off go build ./... && GOWORK=off go vet ./...`;

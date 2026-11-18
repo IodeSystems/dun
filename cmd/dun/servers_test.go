@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/enginecmd"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // --rag=false (force off for this run) must be distinguishable from not passing
@@ -26,10 +26,10 @@ func TestTristate_UnsetIsNotFalse(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := autostartOverrides(rag, lsp)
-	if v, ok := got[dun.ServerDocs]; !ok || v {
+	if v, ok := got[harness.ServerDocs]; !ok || v {
 		t.Fatalf("--rag=false should force docs off, got %v", got)
 	}
-	if _, ok := got[dun.ServerCode]; ok {
+	if _, ok := got[harness.ServerCode]; ok {
 		t.Error("an unset --lsp must not be overridden")
 	}
 	if rag.String() != "false" {
@@ -41,18 +41,18 @@ func TestTristate_UnsetIsNotFalse(t *testing.T) {
 // off is not in it: the splash says that (TestSplash_FreshSessionOnly), with
 // the command, from the server's Slash.
 func TestServerHint_NamesWhatFailedNotWhatIsOff(t *testing.T) {
-	hint := enginecmd.ServerHint([]dun.ServerState{
-		{ID: dun.ServerShell, Running: true},
-		{ID: dun.ServerDocs},
-		{ID: dun.ServerCode, Err: "mcp: initialize code: transport closed\nsome-lsp: bad flag"},
+	hint := enginecmd.ServerHint([]harness.ServerState{
+		{ID: harness.ServerShell, Running: true},
+		{ID: harness.ServerDocs},
+		{ID: harness.ServerCode, Err: "mcp: initialize code: transport closed\nsome-lsp: bad flag"},
 	})
-	if strings.Contains(hint, dun.ServerShell) {
+	if strings.Contains(hint, harness.ServerShell) {
 		t.Error("a running server should not be in the hint")
 	}
 	if strings.Contains(hint, "raglit") || strings.Contains(hint, "off:") {
 		t.Errorf("an extra that is off is the splash's to say: %q", hint)
 	}
-	if ps := enginecmd.ServersProto([]dun.ServerState{{ID: dun.ServerDocs}}); ps[0].Slash != "rag" {
+	if ps := enginecmd.ServersProto([]harness.ServerState{{ID: harness.ServerDocs}}); ps[0].Slash != "rag" {
 		t.Errorf("the server state lacks its command: %+v", ps[0])
 	}
 	if !strings.Contains(hint, "bad flag") {
@@ -67,9 +67,9 @@ func TestServerHint_NamesWhatFailedNotWhatIsOff(t *testing.T) {
 // skipped — a skipped node_modules is otherwise invisible.
 func TestServerHint_CarriesIngestSummary(t *testing.T) {
 	sum := `docs: indexing 12 files · skipped node_modules/ (dependencies) — to include one: "rag": {"include": ["node_modules/"]} in dun.json`
-	hint := enginecmd.ServerHint([]dun.ServerState{
-		{ID: dun.ServerShell, Running: true},
-		{ID: dun.ServerDocs, Running: true, Ingest: sum},
+	hint := enginecmd.ServerHint([]harness.ServerState{
+		{ID: harness.ServerShell, Running: true},
+		{ID: harness.ServerDocs, Running: true, Ingest: sum},
 	})
 	if hint != sum {
 		t.Errorf("hint = %q, want the ingest summary", hint)
@@ -187,12 +187,12 @@ func decodeEvent(t *testing.T, line string) map[string]any {
 // all of them: which of these is even up. So a STOPPED server must still get a
 // line — an absent one reads as "not configured", which is a different fact.
 func TestServerListing_ShowsEveryServerNotJustRunningOnes(t *testing.T) {
-	out := serverListing([]dun.ServerState{
-		{ID: dun.ServerShell, Running: true, Tools: 4},
-		{ID: dun.ServerDocs, Auto: true, Global: "off", Project: "on", From: dun.ScopeProject},
-		{ID: dun.ServerCode, Err: "mcp: initialize code: transport closed\nsome-lsp: bad flag"},
+	out := serverListing([]harness.ServerState{
+		{ID: harness.ServerShell, Running: true, Tools: 4},
+		{ID: harness.ServerDocs, Auto: true, Global: "off", Project: "on", From: harness.ScopeProject},
+		{ID: harness.ServerCode, Err: "mcp: initialize code: transport closed\nsome-lsp: bad flag"},
 	})
-	for _, id := range []string{dun.ServerShell, dun.ServerDocs, dun.ServerCode} {
+	for _, id := range []string{harness.ServerShell, harness.ServerDocs, harness.ServerCode} {
 		if !strings.Contains(out, id) {
 			t.Errorf("%s missing from the listing: %q", id, out)
 		}
@@ -212,7 +212,7 @@ func TestServerListing_ShowsEveryServerNotJustRunningOnes(t *testing.T) {
 }
 
 // /mcp restart bounces what is RUNNING and leaves the rest alone. Both servers
-// are opt-in by design (see dun.DefaultServers), so silently starting one that
+// are opt-in by design (see harness.DefaultServers), so silently starting one that
 // this session left off would cost a spawn and an index build nobody asked for.
 func TestRunAllServersCmd_RestartsRunningOnesAndSkipsTheRest(t *testing.T) {
 	if !haveBin("mcpshell") {
@@ -220,11 +220,11 @@ func TestRunAllServersCmd_RestartsRunningOnesAndSkipsTheRest(t *testing.T) {
 	}
 	ctx := context.Background()
 	dir := t.TempDir()
-	h, err := dun.Start(ctx, dun.Config{
+	h, err := harness.Start(ctx, harness.Config{
 		Workspace: dir,
-		Servers: []dun.Server{
-			{ID: dun.ServerShell, Command: "mcpshell", Args: []string{"mcp", "--files-dir", dir}, Timeout: 30},
-			{ID: dun.ServerDocs, Command: "definitely-not-a-real-binary-xyz", Timeout: 5},
+		Servers: []harness.Server{
+			{ID: harness.ServerShell, Command: "mcpshell", Args: []string{"mcp", "--files-dir", dir}, Timeout: 30},
+			{ID: harness.ServerDocs, Command: "definitely-not-a-real-binary-xyz", Timeout: 5},
 		},
 	})
 	if err != nil {
@@ -232,10 +232,10 @@ func TestRunAllServersCmd_RestartsRunningOnesAndSkipsTheRest(t *testing.T) {
 	}
 	defer h.Close()
 
-	if err := h.StartServer(ctx, dun.ServerShell); err != nil {
+	if err := h.StartServer(ctx, harness.ServerShell); err != nil {
 		t.Fatal(err)
 	}
-	before, _ := stateOf(h, dun.ServerShell)
+	before, _ := stateOf(h, harness.ServerShell)
 	if !before.Running || before.Tools == 0 {
 		t.Fatalf("shell should be up with tools before the restart: %+v", before)
 	}
@@ -245,12 +245,12 @@ func TestRunAllServersCmd_RestartsRunningOnesAndSkipsTheRest(t *testing.T) {
 	if !strings.Contains(out, "restarted") {
 		t.Errorf("the running server should report a restart: %q", out)
 	}
-	if !strings.Contains(out, "skipped (not running)") || !strings.Contains(out, dun.ServerDocs) {
+	if !strings.Contains(out, "skipped (not running)") || !strings.Contains(out, harness.ServerDocs) {
 		t.Errorf("the stopped server should be named as skipped, not silently ignored: %q", out)
 	}
 	// The point of a restart is a WORKING server on the other side, not just a
 	// dead one: the tools have to come back.
-	after, _ := stateOf(h, dun.ServerShell)
+	after, _ := stateOf(h, harness.ServerShell)
 	if !after.Running || after.Tools != before.Tools {
 		t.Errorf("shell should be back with its tools: before=%+v after=%+v", before, after)
 	}
@@ -265,23 +265,23 @@ func TestRunServerCmd_RestartNamedStartsAStoppedServer(t *testing.T) {
 	}
 	ctx := context.Background()
 	dir := t.TempDir()
-	h, err := dun.Start(ctx, dun.Config{
+	h, err := harness.Start(ctx, harness.Config{
 		Workspace: dir,
-		Servers:   []dun.Server{{ID: dun.ServerShell, Command: "mcpshell", Args: []string{"mcp", "--files-dir", dir}, Timeout: 30}},
+		Servers:   []harness.Server{{ID: harness.ServerShell, Command: "mcpshell", Args: []string{"mcp", "--files-dir", dir}, Timeout: 30}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer h.Close()
 
-	if st, _ := stateOf(h, dun.ServerShell); st.Running {
+	if st, _ := stateOf(h, harness.ServerShell); st.Running {
 		t.Fatal("nothing autostarts, so shell should be down")
 	}
-	out := runServerCmd(ctx, h, dun.ServerShell, "restart")
+	out := runServerCmd(ctx, h, harness.ServerShell, "restart")
 	if !strings.Contains(out, "started") || strings.Contains(out, "restarted") {
 		t.Errorf("a stopped server that was NAMED should report a start, not a restart: %q", out)
 	}
-	if st, _ := stateOf(h, dun.ServerShell); !st.Running {
+	if st, _ := stateOf(h, harness.ServerShell); !st.Running {
 		t.Error("naming a stopped server should start it")
 	}
 }
@@ -323,7 +323,7 @@ func TestTurnErr_BudgetExpiryNamesItself(t *testing.T) {
 	// What the agent loop actually returns from a cancelled request: the bare
 	// cancellation, wrapped the way an HTTP client wraps it.
 	got := turnErr(tctx, fmt.Errorf("post %q: %w", "/v1/chat", context.Canceled))
-	var budget dun.BudgetCut
+	var budget harness.BudgetCut
 	if !errors.As(got, &budget) {
 		t.Fatalf("budget expiry did not name itself: %v", got)
 	}
@@ -348,7 +348,7 @@ func TestTurnErr_CtrlCStaysCancelled(t *testing.T) {
 	if !errors.Is(got, context.Canceled) {
 		t.Fatalf("ctrl-C should stay a plain cancellation, got %v", got)
 	}
-	var budget dun.BudgetCut
+	var budget harness.BudgetCut
 	if errors.As(got, &budget) {
 		t.Error("ctrl-C was blamed on the turn budget")
 	}
@@ -389,10 +389,10 @@ func TestTurnErr_LiveTurnIsUntouched(t *testing.T) {
 // /mcp says what the tool definitions cost per request in total, and that a
 // server in the shell adds none.
 func TestServerListing_ShowsDefinitionCost(t *testing.T) {
-	out := serverListing([]dun.ServerState{
-		{ID: "a", Running: true, Via: dun.ViaDirect, Tools: 10, Cost: 3000},
-		{ID: "b", Running: true, Via: dun.ViaDirect, Tools: 2, Cost: 1200},
-		{ID: "c", Via: dun.ViaShell, Auto: true, Hosted: true, Tools: 40, Namespace: "c"},
+	out := serverListing([]harness.ServerState{
+		{ID: "a", Running: true, Via: harness.ViaDirect, Tools: 10, Cost: 3000},
+		{ID: "b", Running: true, Via: harness.ViaDirect, Tools: 2, Cost: 1200},
+		{ID: "c", Via: harness.ViaShell, Auto: true, Hosted: true, Tools: 40, Namespace: "c"},
 		{ID: "d"},
 	})
 	for _, want := range []string{"~3.0k tokens", "~1.2k tokens", "tool definitions: ~4.2k tokens in every request, from 2 running servers", "40 tools · 0 tokens per request"} {

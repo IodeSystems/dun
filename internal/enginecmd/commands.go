@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
@@ -26,12 +26,12 @@ func choices(pairs ...string) []proto.CommandChoice {
 
 // CommandList builds the list from the state it shows: the extensions'
 // slash commands (the bundled ones when exts is empty), after dun's own.
-func CommandList(servers []dun.ServerState, iso string, exts ...dun.Extension) *proto.Commands {
+func CommandList(servers []harness.ServerState, iso string, exts ...harness.Extension) *proto.Commands {
 	if len(exts) == 0 {
-		exts = dun.BundledExtensions()
+		exts = harness.BundledExtensions()
 	}
 	serverState := func(alias string) (string, string) {
-		var st dun.ServerState
+		var st harness.ServerState
 		ok := false
 		for _, s := range servers {
 			if s.ID == alias {
@@ -66,7 +66,7 @@ var srvActions = []string{"on", "on for this session (--project, --global for wi
 
 // extCommand is an extension's slash command: the server switch's actions,
 // then the extension's own commands.
-func extCommand(e dun.Extension, state, detail string) proto.CommandSpec {
+func extCommand(e harness.Extension, state, detail string) proto.CommandSpec {
 	pairs := append([]string{}, srvActions...)
 	usage := "on|off|unset|restart|auto|manual"
 	own := ExtOwnCommands(e)
@@ -89,7 +89,7 @@ func extCommand(e dun.Extension, state, detail string) proto.CommandSpec {
 
 // ExtOwnCommands are e's commands beside the server switch, as name, help
 // pairs: the manifest's (by name), then the index commands its roles give it.
-func ExtOwnCommands(e dun.Extension) []string {
+func ExtOwnCommands(e harness.Extension) []string {
 	var pairs []string
 	names := make([]string, 0, len(e.Slash.Commands))
 	for n := range e.Slash.Commands {
@@ -110,7 +110,7 @@ func ExtOwnCommands(e dun.Extension) []string {
 	if _, own := e.Slash.Commands["exclude"]; !own && ExcludeVerb(e.ID, "exclude") {
 		pairs = append(pairs, excludeHelp...)
 	}
-	if _, own := e.Slash.Commands["setup"]; !own && e.ID == dun.ServerDocs {
+	if _, own := e.Slash.Commands["setup"]; !own && e.ID == harness.ServerDocs {
 		pairs = append(pairs, ragSetupHelp...)
 	}
 	if _, own := e.Slash.Commands["attach"]; !own && ExtIndexVerb(e, "attach") {
@@ -150,7 +150,7 @@ func OwnCommands(iso string) []proto.CommandSpec {
 		// /docker and /worktree new are /isolate's old words: still routed
 		// (routeSlash, isolateAlias), not listed.
 		{Name: "isolate", Usage: "[none|worktree|docker|off]", Group: "tools", Choices: isolateChoices,
-			State: cmp.Or(iso, dun.IsoNone), Description: "where dun's edits and commands are: in place, a fresh git worktree, or a worktree with commands in Docker; alone shows which",
+			State: cmp.Or(iso, harness.IsoNone), Description: "where dun's edits and commands are: in place, a fresh git worktree, or a worktree with commands in Docker; alone shows which",
 			Help: "/isolate alone says where this session works now: in place (the checkout itself), a worktree (its path and branch), or docker (a worktree, its commands in a container; the image).\n" +
 				"/isolate worktree moves the session into a fresh git worktree on a new branch: your checkout is not touched.\n" +
 				"/isolate docker does the same and runs its commands in Docker on the worktree. A container on your own checkout would still change your files, so docker always brings a worktree.\n" +
@@ -205,9 +205,9 @@ func OwnCommands(iso string) []proto.CommandSpec {
 				"clear", "archive every finished tree: out of the view and the model's plan, kept in the file", "unarchive", "bring the archived trees back"),
 			Description: "the task plan the model keeps: alone, the graph as a tree to review, edit, drop and approve; the model is told what you change"},
 		{Name: "effort", Usage: "[default|off|low|medium|high]", Group: "session",
-			Choices: choices(dun.EffortDefault, EffortWords(dun.EffortDefault), dun.EffortOff, dun.EffortAbout[dun.EffortOff],
-				dun.EffortLow, dun.EffortAbout[dun.EffortLow], dun.EffortMedium, dun.EffortAbout[dun.EffortMedium],
-				dun.EffortHigh, dun.EffortAbout[dun.EffortHigh]),
+			Choices: choices(harness.EffortDefault, EffortWords(harness.EffortDefault), harness.EffortOff, harness.EffortAbout[harness.EffortOff],
+				harness.EffortLow, harness.EffortAbout[harness.EffortLow], harness.EffortMedium, harness.EffortAbout[harness.EffortMedium],
+				harness.EffortHigh, harness.EffortAbout[harness.EffortHigh]),
 			State: EffortLevel, Description: "how much the model thinks before it answers: alone picks a level; saved for every session"},
 		{Name: "suggest", Usage: "[on|off|auto]", Group: "session", Choices: choices("on", "always", "off", "never", "auto", "when idle"),
 			State: SuggestMode, Description: "next-message suggestions: alone asks for some now, on/off/auto set the mode"},
@@ -237,7 +237,7 @@ func OwnCommands(iso string) []proto.CommandSpec {
 }
 
 // RephraseOn is the engine-side /rephrase toggle: when true, every user message
-// is rephrased for specificity before it starts a turn (see dun.Harness.
+// is rephrased for specificity before it starts a turn (see harness.Harness.
 // Rephrase). Off by default — the extra LLM round-trip is only worth it when
 // asked for. Set by the `rephrase` control command and --rephrase; the TUI keeps
 // its own copy for the bare /rephrase status, so the engine's copy only has to
@@ -250,15 +250,15 @@ var RephraseOn bool
 var SuggestMode = "auto"
 
 // EffortLevel is /effort's level, for the command list's state (dun/effort.go).
-var EffortLevel = dun.LoadEffort()
+var EffortLevel = harness.LoadEffort()
 
 // EffortWords is an effort level in words: for default, what this
-// engine's server does when its model list says (dun.Harness.EffortWords).
+// engine's server does when its model list says (harness.Harness.EffortWords).
 func EffortWords(level string) string {
-	if h, _ := EngineHarness.Load().(*dun.Harness); h != nil {
+	if h, _ := EngineHarness.Load().(*harness.Harness); h != nil {
 		return h.EffortWords(level)
 	}
-	return dun.EffortAbout[level]
+	return harness.EffortAbout[level]
 }
 
 // EngineHarness is this engine's harness, once started, for settingsEvent.
@@ -268,14 +268,14 @@ var EngineHarness atomic.Value
 // e's roles give it (dun/attach.go): watch with an index CLI, attach and
 // detach with a search role. An extension's own command of the same name
 // wins (routeSlash asks it first).
-func ExtIndexVerb(e dun.Extension, verb string) bool {
+func ExtIndexVerb(e harness.Extension, verb string) bool {
 	switch verb {
 	case "watch":
 		return e.Roles.Index != nil && e.Roles.Index.CLI != ""
 	case "attach", "detach":
 		return e.Roles.Search != nil
 	case "workspace": // whether the workspace is read into an index (dun/ragworkspace.go)
-		return e.Roles.Search != nil && e.Subscribes(dun.HookWorkspaceOpen)
+		return e.Roles.Search != nil && e.Subscribes(harness.HookWorkspaceOpen)
 	}
 	return false
 }
@@ -283,7 +283,7 @@ func ExtIndexVerb(e dun.Extension, verb string) bool {
 // ExcludeVerb reports whether /<slash> <verb> is an exclude command: the
 // code server's, whose index takes --exclude.
 func ExcludeVerb(id, verb string) bool {
-	return id == dun.ServerCode && (verb == "exclude" || verb == "include" || verb == "budget" || verb == "index-anyway")
+	return id == harness.ServerCode && (verb == "exclude" || verb == "include" || verb == "budget" || verb == "index-anyway")
 }
 
 // excludeHelp is exclude's and include's lines in the palette and in bare
@@ -297,15 +297,15 @@ var excludeHelp = []string{
 
 // isolateChoices are /isolate's values, for the palette and /help.
 var isolateChoices = choices(
-	dun.IsoNone, "in place: the checkout itself, commands on this machine",
-	dun.IsoWorktree, "a fresh git worktree on a new branch; commands on this machine",
-	dun.IsoDocker, "a fresh git worktree, its commands in a Docker container on it",
+	harness.IsoNone, "in place: the checkout itself, commands on this machine",
+	harness.IsoWorktree, "a fresh git worktree on a new branch; commands on this machine",
+	harness.IsoDocker, "a fresh git worktree, its commands in a Docker container on it",
 	"off", "back in place, as none; a worktree is kept on disk, never deleted")
 
 // PresetIDs lists the presets for a hint.
 func PresetIDs() string {
-	ids := make([]string, len(dun.Presets()))
-	for i, p := range dun.Presets() {
+	ids := make([]string, len(harness.Presets()))
+	for i, p := range harness.Presets() {
 		ids[i] = p.ID
 	}
 	return strings.Join(ids, ", ")

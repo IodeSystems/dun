@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // mediaFlag is --media <file>, repeatable: files to attach to a one-shot
@@ -33,7 +33,7 @@ func (m mediaFlag) resolve() error {
 		if _, err := os.Stat(abs); err != nil {
 			return fmt.Errorf("--media %s: %v", p, err)
 		}
-		if err := dun.CheckImage(abs); err != nil {
+		if err := harness.CheckImage(abs); err != nil {
 			return fmt.Errorf("--media %s: %v", p, err)
 		}
 		m[i] = abs
@@ -42,10 +42,10 @@ func (m mediaFlag) resolve() error {
 }
 
 // inputs are the files as the harness takes them, labelled like the TUI's.
-func (m mediaFlag) inputs() []dun.ImageInput {
-	var out []dun.ImageInput
+func (m mediaFlag) inputs() []harness.ImageInput {
+	var out []harness.ImageInput
 	for _, p := range m {
-		out = append(out, dun.ImageInput{Path: p})
+		out = append(out, harness.ImageInput{Path: p})
 	}
 	return out
 }

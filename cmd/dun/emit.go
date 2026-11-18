@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/agent"
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
@@ -19,7 +19,7 @@ import (
 // usageEvent is the per-turn accounting event, built in ONE place because it is
 // emitted from two turn paths that had already drifted apart once. It carries
 // three groups: what the turn cost, how the pre-conversation context breaks
-// down, and how the window is divided (see dun.WindowBudget) — the last of which
+// down, and how the window is divided (see harness.WindowBudget) — the last of which
 // /context has no other way to learn.
 //
 // The token counts are the session's, cumulative (agentkit's tally): a
@@ -27,7 +27,7 @@ import (
 // the last one stands for it, or the totals would read 0. They include what
 // the engines before this one counted on the session (tally.go), and the
 // stats file is saved with the turn closed.
-func usageEvent(h *dun.Harness, u agent.TokenUsage) *proto.Usage {
+func usageEvent(h *harness.Harness, u agent.TokenUsage) *proto.Usage {
 	u = lastUsage.at(u)
 	defer tally.save(u)
 	sysTokens, forcedCalls, notifLifted := h.SessionStats()
@@ -100,7 +100,7 @@ func (t *usageTally) at(u agent.TokenUsage) agent.TokenUsage {
 // mcpInfoDays is how far back /mcp info totals what the schemas cost.
 const mcpInfoDays = 7
 
-func turnStatsProto(h *dun.Harness) *proto.TurnStats {
+func turnStatsProto(h *harness.Harness) *proto.TurnStats {
 	t := h.EndTurnStats()
 	speed, n := h.PrefillSpeed()
 	return &proto.TurnStats{Rounds: t.Rounds, WallMS: t.WallMS, ModelMS: t.ModelMS,
@@ -112,7 +112,7 @@ func turnStatsProto(h *dun.Harness) *proto.TurnStats {
 
 // monthUsage is the stats ledger's main rounds since the start of now's
 // month; nil when there were none.
-func monthUsage(h *dun.Harness, now time.Time) *proto.UsageMonth {
+func monthUsage(h *harness.Harness, now time.Time) *proto.UsageMonth {
 	since := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 	s := h.StatsSummary(since)
 	if s.Rounds == 0 {
@@ -121,7 +121,7 @@ func monthUsage(h *dun.Harness, now time.Time) *proto.UsageMonth {
 	return &proto.UsageMonth{Since: since.UTC().Format(time.RFC3339), Rounds: s.Rounds,
 		Prompt: s.Prompt, Cached: s.Cached, PrefillTPS: s.Speed}
 }
-func endTurnSpend(h *dun.Harness) *proto.Spend {
+func endTurnSpend(h *harness.Harness) *proto.Spend {
 	h.EndTurnSpend()
 	return spendProto(h.Spend(), time.Now())
 }
@@ -130,7 +130,7 @@ func endTurnSpend(h *dun.Harness) *proto.Spend {
 // carry it at STARTUP too: the window and the reserve are known before the first
 // turn, and a /context opened before anything has run should say so rather than
 // look like a session with no window.
-func windowOf(w dun.WindowBudget) proto.Window {
+func windowOf(w harness.WindowBudget) proto.Window {
 	return proto.Window{
 		Window: w.Window, WindowReserved: w.Reserved, WindowCap: w.Cap,
 		PromptBudget: w.PromptBudget, PromptTokens: w.Prompt, PromptOverhead: w.Overhead,
@@ -142,7 +142,7 @@ func windowOf(w dun.WindowBudget) proto.Window {
 // retryEvent renders a RetryNote as an --engine event. Durations travel as milliseconds
 // (JSON has no duration type, and a client that wants to count down needs the
 // number, not a formatted string) alongside the ready-made one-liner in "text".
-func retryEvent(n dun.RetryNote) *proto.Retry {
+func retryEvent(n harness.RetryNote) *proto.Retry {
 	ev := &proto.Retry{Scope: n.Scope, Kind: n.Kind, Attempt: n.Attempt, Status: n.Status,
 		DelayMS: n.Delay.Milliseconds(), ElapsedMS: n.Elapsed.Milliseconds(),
 		BudgetMS: n.Budget.Milliseconds(),
@@ -157,7 +157,7 @@ func retryEvent(n dun.RetryNote) *proto.Retry {
 }
 
 // retryGlyph marks the three states a retry note can be in, for the human stream.
-func retryGlyph(n dun.RetryNote) string {
+func retryGlyph(n harness.RetryNote) string {
 	switch n.Kind {
 	case "recovered":
 		return "✓"
@@ -220,8 +220,8 @@ func (e *emitter) emit(payload any) {
 // session (dun/usercommand.go): the replies to what they typed or toggled,
 // spelled as typed. Views, pickers and the engine's own server starts are
 // not commands.
-func recordReplies(h *dun.Harness) func(payload any) {
-	slashOf := map[string]string{"files": "file", "ctxconfig": "context config", dun.ServerDocs: "rag"}
+func recordReplies(h *harness.Harness) func(payload any) {
+	slashOf := map[string]string{"files": "file", "ctxconfig": "context config", harness.ServerDocs: "rag"}
 	kindSlash := map[string]string{"indexes": "rag", "paths": "file", "lsp": "lsp", "skills": "skill", "rules": "rules"}
 	commands := map[string]bool{"slash": true, "files": true, "switches": true, "mcp": true, "ext": true, "jobs": true,
 		"schedule": true, "loop": true, "remember": true, "rules": true, "effort": true, "retry": true, "loops": true, "spend": true, "suggest": true,
@@ -286,7 +286,7 @@ func shortArgs(args map[string]any) string {
 }
 
 // agentsProto is every sub-agent, for the agents event.
-func agentsProto(as []dun.AgentInfo) []proto.AgentInfo {
+func agentsProto(as []harness.AgentInfo) []proto.AgentInfo {
 	out := make([]proto.AgentInfo, 0, len(as))
 	for _, a := range as {
 		out = append(out, proto.AgentInfo{ID: a.ID, Model: a.Model, State: a.State, Status: a.Status,
@@ -298,7 +298,7 @@ func agentsProto(as []dun.AgentInfo) []proto.AgentInfo {
 // jobsProto mirrors agentsProto — the whole list every time, for the same
 // reason. Times cross as unix seconds so the UI can tick a running job's clock
 // without the engine pushing a row per second.
-func jobsProto(js []dun.JobInfo) []proto.JobInfo {
+func jobsProto(js []harness.JobInfo) []proto.JobInfo {
 	out := make([]proto.JobInfo, 0, len(js))
 	for _, j := range js {
 		out = append(out, proto.JobInfo{ID: j.ID, Command: j.Command, Log: j.Log, State: j.State,
@@ -306,7 +306,7 @@ func jobsProto(js []dun.JobInfo) []proto.JobInfo {
 	}
 	return out
 }
-func docsProto(docs []dun.DocHitInfo) []proto.DocHit {
+func docsProto(docs []harness.DocHitInfo) []proto.DocHit {
 	out := make([]proto.DocHit, 0, len(docs))
 	for _, d := range docs {
 		out = append(out, proto.DocHit{Title: d.Title, ID: d.DocID, Line: d.Line, Score: d.Score, Inline: d.Inline,
@@ -318,7 +318,7 @@ func docsProto(docs []dun.DocHitInfo) []proto.DocHit {
 }
 
 // historyProto is a conversation as replayable items.
-func historyProto(items []dun.HistoryItem) []proto.HistoryItem {
+func historyProto(items []harness.HistoryItem) []proto.HistoryItem {
 	out := make([]proto.HistoryItem, 0, len(items))
 	for _, it := range items {
 		out = append(out, proto.HistoryItem{Kind: it.Kind, ID: it.ID, Queued: it.Queued, IsError: it.IsError, Content: it.Content, Tool: it.Tool,
@@ -330,7 +330,7 @@ func historyProto(items []dun.HistoryItem) []proto.HistoryItem {
 // systemCost renders the context breakdown for the event stream. The TUI
 // is fed by events rather than holding the harness, so the parts travel as
 // plain maps beside the totals they add up to.
-func systemCost(bd dun.SystemBreakdown, total int) proto.SystemCost {
+func systemCost(bd harness.SystemBreakdown, total int) proto.SystemCost {
 	parts := make([]proto.ContextPart, 0, len(bd.Parts))
 	for _, p := range bd.Parts {
 		parts = append(parts, proto.ContextPart{Name: p.Name, Tokens: p.Tokens})

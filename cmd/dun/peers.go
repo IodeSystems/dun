@@ -11,13 +11,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/enginecmd"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
 // The engine's half of dun↔dun messaging (dun/peers.go, proto/peer.go): a
-// dun.PeerLink over the engine's own stdio. A request goes out as a
+// harness.PeerLink over the engine's own stdio. A request goes out as a
 // peer_request event; dund answers with a peer_reply command, which the
 // input reader hands back here by rid.
 
@@ -56,13 +56,13 @@ var oauthTimeout = 6 * time.Minute
 
 // oauth asks dund for an OAuth server's token, or to log in or out
 // (dun/oauthbroker.go).
-func (p *peerLink) oauth(ctx context.Context, req dun.OAuthRequest) (dun.OAuthResult, error) {
+func (p *peerLink) oauth(ctx context.Context, req harness.OAuthRequest) (harness.OAuthResult, error) {
 	rep, err := p.callFor(ctx, proto.PeerRequest{Op: "oauth", OAuth: &proto.OAuthReq{
-		Op: req.Op, ID: req.ID, URL: req.URL, WWW: req.WWW, Rejected: req.Rejected, Spec: dun.MarshalOAuthSpec(req.Spec)}}, oauthTimeout)
-	var res dun.OAuthResult
+		Op: req.Op, ID: req.ID, URL: req.URL, WWW: req.WWW, Rejected: req.Rejected, Spec: harness.MarshalOAuthSpec(req.Spec)}}, oauthTimeout)
+	var res harness.OAuthResult
 	if rep.OAuth != nil {
-		res = dun.OAuthResult{Authorization: rep.OAuth.Authorization, Revoked: rep.OAuth.Revoked,
-			Status: dun.UnmarshalOAuthStatus(rep.OAuth.Status)}
+		res = harness.OAuthResult{Authorization: rep.OAuth.Authorization, Revoked: rep.OAuth.Revoked,
+			Status: harness.UnmarshalOAuthStatus(rep.OAuth.Status)}
 	}
 	return res, err
 }
@@ -70,19 +70,19 @@ func (p *peerLink) oauth(ctx context.Context, req dun.OAuthRequest) (dun.OAuthRe
 // Share asks dund's MCP gateway for a shared server's endpoint
 // (dun/gateway.go). The first share of a server waits on its start, which
 // may wait on a login.
-func (p *peerLink) Share(ctx context.Context, req dun.ShareRequest) (dun.ShareGrant, error) {
+func (p *peerLink) Share(ctx context.Context, req harness.ShareRequest) (harness.ShareGrant, error) {
 	b, err := json.Marshal(req)
 	if err != nil {
-		return dun.ShareGrant{}, err
+		return harness.ShareGrant{}, err
 	}
 	rep, err := p.callFor(ctx, proto.PeerRequest{Op: "mcp_share", Share: &proto.McpShareReq{Request: string(b)}}, oauthTimeout)
 	if err != nil {
-		return dun.ShareGrant{}, err
+		return harness.ShareGrant{}, err
 	}
 	if rep.Share == nil {
-		return dun.ShareGrant{}, errors.New("dund gave no endpoint")
+		return harness.ShareGrant{}, errors.New("dund gave no endpoint")
 	}
-	return dun.ShareGrant{URL: rep.Share.URL, Bearer: rep.Share.Bearer, Key: rep.Share.Key}, nil
+	return harness.ShareGrant{URL: rep.Share.URL, Bearer: rep.Share.Bearer, Key: rep.Share.Key}, nil
 }
 
 // Release gives a gateway client back.
@@ -130,31 +130,31 @@ func (p *peerLink) reply(rep proto.PeerReply) {
 	}
 }
 
-func (p *peerLink) List(ctx context.Context) ([]dun.PeerSession, error) {
+func (p *peerLink) List(ctx context.Context) ([]harness.PeerSession, error) {
 	rep, err := p.call(ctx, proto.PeerRequest{Op: "list"})
 	if err != nil {
 		return nil, err
 	}
-	out := make([]dun.PeerSession, 0, len(rep.Sessions))
+	out := make([]harness.PeerSession, 0, len(rep.Sessions))
 	for _, s := range rep.Sessions {
-		out = append(out, dun.PeerSession{ID: s.ID, Name: s.Name, Workspace: s.Workspace, Branch: s.Branch, Worktree: s.Worktree,
+		out = append(out, harness.PeerSession{ID: s.ID, Name: s.Name, Workspace: s.Workspace, Branch: s.Branch, Worktree: s.Worktree,
 			State: s.State, Task: s.Task, Attached: s.Attached, You: s.You})
 	}
 	return out, nil
 }
 
-func (p *peerLink) Send(ctx context.Context, to, text string, wake bool) (dun.PeerSent, error) {
+func (p *peerLink) Send(ctx context.Context, to, text string, wake bool) (harness.PeerSent, error) {
 	rep, err := p.call(ctx, proto.PeerRequest{Op: "msg", To: to, Text: text, Wake: wake})
 	if err != nil {
-		return dun.PeerSent{}, err
+		return harness.PeerSent{}, err
 	}
-	return dun.PeerSent{ID: rep.ID, Name: rep.Name, Busy: rep.Busy, Started: rep.Started, Queued: rep.Queued}, nil
+	return harness.PeerSent{ID: rep.ID, Name: rep.Name, Busy: rep.Busy, Started: rep.Started, Queued: rep.Queued}, nil
 }
 
 // peerIn routes the peer frames the input reader gets: dund's reply to this
 // engine's request, another session's message, and this session's loop
 // count (schedule.go).
-func peerIn(link *peerLink, h *dun.Harness, em *emitter) func(typ string, line []byte) {
+func peerIn(link *peerLink, h *harness.Harness, em *emitter) func(typ string, line []byte) {
 	return func(typ string, line []byte) {
 		switch typ {
 		case "peer_reply":
@@ -168,7 +168,7 @@ func peerIn(link *peerLink, h *dun.Harness, em *emitter) func(typ string, line [
 				return
 			}
 			// Every client shows it, dim, naming the sender; the model reads
-			// it labelled (dun.PeerLabel).
+			// it labelled (harness.PeerLabel).
 			em.emit(&proto.Notification{Kind: "peer", Text: m.FromName + " (" + m.From + "): " + m.Text})
 			if m.Human && m.Wake && wakeHold.Load() {
 				wakePass.Store(true) // a person's message starts now, held or not

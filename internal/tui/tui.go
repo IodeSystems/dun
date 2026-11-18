@@ -16,8 +16,8 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/iodesystems/dun"
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // tuiOpts are the flags the TUI forwards to its `dun --engine` subprocess.
@@ -359,13 +359,13 @@ type tuiModel struct {
 	// reportDir is the capture a /repaint report is waiting on the model for.
 	reportDir string
 
-	renderDue   bool              // streamed text arrived; a tick will draw it
-	tickPending bool              // a render tick is already scheduled
-	picking     bool              // the session picker owns the keys
-	sessions    []dun.SessionInfo // what it is listing
-	sessWS      map[string]string // id → workspace, for sessions dund has elsewhere
-	sessLive    map[string]bool   // id → its engine is running in dund
-	pickSel     int               // highlighted session
+	renderDue   bool                  // streamed text arrived; a tick will draw it
+	tickPending bool                  // a render tick is already scheduled
+	picking     bool                  // the session picker owns the keys
+	sessions    []harness.SessionInfo // what it is listing
+	sessWS      map[string]string     // id → workspace, for sessions dund has elsewhere
+	sessLive    map[string]bool       // id → its engine is running in dund
+	pickSel     int                   // highlighted session
 	// Model picker (/model): fetch available models, let the user switch.
 	modelPicking bool       // the model picker owns the keys
 	models       pickList   // its search box and highlighted row
@@ -414,12 +414,12 @@ type tuiModel struct {
 	switchesWant string // the kind whose switch list this TUI asked for (switchlist.go)
 	// mcpServersWant: this TUI asked for the /mcp table (mcpview.go).
 	mcpServersWant bool
-	keys           keyMap            // keymap.go: the key pressed → the key the handlers match
-	keysErr        error             // keys.json would not load: said once, defaults in use
-	engineCmds     []engineCmd       // the engine's slash commands (commands event)
-	skills         []catalogSkill    // from the engine's catalog event
-	serverIDs      []string          // every MCP server's id (ready/servers events), for /mcp completion
-	servers        []dun.ServerState // the last server states (ready/servers events), for the splash
+	keys           keyMap                // keymap.go: the key pressed → the key the handlers match
+	keysErr        error                 // keys.json would not load: said once, defaults in use
+	engineCmds     []engineCmd           // the engine's slash commands (commands event)
+	skills         []catalogSkill        // from the engine's catalog event
+	serverIDs      []string              // every MCP server's id (ready/servers events), for /mcp completion
+	servers        []harness.ServerState // the last server states (ready/servers events), for the splash
 	// The splash (splash.go): splashWant shows it at the next settings event
 	// (a fresh session, or a model pick that restarted under one);
 	// splashKeep keeps it through that restart's history; splashDone: a

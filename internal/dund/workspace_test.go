@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // fakeHome points userHome at a temporary directory for one test.
@@ -102,12 +102,12 @@ func TestRootDecoderReadsBackRootDir(t *testing.T) {
 	mkdirs(t, plain, dashed, spaced, ambig, filepath.Join(base, "p", "q"))
 	d := newRootDecoder()
 	for _, p := range []string{plain, dashed, spaced, ambig} {
-		got, ok := d.decode(filepath.Base(dun.RootDir(p)))
-		if !ok || filepath.Base(dun.RootDir(got)) != filepath.Base(dun.RootDir(p)) || !isDir(got) {
+		got, ok := d.decode(filepath.Base(harness.RootDir(p)))
+		if !ok || filepath.Base(harness.RootDir(got)) != filepath.Base(harness.RootDir(p)) || !isDir(got) {
 			t.Errorf("%s: decoded %q, %v", p, got, ok)
 		}
 	}
-	if got, ok := d.decode(filepath.Base(dun.RootDir(filepath.Join(base, "gone", "away")))); ok {
+	if got, ok := d.decode(filepath.Base(harness.RootDir(filepath.Join(base, "gone", "away")))); ok {
 		t.Errorf("a removed directory decoded to %q", got)
 	}
 	if _, ok := d.decode("no-leading-marker"); ok {
@@ -132,7 +132,7 @@ func TestWorkspacesListsWhereSessionsRan(t *testing.T) {
 	scratch := filepath.Join(tmp, "scratch")
 	mkdirs(t, old, recent, gone, empty, scratch)
 	write := func(ws, name string, size int, age time.Duration) {
-		dir := dun.RootDir(ws)
+		dir := harness.RootDir(ws)
 		mkdirs(t, dir)
 		p := filepath.Join(dir, name)
 		if err := os.WriteFile(p, make([]byte, size), 0o644); err != nil {

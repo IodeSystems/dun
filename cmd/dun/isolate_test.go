@@ -10,14 +10,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
 // isoHarness is a session on dir: no tools, no servers.
-func isoHarness(t *testing.T, dir string) *dun.Harness {
+func isoHarness(t *testing.T, dir string) *harness.Harness {
 	t.Helper()
-	h, err := dun.Start(context.Background(), dun.Config{Workspace: dir, NoTools: true, Servers: []dun.Server{},
+	h, err := harness.Start(context.Background(), harness.Config{Workspace: dir, NoTools: true, Servers: []harness.Server{},
 		SessionFile: filepath.Join(t.TempDir(), "s.jsonl")})
 	if err != nil {
 		t.Fatal(err)
@@ -48,7 +48,7 @@ func dockerAvailable(t *testing.T, err error) {
 	t.Cleanup(func() { dockerProbe = old })
 }
 
-func ctl(h *dun.Harness, id, action string) string {
+func ctl(h *harness.Harness, id, action string) string {
 	return runControlCmd(context.Background(), h, id, action)
 }
 
@@ -62,7 +62,7 @@ func TestIsolate_Transitions(t *testing.T) {
 	if !strings.Contains(out, "isolate: none — in place: "+repo) || !strings.Contains(out, "/isolate docker") {
 		t.Errorf("status in place: %q", out)
 	}
-	if isolationMode(h) != dun.IsoNone {
+	if isolationMode(h) != harness.IsoNone {
 		t.Fatalf("mode %q", isolationMode(h))
 	}
 
@@ -83,18 +83,18 @@ func TestIsolate_Transitions(t *testing.T) {
 
 	// docker from a worktree keeps that worktree.
 	out = ctl(h, "isolate", "docker")
-	if !h.IsDocker() || h.Worktree().Path != wt.Path || isolationMode(h) != dun.IsoDocker {
+	if !h.IsDocker() || h.Worktree().Path != wt.Path || isolationMode(h) != harness.IsoDocker {
 		t.Fatalf("docker: %q, ws %q", out, h.Workspace())
 	}
 	if !strings.Contains(out, "kept the worktree") || !strings.Contains(out, "image golang:1.23") {
 		t.Errorf("docker reply: %q", out)
 	}
-	if d := h.ExecBackend().(dun.DockerExec); d.Dir != wt.Path {
+	if d := h.ExecBackend().(harness.DockerExec); d.Dir != wt.Path {
 		t.Errorf("the container is on %q, want the worktree %q", d.Dir, wt.Path)
 	}
 
 	out = ctl(h, "isolate", "off")
-	if h.Workspace() != repo || h.IsDocker() || isolationMode(h) != dun.IsoNone {
+	if h.Workspace() != repo || h.IsDocker() || isolationMode(h) != harness.IsoNone {
 		t.Fatalf("off: ws %q docker %v (%q)", h.Workspace(), h.IsDocker(), out)
 	}
 	if !strings.Contains(out, "in place: "+repo) || !strings.Contains(out, "the worktree is kept: "+wt.Path) ||
@@ -183,15 +183,15 @@ func TestIsolate_Aliases(t *testing.T) {
 		t.Errorf("/docker: %q", out)
 	}
 	out = ctl(h, "docker", "on")
-	if !strings.HasPrefix(out, "/docker on is /isolate docker now") || isolationMode(h) != dun.IsoDocker || h.Workspace() == repo {
+	if !strings.HasPrefix(out, "/docker on is /isolate docker now") || isolationMode(h) != harness.IsoDocker || h.Workspace() == repo {
 		t.Errorf("/docker on: %q", out)
 	}
 	out = ctl(h, "docker", "off")
-	if !strings.HasPrefix(out, "/docker off is /isolate off now\n") || isolationMode(h) != dun.IsoNone || h.Workspace() != repo {
+	if !strings.HasPrefix(out, "/docker off is /isolate off now\n") || isolationMode(h) != harness.IsoNone || h.Workspace() != repo {
 		t.Errorf("/docker off: %q", out)
 	}
 	out = ctl(h, "worktree", "new")
-	if !strings.HasPrefix(out, "/worktree new is /isolate worktree now\n") || isolationMode(h) != dun.IsoWorktree {
+	if !strings.HasPrefix(out, "/worktree new is /isolate worktree now\n") || isolationMode(h) != harness.IsoWorktree {
 		t.Errorf("/worktree new: %q", out)
 	}
 	// /worktree's own actions are not aliases.

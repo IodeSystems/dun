@@ -13,7 +13,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/iodesystems/dun"
+	"github.com/iodesystems/dun/internal/harness"
 )
 
 // Key maps (USER 2026-10-28: "vim crew vs emacs crew vs vscode crew").
@@ -121,7 +121,7 @@ type keyMap struct {
 }
 
 // keysFile is where a person's bindings live.
-func keysFile() string { return filepath.Join(dun.DunHome(), "keys.json") }
+func keysFile() string { return filepath.Join(harness.DunHome(), "keys.json") }
 
 // keysConfig is keys.json: a preset, and actions bound to keys of your own.
 // An action given [] has no key.
