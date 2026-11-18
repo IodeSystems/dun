@@ -129,6 +129,23 @@ type session struct {
 	worktree string
 	branch   string
 	lastUser string
+
+	// Engine adoption (adopt.go, docs/engine-adoption.md), under actMu.
+	// stale: this engine was adopted and is to move to a new engine at its
+	// next idle (an older build, or gateway grants that died with the old
+	// dund), and why; live: its replay is over, so its state is current;
+	// moving: the move is under way.
+	stale        string
+	live, moving bool
+	// blockPid is an engine from before dund's restart that was not
+	// adopted and may still run on this transcript: no engine starts for
+	// the session while it lives (blocked), and blockWhy says why.
+	blockPid int
+	blockWhy string
+	// fallback is what the next start does if this session's engine is not
+	// adopted after an upgrade's restart: the resume record a stop would
+	// have written (registry).
+	fallback *fallbackRec
 }
 
 // track notes what an event says the engine is doing.
@@ -377,6 +394,18 @@ var askedIn = harness.SessionAsked
 // then handles the exit.
 func (s *session) readEvents(eng Engine, done chan struct{}, sc *bufio.Scanner, reason string) {
 	for sc.Scan() {
+		// The engine link's markers, in band (enginelink.go).
+		switch string(sc.Bytes()) {
+		case linkGapMark:
+			s.reattachHistory()
+			continue
+		case proto.LinkLiveLine:
+			s.actMu.Lock()
+			s.live = true
+			s.actMu.Unlock()
+			s.checkStale()
+			continue
+		}
 		if ev, ok := decodeEvent(sc.Bytes()); ok {
 			// Why this engine replays the conversation: dund knows, the
 			// engine does not (docs/session-events.md, "History reason").
@@ -395,6 +424,7 @@ func (s *session) readEvents(eng Engine, done chan struct{}, sc *bufio.Scanner, 
 			cont := s.isContinued()
 			s.track(ev)
 			s.log.Append(ev)
+			s.checkStale()
 			switch ev.Payload.(type) {
 			case *proto.Done, *proto.Error:
 				s.svc.loopTurnEnded(s)
@@ -405,6 +435,11 @@ func (s *session) readEvents(eng Engine, done chan struct{}, sc *bufio.Scanner, 
 		}
 	}
 	err := eng.Wait()
+	if errors.Is(err, errDetached) {
+		// dund let go of it (Service.Detach): it runs on, for the next dund.
+		close(done)
+		return
+	}
 	s.svc.releaseEngine(eng) // its gateway clients (mcpgw.go)
 	s.exited(eng, err)
 	// What it was doing ended with it. dund's own "stopped" goes to the log,
@@ -490,6 +525,9 @@ func (s *session) ensureRunning() error {
 	if s.svc.isClosing() {
 		return errors.New("service is shutting down")
 	}
+	if err := s.blocked(); err != nil {
+		return err
+	}
 	eng, err := s.svc.spawner.Spawn(s.workspace, s.spawnArgs())
 	if err != nil {
 		return err
@@ -517,6 +555,9 @@ func (s *session) attach(eng Engine, sc *bufio.Scanner) {
 	s.running, s.stopping, s.gaveUp = true, false, false
 	s.log.Append(proto.NewEvent(&proto.EngineState{State: "started"}))
 	go s.readEvents(eng, s.engDone, sc, s.historyReason())
+	if _, linked := eng.(*linkEngine); linked {
+		return // not held: an upgrade adopts it (docs/engine-adoption.md)
+	}
 	if on, gen := s.svc.holdGen(); on {
 		// Held from its start, as the running engines are. Not under mu: a
 		// write may wait for the engine to read. Gen: should the upgrade

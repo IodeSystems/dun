@@ -69,6 +69,8 @@ type Service struct {
 	boxes map[[2]string]*mailbox
 	// gwh is the MCP gateway, started on first use (mcpgw.go).
 	gwh gatewayHolder
+	// peerDone remembers the mutating peer requests done (peerdone.go).
+	peerDone *peerDone
 }
 
 // New opens the registry in dir, loading the sessions it lists. Their engines
@@ -77,7 +79,8 @@ func New(dir string, spawner Spawner) (*Service, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("dund: %w", err)
 	}
-	s := &Service{dir: dir, spawner: spawner, sessions: map[string]*session{}, done: make(chan struct{})}
+	s := &Service{dir: dir, spawner: spawner, sessions: map[string]*session{}, done: make(chan struct{}),
+		peerDone: loadPeerDone(dir)}
 	s.up.init()
 	sched, err := loadScheduler(filepath.Join(dir, "schedule.json"), time.Now)
 	if err != nil {
@@ -105,7 +108,7 @@ func New(dir string, spawner Spawner) (*Service, error) {
 		ses := &session{svc: s, id: r.ID, workspace: r.Workspace, owner: r.Owner,
 			members: r.Members, args: r.Args, persist: r.Persist, resume: r.Resume, restored: r.Ask,
 			resumeQuiet: r.ResumeQuiet, continued: r.Continued, cutAgents: r.Agents, queued: r.Queued,
-			log: proto.NewLog(r.ID, logCapacity), shown: true}
+			fallback: r.Fallback, log: proto.NewLog(r.ID, logCapacity), shown: true}
 		// A session nothing was ever asked in is not kept (USER 2026-10-22);
 		// no engine runs yet, so it can simply be left out. One with a
 		// message queued for now is: that message is its first.
@@ -116,11 +119,17 @@ func New(dir string, spawner Spawner) (*Service, error) {
 		}
 		s.sessions[r.ID] = ses
 	}
+	// The engines an earlier dund left running (an upgrade's restart) are
+	// taken back first: their sessions are mid-turn for a reason, not cut.
+	adopted := map[string]bool{} // and blocked: adoptAll
+	if ad, ok := spawner.(Adopter); ok {
+		adopted = s.adoptAll(ad)
+	}
 	// A session whose transcript ended mid-turn without a recorded stop was
 	// working when dund last died (a crash records nothing): woken the same
 	// way, and said so.
 	for _, ses := range s.sessions {
-		if ses.resume == "" && ses.restored == nil && crashedMidTurn(ses.workspace, ses.id) {
+		if !adopted[ses.id] && ses.resume == "" && ses.restored == nil && crashedMidTurn(ses.workspace, ses.id) {
 			ses.resume = resumeMessage("dund stopped unexpectedly (a crash, or it was killed)", true, nil, nil, nil)
 			// The turn that crashed it was dund's own continue: not again.
 			ses.resumeQuiet = ses.continued
@@ -717,11 +726,11 @@ func (s *Service) all() []*session {
 }
 
 // Waiting is everything a restart would cut short, every session, in
-// session order.
+// session order. An engine the next dund adopts is cut short by nothing.
 func (s *Service) Waiting() []proto.UpgradeWait {
 	var out []proto.UpgradeWait
 	for _, ses := range s.all() {
-		out = append(out, ses.waiting()...)
+		out = append(out, ses.waitsUpgrade()...)
 	}
 	return out
 }
@@ -782,6 +791,10 @@ type record struct {
 	// Queued are automatic messages held while an upgrade was pending: sent
 	// on the next start (USER 2026-11-17).
 	Queued []string `json:"queued,omitempty"`
+	// Fallback is the resume record of a working session whose engine an
+	// upgrade's restart left running: used when the next dund cannot adopt
+	// that engine (adopt.go).
+	Fallback *fallbackRec `json:"fallback,omitempty"`
 }
 
 func (s *Service) registryPath() string { return filepath.Join(s.dir, "sessions.json") }
@@ -820,6 +833,12 @@ func (s *Service) saveRegistry() error {
 		ses.actMu.Lock()
 		r.Resume, r.Ask, r.ResumeQuiet, r.Continued = ses.resume, ses.restored, ses.resumeQuiet, ses.continued
 		r.Agents, r.Queued = slices.Clone(ses.cutAgents), slices.Clone(ses.queued)
+		r.Fallback = ses.fallback
+		if fb := ses.fallback; fb != nil && r.Resume == "" && r.Ask == nil {
+			// Also where an older dund reads it (a downgrade): it resumes
+			// the session as before. This dund drops it when it adopts.
+			r.Resume, r.Ask, r.ResumeQuiet, r.Agents = fb.Resume, fb.Ask, fb.Quiet, slices.Clone(fb.Agents)
+		}
 		ses.actMu.Unlock()
 		recs = append(recs, r)
 	}

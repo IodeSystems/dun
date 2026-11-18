@@ -199,6 +199,10 @@ func main() {
 	// prog are the two; *prog below always means the engine.
 	headless := flag.Bool("p", false, "run one task headless and exit: the answer on stdout, the work and the diff on stderr; with no task, the task is read from stdin")
 	prog := flag.Bool("engine", false, "engine mode: line-delimited JSON events on stdin/stdout (what dund runs)")
+	// Set by dund: the events and commands go over a socket of this
+	// engine's own in that directory, so it outlives dund's restart
+	// (enginelink.go, docs/engine-adoption.md).
+	listen := flag.String("listen", "", "with --engine, set by dund: talk over <dir>/<pid>.sock instead of stdin/stdout")
 	asideEscalateMS := flag.Int("aside-escalate-ms", 0, "how long a heartbeat about a silent background job or child waits for a turn to carry it before it wakes the agent (0 is off: heartbeats stay asides; unset: DUN_ASIDE_ESCALATE_MS, else 5000; at most 3 wakes per job or child)")
 	turnLimit := flag.Int("tool-call-turn-limit", 0, "the most tool-call rounds one turn may make (0: DUN_MAX_TURNS, else 400); the model is told it, and warned at 80%")
 	settleDelay := flag.Duration("settle-delay", 0, "interactive: how long after a turn that used tools, with no reply and no sign of the person at the TUI, the agent is woken to report what is done, left, or needs them (0 is off; unset: DUN_SETTLE_DELAY, else 2m)")
@@ -245,6 +249,19 @@ func main() {
 		os.Exit(completionCmd(os.Args[1:], flag.CommandLine, os.Stdout, os.Stderr))
 	}
 	flag.Parse()
+	// The engine link first: dund dials it at once, and an error before
+	// the session (a bad flag) must reach it as an event, not die on stderr.
+	var link *engineLink
+	if *prog && *listen != "" {
+		home := harness.DunHome()
+		l, err := listenLink(*listen, func() bool { _, up := dundcli.Running(home); return up })
+		if err != nil {
+			fatal(err)
+		}
+		link = l
+		linkExit = l.Close
+		defer l.Close()
+	}
 	if *serve {
 		fmt.Fprintln(os.Stderr, "--web-tui moved into dund: dun dund enable web && dun dund enable tui, then open the address it prints")
 		os.Exit(2)
@@ -345,6 +362,11 @@ func main() {
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
+		if link != nil {
+			// Not adoptable (docs/engine-adoption.md): dund starts a
+			// --docker engine over stdio, as before the link.
+			fatal(fmt.Errorf("--listen does not work with --docker: dund runs a docker engine over stdio"))
+		}
 		if err := cmd.Run(); err != nil {
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				os.Exit(exitErr.ExitCode())
@@ -748,10 +770,20 @@ func main() {
 		em = &emitter{}
 		em.turn = newTurnTracker(em, func() *harness.Harness { h, _ := started.Load().(*harness.Harness); return h })
 		in = newInputStream()
+		if link != nil {
+			em.w = link
+			in = newInputStreamFrom(link.in)
+		}
 		// Under dund, the model can see and message the other live sessions
 		// (peers.go); standalone, the tools are absent.
 		if underDund() {
 			peers = newPeerLink(em)
+			if link != nil {
+				// Requests open across a dund restart go again to the next
+				// dund; the hello says how many gateway grants are held.
+				peers.link = link
+				link.setHooks(peers.resend, peers.sharedCount)
+			}
 			if !cfg.Worker {
 				cfg.Peers = peers
 				cfg.Loops = peers
@@ -1030,6 +1062,9 @@ func main() {
 
 	if *prog {
 		em.setSession(sessionID)
+		if link != nil {
+			link.setSession(sessionID)
+		}
 		em.emit(&proto.Session{ID: sessionID, Resumed: h.Resumed()})
 		// Replay the loaded conversation so a resuming client rebuilds scrollback
 		// (the model already holds it as context; this is pure display).
@@ -1135,7 +1170,16 @@ func sessionRag() harness.RagLink {
 
 func fatal(err error) {
 	fmt.Fprintf(os.Stderr, "dun: %v\n", err)
+	exitLink()
 	os.Exit(1)
+}
+
+// exitLink flushes and closes the engine link before an os.Exit, which
+// skips main's defer.
+func exitLink() {
+	if linkExit != nil {
+		linkExit()
+	}
 }
 
 // filesConfig is the workspace's file-tool settings; none for a --no-dir

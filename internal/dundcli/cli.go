@@ -174,6 +174,31 @@ func serveCmd(l *loader) *cobra.Command {
 	return cmd
 }
 
+// engineSpawner starts engines on the engine link in <home>/dund/engines,
+// so they outlive dund's restart (docs/engine-adoption.md): in a systemd
+// scope of their own when systemd runs dund, which would otherwise end
+// them with its cgroup. Version is bin's build, which an adopted engine of
+// another build moves to at its next idle.
+func engineSpawner(home, bin string) dund.ExecSpawner {
+	sp := dund.ExecSpawner{Bin: bin, EnginesDir: filepath.Join(home, "dund", "engines"),
+		Scope: runtime.GOOS == "linux" && os.Getenv("INVOCATION_ID") != ""}
+	if self, err := os.Executable(); err == nil && sameFile(self, bin) {
+		sp.Version = Version
+	} else {
+		sp.Version = ProbeVersion(bin)
+	}
+	return sp
+}
+
+func sameFile(a, b string) bool {
+	sa, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	sb, err := os.Stat(b)
+	return err == nil && os.SameFile(sa, sb)
+}
+
 // defaultDun is the binary engines run: this one when it is dun itself (run
 // as `dun dund`), else the dun next to it, else the one on PATH.
 func defaultDun() string {
@@ -201,7 +226,7 @@ func serve(ctx context.Context, l *loader, bin, httpAddr string, o dundapi.Optio
 	}
 	defer os.Remove(l.pidfile())
 
-	svc, err := dund.New(filepath.Join(l.home, "dund"), dund.ExecSpawner{Bin: bin})
+	svc, err := dund.New(filepath.Join(l.home, "dund"), engineSpawner(l.home, bin))
 	if err != nil {
 		return err
 	}
@@ -294,7 +319,7 @@ func serve(ctx context.Context, l *loader, bin, httpAddr string, o dundapi.Optio
 	go func() { errc <- srv.Serve(ln) }()
 	go watchSelf(ctx, svc, self)
 	fmt.Fprintf(os.Stderr, "dund: serving %s (engines: %s)\n", sock, bin)
-	reexec := false
+	reexec, detached := false, false
 	select {
 	case sig := <-sigc:
 		// A planned stop (a service restart, a kill): sessions that are
@@ -310,6 +335,11 @@ func serve(ctx context.Context, l *loader, bin, httpAddr string, o dundapi.Optio
 	case exe := <-svc.UpgradeReady():
 		// The upgrade's waiting is over (or was cut short and recorded):
 		// restart into the new binary, engines too, so the two agree.
+		// The engines on the link run on; the next dund adopts them
+		// (docs/engine-adoption.md). Before the drain, so clients get
+		// every event the engines' last words put in the logs.
+		svc.Detach()
+		detached = true
 		if handover {
 			// The new build is already at self: the manager starts it.
 			fmt.Fprintf(os.Stderr, "dund: %s is the new build — exiting %d for the service manager to start it\n", self, handoverExit)
@@ -333,7 +363,9 @@ func serve(ctx context.Context, l *loader, bin, httpAddr string, o dundapi.Optio
 	// Before the re-exec too: a job cut off here goes back on the queue for
 	// the next dund, rather than showing as an error.
 	rag.Close(ragd.DrainGrace)
-	svc.Close()
+	if !detached {
+		svc.Close() // a stop: every engine ends (PrepareStop recorded the work)
+	}
 	if reexec {
 		return syscall.Exec(self, os.Args, os.Environ())
 	}

@@ -67,6 +67,12 @@ func (launchd) render(name, execPath string, prefix []string, home string, serve
 	}
 	b.WriteString("\t</dict>\n")
 	b.WriteString("\t<key>KeepAlive</key>\n\t<dict>\n\t\t<key>SuccessfulExit</key>\n\t\t<false/>\n\t</dict>\n")
+	// Engines outlive dund's restart (docs/engine-adoption.md): they start
+	// in a process group of their own, which launchd's clean-up of a dead
+	// job's group does not reach; this also spares any child left in dund's
+	// own group ("When a job dies, launchd kills any remaining processes
+	// with the same process group ID as the job", launchd.plist(5)).
+	b.WriteString("\t<key>AbandonProcessGroup</key>\n\t<true/>\n")
 	b.WriteString("\t<key>ThrottleInterval</key>\n\t<integer>3</integer>\n")
 	b.WriteString("\t<key>ExitTimeOut</key>\n\t<integer>30</integer>\n")
 	fmt.Fprintf(&b, "\t<key>StandardOutPath</key>%s\n", str(logf))

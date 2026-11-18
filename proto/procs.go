@@ -83,10 +83,14 @@ type ProcSession struct {
 	Worktree string `json:"worktree,omitempty"`
 	// Project is the workspace's rag project slug (harness.ProjectSlug):
 	// the indexes in Rag of that project are the session's.
-	Project   string      `json:"project,omitempty"`
-	EnginePID int         `json:"engine_pid"`
-	Agents    []ProcAgent `json:"agents,omitempty"`
-	Jobs      []ProcJob   `json:"jobs,omitempty"`
+	Project   string `json:"project,omitempty"`
+	EnginePID int    `json:"engine_pid"`
+	// Blocked: EnginePID is an engine from before dund's restart that was
+	// not adopted and may still run; the session starts no engine until it
+	// is gone. Why it was not adopted.
+	Blocked string      `json:"blocked,omitempty"`
+	Agents  []ProcAgent `json:"agents,omitempty"`
+	Jobs    []ProcJob   `json:"jobs,omitempty"`
 }
 
 // ProcAgent is a live sub-agent that works in a tree of its own.

@@ -40,6 +40,16 @@ func (s *Service) Procs(principal string) *proto.ProcsList {
 		ses.mu.Lock()
 		running, eng := ses.running, ses.eng
 		ses.mu.Unlock()
+		ses.actMu.Lock()
+		bpid, bwhy := ses.blockPid, ses.blockWhy
+		ses.actMu.Unlock()
+		if (!running || eng == nil) && bpid != 0 {
+			// An engine from before dund's restart that was not adopted and
+			// may still run: shown, for a person to end it.
+			out.Sessions = append(out.Sessions, proto.ProcSession{ID: ses.id, Workspace: ses.workspace,
+				Project: projectSlug(ses.workspace), EnginePID: bpid, Blocked: bwhy})
+			continue
+		}
 		if !running || eng == nil {
 			continue
 		}

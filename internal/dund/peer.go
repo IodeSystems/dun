@@ -43,6 +43,13 @@ var sessionTask = func(workspace, id string) string {
 // readers each waiting on the other's engine would deadlock.
 // eng is the engine that asked: its gateway clients are its (mcpgw.go).
 func (s *Service) handlePeer(from *session, eng Engine, req proto.PeerRequest) {
+	rep := s.peerDone.once(from.id, req, func() proto.PeerReply { return s.peerOp(from, eng, req) })
+	// An error is the requester gone; its tool call ends on its own timeout.
+	_ = from.sendLoaded(proto.NewCommand("", &rep))
+}
+
+// peerOp does a peer request (handlePeer: once, for one that changes things).
+func (s *Service) peerOp(from *session, eng Engine, req proto.PeerRequest) proto.PeerReply {
 	rep := proto.PeerReply{RID: req.RID}
 	switch req.Op {
 	case "list":
@@ -84,8 +91,7 @@ func (s *Service) handlePeer(from *session, eng Engine, req proto.PeerRequest) {
 	default:
 		rep.Error = fmt.Sprintf("unknown peer op %q", req.Op)
 	}
-	// An error is the requester gone; its tool call ends on its own timeout.
-	_ = from.sendLoaded(proto.NewCommand("", &rep))
+	return rep
 }
 
 // Peers is principal's live sessions, as dun_list shows them, in id order;

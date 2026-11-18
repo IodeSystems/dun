@@ -52,6 +52,8 @@ func TestRenderLaunchAgent(t *testing.T) {
 		"<key>PATH</key><string>/opt/homebrew/bin:/usr/bin</string>",
 		"<key>X</key><string>a&lt;b</string>",
 		"<key>SuccessfulExit</key>\n\t\t<false/>",
+		// Engines outlive a relaunch (docs/engine-adoption.md).
+		"<key>AbandonProcessGroup</key>\n\t<true/>",
 		"<key>StandardErrorPath</key><string>/Users/me/.dun/dund.log</string>",
 	} {
 		if !strings.Contains(p, want) {
@@ -126,5 +128,19 @@ func TestHomeLine(t *testing.T) {
 	p := launchd{}.render("dund", "/bin/dun", []string{"dund"}, "/Users/me/.dun", nil, nil)
 	if !strings.Contains(p, launchd{}.homeLine("/Users/me/.dun")) || strings.Contains(p, launchd{}.homeLine("/tmp/rc")) {
 		t.Errorf("launchd home line in\n%s", p)
+	}
+}
+
+// dund starts engines on the engine link in its home, in a systemd scope
+// of their own only when systemd runs it (docs/engine-adoption.md).
+func TestEngineSpawner(t *testing.T) {
+	t.Setenv("INVOCATION_ID", "")
+	sp := engineSpawner("/h", "/nonexistent/dun")
+	if sp.EnginesDir != filepath.Join("/h", "dund", "engines") || sp.Scope || sp.Bin != "/nonexistent/dun" || sp.Version != "" {
+		t.Fatalf("spawner = %+v", sp)
+	}
+	t.Setenv("INVOCATION_ID", "abc")
+	if sp := engineSpawner("/h", "/nonexistent/dun"); sp.Scope != (runtime.GOOS == "linux") {
+		t.Fatalf("under systemd: %+v", sp)
 	}
 }

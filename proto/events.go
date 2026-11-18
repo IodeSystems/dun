@@ -536,6 +536,11 @@ const (
 	HistoryResume      = "resume"
 	HistoryRestart     = "restart"
 	HistoryModelSwitch = "model_switch"
+	// HistoryReattach: a restarted dund took back a running engine whose
+	// buffered events overflowed while no dund was there; the conversation
+	// from the transcript replaces what a client shows
+	// (docs/engine-adoption.md).
+	HistoryReattach = "reattach"
 )
 
 // HistoryItem mirrors harness.HistoryItem.
