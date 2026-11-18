@@ -322,7 +322,7 @@ func (km keyMap) report() string {
 		}
 		fmt.Fprintf(&b, "  %-*s  %-28s %s%s\n", w, a.name, keys, a.desc, src)
 	}
-	b.WriteString("fixed: ctrl+c, esc, / and y in the conversation, and the keys inside pagers, pickers and forms\n")
+	b.WriteString("fixed: ctrl+c, esc, / in the conversation, y (copy the selected block's raw markdown: the message as typed or sent, a tool call's arguments and result, a notice in full), and the keys inside pagers, pickers and forms\n")
 	b.WriteString(`keys.json: {"preset": "vscode", "bind": {"scroll.bottom": ["ctrl+g"], "turn.interrupt": ["ctrl+x"]}} · /keys reload`)
 	return b.String()
 }

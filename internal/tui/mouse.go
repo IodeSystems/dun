@@ -405,21 +405,28 @@ func copyText(text string) (via []string, hint string) {
 }
 
 type copiedMsg struct {
-	n    int
-	via  []string
-	hint string
+	n, lines int
+	raw      bool // a block's source (y): the flash counts lines
+	via      []string
+	hint     string
 }
 
-func copyCmd(text string) tea.Cmd {
+func copyCmd(text string) tea.Cmd { return copyCmdRaw(text, false) }
+
+// copyCmdRaw copies text; raw says it is a block's markdown source.
+func copyCmdRaw(text string, raw bool) tea.Cmd {
 	return func() tea.Msg {
 		via, hint := copyText(text)
-		return copiedMsg{n: len([]rune(text)), via: via, hint: hint}
+		return copiedMsg{n: len([]rune(text)), lines: strings.Count(text, "\n") + 1, raw: raw, via: via, hint: hint}
 	}
 }
 
 // copiedNote is the flash after a copy: how much, and where it went.
 func copiedNote(c copiedMsg) string {
 	s := numfmt.Commaf("copied %d chars", c.n)
+	if c.raw {
+		s = numfmt.Commaf("copied %d lines (raw markdown)", c.lines)
+	}
 	if len(c.via) > 0 {
 		s += " → " + strings.Join(c.via, " + ")
 	} else {

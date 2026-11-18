@@ -425,7 +425,7 @@ func TestYank(t *testing.T) {
 	if len(wrote) != 1 || wrote[0] != osc52("A **bold** reply") {
 		t.Errorf("wrote %q, want the reply's markdown", wrote)
 	}
-	if f := nm.(tuiModel).flashText; !strings.HasPrefix(f, "copied 16 chars") {
+	if f := nm.(tuiModel).flashText; !strings.HasPrefix(f, "copied 1 lines (raw markdown)") {
 		t.Errorf("flash %q", f)
 	}
 }
