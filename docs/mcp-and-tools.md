@@ -27,9 +27,16 @@ server's own switch stays in `/mcp`; its verbs (`setup`, `watch`, `include`,
 may use, switched the same way (`internal/harness/fileadd.go`): each scope (`paths.json`
 global, project, and the session's sidecar) may name a path, with on/off, a
 mode (read, the default, or write) and, for a directory, index (on by
-default). The nearest scope that sets a field decides it. A read-only path
-refuses `file_edit` and `file_write` with the command that opens it for
-writing (`withFiles`). An indexed directory is watched by raglit into an
+default). The nearest scope that sets a field decides it. A file call for a
+path no scope opens, or a write to one open for reading only, pauses the
+turn and asks the person (`fileaccess.go`, decisions.md "File access asks in
+the turn"): yes for this session, this project or everywhere opens the path
+the call named at that scope (for writing when the call writes, unindexed)
+and runs the call once; a no, or the person's own words, is the call's
+error. With nobody to ask (a sub-agent, `--non-interactive`) the call is
+refused with the `/file add` or `/file mode` command, and in a round dun
+added the refusal says to block the ask with it. A read-only workspace keeps
+`file_edit` and `file_write` listed; they refuse with `/file mode . write`. An indexed directory is watched by raglit into an
 index of its own (`file-<name>-<hash>` in this project's namespace) and
 switched on in `/rag` at the same scope; index off switches it off there and
 keeps it. A session's old `<session>.files.json` list (read and write) is
@@ -385,8 +392,13 @@ exec, with unbounded output, no line numbers and an exit code as the only
 receipt of an edit.
 
 - Root is the session working tree (the worktree when one is in use), so a path
-  that climbs out is refused. Docker sessions work on the same tree through the
+  that climbs out is refused unless `/file` opens it, or the person opens it
+  when asked (above). Docker sessions work on the same tree through the
   mount.
+- `file_edit` takes several replacements in one call (`edits: [{old, new},
+  …]`, agentkit). The prompt line says to put several changes to a file in
+  one call rather than a sed or python script, and to run builds and tests in
+  an exec call of their own (USER 2026-11-18: 18 exec edits did both at once).
 - Rebuilt on `Rehoist`, **kept across other rebuilds so read-tracking survives**
   (write's overwrite guard refuses to overwrite a file not read).
 - Config is the `files` section of any dun.json layer, field by field;

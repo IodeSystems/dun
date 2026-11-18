@@ -347,7 +347,8 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
 
 - **Isolation, not approval prompts.** The agent works in a git worktree on a
   fresh `dun/<ts>` branch (opt out with `--no-worktree`). dun never switches
-  branches in the user's checkout.
+  branches in the user's checkout. For paths outside the workspace this is
+  reversed: see "File access asks in the turn (USER 2026-11-18)".
 - **`/worktree` answers about the repo, not the isolation mode (USER,
   2026-08-03).** `status` said "none (working in place)" when isolation was
   off, which states the mode and answers nothing. It reports the porcelain
@@ -1105,6 +1106,50 @@ back. `internal/harness/netwait.go`.
   row `(waiting for network since 14:02)` (ProcSession `net_wait_since`).
 - `/retry` settings still apply: an unbounded budget never gives up, so
   this path is not reached.
+
+## File access asks in the turn (USER 2026-11-18)
+
+This reverses "Isolation, not approval prompts" (Worktrees and ship) for
+paths outside the workspace. The file tools refused such a path and told the
+model to ask for `/file add`; the model went to exec instead. Evidence: 17
+exec edits followed an "outside the root" refusal. `internal/harness/fileaccess.go`.
+
+- **When.** A file call (`file_read`, `file_edit`, `file_write`, and the
+  opt-in tools that take a `path`) names a path outside the workspace that
+  no scope opens, or one open for reading only when the call writes.
+  Absolute paths, `..` escapes and symlinks whose target is outside are
+  all resolved to the real path first, so a `..` reaches a grant too.
+- **The question** goes through the session's Ask (the `ask` event: TUI,
+  web and mobile; the clock is paused while it waits). Options: yes for
+  this session, this project, everywhere, or no. An answer in the person's
+  own words is a no, and the words go to the model as the reason.
+- **A yes** opens the path the call named, the file or the directory, at
+  that scope (`AddPath`), for writing when the call writes. It is not
+  indexed: `/file add` indexes a directory by default, but raglit watching
+  a tree is not what a file call asked for (`/file index` turns it on). A
+  read-only grant gets mode write at that scope (`SetPathMode`). The
+  chosen scope decides: the nearer scopes forget the path's on (and, for a
+  write, its mode), else a session's read would hide a project's write
+  (`clearNearer`). The call then runs once and its result is the answer;
+  a note after the option (the TUI's `<option> — <note>`) rides with it.
+  A move asks about its `to` as well.
+- **A file's mode is its own.** A directory's grants used to share one
+  mode, so one file open for writing opened its read-only neighbours;
+  each file now keeps its own (`addedSets.writable`).
+- **Nobody to answer.** A sub-agent and `--non-interactive` have no Ask:
+  the refusal is as before, with the exact `/file add <path> [--write]`.
+  In a round dun added (`autoRound`: automatic turns, which include a
+  peer's wake, the turn-end check, the round after a nudge) the refusal
+  also says to block the ask with the command as the question: the same
+  text as ask_user's refusal there (`askBlockHow`).
+- **A read-only workspace keeps its edit tools.** agentkit's `ReadOnly`
+  dropped `file_edit` and `file_write` from the list, and the model edited
+  through exec with nothing to say why. They stay listed and refuse with
+  `/file mode . write`; the list no longer changes with the mode.
+- **Several edits in one call, builds apart.** 18 exec edits were the model
+  making several replacements and running `go build` in one python or sed
+  call. `file_edit` already takes `edits: [{old, new}, …]`; the prompt line
+  says to use it and to run builds and tests in an exec call of their own.
 
 ## Release updates
 

@@ -164,7 +164,11 @@ func checkAsk(question string, options []string, multi bool, recommended []strin
 
 // askAutoRefused is ask_user's result in a round dun added.
 const askAutoRefused = "ERROR: ask_user is not available in this round: dun started it, not the user, so no one may be " +
-	"there to answer. Do not wait for an answer. Mark the ask (or the plan node the question is about) blocked with " +
+	"there to answer. Do not wait for an answer. " + askBlockHow
+
+// askBlockHow is what to do with a question no one may be there to answer:
+// ask_user's refusal and the file tools' (fileaccess.go) both end with it.
+const askBlockHow = "Mark the ask (or the plan node the question is about) blocked with " +
 	`the question as the reason — plan_close {"id":"<id>","outcome":"block","reason":"<the question>"} — and go on ` +
 	"with what needs no answer. The user sees the question in the plan."
 

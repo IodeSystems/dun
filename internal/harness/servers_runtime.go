@@ -734,7 +734,7 @@ func (h *Harness) rebuildTools() {
 		// file_read gains whole: all of a file, bounded by the context left
 		// (wholeread.go). A dun wrapper; agentkit's caps are unchanged.
 		toolDefs = append(toolDefs, wholeReadDefs(ft.Defs(), ft.Name(filetools.Read))...)
-		dispatch = withFiles(dispatch, ft, h.tmpReaders(), h.addedNow, h.readWhole, report)
+		dispatch = withFiles(dispatch, ft, h.tmpReaders(), h, h.readWhole, report)
 	}
 	if cfg.Ask != nil {
 		toolDefs = append(toolDefs, askToolDef())
