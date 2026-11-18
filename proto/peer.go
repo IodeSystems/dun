@@ -148,6 +148,9 @@ type PeerMsg struct {
 	FromName string `json:"from_name"`
 	Text     string `json:"text"`
 	Wake     bool   `json:"wake,omitempty"`
+	// Human: a person sent it (`dun msg` from a shell), not another
+	// session's agent. Its wake is not held by an upgrade (UpgradeHold).
+	Human bool `json:"human,omitempty"`
 }
 
 // ServersChanged tells an engine that another session of its owner wrote the

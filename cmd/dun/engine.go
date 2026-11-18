@@ -823,9 +823,18 @@ var (
 	wakeHold        atomic.Bool
 	wakePass        atomic.Bool
 	wakeHoldChanged = make(chan struct{}, 1)
+	wakeHoldGen     atomic.Int64 // the newest hold taken; older ones are ignored
 )
 
-func setWakeHold(on bool) {
+// setWakeHold takes dund's hold of generation gen, unless a newer one was
+// taken (0: an unnumbered one, always taken). One caller, the input reader.
+func setWakeHold(on bool, gen int64) {
+	if gen != 0 {
+		if gen < wakeHoldGen.Load() {
+			return
+		}
+		wakeHoldGen.Store(gen)
+	}
 	wakeHold.Store(on)
 	wakePass.Store(false)
 	select {

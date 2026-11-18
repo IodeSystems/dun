@@ -460,6 +460,7 @@ func (c *conn) handle(cmd proto.Command) {
 				c.reply(cmd, cmd.Session, &proto.Ack{Queued: queuedText})
 				return
 			}
+			ses.personEnded(cmd)
 			err = ses.send(stampAnswer(cmd, c.who))
 		}
 		if a, ok := p.(*proto.AgentCmd); ok && err == nil {

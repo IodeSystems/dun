@@ -49,8 +49,13 @@ func init() {
 // what was held runs at once. dund sends it to every engine when an
 // upgrade becomes pending, to each engine that starts while one is, and
 // Off when the upgrade fails.
+//
+// Gen orders them: dund counts up at each change, and an engine ignores a
+// hold older than one it has (an engine that starts as an upgrade fails
+// may get the failure's Off before its own On).
 type UpgradeHold struct {
-	On bool `json:"on"`
+	On  bool  `json:"on"`
+	Gen int64 `json:"gen,omitempty"`
 }
 
 // WakeHeld is an engine saying that, held (UpgradeHold), it kept Count

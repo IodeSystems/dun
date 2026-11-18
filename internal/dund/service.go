@@ -52,6 +52,9 @@ type Service struct {
 	done     chan struct{} // closed by Close
 
 	up upgrader // a pending restart into a new build (upgrade.go)
+	// stopWhy is a planned stop's reason, once PrepareStop began (until it
+	// fails). Guarded by mu.
+	stopWhy string
 
 	// sched holds and fires the scheduled messages and loops (schedule.go).
 	sched *scheduler
@@ -401,6 +404,7 @@ func (s *Service) Send(principal, id string, c proto.Command) error {
 	if err != nil {
 		return err
 	}
+	ses.personEnded(c)
 	return ses.send(stampAnswer(c, principal))
 }
 
@@ -622,6 +626,7 @@ func (s *Service) Stop(principal, id string) error {
 	if err != nil {
 		return err
 	}
+	ses.personEnded(proto.NewCommand("", &proto.Stop{}))
 	ses.stop()
 	s.dropIfEmpty(ses)
 	return nil

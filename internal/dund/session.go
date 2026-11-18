@@ -154,8 +154,11 @@ func (s *session) track(ev proto.Event) {
 			s.inTurn, s.asking, s.ask = false, false, nil
 		}
 		s.calls = nil
-		if d, ok := p.(*proto.Done); ok && d.Reason != "interrupted" {
-			s.continued = false // the continued turn ended on its own
+		// The continued turn ended on its own, or failed: a turn end the
+		// person sees. dund's own stop interrupt leaves it set; a person's
+		// interrupt clears it where it comes in (personEnded).
+		if d, ok := p.(*proto.Done); !ok || d.Reason != "interrupted" {
+			s.continued = false
 		}
 	case *proto.ToolCall:
 		if s.calls == nil {
@@ -220,14 +223,6 @@ func (s *session) track(ev proto.Event) {
 func callLine(p *proto.ToolCall) string {
 	b, _ := json.Marshal(p.Args)
 	return clipLine(p.Tool+" "+string(b), 200)
-}
-
-// worker: created for dun mcp's dun_start (--worker), whose every message
-// is a program's.
-func (s *session) worker() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return slices.Contains(s.args, "--worker")
 }
 
 // occupied: a turn, a question, a job or a sub-agent. Called with actMu held.
@@ -387,6 +382,7 @@ func (s *session) readEvents(eng Engine, done chan struct{}, sc *bufio.Scanner, 
 			}
 			if _, ok := ev.Payload.(*proto.WakeHeld); ok { // dund's, not the clients'
 				s.track(ev)
+				s.svc.heldAfterStop(s)
 				continue
 			}
 			cont := s.isContinued()
@@ -514,10 +510,22 @@ func (s *session) attach(eng Engine, sc *bufio.Scanner) {
 	s.running, s.stopping, s.gaveUp = true, false, false
 	s.log.Append(proto.NewEvent(&proto.EngineState{State: "started"}))
 	go s.readEvents(eng, s.engDone, sc, s.historyReason())
-	if s.svc.UpgradeStatus() != nil {
+	if on, gen := s.svc.holdGen(); on {
 		// Held from its start, as the running engines are. Not under mu: a
-		// write may wait for the engine to read.
-		go func() { _ = s.sendLoaded(proto.NewCommand("", &proto.UpgradeHold{On: true})) }()
+		// write may wait for the engine to read. Gen: should the upgrade
+		// fail meanwhile, the failure's Off (gen+1) wins whatever the order.
+		go func() { _ = s.sendLoaded(proto.NewCommand("", &proto.UpgradeHold{On: true, Gen: gen})) }()
+	}
+}
+
+// personEnded notes a client's interrupt or stop: the person ended the turn
+// dund continued, so a later stop that cuts another turn continues it again.
+func (s *session) personEnded(c proto.Command) {
+	switch c.Payload.(type) {
+	case *proto.Interrupt, *proto.Stop:
+		s.actMu.Lock()
+		s.continued = false
+		s.actMu.Unlock()
 	}
 }
 

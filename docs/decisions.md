@@ -898,16 +898,19 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   typed is kept in the registry (`record.Queued`) and sent after the
   restart; the sender gets `ack {queued}` ("dund is upgrading; …"), also
   without a cid, and `dun_start`/`dun_send` return `queued: …`. Automatic is
-  `User.Auto` (new; dun mcp sets it) or any message to a `--worker` session
-  — no client or source field existed, and an older dun mcp sends no
-  `Auto`; a person typing into a worker session is taken for a program
-  (accepted). A message a person types starts at once and holds the
-  restart as before. `dun_start` while pending makes the session and
+  said by the sender (no client or source field existed): `User.Auto`, set
+  by dun mcp's `dun_start`/`dun_send` only, and a peer's `dun_msg` from
+  another session's agent. The TUI, the web and the app are people, also
+  typing into a `--worker` session; `dun msg` from a shell is a person
+  (`PeerMsg.Human`: the engine's hold lets its wake through). An older dun
+  mcp sends no `Auto` and is taken for a person. A message a person types
+  starts at once and holds the restart as before. `dun_start` while pending makes the session and
   starts its idle engine (no turn: nothing the upgrade waits for); only
   the first message waits, and a session whose only message is queued is
   kept on load. Engine self-wakes: dund sends `upgrade_hold {on}` to every
   engine (and to each one started while pending; `on:false` when the
-  upgrade fails). Held, the engine's loop runs no turn of its own — every
+  upgrade fails), numbered (`gen`, up at each change; an engine ignores an
+  older one, so a start racing a failure cannot stay held). Held, the engine's loop runs no turn of its own — every
   self-wake (job end, peer `dun_msg`, server wake, escalated aside, settle)
   goes through `h.wake` and `Pending`, one place to gate —; it writes the
   waking news into the conversation (`HoldPending`, persisted in the
@@ -919,17 +922,26 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   reads the news where it would have anyway. A person's message and dund's
   waking wrap-up notice (one pass) still start a turn; quiet news (asides,
   `wake:false`) stays in memory and rides the next turn, lost at a restart
-  as before. A peer's `dun_msg` and `dun msg` to an idle session say
-  "queued". Scheduled entries stay held as before. Durable resume: the
+  as before. A peer's `dun_msg` to an idle session says "queued". Once
+  the stop has begun (`PrepareStop`, state `restarting`), `dun_msg` and
+  `dun msg` are refused ("dund is restarting: send … again") — the record
+  is written; a `wake_held` that arrives after the record records itself
+  and rewrites the registry (`heldAfterStop`). Scheduled entries stay held as before. Durable resume: the
   stop records every working session's resume (and held wakes, cut
   sub-agents) and writes the registry first; a failed write takes the
   flags back, interrupts nothing, and puts the upgrade back to `pending`
-  with the error, retried every `upgradeRetry` (5 s). A SIGTERM cannot be
+  with the error, retried every `upgradeRetry` (5 s); failing for
+  `upgradeRecordGiveUp` (2 min), the upgrade fails (the hold ends, the
+  queued messages go). Queued messages and sub-agent continues are
+  delivered at least once: one whose send fails is kept for the next try,
+  and a crash between a delivery and the registry write after it sends it
+  again. A SIGTERM cannot be
   refused: the error is logged and dund stops. After the restart each cut
   turn auto-continues: the `[automatic]` message names the tool calls in
   flight (dund now tracks `tool_call`/`tool_result`) and the killed jobs
   with their commands. One continue per cut turn: dund marks the session
-  `continued` until a turn ends not interrupted; a stop or crash that cuts
+  `continued` until a turn ends that the person caused or saw (done, an
+  error, their interrupt or stop; not dund's own stop interrupt); a stop or crash that cuts
   it again records `resume_quiet`, and the next start leaves a quiet
   `[dun]` note and wakes nothing (no loop). Sub-agents running at the
   stop are recorded (`record.Agents`) and each gets `agent {action:

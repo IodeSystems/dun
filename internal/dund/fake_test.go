@@ -176,10 +176,13 @@ func (e *fakeEngine) run(id string) {
 			}
 		case *proto.PeerMsg:
 			e.sp.record(fmt.Sprintf("peer %s: from %s (%s) wake=%v: %s", id, p.FromName, p.From, p.Wake, p.Text))
+			if p.Human {
+				e.sp.record("human peer " + id + ": " + p.Text)
+			}
 		case *proto.AgentCmd:
 			e.sp.record("agent " + id + ": " + p.Action + " " + p.ID)
 		case *proto.UpgradeHold:
-			e.sp.record(fmt.Sprintf("hold %s: %v", id, p.On))
+			e.sp.record(fmt.Sprintf("hold %s: %v gen %d", id, p.On, p.Gen))
 		case *proto.ServersChanged:
 			e.sp.record("servers " + id)
 		case *proto.ServiceNotice:

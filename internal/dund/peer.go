@@ -180,6 +180,9 @@ func (s *Service) PeerSend(principal, from, to, text string, wake bool) (PeerDel
 	if !s.peerAllow(from, dst.ID, time.Now()) {
 		return PeerDelivery{}, fmt.Errorf("rate limit: at most %d messages a minute to %s — wait for its reply", peerRateMax, dst.Name)
 	}
+	if s.stopReason() != "" {
+		return PeerDelivery{}, errRestarting
+	}
 	d := PeerDelivery{ID: dst.ID, Name: dst.Name, Busy: ses.busy()}
 	d.Started = wake && !d.Busy
 	if d.Started && s.UpgradeStatus() != nil {

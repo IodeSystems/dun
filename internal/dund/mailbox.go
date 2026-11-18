@@ -187,17 +187,20 @@ func (s *Service) MsgSend(principal string, p proto.MsgSend) (proto.MsgSent, err
 	if !s.peerAllow(from, dst.ID, time.Now()) {
 		return proto.MsgSent{}, fmt.Errorf("rate limit: at most %d messages a minute to %s", peerRateMax, dst.Name)
 	}
+	if s.stopReason() != "" {
+		return proto.MsgSent{}, errRestarting
+	}
 	wake := !p.NoWake
 	busy := ses.busy()
-	if err := ses.sendLoaded(proto.NewCommand("", &proto.PeerMsg{From: from, FromName: fromName, Text: text, Wake: wake})); err != nil {
+	// Human: `dun msg` is a person at a shell; an upgrade does not hold its
+	// wake (USER 2026-11-17).
+	if err := ses.sendLoaded(proto.NewCommand("", &proto.PeerMsg{From: from, FromName: fromName, Text: text, Wake: wake, Human: true})); err != nil {
 		return proto.MsgSent{}, fmt.Errorf("%s: %w", dst.Name, err)
 	}
 	detail := "idle, not woken"
 	switch {
 	case busy:
 		detail = "busy: it reads the message in its turn"
-	case wake && s.UpgradeStatus() != nil: // its engine holds the wake (proto.UpgradeHold)
-		detail = "idle: queued: dund is upgrading; it reads the message after the restart"
 	case wake:
 		detail = "idle: woken"
 	}

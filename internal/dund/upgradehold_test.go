@@ -42,10 +42,10 @@ func count(sp *fakeSpawner, prefix string) int {
 	return n
 }
 
-// While an upgrade is pending an automatic message — dun mcp's (Auto), or
-// any to a --worker session — is not delivered: the sender is told
-// "queued", it is kept in the registry, and the next dund sends it. A
-// person's message starts its turn at once, and the upgrade waits for it.
+// While an upgrade is pending an automatic message (dun mcp's, Auto) is not
+// delivered: the sender is told "queued", it is kept in the registry, and
+// the next dund sends it. A person's message starts its turn at once, also
+// in a --worker session, and the upgrade waits for it.
 func TestUpgradeQueuesAutomaticMessagesAndNotTheHumans(t *testing.T) {
 	fastUpgrade(t)
 	svc, sp, dir := newSvc(t)
@@ -66,10 +66,16 @@ func TestUpgradeQueuesAutomaticMessagesAndNotTheHumans(t *testing.T) {
 	if a := c.until(typed("ack")).Payload.(*proto.Ack); a.Queued != queuedText || a.Error != "" {
 		t.Fatalf("auto: %+v", a)
 	}
-	c.send("w", worker, &proto.User{Content: "build it"}) // an older dun mcp: no Auto
+	c.send("w", worker, &proto.User{Content: "build it", Auto: true})
 	if a := c.until(ackOrReply("w")).Payload.(*proto.Ack); a.Queued == "" {
 		t.Fatalf("worker: %+v", a)
 	}
+	// A person typing into the worker session is a person.
+	c.send("p", worker, &proto.User{Content: "status?"})
+	if a := c.until(ackOrReply("p")).Payload.(*proto.Ack); a.Queued != "" || a.Error != "" {
+		t.Fatalf("person in a worker: %+v", a)
+	}
+	waitRecord(t, sp, "user "+worker+": status?")
 	// The person's message starts now; the upgrade waits for its turn too.
 	c.send("h", idle, &proto.User{Content: "slow"})
 	if a := c.until(ackOrReply("h")).Payload.(*proto.Ack); a.Queued != "" || a.Error != "" {
@@ -79,7 +85,7 @@ func TestUpgradeQueuesAutomaticMessagesAndNotTheHumans(t *testing.T) {
 	is, _ := svc.Get(alice, idle)
 	waitFor(t, func() bool { return len(is.waiting()) == 1 })
 	time.Sleep(5 * upgradePoll)
-	if n := count(sp, "user "+idle+": from a program") + count(sp, "user "+worker); n != 0 {
+	if n := count(sp, "user "+idle+": from a program") + count(sp, "user "+worker+": build it"); n != 0 {
 		t.Fatalf("an automatic message was delivered while pending: %q", sp.received())
 	}
 	recs, _ := (&Service{dir: dir}).loadRegistry()
@@ -180,6 +186,28 @@ func TestUpgradeRecordFailureAborts(t *testing.T) {
 	}
 }
 
+// A record that keeps failing ends the upgrade as failed: the hold ends.
+func TestUpgradeRecordFailureGivesUp(t *testing.T) {
+	fastUpgrade(t)
+	oldR, oldG := upgradeRetry, upgradeRecordGiveUp
+	upgradeRetry, upgradeRecordGiveUp = 10*time.Millisecond, 50*time.Millisecond
+	t.Cleanup(func() { upgradeRetry, upgradeRecordGiveUp = oldR, oldG })
+	svc, sp, dir := newSvc(t)
+	busy := working(t, svc, false)
+	if err := os.Mkdir(filepath.Join(dir, "sessions.json.tmp"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_ = svc.RequestUpgrade("/x/dun", "v2")
+	_ = svc.UpgradeNow()
+	waitRecord(t, sp, "hold "+busy+": false")
+	if svc.UpgradeStatus() != nil {
+		t.Fatal("still pending")
+	}
+	if n := count(sp, "interrupt "+busy); n != 0 {
+		t.Fatalf("interrupted: %q", sp.received())
+	}
+}
+
 // A cut turn is continued once: the message names the tool call in flight,
 // and the turn runs. Cut again before it ends, the next start leaves a
 // quiet note and wakes nothing.
@@ -275,5 +303,135 @@ func TestUpgradeWakesHeldNewsAfterTheRestart(t *testing.T) {
 	got := waitRecord(t, sp2, "user "+idle+": [automatic] ")
 	if !strings.Contains(got, "News that came while dun waited") {
 		t.Fatalf("woken with %q", got)
+	}
+}
+
+// Each change of the hold is numbered: a failure's Off is newer than the
+// On it ends, so an engine that gets them out of order keeps the Off.
+func TestUpgradeHoldGenerations(t *testing.T) {
+	fastUpgrade(t)
+	svc, sp, _ := newSvc(t)
+	busy := working(t, svc, false)
+	svc.SetUpgradeInstall(func(string, string) error { return errors.New("no room on disk") })
+	_ = svc.RequestUpgrade("/x/dun", "v2")
+	waitRecord(t, sp, "hold "+busy+": true gen 1")
+	late, _ := svc.Create(alice, t.TempDir(), nil, "") // started while pending
+	waitRecord(t, sp, "hold "+late+": true gen 1")
+	_ = svc.Send(alice, busy, proto.NewCommand("", &proto.User{Content: "finish"}))
+	waitRecord(t, sp, "hold "+busy+": false gen 2")
+	waitRecord(t, sp, "hold "+late+": false gen 2")
+	_ = svc.RequestUpgrade("/x/dun", "v3")
+	waitRecord(t, sp, "hold "+busy+": true gen 3")
+}
+
+// A held message that cannot be delivered after the restart (its engine
+// does not start) stays in the registry for the next try.
+func TestUpgradeKeepsUndeliveredQueuedMessages(t *testing.T) {
+	fastUpgrade(t)
+	svc, _, dir := newSvc(t)
+	busy := working(t, svc, false)
+	idle, _ := svc.Create(alice, t.TempDir(), nil, "")
+	_ = svc.RequestUpgrade("/x/dun", "v2")
+	is, _ := svc.Get(alice, idle)
+	for _, m := range []string{"one", "two"} {
+		if held, err := svc.queueIfUpgrading(is, proto.NewCommand("", &proto.User{Content: m, Auto: true})); !held || err != nil {
+			t.Fatalf("held %v, %v", held, err)
+		}
+	}
+	_ = svc.Send(alice, busy, proto.NewCommand("", &proto.User{Content: "finish"}))
+	sp2 := &fakeSpawner{fail: errors.New("no engine")}
+	restartInto(t, svc, dir, sp2)
+	time.Sleep(50 * time.Millisecond) // resumeFlagged ran, and failed
+	recs, _ := (&Service{dir: dir}).loadRegistry()
+	for _, r := range recs {
+		if r.ID == idle && !slices.Equal(r.Queued, []string{"one", "two"}) {
+			t.Fatalf("queued after a failed delivery: %q", r.Queued)
+		}
+	}
+}
+
+// Once a stop has begun, a peer's message is refused (its record is
+// written), and news an engine reports after the record is recorded
+// itself, in the registry.
+func TestStopRefusesPeerSendsAndRecordsLateHeldNews(t *testing.T) {
+	svc, sp, dir := newSvc(t)
+	a, _ := svc.Create(alice, t.TempDir(), nil, "")
+	b, _ := svc.Create(alice, t.TempDir(), nil, "")
+	_ = svc.Send(alice, b, proto.NewCommand("", &proto.User{Content: "hi"}))
+	waitRecord(t, sp, "user "+b+": hi")
+	if err := svc.PrepareStop("dund was stopped (terminated)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.PeerSend(alice, a, b, "ping", true); !errors.Is(err, errRestarting) {
+		t.Fatalf("peer send while stopping: %v", err)
+	}
+	if _, err := svc.MsgSend(alice, proto.MsgSend{To: b, Text: "ping"}); !errors.Is(err, errRestarting) {
+		t.Fatalf("dun msg while stopping: %v", err)
+	}
+	_ = svc.Send(alice, b, proto.NewCommand("", &proto.User{Content: "news"})) // a wake_held after the record
+	waitFor(t, func() bool {
+		recs, _ := (&Service{dir: dir}).loadRegistry()
+		for _, r := range recs {
+			if r.ID == b && strings.Contains(r.Resume, "News that came while dun waited") {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+// dun msg is a person at a shell: its wake is marked human, which an
+// engine's upgrade hold lets through.
+func TestDunMsgIsHuman(t *testing.T) {
+	fastUpgrade(t)
+	svc, sp, _ := newSvc(t)
+	busy := working(t, svc, false)
+	b, _ := svc.Create(alice, t.TempDir(), nil, "")
+	_ = svc.RequestUpgrade("/x/dun", "v2")
+	waitRecord(t, sp, "hold "+b+": true")
+	sent, err := svc.MsgSend(alice, proto.MsgSend{To: b, Text: "look"})
+	if err != nil || sent.Detail != "idle: woken" {
+		t.Fatalf("dun msg: %+v, %v", sent, err)
+	}
+	waitRecord(t, sp, "human peer "+b+": look")
+	_ = svc.Send(alice, busy, proto.NewCommand("", &proto.User{Content: "finish"}))
+	select { // the upgrade's loop must not outlive the test
+	case <-svc.UpgradeReady():
+	case <-time.After(5 * time.Second):
+		t.Fatal("never ready")
+	}
+}
+
+// The continued mark ends with any turn end the person caused or saw: a
+// turn that ended, failed, or that they interrupted or stopped. dund's own
+// stop interrupt keeps it.
+func TestContinuedClearsOnAPersonsTurnEnd(t *testing.T) {
+	svc, _, _ := newSvc(t)
+	id, _ := svc.Create(alice, t.TempDir(), nil, "")
+	ses, _ := svc.Get(alice, id)
+	set := func() { ses.actMu.Lock(); ses.continued = true; ses.actMu.Unlock() }
+	set()
+	ses.track(proto.NewEvent(&proto.Done{Reason: "interrupted"}))
+	if !ses.isContinued() {
+		t.Fatal("dund's interrupt cleared it")
+	}
+	ses.track(proto.NewEvent(&proto.Error{Error: "provider down"}))
+	if ses.isContinued() {
+		t.Fatal("an error kept it")
+	}
+	set()
+	_ = svc.Send(alice, id, proto.NewCommand("", &proto.Interrupt{}))
+	if ses.isContinued() {
+		t.Fatal("the person's interrupt kept it")
+	}
+	set()
+	_ = svc.Stop(alice, id)
+	if ses.isContinued() {
+		t.Fatal("the person's stop kept it")
+	}
+	set()
+	ses.track(proto.NewEvent(&proto.Done{}))
+	if ses.isContinued() {
+		t.Fatal("a turn that ended kept it")
 	}
 }

@@ -135,8 +135,8 @@ build must not cut work short, and no one should have to coordinate it.
   `schedule.json` and fires once when the hold ends — at the next dund's
   start, or at once when the upgrade fails — however many runs it missed.
 - Automatic launches wait for the new build (USER 2026-11-17). A message no
-  person typed (`User.Auto`: dun mcp's `dun_start`/`dun_send`; any message to
-  a `--worker` session) is kept in the registry and sent after the restart;
+  person typed (`User.Auto`: dun mcp's `dun_start`/`dun_send`) is kept in the
+  registry and sent after the restart (at least once);
   the sender gets `ack {queued}` and dun mcp returns `queued: …`. A message a
   person types starts its turn at once. Each engine is held
   (`upgrade_hold`): its own wakes — a finished job, a peer's `dun_msg`, a
