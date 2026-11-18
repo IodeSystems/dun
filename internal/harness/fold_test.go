@@ -461,12 +461,60 @@ func TestFoldRunner_RetryKeptOnlyIfBetter(t *testing.T) {
 			h.ask = foldAsk{id: "u", text: repoAsk, at: 1}
 			f := &foldFake{replies: tc.replies}
 			r := foldRunner{inner: f, h: h}
-			text, _, err := collectText(context.Background(), r, []llm.Message{
+			text, _, _, err := collectText(context.Background(), r, []llm.Message{
 				{Role: "system", Content: agent.DefaultSummarySystem}, {Role: "user", Content: "events"}}, nil, nil)
 			if err != nil || text != tc.want {
 				t.Errorf("got %q (%v), want %q", text, err, tc.want)
 			}
 		})
+	}
+}
+
+// usageFake replies once, then sends the usage in its own chunk after the
+// finish, as an OpenAI-style stream with include_usage does.
+type usageFake struct{ reply string }
+
+func (f usageFake) ChatStream(context.Context, []llm.Message, []llm.ToolDef, *llm.ChatOpts) (<-chan llm.StreamChunk, error) {
+	ch := make(chan llm.StreamChunk, 2)
+	ch <- llm.StreamChunk{Content: f.reply, Done: true}
+	ch <- llm.StreamChunk{Usage: &llm.Usage{PromptTokens: 1000, CompletionTokens: 200}}
+	close(ch)
+	return ch, nil
+}
+
+// Each summarizer call of a shaper fold is a side call of kind "fold", with
+// the usage that came after the finish; a call that is not a fold is not.
+func TestFoldRunner_RecordsSideCall(t *testing.T) {
+	for _, tc := range []struct {
+		name, reply string
+		calls       int
+	}{
+		{"passes first time", foldGoodSummary(repoAsk), 1},
+		{"rejected, retried", "bad", 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newNoteHarness(t)
+			h.sideCalls = &sideCallStats{}
+			h.ask = foldAsk{id: "u", text: repoAsk, at: 1}
+			r := foldRunner{inner: usageFake{reply: tc.reply}, h: h}
+			if _, _, _, err := collectText(context.Background(), r, []llm.Message{
+				{Role: "system", Content: agent.DefaultSummarySystem}, {Role: "user", Content: "events"}}, nil, nil); err != nil {
+				t.Fatal(err)
+			}
+			got := h.SideCalls()["fold"]
+			if got == nil || got["calls"].(int) != tc.calls || got["generated"].(int) != 200*tc.calls {
+				t.Errorf("fold side calls = %v, want %d calls of 200 generated each", got, tc.calls)
+			}
+		})
+	}
+	h := newNoteHarness(t)
+	h.sideCalls = &sideCallStats{}
+	r := foldRunner{inner: usageFake{reply: "hi"}, h: h}
+	if _, _, _, err := collectText(context.Background(), r, []llm.Message{{Role: "user", Content: "hi"}}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.SideCalls()["fold"]; got != nil {
+		t.Errorf("a turn call is not a fold: %v", got)
 	}
 }
 

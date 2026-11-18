@@ -432,7 +432,7 @@ func (r foldRunner) ChatStream(ctx context.Context, msgs []llm.Message, tools []
 		return r.inner.ChatStream(ctx, msgs, tools, opts)
 	}
 	ask := r.h.askNow().text
-	text, errMsg, err := collectText(ctx, r.inner, msgs, tools, opts)
+	text, errMsg, err := r.call(ctx, msgs, tools, opts)
 	if err != nil || errMsg != "" {
 		return replay(text, errMsg), err
 	}
@@ -445,7 +445,7 @@ func (r foldRunner) ChatStream(ctx context.Context, msgs []llm.Message, tools []
 		last := &retry[len(retry)-1]
 		last.Content += "\n\nYour previous summary was rejected: " + strings.Join(first, "; ") +
 			". Write it again with the four sections and the ask copied word for word."
-		t2, e2, err2 := collectText(ctx, r.inner, retry, tools, opts)
+		t2, e2, err2 := r.call(ctx, retry, tools, opts)
 		switch {
 		case err2 != nil || e2 != "":
 			log.Printf("dun: fold summary retry failed (%v %s); keeping the first", err2, e2)
@@ -466,14 +466,33 @@ func (r foldRunner) ChatStream(ctx context.Context, msgs []llm.Message, tools []
 	return replay(text, ""), nil
 }
 
-// collectText reads one reply whole.
-func collectText(ctx context.Context, r agent.LLMRunner, msgs []llm.Message, tools []llm.ToolDef, opts *llm.ChatOpts) (text, errMsg string, err error) {
+// call is one summarizer call, measured as side-call kind "fold" (USER
+// 2026-11-18): a shaper fold stage is up to two calls (the first and its
+// retry), and neither showed in /usage or any spend view before.
+func (r foldRunner) call(ctx context.Context, msgs []llm.Message, tools []llm.ToolDef, opts *llm.ChatOpts) (string, string, error) {
+	start := time.Now()
+	text, errMsg, usage, err := collectText(ctx, r.inner, msgs, tools, opts)
+	r.h.noteSideCall("fold", start, usage)
+	return text, errMsg, err
+}
+
+// collectText reads one reply whole. After the finish it reads on to the
+// close, as askOnce does: the usage can arrive after it, in a usage-only
+// chunk, and usage is the last one any chunk carried (nil if none did).
+func collectText(ctx context.Context, r agent.LLMRunner, msgs []llm.Message, tools []llm.ToolDef, opts *llm.ChatOpts) (text, errMsg string, usage *llm.Usage, err error) {
 	ch, err := r.ChatStream(ctx, msgs, tools, opts)
 	if err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
 	var b strings.Builder
+	done := false
 	for c := range ch {
+		if c.Usage != nil {
+			usage = c.Usage
+		}
+		if done {
+			continue // past the finish only the usage counts
+		}
 		if c.Error != "" {
 			errMsg = c.Error
 			go func() {
@@ -483,15 +502,9 @@ func collectText(ctx context.Context, r agent.LLMRunner, msgs []llm.Message, too
 			break
 		}
 		b.WriteString(c.Content)
-		if c.Done {
-			go func() {
-				for range ch {
-				}
-			}()
-			break
-		}
+		done = c.Done
 	}
-	return b.String(), errMsg, nil
+	return b.String(), errMsg, usage, nil
 }
 
 // replay is a finished reply as a stream.

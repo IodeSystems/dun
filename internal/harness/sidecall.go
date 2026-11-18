@@ -22,7 +22,7 @@ import (
 // without reading it.
 //
 // This is that reading, in one place. Every side-call site (commit.go,
-// suggest.go, rephrase.go, rescue.go) calls noteSideCall with the wall clock
+// suggest.go, rephrase.go, rescue.go, fold.go) calls noteSideCall with the wall clock
 // and whatever Usage the final chunk carried (nil when the provider did not
 // report, or the call failed before one). The numbers are per-session
 // running totals, per KIND: counts, latency sums (for averages), and the

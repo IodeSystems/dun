@@ -177,6 +177,7 @@ func sideCallBlock(s *contextStats) string {
 		"rephrase": "prompt rewrites (/rephrase)",
 		"commit":   "commit messages (/worktree commit)",
 		"rescue":   "context rescue compaction",
+		"fold":     "context budget compaction",
 		"repaint":  "bug report redaction (/repaint report)",
 		"worklog":  "task accounts (/worklog write)",
 	}

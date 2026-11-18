@@ -908,6 +908,18 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   hijacked connections, and `/tui`'s are hijacked: stop, re-exec and the
   service handover call `webterm.Close` before the listener stops.
 
+## Automatic token spend: guards and measurement (USER 2026-11-18)
+
+From the 2026-11-18 inventory of model calls nobody typed for.
+
+- **A shaper fold is side call kind `fold`** (`internal/harness/fold.go`,
+  `foldRunner.call`). Each summarizer call counts: a fold stage is up to two
+  (the first and its retry). The rescue fold keeps kind `rescue`. Before
+  this, folds were the one automatic call /context and the usage event did
+  not show. `collectText` now reads to the stream's close after the finish,
+  as `askOnce` does, because the usage can arrive in its own chunk after it.
+  Measurement only: what the Shaper receives is unchanged.
+
 ## Release updates
 
 - **para shares dun's signing key (Carl, 2026-11-10); manifests are bound to
