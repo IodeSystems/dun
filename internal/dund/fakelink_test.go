@@ -111,7 +111,7 @@ func (ls *linkSpawner) Spawn(workspace string, args []string) (Engine, error) {
 }
 
 func (ls *linkSpawner) Adopt() ([]*Adoption, []AdoptFailure) { return adoptEngines(ls.dir) }
-func (ls *linkSpawner) EngineBuild() string { return ls.build }
+func (ls *linkSpawner) EngineBuild() string                  { return ls.build }
 
 // linkOf is the fake link of session id's engine.
 func (ls *linkSpawner) linkOf(id string) *fakeLink {

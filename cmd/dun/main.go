@@ -780,7 +780,7 @@ func main() {
 				// Requests open across a dund restart go again to the next
 				// dund; the hello says how many gateway grants are held.
 				peers.link = link
-				link.onAttach, link.shared = peers.resend, peers.sharedCount
+				link.setHooks(peers.resend, peers.sharedCount)
 			}
 			if !cfg.Worker {
 				cfg.Peers = peers

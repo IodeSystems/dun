@@ -50,6 +50,12 @@ func TestAdoptAcrossSystemdHandover(t *testing.T) {
 
 func adoptAcrossRestart(t *testing.T, viaSystemd bool) {
 	const words = 30
+	// A handover checks the new build (serve --check) before it exits: the
+	// turn must outlast that, race builds being slower.
+	wordGap := 100 * time.Millisecond
+	if viaSystemd {
+		wordGap = 400 * time.Millisecond
+	}
 	bins := t.TempDir()
 	v1, v2 := filepath.Join(bins, "v1", "dun"), filepath.Join(bins, "v2", "dun")
 	for exe, ver := range map[string]string{v1: "v9.9.1", v2: "v9.9.2"} {
@@ -81,7 +87,7 @@ func adoptAcrossRestart(t *testing.T, viaSystemd bool) {
 		if strings.Contains(string(body), "COUNT SLOWLY") && !strings.Contains(string(body), "w01") {
 			for i := 1; i <= words; i++ {
 				chunk(fmt.Sprintf("w%02d ", i))
-				time.Sleep(100 * time.Millisecond)
+				time.Sleep(wordGap)
 			}
 		} else {
 			chunk("ok")

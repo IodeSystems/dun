@@ -166,6 +166,14 @@ func (l *engineLink) setSession(id string) {
 	}
 }
 
+// setHooks installs onAttach and shared: after the link serves, as the
+// peer link exists only later in the engine's start.
+func (l *engineLink) setHooks(onAttach func(), shared func() int) {
+	l.mu.Lock()
+	l.onAttach, l.shared = onAttach, shared
+	l.mu.Unlock()
+}
+
 // connected reports whether a dund is attached.
 func (l *engineLink) connected() bool {
 	l.mu.Lock()
@@ -270,9 +278,10 @@ func (l *engineLink) serve(c net.Conn) {
 	l.mu.Lock()
 	hello := proto.LinkHello{Type: proto.LinkHelloType, Link: proto.LinkVersion, Proto: proto.Version,
 		Version: buildinfo.Version, Pid: l.pid, Session: l.session, Seq: l.seq, Acked: l.acked, First: l.first()}
+	shared, onAttach := l.shared, l.onAttach
 	l.mu.Unlock()
-	if l.shared != nil {
-		hello.Shared = l.shared()
+	if shared != nil {
+		hello.Shared = shared()
 	}
 	b, _ := json.Marshal(hello)
 	if _, err := c.Write(append(b, '\n')); err != nil {
@@ -334,8 +343,8 @@ func (l *engineLink) serve(c net.Conn) {
 	l.sent = upto
 	l.cond.Broadcast()
 	l.mu.Unlock()
-	if l.onAttach != nil {
-		go l.onAttach()
+	if onAttach != nil {
+		go onAttach()
 	}
 	go l.writeLive(c)
 	for sc.Scan() {
