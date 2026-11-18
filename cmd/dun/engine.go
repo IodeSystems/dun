@@ -1046,7 +1046,7 @@ func emitSuggestions(ctx context.Context, h *harness.Harness, em *emitter) {
 	if !suggestEnabled {
 		return
 	}
-	sugs, err := h.Suggestions(ctx)
+	sugs, err := h.IdleSuggestions(ctx) // once per idle, for every client (suggest.go)
 	if err != nil || len(sugs) == 0 {
 		return
 	}

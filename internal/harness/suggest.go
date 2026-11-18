@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/iodesystems/agentkit/agent"
@@ -48,6 +49,42 @@ import (
 
 // The same call also records what the last turn finished as done plan nodes
 // (USER 2026-11-17, "idle plans"): suggestdone.go.
+
+// Once per idle, in the engine (USER 2026-11-18): every attached client asks
+// when its person sits still, so two clients asked twice. IdleSuggestions
+// makes the call once per idle (between two turns) and gives a later ask
+// the same answer; and not at all after a turn the person did not start
+// (autoturn.go) unless the person was seen since (control "presence").
+
+// idleSuggest is the idle call's once-per-idle state.
+type idleSuggest struct {
+	mu   sync.Mutex // held over the call: a second ask waits for the first's answer
+	gen  uint64     // the idle (autoState.gen) the answer is for
+	done bool
+	last []Suggestion
+}
+
+// IdleSuggestions is Suggestions once per idle: the first ask after a turn
+// makes the call; a later one in the same idle, from any client, gets its
+// answer without a call. After a turn the person did not start, it makes
+// none until the person was seen.
+func (h *Harness) IdleSuggestions(ctx context.Context) ([]Suggestion, error) {
+	s := &h.idleSug
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	h.auto.mu.Lock()
+	gen, origin, seen := h.auto.gen, h.auto.origin, h.auto.presence
+	h.auto.mu.Unlock()
+	if s.done && s.gen == gen {
+		return s.last, nil
+	}
+	if origin != originPerson && !seen {
+		return nil, nil
+	}
+	sugs, err := h.Suggestions(ctx)
+	s.gen, s.done, s.last = gen, true, sugs
+	return sugs, err
+}
 
 // Suggestion is one predicted next user message.
 type Suggestion struct {

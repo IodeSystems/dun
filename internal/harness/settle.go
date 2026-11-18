@@ -189,6 +189,7 @@ func (h *Harness) settleCancel() {
 // during a turn, it does nothing: typing is not a reply, and a started settle
 // turn is cut only by a sent message.
 func (h *Harness) SettlePresence() {
+	h.notePresence() // the idle suggestion may follow a turn nobody typed (suggest.go)
 	s := &h.settle
 	s.mu.Lock()
 	defer s.mu.Unlock()

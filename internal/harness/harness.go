@@ -353,6 +353,8 @@ type Harness struct {
 	// Guarded by planMu.
 	doneAsks  string
 	doneAsked bool
+	// idleSug is the idle suggestion call, once per idle (suggest.go).
+	idleSug idleSuggest
 
 	mgr     *mcpmgr.Manager
 	Session *agent.Session
