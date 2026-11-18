@@ -265,7 +265,7 @@ func (s *Service) upgradeLoop() {
 			st, exe := *s.up.snapshot(), s.up.st.Exe
 			s.up.mu.Unlock()
 			s.notifyUpgrade(st)
-			err := s.PrepareStop("dund restarted into " + orBuild(st.Version))
+			err := s.prepareStop("dund restarted into "+orBuild(st.Version), true)
 			if err == nil {
 				s.up.ready <- exe
 				return
@@ -362,6 +362,9 @@ func (s *Service) failUpgrade(err error) {
 // (proto.UpgradeHold).
 func (s *Service) holdEngines(on bool, gen int64) {
 	for _, ses := range s.all() {
+		if ses.adoptable() {
+			continue // runs on through the restart: nothing to hold
+		}
 		_ = ses.sendLoaded(proto.NewCommand("", &proto.UpgradeHold{On: on, Gen: gen}))
 	}
 }
@@ -403,7 +406,7 @@ const queuedText = "dund is upgrading; the message is kept and runs after the re
 // message that could not be kept, and was not.
 func (s *Service) queueIfUpgrading(ses *session, c proto.Command) (bool, error) {
 	u, ok := c.Payload.(*proto.User)
-	if !ok || s.UpgradeStatus() == nil || !automatic(u) {
+	if !ok || s.UpgradeStatus() == nil || !automatic(u) || ses.adoptable() {
 		return false, nil
 	}
 	ses.actMu.Lock()
@@ -429,7 +432,7 @@ func automatic(u *proto.User) bool { return u.Auto }
 // work. left is the time until it stops waiting.
 func (s *Service) noticeBusy(version string, left time.Duration) {
 	for _, ses := range s.all() {
-		if len(ses.waiting()) == 0 {
+		if len(ses.waitsUpgrade()) == 0 {
 			continue
 		}
 		ses.actMu.Lock()
@@ -472,13 +475,20 @@ func orBuild(v string) string {
 // when it cannot be written, nothing is interrupted, the flags are taken
 // back, and the error says why — an upgrade stays pending rather than kill
 // engines with nothing to resume them by.
-func (s *Service) PrepareStop(why string) error {
+func (s *Service) PrepareStop(why string) error { return s.prepareStop(why, false) }
+
+// prepareStop is PrepareStop; adopt (an upgrade's restart, which leaves the
+// engines on the link running for the next dund): such a session is not
+// interrupted, its record goes to fallback, used only if the next dund
+// cannot adopt the engine (docs/engine-adoption.md).
+func (s *Service) prepareStop(why string, adopt bool) error {
 	type before struct {
 		note        string
 		quiet, held bool
 		restored    *proto.Ask
 		agents      []int
 	}
+	var fellBack []*session
 	was := map[*session]before{}
 	var cut []*session
 	// Set before the sessions are read: a wake_held that comes after this
@@ -488,6 +498,13 @@ func (s *Service) PrepareStop(why string) error {
 	s.mu.Unlock()
 	for _, ses := range s.all() {
 		working := len(ses.waiting()) > 0 || ses.openAsk() != nil
+		if adopt && ses.adoptable() {
+			if working {
+				ses.recordFallback(why)
+				fellBack = append(fellBack, ses)
+			}
+			continue
+		}
 		ses.actMu.Lock()
 		held := ses.heldWake
 		if working || held {
@@ -505,7 +522,7 @@ func (s *Service) PrepareStop(why string) error {
 	flagged := 0
 	for _, ses := range s.all() { // also the ones told to wrap up, which did
 		ses.actMu.Lock()
-		if ses.resume != "" || ses.restored != nil || len(ses.queued) > 0 {
+		if ses.resume != "" || ses.restored != nil || len(ses.queued) > 0 || ses.fallback != nil {
 			flagged++
 		}
 		ses.actMu.Unlock()
@@ -515,6 +532,11 @@ func (s *Service) PrepareStop(why string) error {
 			for ses, b := range was {
 				ses.actMu.Lock()
 				ses.resume, ses.resumeQuiet, ses.restored, ses.cutAgents, ses.heldWake = b.note, b.quiet, b.restored, b.agents, b.held
+				ses.actMu.Unlock()
+			}
+			for _, ses := range fellBack {
+				ses.actMu.Lock()
+				ses.fallback = nil
 				ses.actMu.Unlock()
 			}
 			s.mu.Lock()

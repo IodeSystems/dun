@@ -30,6 +30,15 @@ type Spawner interface {
 type ExecSpawner struct {
 	Bin string
 	Env []string // extra environment, beside the service's own
+	// EnginesDir, when set, starts engines on the engine link (--listen,
+	// enginelink.go): they outlive dund's restart and the next dund adopts
+	// them. Empty, or too long for a socket path: over stdio, as before.
+	EnginesDir string
+	// Scope starts each linked engine in a systemd scope of its own (dund
+	// runs as a systemd user service).
+	Scope bool
+	// Version is Bin's build, when known (Adopter.EngineBuild).
+	Version string
 }
 
 type execEngine struct {
@@ -39,6 +48,9 @@ type execEngine struct {
 }
 
 func (s ExecSpawner) Spawn(workspace string, args []string) (Engine, error) {
+	if linkable(s.EnginesDir) {
+		return s.spawnLinked(workspace, args)
+	}
 	cmd := exec.Command(s.Bin, append([]string{"--engine", "--workspace", workspace}, args...)...)
 	// A spawned engine never rebuilds itself; the service owns freshness.
 	// DUN_DUND tells it dund is on the other end of its stdio, so it offers
