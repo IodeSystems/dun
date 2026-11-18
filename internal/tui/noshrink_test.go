@@ -96,9 +96,13 @@ func TestNoShrink_ToolRunsWithThinking(t *testing.T) {
 
 // A long random mix of everything the engine sends.
 func TestNoShrink_RandomEventStreams(t *testing.T) {
+	initMarkdownStyle() // as dun does before its loop: not first from two subtests at once
 	for _, seed := range []int64{1, 2, 3, 4} {
 		for _, size := range [][2]int{{80, 24}, {44, 18}} {
 			t.Run(fmt.Sprintf("seed%d_%dx%d", seed, size[0], size[1]), func(t *testing.T) {
+				// Events only, no keys: nothing here touches the package's
+				// one editState (edits), so the streams run side by side.
+				t.Parallel()
 				r := rand.New(rand.NewSource(seed))
 				c := newShrinkCheck(t, size[0], size[1])
 				pending := false

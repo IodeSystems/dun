@@ -92,14 +92,22 @@ func startScreen(t *testing.T, m tuiModel, w, h int) *screenRun {
 
 // settle waits for the renderer to go quiet, feeds what it wrote to the
 // emulator, and returns those bytes.
+//
+// Quiet is 5 ticks (50 ms) with no new byte once the frame has begun. A
+// message that changes nothing on screen writes no frame (a token: the
+// stream shows on a render tick, and quiet drops commands): for that, 50
+// ticks (500 ms, about 30 renderer frames) with nothing at all is quiet too,
+// not the whole 5 s deadline. The first frame (nothing fed yet) is always
+// waited for.
 func (r *screenRun) settle() []byte {
 	r.t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	last, stable := -1, 0
 	for time.Now().Before(deadline) {
 		n := len(r.out.bytes())
-		if n == last && n > r.fed {
-			if stable++; stable >= 5 {
+		if n == last {
+			stable++
+			if (n > r.fed && stable >= 5) || (r.fed > 0 && stable >= 50) {
 				break
 			}
 		} else {
