@@ -170,6 +170,7 @@ type idleState struct {
 	paths   []string // file_edit and file_write paths, in order, once each
 	plan    planRev  // the plan as the last check read it, in any turn
 	text    int      // tool calls written as text corrected in this turn (textcall.go)
+	seen    string   // the entry the last correction read, or the newest as the turn began
 }
 
 func (s *idleState) reset() {
@@ -178,15 +179,24 @@ func (s *idleState) reset() {
 	s.mu.Unlock()
 }
 
-// textCallTake spends one of the turn's textCallsMax corrections; false
-// with none left.
-func (s *idleState) textCallTake() bool {
+// textCallSeen records an entry no correction is to read (again).
+func (s *idleState) textCallSeen(id string) {
+	s.mu.Lock()
+	s.seen = id
+	s.mu.Unlock()
+}
+
+// textCallTake spends one of the turn's textCallsMax corrections on entry
+// id; false with none left, or when id was read already or is older than
+// the turn.
+func (s *idleState) textCallTake(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.text >= textCallsMax {
+	if s.text >= textCallsMax || id == s.seen {
 		return false
 	}
 	s.text++
+	s.seen = id
 	return true
 }
 

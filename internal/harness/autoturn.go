@@ -183,6 +183,11 @@ func (h *Harness) turnBegin(o turnOrigin) {
 	h.auto.gen++
 	h.auto.mu.Unlock()
 	h.idle.reset()
+	if h.store != nil { // a reply from before the turn is not this turn's (textcall.go)
+		if e, ok := h.store.lastRoundEntry(); ok {
+			h.idle.textCallSeen(e.ID)
+		}
+	}
 	if o == originPerson {
 		h.autoPersonReset()
 	}

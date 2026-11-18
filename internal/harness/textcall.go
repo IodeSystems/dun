@@ -13,8 +13,10 @@ import (
 // and no tool_calls: nothing ran and the turn ended. A reply with no tool
 // calls whose text (outside code) has tool-call markup is a failed tool call:
 // onIdle tells the model, at most textCallsMax times a turn, and the turn
-// goes on. Inside the person's turn, so not an automatic turn and not under
-// its budget (autoturn.go). corrallm may repair it upstream; this stays as the
+// goes on. It runs in every turn, the automatic ones too, but it is a note
+// inside the running turn, not a new turn: the automatic-turn budget
+// (autoturn.go) does not count it. Only a reply written in this turn is
+// read: an empty reply in a wake would otherwise find an earlier turn's. corrallm may repair it upstream; this stays as the
 // fallback. docs/decisions.md, "Tool calls sent as text are retried".
 
 // textCallsMax is how many corrections one turn gets; past it the turn ends
@@ -39,7 +41,7 @@ func (h *Harness) textCallCheck() string {
 		return ""
 	}
 	what := textfmt.ToolMarkup(e.Content)
-	if what == "" || !h.idle.textCallTake() {
+	if what == "" || !h.idle.textCallTake(e.ID) {
 		return ""
 	}
 	return fmt.Sprintf(textCallNote, what)

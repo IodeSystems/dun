@@ -1114,20 +1114,26 @@ ran, the turn ended, and the TUI dropped the tags as HTML. Once the markup was
 in a plan node's text. `internal/harness/textcall.go`,
 `internal/textfmt/toolmarkup.go`.
 
-- **Detect.** A reply with no tool calls whose text, outside fenced and
-  inline code, has a DSML marker (`<｜DSML｜`, `<|DSML|`), `<invoke` with
-  `<parameter`, `<function_calls>`, `<tool_call>` or `<|tool▁calls▁begin|>`.
-  Prose that explains the tags in backticks is not a call.
+- **Detect structure, not a tag.** A reply with no tool calls whose text,
+  outside code (fenced, also in quotes and list items; indented; inline),
+  has a DSML marker (`<｜DSML｜`, `<|DSML|`) or `<|tool▁calls▁begin|>`;
+  `<invoke name=` with `<parameter name=`; `<function_calls>` with
+  `<invoke`; or `<tool_call>` then `{` and `"name"`. A tag named in prose
+  ("Qwen wraps calls in <tool_call> tags") is not a call.
 - **Respond.** onIdle answers first with one `[automatic] your last reply had
   a tool call written as text (…)` note and the turn goes on; at most 2 a
-  turn, then the turn ends as before (with its usual turn-end check). The
-  note is inside the current turn, not a new one: it is not an automatic turn
-  and not under the unrequested-turn budget.
+  turn, then the turn ends as before (with its usual turn-end check). Only a
+  reply written in this turn is read: the newest entry as the turn began is
+  skipped, so a wake with an empty reply does not correct the last turn's.
+  It runs in automatic turns too, but as a note inside the running turn,
+  not a new turn: the unrequested-turn budget does not count it.
 - **Plan arguments.** A plan tool call with the markup in any string argument
   is refused with the same guidance: plan text is shown to the person and in
   the turn-end check. File contents are not checked.
-- **Display.** The TUI fences the markup span before rendering, so it shows
-  raw as a code block. The app (mobile/web) draws HTML nodes as their text
+- **Display.** The TUI fences each markup span (its lines only, a
+  parameter's value kept whole) before rendering, so it shows raw as a code
+  block. In a blockquote or an indent the fence lines keep the prefix; a span
+  that opens on a list marker line is left as it is. The app (mobile/web) draws HTML nodes as their text
   and was not changed.
 - corrallm may repair this upstream (parse the markup into tool_calls); this
   guard stays as the fallback.

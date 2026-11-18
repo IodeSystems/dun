@@ -60,6 +60,26 @@ func TestTextCall_RetriesThenStopsAtCap(t *testing.T) {
 	}
 }
 
+// A wake whose reply is empty reads no earlier turn's reply: the last
+// turn's DSML is not corrected again (review 2026-11-18).
+func TestTextCall_OldReplyNotReread(t *testing.T) {
+	h, r := textCallHarness(t, func(i int) string {
+		if i <= textCallsMax {
+			return dsmlSample
+		}
+		return ""
+	})
+	if _, err := h.Ask(context.Background(), "build it"); err != nil {
+		t.Fatal(err)
+	}
+	if err := wakeTurn(h, "job 1 finished"); err != nil {
+		t.Fatal(err)
+	}
+	if n, want := r.calls(), 1+textCallsMax+1; n != want {
+		t.Fatalf("%d requests, want %d: the wake was corrected for the last turn's reply", n, want)
+	}
+}
+
 // One correction, then a proper reply: the turn ends there.
 func TestTextCall_OnceThenReply(t *testing.T) {
 	h, r := textCallHarness(t, func(i int) string {
@@ -91,7 +111,7 @@ func TestTextCall_CodeIgnored(t *testing.T) {
 }
 
 // A plan argument with the markup is refused with the guidance and nothing
-// is added; the same tags in inline code are accepted.
+// is added; a tag named in prose or in inline code is accepted.
 func TestTextCall_PlanArgRefused(t *testing.T) {
 	h := planHarness(t, false)
 	d := withPlan(nil, h.planTools(), nil)
@@ -106,8 +126,12 @@ func TestTextCall_PlanArgRefused(t *testing.T) {
 	if g, _ := (planStore{h}).View(context.Background()); len(g.Nodes) != 0 {
 		t.Errorf("node added: %+v", g.Nodes)
 	}
-	ok := `{"title":"document ` + "`<tool_call>`" + ` tags","done_when":"written"}`
-	if out, _ := d(context.Background(), *nudgeCall("p2", "plan_add", ok)); strings.HasPrefix(out, "ERROR") {
-		t.Errorf("code refused: %s", out)
+	for _, ok := range []string{
+		`{"title":"document ` + "`<tool_call>`" + ` tags","done_when":"written"}`,
+		`{"title":"parser","details":"fix <tool_call> parsing","done_when":"tests pass"}`,
+	} {
+		if out, _ := d(context.Background(), *nudgeCall("p2", "plan_add", ok)); strings.HasPrefix(out, "ERROR") {
+			t.Errorf("a tag named in text refused: %s", out)
+		}
 	}
 }
