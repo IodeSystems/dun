@@ -129,7 +129,7 @@ one place beside the built-in definitions (`builtinInstances`,
 A scripted server with `agent` is refused by `/mcp instance` and `/mcp
 mode`: it runs in the session's shell, and a child has no shell of its own.
 A hand-edited file that still holds the pair runs it as `session`. With no
-dund (a test, a bare `dun -p`), `shared` acts as `session`.
+dund (a test, a bare `dun --engine`), `shared` acts as `session`.
 
 In the TUI's `/mcp` table, `i` cycles the instance: shared → session → agent
 → unset; global has no unset. `m` cycles the mode likewise, unset included
@@ -326,7 +326,7 @@ and corporate tools behind a login gate.
   loopback). The engine keeps the token until it is about to expire or is
   refused; an `unauthorized` names the refused token, and dund refreshes only
   when that is still its current one, so ten engines' 401s are one refresh.
-  With no dund (a test, a bare `dun -p`) the engine's own client works on the
+  With no dund (a test, a bare `dun --engine`) the engine's own client works on the
   token file as before.
 - **Scripted OAuth servers** (in mcpshell): their entry has `auth_cmd:
   '<dun>' oauth token --spec <base64 id, url, oauth> --session <id>`, never a

@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// Engine is one running `dun -p`: commands go in on Stdin, events come out on
+// Engine is one running `dun --engine`: commands go in on Stdin, events come out on
 // Stdout, one NDJSON frame per line.
 type Engine interface {
 	Stdin() io.Writer
@@ -26,7 +26,7 @@ type Spawner interface {
 	Spawn(workspace string, args []string) (Engine, error)
 }
 
-// ExecSpawner runs `<Bin> -p --workspace <ws> <args…>`.
+// ExecSpawner runs `<Bin> --engine --workspace <ws> <args…>`.
 type ExecSpawner struct {
 	Bin string
 	Env []string // extra environment, beside the service's own
@@ -39,7 +39,7 @@ type execEngine struct {
 }
 
 func (s ExecSpawner) Spawn(workspace string, args []string) (Engine, error) {
-	cmd := exec.Command(s.Bin, append([]string{"-p", "--workspace", workspace}, args...)...)
+	cmd := exec.Command(s.Bin, append([]string{"--engine", "--workspace", workspace}, args...)...)
 	// A spawned engine never rebuilds itself; the service owns freshness.
 	// DUN_DUND tells it dund is on the other end of its stdio, so it offers
 	// dun_list and dun_msg (proto/peer.go).

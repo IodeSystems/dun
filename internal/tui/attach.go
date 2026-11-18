@@ -121,7 +121,7 @@ func startDund() error {
 // what the service sets itself (workspace, resume, continue) and what it
 // refuses (the key — the engine reads the saved one).
 func engineArgs(o TuiOpts) []string {
-	all := ProcArgs(o, "-p")[3:] // drop -p --workspace <ws>
+	all := ProcArgs(o, "--engine")[3:] // drop --engine --workspace <ws>
 	var out []string
 	for i := 0; i < len(all); i++ {
 		switch all[i] {

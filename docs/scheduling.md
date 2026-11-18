@@ -117,7 +117,7 @@ with /loop (like claude it installs a loop_ctl() tool)".
   by `peer_reply`. No new channel. The rest of the line goes as typed (case,
   spacing, newlines): the TUI hands the raw line for these two
   (`slashLine`), since its fields have lost them.
-- `dun -p` with no dund has no peer link; both commands say they need dund.
+- `dun --engine` with no dund has no peer link; both commands say they need dund.
 - `/schedule edit <id>` with no text puts `/schedule edit <id> <text>` in the
   composer of the TUI that asked (control `schedule-edit`, like `unqueue`);
   other clients see the text as a line.

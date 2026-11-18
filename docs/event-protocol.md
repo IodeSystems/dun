@@ -1,6 +1,6 @@
 # Event Protocol
 
-The TUI is a **client** of the headless `dun -p` engine. It re-execs `dun -p`,
+The TUI is a **client** of the headless `dun --engine` engine. It re-execs `dun --engine`,
 writes user events to its stdin, and renders the JSON event stream on stdout.
 The engine stays headless; the UI is pure presentation.
 

@@ -67,7 +67,7 @@ func (m tuiModel) writeDump() {
 	_, _ = f.WriteString(m.dumpString())
 }
 
-// ── subprocess (dun -p) ────────────────────────────────────────────
+// ── subprocess (dun --engine) ────────────────────────────────────────────
 
 type evMsg map[string]any
 
@@ -212,7 +212,7 @@ type dunProc struct {
 	replay  *replayStats // --replay: what the pacing did to the recording
 }
 
-// ProcArgs builds a `dun <mode>` argv from the shared flags. mode is "-p" (the
+// ProcArgs builds a `dun <mode>` argv from the shared flags. mode is "--engine" (the
 // engine, for the TUI) or "--tui" (the full TUI, for the xterm/PTY terminal
 // view served at /term).
 func ProcArgs(o TuiOpts, mode string) []string {
@@ -221,7 +221,7 @@ func ProcArgs(o TuiOpts, mode string) []string {
 		args = append(args, "--disable-exit")
 	}
 	if !o.Suggest {
-		args = append(args, "--no-suggest") // propagate to -p (engine) and web -tui
+		args = append(args, "--no-suggest") // propagate to --engine and web -tui
 	}
 	if o.Rag != "" {
 		args = append(args, "--rag="+o.Rag)

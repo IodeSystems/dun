@@ -23,7 +23,7 @@ func headlessMissing(err error) string {
 	if errors.Is(err, dunconfig.ErrNoModel) {
 		return "dun: no model chosen, so the task cannot run. Pick one:\n" +
 			"  dun --setup                 in a terminal (saved for next time), or\n" +
-			"  DUN_MODEL=<model> dun \"…\"   for this run (or --model)\n"
+			"  DUN_MODEL=<model> dun -p \"…\" for this run (or --model)\n"
 	}
 	return "dun: not logged in to an AI service, so the task cannot run. Log in:\n" +
 		"  dun --setup   in a terminal: an address, a key if it needs one, a model (saved for next time)\n" +

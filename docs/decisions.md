@@ -66,7 +66,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   fields; setting only `BudgetTokens` skips the cheap rungs.
 - **Compaction is always reported.** It is the only operation that destroys
   conversation, and it once ran unreported for three days. `OnCompaction`
-  produces a TUI line, stderr and a `-p` event, with a per-turn counter so
+  produces a TUI line, stderr and an `--engine` event, with a per-turn counter so
   thrashing names itself.
 - **The model may rewrite its own recent history (`recap`, `recap.go`),
   under four constraints.** It replaces a span with the account the
@@ -849,9 +849,19 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   `engineRestartWindow`): a crash loop is reported, not hidden.
 - **The TUI is the default mode; long flags are `--long`.** Bare `dun` printed
   usage and exited, making the interactive UI the one mode you had to ask
-  for. A positional task still runs headless, so scripts do not open a UI.
-  `flag.Usage` is overridden because Go prints `-tui`, which reads like
+  for. A headless task (`dun -p "task"`) does not open a UI, so scripts do
+  not. `flag.Usage` is overridden because Go prints `-tui`, which reads like
   `-t -u -i`.
+- **`-p` is the headless task; `--engine` is the JSON protocol (USER
+  2026-11-17).** `dun -p "task"` runs one task and exits: the answer on
+  stdout, the work and the diff on stderr (answer.go); with no task and stdin
+  not a terminal, stdin is the task, the way other CLI agents read a pipe. The
+  line-delimited JSON events that dund, the TUI and the Harbor adapter drive
+  moved to `--engine`. Bare words are only subcommands: `dun "fix it"` is
+  refused with the `dun -p` spelling, so a typo in a subcommand cannot start a
+  paid run. A dund from before the rename still spawns `dun -p` with no task;
+  under `DUN_DUND` that stays the engine (cli.go), so an upgrade does not turn
+  its sessions into headless runs that read their JSON as a task.
 - **A recorded session is the reproduction.** `DUN_TRACE` records engine events
   with offsets; `--replay` drives the real TUI from them. Built after three
   perf findings in a row had to be inferred from after-the-fact benchmarks.

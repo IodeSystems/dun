@@ -38,7 +38,7 @@ clients: TUI (cmd/dun) · browser · phone (mobile/)
 dund — session service (internal/dund). Owns sessions; they outlive clients.
    │  stdio, line-delimited JSON (docs/event-protocol.md)
    ▼
-engine: `dun -p` — one process per session (harness.go)
+engine: `dun --engine` — one process per session (harness.go)
    ├─ agentkit Session + LLM client (any OpenAI-compatible endpoint)
    ├─ git worktree of the repo (isolated mutable surface; opt out: --no-worktree)
    ├─ mcpmgr spawns tool servers on the host over stdio JSON-RPC:

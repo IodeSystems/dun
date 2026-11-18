@@ -47,7 +47,7 @@ func TestItermTabOptIn(t *testing.T) {
 // The flag is this client's: the engine's argv never carries it.
 func TestItermFlagNotForwarded(t *testing.T) {
 	o := TuiOpts{Workspace: "/w", Model: "m", ItermTabs: true, Suggest: true}
-	for _, mode := range []string{"-p", "--tui"} {
+	for _, mode := range []string{"--engine", "--tui"} {
 		for _, a := range ProcArgs(o, mode) {
 			if strings.Contains(a, "iterm") {
 				t.Fatalf("%s argv carries %q: %v", mode, a, ProcArgs(o, mode))

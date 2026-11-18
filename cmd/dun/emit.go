@@ -139,7 +139,7 @@ func windowOf(w dun.WindowBudget) proto.Window {
 	}
 }
 
-// retryEvent renders a RetryNote as a -p event. Durations travel as milliseconds
+// retryEvent renders a RetryNote as an --engine event. Durations travel as milliseconds
 // (JSON has no duration type, and a client that wants to count down needs the
 // number, not a formatted string) alongside the ready-made one-liner in "text".
 func retryEvent(n dun.RetryNote) *proto.Retry {
@@ -178,7 +178,7 @@ type emitter struct {
 	// onReply sees every event after it is written: what keeps the person's
 	// commands in the session (recordReplies).
 	onReply func(payload any)
-	// turn follows the events into turn_state (turnstate.go); nil outside -p.
+	// turn follows the events into turn_state (turnstate.go); nil outside --engine.
 	turn *turnTracker
 	// rounds stamps reasoning, token and tool_call with their model round
 	// and sends reasoning_end where a round's thinking ends (proto.StepRound),

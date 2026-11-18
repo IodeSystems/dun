@@ -153,7 +153,7 @@ completion list each command with its `help`.
 and `--no-rag` / `--no-lsp` say the same), above whatever is saved. `--no-tools`
 is a plain chat: the model gets no tools at all (no commands, files, servers,
 agents) and no server starts. `--media <file>` (repeat for more) attaches a png,
-jpeg, gif or webp to a one-shot task: `dun --media shot.png "what is wrong here"`. Startup names what is off, so a missing tool family is
+jpeg, gif or webp to a one-shot task: `dun --media shot.png -p "what is wrong here"`. Startup names what is off, so a missing tool family is
 never a silent absence. A server that fails to start is reported and skipped —
 it costs you that family, not your session.
 
@@ -254,11 +254,11 @@ dun --setup   # Bubble Tea wizard: log in to a provider (an OpenAI-compatible
 # interactive Bubble Tea UI — the DEFAULT, no flag needed
 DUN_LLM_KEY=... dun --workspace ./my-project
 
-# one-shot, human-readable
-DUN_LLM_KEY=... dun --workspace ./my-project "find the greet function and explain it"
+# one-shot: the work on stderr, the answer on stdout (or the task on stdin: echo ... | dun -p)
+DUN_LLM_KEY=... dun --workspace ./my-project -p "find the greet function and explain it"
 
 # programmatic: line-delimited JSON events in/out (the TUI is a client of this)
-echo '{"type":"user","content":"..."}' | dun -p --workspace ./my-project
+echo '{"type":"user","content":"..."}' | dun --engine --workspace ./my-project
 ```
 
 **TUI keys.** The screen has three focus zones: the composer, the
@@ -302,7 +302,7 @@ back at exit. Inside tmux the escapes need `set -g allow-passthrough on`
 (`dun tmux` says so under iTerm2); without it the `@dun_icon` mark is what
 shows.
 
-The engine speaks a small JSON event protocol (`-p`): out `ready`/`token`/
+The engine speaks a small JSON event protocol (`--engine`): out `ready`/`token`/
 `tool_call`/`tool_result`/`message`/`usage`/`done`/`error` + `ask`/`notification`/
 `retry`/`queued`; in `{"type":"user",...}` / `{"type":"answer","value":...}` /
 `{"type":"stop"}`. The TUI is just a client of it, so the engine stays headless
@@ -351,7 +351,7 @@ tell a 32k window from a 180k one without minutes of multi-megabyte probing, and
 guessing low compacts a large window for nothing.
 
 Every fold is reported — `🗜 compacted 12 entries: 30000 → 8000 tokens (saved
-22000)` — in the TUI, on stderr, and as a `compaction` event on `-p`. More than
+22000)` — in the TUI, on stderr, and as a `compaction` event on `--engine`. More than
 one fold in a single turn is called out as thrashing, because that means the
 budget cannot fit one turn's floor (system prompt + tool schemas + the pristine
 tail) and every turn will re-summarize what it just summarized.

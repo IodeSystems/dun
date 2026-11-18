@@ -14,7 +14,7 @@ import (
 //
 // When the task is ambiguous or a decision is the user's to make, the agent
 // calls ask_user{question, options}; the turn PAUSES at that tool call until the
-// answer comes back (over the -p `ask` event → a UI picker → an `answer` event,
+// answer comes back (over the --engine `ask` event → a UI picker → an `answer` event,
 // or a terminal prompt), and the answer becomes the tool result so the turn
 // continues. Synchronous by design: nothing should proceed until the user
 // decides. (agentkit's lifting primitive could make this async/background; a

@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// PROTO_CAPTURE=<file> decodes a recorded `dun -p` stdout strictly: every
+// PROTO_CAPTURE=<file> decodes a recorded `dun --engine` stdout strictly: every
 // line an Event, every field known. A check to run against a live engine, not
 // part of the default suite.
 func TestDecodeCapture(t *testing.T) {

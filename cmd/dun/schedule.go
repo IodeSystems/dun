@@ -26,8 +26,8 @@ const (
 	loopUsage = "usage: /loop [interval] <prompt> | /loop (lists) | /loop stop [id] — no interval: the model paces it with loop_ctl"
 )
 
-// noDund is the answer when the engine has no dund on its stdio (dun -p).
-const noDund = "needs dund (the session service): a one-shot dun -p has nothing to keep a schedule after it exits"
+// noDund is the answer when the engine has no dund on its stdio (dun --engine).
+const noDund = "needs dund (the session service): a standalone dun --engine or dun -p has nothing to keep a schedule after it exits"
 
 // parseWhen reads a time from the front of fields: a duration from now
 // ("10m", "2h30m", "+10m"), a clock time today or, when that has passed,

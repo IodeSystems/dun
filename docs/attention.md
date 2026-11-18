@@ -59,7 +59,7 @@ Delivery, cheapest first:
 3. **Wait.** An aside with no tool result to ride and no turn coming waits
    indefinitely.
 
-A notify starts a turn through `h.wake`: the engine's loop, and in `-p` mode
+A notify starts a turn through `h.wake`: the engine's loop, and in `--engine` mode
 `drainStep` (cmd/dun/engine.go), block on it while background work runs.
 
 ### Keyed, escalating and turn-scoped asides (branch `idle-check`, `asidettl.go`)
@@ -152,7 +152,7 @@ When a turn that used tools ends, a settle timer starts (proposed: 2 minutes).
   input box is empty and the person has sat still"); it sends the engine a
   presence ping at most every 10 s or so while the user is active, and the
   engine only restarts the timer. The engine never sees keystrokes. A client with
-  no keyboard (a `-p` script, a peer, dund) sends no pings, and only a reply
+  no keyboard (a `--engine` or `-p` script, a peer, dund) sends no pings, and only a reply
   cancels the timer.
 - **Typing does not cut a settle turn that has started.** Only a sent message
   does (head chop, below): keystrokes are not a reply.
