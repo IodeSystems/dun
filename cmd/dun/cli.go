@@ -28,6 +28,7 @@ var subcommands = []subcommand{
 	{"spend", "what dun has spent"},
 	{"oauth", "an OAuth MCP server's bearer token"},
 	{"dund", "the session service"},
+	{"completion", "the shell completion script: bash, zsh or fish"},
 }
 
 func isSubcommand(w string) bool {

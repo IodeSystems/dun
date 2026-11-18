@@ -126,6 +126,7 @@ start:
   dun msg                    message dun sessions and listen for messages from a shell (dun msg --help)
   dun --engine               engine mode: line-delimited JSON events on stdin/stdout (what dund runs)
   dun dund …                 the session service (dun dund --help)
+  dun completion [shell]     shell completion: source <(dun completion bash), or zsh, fish
 
   DUN_URL, DUN_MODEL, DUN_LLM_KEY in the environment set the provider without
   /login (--url, --model, --key for one run).
@@ -317,6 +318,12 @@ func main() {
 	noTools := flag.Bool("no-tools", false, "a plain chat: the model gets no tools at all, and no tool server starts")
 	var media mediaFlag
 	flag.Var(&media, "media", "attach an image (png, jpeg, gif, webp) to the task's first message; repeat for more: dun --media shot.png -p \"what is wrong here\"")
+	// `dun completion [shell]` and its `dun __complete sessions`: after the
+	// flags are defined (the script lists them), before any server, session
+	// or LLM (completion.go).
+	if len(os.Args) > 1 && (os.Args[1] == "completion" || os.Args[1] == "__complete") {
+		os.Exit(completionCmd(os.Args[1:], flag.CommandLine, os.Stdout, os.Stderr))
+	}
 	flag.Parse()
 	if err := noAutostart(&ragFlag, *noRag, "rag"); err != nil {
 		fatal(err)
