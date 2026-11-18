@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -30,6 +31,7 @@ func TestAdoptAcrossDundReexec(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds dun twice and runs a dund")
 	}
+	t.Parallel() // its own processes and env: it overlaps the other builds (testDun)
 	adoptAcrossRestart(t, false)
 }
 
@@ -58,6 +60,10 @@ func adoptAcrossRestart(t *testing.T, viaSystemd bool) {
 	}
 	bins := t.TempDir()
 	v1, v2 := filepath.Join(bins, "v1", "dun"), filepath.Join(bins, "v2", "dun")
+	// The two builds differ only in the link: side by side, not one after
+	// the other.
+	var builds sync.WaitGroup
+	buildErr := make(chan string, 2)
 	for exe, ver := range map[string]string{v1: "v9.9.1", v2: "v9.9.2"} {
 		args := []string{"build", "-o", exe, "-ldflags", "-X main.version=" + ver}
 		if raceBuild {
@@ -65,9 +71,18 @@ func adoptAcrossRestart(t *testing.T, viaSystemd bool) {
 		}
 		build := exec.Command("go", append(args, ".")...)
 		build.Env = append(os.Environ(), "GOWORK=off")
-		if out, err := build.CombinedOutput(); err != nil {
-			t.Fatalf("go build %s: %v\n%s", ver, err, out)
-		}
+		builds.Add(1)
+		go func() {
+			defer builds.Done()
+			if out, err := build.CombinedOutput(); err != nil {
+				buildErr <- fmt.Sprintf("go build %s: %v\n%s", ver, err, out)
+			}
+		}()
+	}
+	builds.Wait()
+	close(buildErr)
+	for e := range buildErr {
+		t.Fatal(e)
 	}
 
 	// The fake LLM: the turn's request streams w01..w30 slowly; anything

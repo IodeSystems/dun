@@ -15,6 +15,7 @@ import (
 // set, so a new flag is completed without editing the script), and the
 // sessions helper for --resume; the removed flags are not offered.
 func TestCompletion_Scripts(t *testing.T) {
+	t.Parallel() // runs the built dun (testDun): its own process and env
 	for _, sh := range []string{"bash", "zsh", "fish"} {
 		out, stderr, code := runDun(t, "", nil, "completion", sh)
 		if code != 0 {

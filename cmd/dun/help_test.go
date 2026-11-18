@@ -12,6 +12,7 @@ import (
 // lists them; a --x/--no-x pair is one entry, and a zero default is not
 // printed.
 func TestHelp_WidthGroupsAndDefaults(t *testing.T) {
+	t.Parallel() // runs the built dun (testDun): its own process and env
 	adv := flagGroups[len(flagGroups)-1].names
 	adv = append(adv, "worker", "settle-delay", "non-interactive") // ungrouped: listed as advanced
 	for _, width := range []int{80, 50, 120} {

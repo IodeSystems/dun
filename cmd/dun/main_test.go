@@ -2,6 +2,8 @@ package main
 
 import (
 	"os"
+	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -13,6 +15,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
+	keepGoCaches()
 	os.Setenv("DUN_HOME", home)
 	// And off the real home directory: a harness reads the user's rules
 	// files (~/AGENTS.md, ~/CLAUDE.md, ~/.claude/CLAUDE.md, dun/rules.go).
@@ -27,4 +30,23 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	os.RemoveAll(home)
 	os.Exit(code)
+}
+
+// keepGoCaches pins the go command's build and module caches to the ones it
+// uses now, before HOME moves: under the temp HOME, each `go build` a test
+// runs (testDun, the adoption test's two builds) started from an empty
+// build cache and an empty module cache, recompiled every dependency and
+// fetched every module: 40-80 s a build. A test that wants its own cache
+// still sets one in its command's env (toolver_test.go).
+func keepGoCaches() {
+	out, err := exec.Command("go", "env", "GOCACHE", "GOMODCACHE").Output()
+	if err != nil {
+		return // no go command: the builds fail on their own, as before
+	}
+	v := strings.Split(strings.TrimSpace(string(out)), "\n")
+	for i, k := range []string{"GOCACHE", "GOMODCACHE"} {
+		if i < len(v) && v[i] != "" && os.Getenv(k) == "" {
+			os.Setenv(k, v[i])
+		}
+	}
 }
