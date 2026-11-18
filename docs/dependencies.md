@@ -24,10 +24,13 @@ Session names are as of 2026-11-08; `ListAgents` shows the current ones.
   when dun starts depending on a flag or behaviour. The comment beside it
   names that dependency.
 - `supported.go` `Recommended`: the version dun was tested with. `dun doctor
-  --fix` installs it. It must be a tag or a pushed pseudo-version, never
+  --fix` installs it into `$DUN_HOME/tools/<tool>/<version>/` (go install on a
+  build that is not a release). It must be a tag or a pushed pseudo-version, never
   `latest`.
 - `deps.json`: each tool's release tarballs (url, sha256, size) at its
-  `Recommended`. Release builds embed it; `supported_test.go` checks the two
+  `Recommended`. Release builds embed it, and download from it on `doctor --fix`
+  and when a session first needs a tool (`internal/mcpserver/tools.go`);
+  `supported_test.go` checks the two
   agree. It is filled by hand (Makefile, `release:` comment).
 
 dun also probes the tool at run time (`speaksIndex` markers in

@@ -65,7 +65,7 @@ esac
 cat <<EOF
 
 next:
-  dun doctor --fix    # fetches mcpshell; poly-lsp-mcp and raglit when you want them
+  dun doctor --fix    # fetches mcpshell, poly-lsp-mcp and raglit now (a session fetches one when it first needs it)
   dun --setup         # log in to a model: an address, and a key if it needs one
   cd your-project && dun
 EOF

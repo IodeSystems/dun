@@ -668,11 +668,12 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   `ingest`/`forget` tools when the server has them, else a CLI fallback; when
   raglit adds both, dun switches with no code change. A slash name taken by an
   earlier extension or by dun itself is dropped from the later one.
-- **mcpshell is looked for on PATH, then beside dun's executable** (`internal/mcpserver/missing.go`);
-  absent, dun runs with one tool less and says how to install it (`dun doctor
-  --fix`). Installation by `go install` was chosen over bundling because it
-  builds from source and is checked by sum.golang.org. (Release tarballs have
-  since been added in `release/`; this fallback remains.)
+- **mcpshell is dun's pinned copy under DUN_HOME** (`internal/mcpserver/tools.go`;
+  it was looked for on PATH, then beside dun's executable, until "dun manages
+  its tools under DUN_HOME" below); absent, dun runs with one tool less and
+  says how to install it (`dun doctor --fix`). Installation by `go install`
+  was chosen over bundling because it builds from source and is checked by
+  sum.golang.org; release builds download the pinned tarballs.
 - **Hosted-server shell options replace, not merge** (`internal/harness/shellhost.go`): a later
   layer's `shell` block replaces a lower one's. Bad globs are dropped with a log
   line, because mcpshell exits on one and would take the shell down.
@@ -1150,6 +1151,56 @@ exec edits followed an "outside the root" refusal. `internal/harness/fileaccess.
   making several replacements and running `go build` in one python or sed
   call. `file_edit` already takes `edits: [{old, new}, …]`; the prompt line
   says to use it and to run builds and tests in an exec call of their own.
+
+## dun manages its tools under DUN_HOME (USER 2026-11-18)
+
+dun took mcpshell, poly-lsp-mcp and raglit from the user's PATH first, then
+from its own directory. What ran was whatever the shell had first: a Mac
+ran a modified mcpshell checkout from `~/.local/bin`, far below Min, for
+weeks; the version was checked only in `dun doctor` and `dun tools`.
+`internal/mcpserver/tools.go`.
+
+- **Managed first.** For each tool: an override, else the pinned copy at
+  `$DUN_HOME/tools/<tool>/<version>/<tool>`, else not installed. The user's
+  PATH and dun's directory are not searched for these three. Other commands
+  (git, language servers, ant) are found on PATH as before.
+- **Overrides.** `$DUN_MCPSHELL`, `$DUN_POLY_LSP_MCP`, `$DUN_RAGLIT`, else
+  `tools.<name>.path` in `$DUN_HOME/mcp.json`; env wins, as env does over
+  every config file (standards CFG-3). A server entry whose `command` is a
+  path is used as it is, before either. `tools` is read from
+  `$DUN_HOME/mcp.json` only, as `default_via` is: a repo's dun.json does not
+  pick a machine's binaries, and the lookup has no workspace. An env var
+  reaches dund's engines only when dund was started with it; the mcp.json
+  entry reaches every process. An override that is not an executable is
+  "not installed" with the reason; the pinned copy does not stand in for it.
+- **Version.** A pinned copy is the pinned version by construction. An
+  override runs whatever its version; doctor, `dun tools` and `dun ps` call
+  it "your build" with its version, and say when it is below Min. dun never
+  updates an override.
+- **Auto-fetch on first need, release builds only.** When a session starts
+  a tool whose pinned copy is missing, `EnsureCommand` downloads the
+  tarball from deps.json (or the registry's newer pin), the code doctor
+  --fix runs (`FetchPinned`, `update.Fetcher.Install`: sha256 and size
+  checked, temp file, rename). A lock file per tool (`tools/<tool>/.lock`,
+  flock) makes concurrent sessions and dund download once. One quiet line:
+  "fetching mcpshell v0.14.0 …", then "fetched …" or "… failed: <reason> —
+  dun doctor says how to get it" (the server log and an OnServerSetup
+  event). A failure is "not installed"; the session goes on. A build that
+  is not a release does not fetch; its `doctor --fix` runs `go install`
+  with GOBIN set to a temp directory under `tools/<tool>/`, then renames the
+  binary into `tools/<tool>/<version>/`.
+- **Old versions are kept; there is no prune.** When the pin's directory is
+  missing (the registry raised the pin while offline, or a build that does
+  not fetch), the newest kept copy at or past Min runs, and doctor and the
+  session-start hint say it is behind. A prune is not needed yet: each
+  version is 15-40 MB, and a pin moves every few weeks.
+- **Migration: old copies are left.** Tools doctor --fix put beside dun stay
+  there, unused. doctor names each copy on PATH or in dun's directory as
+  "unused (dun uses <managed path>)", with the `rm`, and `tools.<name>.path`
+  to keep using it.
+- **dund and engines** resolve through the same code in the same DUN_HOME,
+  so the service's PATH no longer matters for these tools; doctor's
+  service-PATH warning is kept for git only.
 
 ## Release updates
 

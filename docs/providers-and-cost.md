@@ -42,8 +42,9 @@ model reads").
   usage counts in the session's spend, but its key's budget and limits are
   dropped (`NoteAs`): they are not the session key's.
 - `dun doctor` is read-only and prints a fix per finding: providers (logged in,
-  model chosen, each model list with its real failure), tools on PATH and on
-  the service's PATH, whether dund's socket answers this user (tests peer
+  model chosen, each model list with its real failure), git on PATH and on
+  the service's PATH, dun's own tools (pinned, your build, missing, and unused
+  copies left on PATH or beside dun), whether dund's socket answers this user (tests peer
   credentials), the service, a self-updating build's Go version.
 
 ## Model facets
