@@ -46,6 +46,7 @@ type planTurnMark struct {
 	store *planMemStore
 	rev   int
 	calls uint64
+	asks  string // the open asks, for once per ask (suggestDoneScope)
 }
 
 // planMarkTurn notes the plan's revision and the tool calls so far, as a turn
@@ -92,7 +93,27 @@ func (h *Harness) suggestDoneScope(ctx context.Context) (planTurnMark, taskgraph
 	if work == 0 && (h.store == nil || h.store.toolCallsNow() == m.calls) {
 		return m, taskgraph.Graph{}, false // a plain chat: nothing to record
 	}
+	// Once per ask (USER 2026-11-18): the open asks this call's nodes would
+	// serve already had their batch.
+	key := h.doneAsksKey()
+	h.planMu.Lock()
+	again := h.doneAsked && h.doneAsks == key
+	h.planMu.Unlock()
+	if again && h.asksOn() {
+		return m, taskgraph.Graph{}, false
+	}
+	m.asks = key
 	return m, g, true
+}
+
+// doneAsksKey names the open asks (asks.go), in order: the set a batch of
+// done nodes is for.
+func (h *Harness) doneAsksKey() string {
+	var parts []string
+	for _, n := range h.asksOpenNow() {
+		parts = append(parts, strconv.Itoa(n))
+	}
+	return strings.Join(parts, ",")
 }
 
 // suggestDoneInstruction is the done part of the instruction, with the plan.
@@ -240,6 +261,7 @@ func (h *Harness) addSuggestDone(ctx context.Context, m planTurnMark, items []su
 			return errNothingDone
 		}
 		p.by = by // savePlan, after this returns, writes it with the graph
+		h.doneAsks, h.doneAsked = m.asks, true
 		return nil
 	})
 	if err != nil {

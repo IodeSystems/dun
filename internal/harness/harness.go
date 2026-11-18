@@ -348,6 +348,11 @@ type Harness struct {
 	// planTurn is the plan as the last turn began, for the idle suggestion
 	// call (suggestdone.go). Guarded by planMu.
 	planTurn planTurnMark
+	// doneAsks is the open asks the idle suggestion call last added done
+	// nodes for, doneAsked whether it has (suggestdone.go: once per ask).
+	// Guarded by planMu.
+	doneAsks  string
+	doneAsked bool
 
 	mgr     *mcpmgr.Manager
 	Session *agent.Session
