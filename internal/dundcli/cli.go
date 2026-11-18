@@ -299,7 +299,10 @@ func serve(ctx context.Context, l *loader, bin, httpAddr string, o dundapi.Optio
 		// A planned stop (a service restart, a kill): sessions that are
 		// working are interrupted, recorded, and resumed by the next start.
 		fmt.Fprintf(os.Stderr, "dund: %v — stopping engines\n", sig)
-		svc.PrepareStop(fmt.Sprintf("dund was stopped (%v)", sig))
+		if perr := svc.PrepareStop(fmt.Sprintf("dund was stopped (%v)", sig)); perr != nil {
+			// A signal is not refused: the engines stop without a record.
+			fmt.Fprintf(os.Stderr, "dund: %v\n", perr)
+		}
 	case <-ctx.Done():
 		fmt.Fprintln(os.Stderr, "dund: stopping engines")
 	case err = <-errc:

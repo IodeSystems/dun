@@ -196,6 +196,8 @@ func (s *Service) MsgSend(principal string, p proto.MsgSend) (proto.MsgSent, err
 	switch {
 	case busy:
 		detail = "busy: it reads the message in its turn"
+	case wake && s.UpgradeStatus() != nil: // its engine holds the wake (proto.UpgradeHold)
+		detail = "idle: queued: dund is upgrading; it reads the message after the restart"
 	case wake:
 		detail = "idle: woken"
 	}

@@ -23,6 +23,9 @@ type fakeSpawner struct {
 	got    []string   // what the engines received (record)
 	n      atomic.Int64
 	fail   error
+	// slowAuto: a message starting "[automatic] " runs as a slow turn, as
+	// a resumed agent's continue would.
+	slowAuto atomic.Bool
 }
 
 func (f *fakeSpawner) Spawn(workspace string, args []string) (Engine, error) {
@@ -112,6 +115,12 @@ func (e *fakeEngine) run(id string) {
 				e.emit(enc, &req)
 				continue
 			}
+			if strings.HasPrefix(p.Content, resumePrefix) && e.sp.slowAuto.Load() {
+				e.emit(enc, &proto.UserEcho{Content: p.Content})
+				e.emit(enc, &proto.Turn{Kind: "user"})
+				slow = true
+				continue
+			}
 			switch p.Content {
 			case "crash":
 				return
@@ -119,6 +128,21 @@ func (e *fakeEngine) run(id string) {
 				e.emit(enc, &proto.UserEcho{Content: p.Content})
 				e.emit(enc, &proto.Turn{Kind: "user"})
 				slow = true
+				continue
+			case "slowtool": // slow, with a tool call in flight
+				e.emit(enc, &proto.UserEcho{Content: p.Content})
+				e.emit(enc, &proto.Turn{Kind: "user"})
+				e.emit(enc, &proto.ToolCall{CallID: "c1", Tool: "exec", Args: map[string]any{"cmd": "make deploy"}})
+				slow = true
+				continue
+			case "agent": // a sub-agent, running until "endagent"
+				e.emit(enc, &proto.Agents{Agents: []proto.AgentInfo{{ID: 2, State: "running", Prompt: "fix the build"}}})
+				continue
+			case "endagent":
+				e.emit(enc, &proto.Agents{Agents: []proto.AgentInfo{{ID: 2, State: "idle", Prompt: "fix the build"}}})
+				continue
+			case "news": // a wake the engine held (proto.UpgradeHold)
+				e.emit(enc, &proto.WakeHeld{Count: 1})
 				continue
 			case "finish":
 				if slow {
@@ -154,6 +178,8 @@ func (e *fakeEngine) run(id string) {
 			e.sp.record(fmt.Sprintf("peer %s: from %s (%s) wake=%v: %s", id, p.FromName, p.From, p.Wake, p.Text))
 		case *proto.AgentCmd:
 			e.sp.record("agent " + id + ": " + p.Action + " " + p.ID)
+		case *proto.UpgradeHold:
+			e.sp.record(fmt.Sprintf("hold %s: %v", id, p.On))
 		case *proto.ServersChanged:
 			e.sp.record("servers " + id)
 		case *proto.ServiceNotice:

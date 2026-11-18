@@ -100,6 +100,26 @@ type session struct {
 	// noticed: told that the pending upgrade waits for it (upgrade.go
 	// noticeBusy), so it is told again when the upgrade is done or off.
 	noticed bool
+	// queued are the automatic messages (automatic) that came while an
+	// upgrade was pending: kept in the registry, sent after the restart, or
+	// at once when the upgrade fails (USER 2026-11-17).
+	queued []string
+	// heldWake: the engine, held (proto.UpgradeHold), kept news that would
+	// have started a turn (proto.WakeHeld); the session is woken for it
+	// after the restart.
+	heldWake bool
+	// calls are the tool calls in flight, by call id, for the resume
+	// message of a stop that cuts the turn.
+	calls map[string]string
+	// cutAgents are the sub-agents a stop cut mid-run: each is told to go
+	// on with its task after the restart (registry).
+	cutAgents []int
+	// continued: the last start woke this session to go on with work a
+	// stop cut, and its turn has not ended since. A stop that cuts that
+	// turn again records resumeQuiet: the next start leaves a quiet note
+	// and wakes nothing, so one cut turn gets one automatic continue, never
+	// a loop. Both are in the registry.
+	continued, resumeQuiet bool
 	// worktree and branch are the worktree the engine reported working in
 	// (empty: in place, in workspace), and lastUser the last message it
 	// took: dun_list's worktree column and task (peer.go).
@@ -133,6 +153,19 @@ func (s *session) track(ev proto.Event) {
 		if !s.turnStated { // fallback: an engine without turn_state
 			s.inTurn, s.asking, s.ask = false, false, nil
 		}
+		s.calls = nil
+		if d, ok := p.(*proto.Done); ok && d.Reason != "interrupted" {
+			s.continued = false // the continued turn ended on its own
+		}
+	case *proto.ToolCall:
+		if s.calls == nil {
+			s.calls = map[string]string{}
+		}
+		s.calls[p.CallID] = callLine(p)
+	case *proto.ToolResult:
+		delete(s.calls, p.CallID)
+	case *proto.WakeHeld:
+		s.heldWake = true
 	case *proto.Ask:
 		if !s.turnStated { // fallback: an engine without turn_state
 			s.asking = true
@@ -177,8 +210,24 @@ func (s *session) track(ev proto.Event) {
 		if p.State != "started" {
 			// The next engine says again whether it sends turn_state.
 			s.inTurn, s.asking, s.ask, s.jobs, s.agents, s.turnStated = false, false, nil, nil, nil, false
+			s.calls = nil
 		}
 	}
+}
+
+// callLine names a tool call for a resume message: the tool and its
+// arguments, clipped.
+func callLine(p *proto.ToolCall) string {
+	b, _ := json.Marshal(p.Args)
+	return clipLine(p.Tool+" "+string(b), 200)
+}
+
+// worker: created for dun mcp's dun_start (--worker), whose every message
+// is a program's.
+func (s *session) worker() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Contains(s.args, "--worker")
 }
 
 // occupied: a turn, a question, a job or a sub-agent. Called with actMu held.
@@ -336,11 +385,19 @@ func (s *session) readEvents(eng Engine, done chan struct{}, sc *bufio.Scanner, 
 				go s.svc.handlePeer(s, eng, *req)
 				continue
 			}
+			if _, ok := ev.Payload.(*proto.WakeHeld); ok { // dund's, not the clients'
+				s.track(ev)
+				continue
+			}
+			cont := s.isContinued()
 			s.track(ev)
 			s.log.Append(ev)
 			switch ev.Payload.(type) {
 			case *proto.Done, *proto.Error:
 				s.svc.loopTurnEnded(s)
+				if cont && !s.isContinued() {
+					_ = s.svc.saveRegistry() // a crash now wakes it again
+				}
 			}
 		}
 	}
@@ -457,6 +514,17 @@ func (s *session) attach(eng Engine, sc *bufio.Scanner) {
 	s.running, s.stopping, s.gaveUp = true, false, false
 	s.log.Append(proto.NewEvent(&proto.EngineState{State: "started"}))
 	go s.readEvents(eng, s.engDone, sc, s.historyReason())
+	if s.svc.UpgradeStatus() != nil {
+		// Held from its start, as the running engines are. Not under mu: a
+		// write may wait for the engine to read.
+		go func() { _ = s.sendLoaded(proto.NewCommand("", &proto.UpgradeHold{On: true})) }()
+	}
+}
+
+func (s *session) isContinued() bool {
+	s.actMu.Lock()
+	defer s.actMu.Unlock()
+	return s.continued
 }
 
 // historyReason is why the engine attached now replays the conversation,

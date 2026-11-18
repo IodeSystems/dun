@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"slices"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -57,11 +59,31 @@ import (
 // told at all. Scheduled messages and loops are held (schedule.go): they
 // keep their time and fire once when the hold ends, in the next dund or
 // after a failed upgrade.
+//
+// The drain gate and the durable resume (USER 2026-11-17). Automatic
+// launches wait for the new build: a message no person typed (automatic:
+// dun mcp's dun_start and dun_send) is kept in the registry (queued) and
+// sent after the restart, and its sender is told "queued"
+// (proto.Ack.Queued); a person's message starts its turn at once. Each
+// engine is held (proto.UpgradeHold): its own wakes — a finished job, a
+// peer's dun_msg, a server's wake, an escalated aside — start no turn; the
+// engine writes that news into the conversation, where the restart keeps
+// it, and reports it (proto.WakeHeld), and the next dund wakes the
+// session to act on it. The stop writes each session's resume record
+// before it interrupts anything, and a failed write puts the upgrade back
+// to pending with the error. After the restart a cut turn is continued
+// (the message names the tool call in flight and the killed jobs), and
+// each sub-agent the stop cut is told to continue its task. A continued
+// turn that is cut again gets a quiet note instead (resumeQuiet): one
+// continue per cut turn.
 
 // Variables so tests can shorten them.
 var (
 	upgradePoll  = 500 * time.Millisecond // how often the waiting list is read
 	upgradeGrace = 10 * time.Minute       // pending this long, it restarts anyway
+	// upgradeRetry: a restart that could not record the sessions' resume
+	// is tried again after this.
+	upgradeRetry = 5 * time.Second
 	// interruptWait is how long a stop waits for an interrupted turn to end
 	// (to record its partial reply and its note) before stopping the engine.
 	interruptWait = 10 * time.Second
@@ -177,6 +199,7 @@ func (s *Service) RequestUpgrade(exe, version string) error {
 	st := *s.up.snapshot()
 	s.up.mu.Unlock()
 	if start {
+		s.holdEngines(true) // before the loop's wrap-up notices
 		go s.upgradeLoop()
 	} else {
 		s.notifyUpgrade(st)
@@ -226,13 +249,27 @@ func (s *Service) upgradeLoop() {
 				}
 				s.up.mu.Lock()
 			}
-			s.up.st.State = "restarting"
+			s.up.st.State, s.up.st.Error = "restarting", ""
 			st, exe := *s.up.snapshot(), s.up.st.Exe
 			s.up.mu.Unlock()
 			s.notifyUpgrade(st)
-			s.PrepareStop("dund restarted into " + orBuild(st.Version))
-			s.up.ready <- exe
-			return
+			err := s.PrepareStop("dund restarted into " + orBuild(st.Version))
+			if err == nil {
+				s.up.ready <- exe
+				return
+			}
+			// Nothing was interrupted: without the record, a restart would
+			// lose what the sessions were doing. Pending again, and said.
+			s.up.mu.Lock()
+			s.up.st.State, s.up.st.Error = "pending", err.Error()
+			st = *s.up.snapshot()
+			s.up.mu.Unlock()
+			log.Printf("dund: the upgrade to %s waits: %v", orBuild(st.Version), err)
+			s.notifyUpgrade(st)
+			if !s.upgradeWait(upgradeRetry) {
+				return
+			}
+			continue
 		}
 		st := *s.up.snapshot()
 		left := upgradeGrace - time.Since(s.up.since)
@@ -241,16 +278,24 @@ func (s *Service) upgradeLoop() {
 			s.notifyUpgrade(st)
 		}
 		s.noticeBusy(st.Version, left)
-		t := time.NewTimer(upgradePoll)
-		select {
-		case <-s.done:
-			t.Stop()
+		if !s.upgradeWait(upgradePoll) {
 			return
-		case <-s.up.kick:
-		case <-t.C:
 		}
-		t.Stop()
 	}
+}
+
+// upgradeWait waits d, or less when the upgrade is poked; false when the
+// service closed.
+func (s *Service) upgradeWait(d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-s.done:
+		return false
+	case <-s.up.kick:
+	case <-t.C:
+	}
+	return true
 }
 
 // failUpgrade ends the pending upgrade without a restart, and says why to
@@ -263,18 +308,73 @@ func (s *Service) failUpgrade(err error) {
 	st.State, st.Error, st.Waiting = "failed", err.Error(), nil
 	log.Printf("dund: the upgrade to %s failed, running on: %v", orBuild(st.Version), err)
 	s.notifyUpgrade(st)
+	s.holdEngines(false) // what each engine held runs now
+	sent := false
 	for _, ses := range s.all() { // told to wrap up: told it is off
 		ses.actMu.Lock()
 		was := ses.noticed
-		ses.noticed, ses.resume = false, ""
+		ses.noticed, ses.resume, ses.heldWake = false, "", false
+		queued := ses.queued
+		ses.queued = nil
 		ses.actMu.Unlock()
 		if was {
 			_ = ses.sendLoaded(proto.NewCommand("", &proto.ServiceNotice{Quiet: true, Text: "The dun upgrade you were told about did not happen (" +
 				err.Error() + "); dun keeps running as it was. Carry on."}))
 		}
+		for _, m := range queued { // the automatic messages it held go now
+			if err := ses.send(proto.NewCommand("", &proto.User{Content: m, Auto: true})); err != nil {
+				log.Printf("dund: could not deliver a held message to %s: %v", ses.id, err)
+			}
+			sent = true
+		}
+	}
+	if sent {
+		if err := s.saveRegistry(); err != nil {
+			log.Printf("dund: registry: %v", err)
+		}
 	}
 	s.sched.poke() // the held firings go now (schedule.go)
 }
+
+// holdEngines tells every running engine that an upgrade is pending (on)
+// or no longer is: held, an engine starts no turn of its own accord
+// (proto.UpgradeHold).
+func (s *Service) holdEngines(on bool) {
+	for _, ses := range s.all() {
+		_ = ses.sendLoaded(proto.NewCommand("", &proto.UpgradeHold{On: on}))
+	}
+}
+
+// queuedText is what the sender of an automatic message is told while an
+// upgrade is pending.
+const queuedText = "dund is upgrading; the message is kept and runs after the restart, on the new build"
+
+// queueIfUpgrading holds an automatic message (automatic) while an upgrade
+// is pending: kept in the registry, it is sent after the restart, on the
+// new build (USER 2026-11-17). It reports whether it held c; the error is a
+// message that could not be kept, and was not.
+func (s *Service) queueIfUpgrading(ses *session, c proto.Command) (bool, error) {
+	u, ok := c.Payload.(*proto.User)
+	if !ok || s.UpgradeStatus() == nil || !automatic(ses, u) {
+		return false, nil
+	}
+	ses.actMu.Lock()
+	ses.queued = append(ses.queued, u.Content)
+	ses.actMu.Unlock()
+	if err := s.saveRegistry(); err != nil {
+		ses.actMu.Lock()
+		ses.queued = ses.queued[:len(ses.queued)-1]
+		ses.actMu.Unlock()
+		return true, fmt.Errorf("dund is upgrading and could not keep the message for after the restart: %w", err)
+	}
+	return true, nil
+}
+
+// automatic: no person typed u. Said by the sender (proto.User.Auto: dun
+// mcp's dun_start and dun_send), or implied: a --worker session is
+// dun_start's, and a dun mcp of an older build does not set Auto. A person
+// typing into a worker session is taken for a program too.
+func automatic(ses *session, u *proto.User) bool { return u.Auto || ses.worker() }
 
 // noticeBusy tells each session the pending upgrade waits for, once, to wrap
 // up: what is coming, how long it waits, and what happens to unfinished
@@ -315,75 +415,152 @@ func orBuild(v string) string {
 
 // PrepareStop readies the sessions for a planned stop of dund (why: "dund
 // restarted into build X", "dund was stopped (terminated)"): each session
-// that is working has its turn interrupted with why as the reason, and is
-// flagged in the registry with the message that wakes it on the next start.
-// Idle sessions are left as they are. The caller then stops the service.
-func (s *Service) PrepareStop(why string) {
-	var wg sync.WaitGroup
-	for _, ses := range s.all() {
-		if len(ses.waiting()) == 0 && ses.openAsk() == nil {
-			continue
-		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			ses.prepareStop(why)
-		}()
+// that is working, or holds news its engine kept (proto.WakeHeld), is
+// flagged in the registry with the message that wakes it on the next start,
+// and then its turn is interrupted with why as the reason. Idle sessions are
+// left as they are. The caller then stops the service.
+//
+// The record is written BEFORE anything is interrupted (USER 2026-11-17):
+// when it cannot be written, nothing is interrupted, the flags are taken
+// back, and the error says why — an upgrade stays pending rather than kill
+// engines with nothing to resume them by.
+func (s *Service) PrepareStop(why string) error {
+	type before struct {
+		note        string
+		quiet, held bool
+		restored    *proto.Ask
+		agents      []int
 	}
-	wg.Wait()
+	was := map[*session]before{}
+	var cut []*session
+	for _, ses := range s.all() {
+		working := len(ses.waiting()) > 0 || ses.openAsk() != nil
+		ses.actMu.Lock()
+		held := ses.heldWake
+		if working || held {
+			was[ses] = before{note: ses.resume, quiet: ses.resumeQuiet, restored: ses.restored,
+				agents: ses.cutAgents, held: held}
+		}
+		ses.actMu.Unlock()
+		if working {
+			ses.recordStop(why)
+			cut = append(cut, ses)
+		} else if held {
+			ses.recordHeld(why)
+		}
+	}
 	flagged := 0
 	for _, ses := range s.all() { // also the ones told to wrap up, which did
-		if ses.resumeNote() != "" || ses.restoredAsk() != nil {
+		ses.actMu.Lock()
+		if ses.resume != "" || ses.restored != nil || len(ses.queued) > 0 {
 			flagged++
 		}
+		ses.actMu.Unlock()
 	}
 	if flagged > 0 {
 		if err := s.saveRegistry(); err != nil {
-			log.Printf("dund: could not record the sessions to resume: %v", err)
+			for ses, b := range was {
+				ses.actMu.Lock()
+				ses.resume, ses.resumeQuiet, ses.restored, ses.cutAgents, ses.heldWake = b.note, b.quiet, b.restored, b.agents, b.held
+				ses.actMu.Unlock()
+			}
+			return fmt.Errorf("could not record the sessions to resume, so none was interrupted: %w", err)
 		}
+	}
+	var wg sync.WaitGroup
+	for _, ses := range cut {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ses.interruptForStop(why)
+		}()
+	}
+	wg.Wait()
+	if flagged > 0 {
 		log.Printf("dund: %s: %d working session(s) will resume on the next start", why, flagged)
+	}
+	return nil
+}
+
+// recordStop sets what this session's next start does about the work a
+// stop cuts: the message that continues its turn (resumeMessage), or its
+// open ask_user question, saved to be shown again — then the agent is woken
+// by its answer, not by the resume message, which waits for that answer
+// (restoredReply). The sub-agents running now are resumed with their task.
+// A turn that was itself dund's automatic continue gets no second one
+// (resumeQuiet).
+func (s *session) recordStop(why string) {
+	s.actMu.Lock()
+	defer s.actMu.Unlock()
+	turn := s.inTurn || s.asking
+	jobs, agents := slices.Clone(s.jobs), slices.Clone(s.agents)
+	calls := make([]string, 0, len(s.calls))
+	for _, c := range s.calls {
+		calls = append(calls, c)
+	}
+	sort.Strings(calls)
+	s.cutAgents = nil
+	for _, a := range agents {
+		s.cutAgents = append(s.cutAgents, a.ID)
+	}
+	held := s.heldWake
+	s.heldWake = false
+	if s.ask != nil && s.asking {
+		note := ""
+		if len(jobs) > 0 || len(agents) > 0 || held {
+			note = resumeMessage(why, false, jobs, agents, nil)
+			if held {
+				note += heldNote
+			}
+		}
+		s.restored, s.restoredEvs, s.resume = s.ask, nil, note
+		return
+	}
+	s.resume = resumeMessage(why, turn, jobs, agents, calls)
+	if held {
+		s.resume += heldNote
+	}
+	s.resumeQuiet = s.continued && turn
+}
+
+// heldNote is said when the engine kept news for after the restart.
+const heldNote = " News that came while dun waited for the upgrade (finished jobs, messages) is in the conversation above; act on it."
+
+// recordHeld flags an idle session whose engine kept news while the
+// upgrade was pending: the next start wakes it to act on it.
+func (s *session) recordHeld(why string) {
+	s.actMu.Lock()
+	defer s.actMu.Unlock()
+	s.heldWake = false
+	if s.resume == "" {
+		s.resume = resumePrefix + why + "." + heldNote
+	} else {
+		s.resume += heldNote
 	}
 }
 
-// prepareStop interrupts this session's turn (if any) and records what it
-// was doing for the next start. An open ask_user question is saved: the
-// next dund shows it again, and the agent is woken by its answer, not by
-// the resume message, which waits for that answer (restoredReply).
-func (s *session) prepareStop(why string) {
+// interruptForStop interrupts this session's turn (if any) and waits up to
+// interruptWait for it to end, so its partial reply and its note are kept.
+func (s *session) interruptForStop(why string) {
 	s.actMu.Lock()
-	turn, asking, ask := s.inTurn, s.asking, s.ask
-	jobs, agents := slices.Clone(s.jobs), slices.Clone(s.agents)
+	turn := s.inTurn || s.asking
 	s.actMu.Unlock()
-	if turn || asking {
-		if err := s.send(proto.NewCommand("", &proto.Interrupt{Reason: why + " while this turn was running"})); err == nil {
-			deadline := time.Now().Add(interruptWait)
-			for time.Now().Before(deadline) {
-				s.actMu.Lock()
-				still := s.inTurn
-				s.actMu.Unlock()
-				if !still {
-					break
-				}
-				time.Sleep(20 * time.Millisecond)
-			}
-		}
-	}
-	if s.persists() {
-		// The engine restarts these and says so itself (dun's
-		// restoredAgentsNote): saying "stopped" here would be wrong.
-		agents = nil
-	}
-	if ask != nil {
-		note := ""
-		if len(jobs) > 0 || len(agents) > 0 {
-			note = resumeMessage(why, false, jobs, agents)
-		}
-		s.actMu.Lock()
-		s.restored, s.restoredEvs, s.resume = ask, nil, note
-		s.actMu.Unlock()
+	if !turn {
 		return
 	}
-	s.setResume(resumeMessage(why, turn || asking, jobs, agents))
+	if err := s.send(proto.NewCommand("", &proto.Interrupt{Reason: why + " while this turn was running"})); err != nil {
+		return
+	}
+	deadline := time.Now().Add(interruptWait)
+	for time.Now().Before(deadline) {
+		s.actMu.Lock()
+		still := s.inTurn
+		s.actMu.Unlock()
+		if !still {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 func (s *session) restoredAsk() *proto.Ask {
@@ -488,12 +665,6 @@ func dismissedNote(question, note string) string {
 	return m
 }
 
-func (s *session) setResume(msg string) {
-	s.actMu.Lock()
-	s.resume = msg
-	s.actMu.Unlock()
-}
-
 func (s *session) resumeNote() string {
 	s.actMu.Lock()
 	defer s.actMu.Unlock()
@@ -501,14 +672,19 @@ func (s *session) resumeNote() string {
 }
 
 // resumeMessage is what a session's agent is woken with after a stop that
-// cut its work short: what happened, what was lost, and to carry on.
-func resumeMessage(why string, turn bool, jobs []proto.JobInfo, agents []proto.AgentInfo) string {
+// cut its work short: what happened, what was lost — the tool calls in
+// flight (calls), the background jobs killed, with their commands to run
+// again, the sub-agents cut mid-run, which dund resumes — and to carry on.
+func resumeMessage(why string, turn bool, jobs []proto.JobInfo, agents []proto.AgentInfo, calls []string) string {
 	var b strings.Builder
 	b.WriteString(resumePrefix + why + " while you were working")
 	if turn {
 		b.WriteString("; your turn was interrupted at the point above")
 	}
 	b.WriteString(".")
+	if len(calls) > 0 {
+		b.WriteString(" The tool call in flight was cut: `" + strings.Join(calls, "`, `") + "`; check what it did before you run it again.")
+	}
 	if len(jobs) > 0 {
 		list := make([]string, len(jobs))
 		for i, j := range jobs {
@@ -519,13 +695,23 @@ func resumeMessage(why string, turn bool, jobs []proto.JobInfo, agents []proto.A
 	if len(agents) > 0 {
 		list := make([]string, len(agents))
 		for i, a := range agents {
-			list[i] = fmt.Sprintf("#%d", a.ID)
+			list[i] = fmt.Sprintf("#%d (%s)", a.ID, clipLine(a.Prompt, 80))
 		}
-		b.WriteString(" It also stopped these sub-agents: " + strings.Join(list, ", ") + ".")
+		b.WriteString(" The restart cut these sub-agents mid-run: " + strings.Join(list, ", ") + "; dun resumes each with its task, and you hear from it as usual.")
 	}
 	b.WriteString(" Resume the task.")
 	return b.String()
 }
+
+// agentContinue is what a sub-agent the restart cut mid-run is told after
+// it, to go on with its task.
+const agentContinue = resumePrefix + "dund restarted while you were working, and your run was cut off at the point above. " +
+	"Continue your task from there; check what a cut tool call did before you run it again."
+
+// notContinued ends a resume message that goes as a quiet note: the turn
+// it is about was itself dund's automatic continue.
+const notContinued = " This was not continued automatically, and no sub-agent was resumed: the turn dun continued after " +
+	"the last restart was cut too. Carry on when the next message comes."
 
 // crashedMidTurn reports whether a session's transcript was cut mid-turn
 // recently (a variable: the tests' fake engine writes no transcript).
@@ -539,31 +725,64 @@ var crashedMidTurn = func(workspace, id string) bool {
 }
 
 // resumeFlagged wakes every session the last stop flagged: its engine
-// starts and gets the resume message as a user message. The flag is cleared
-// once sent, so it is sent once. A session with a restored question is not
-// woken: the question is shown again, and its answer wakes it.
+// starts and gets the resume message as a user message, and each sub-agent
+// the stop cut is told to continue its task (proto.AgentCmd "continue";
+// the parent hears of it in the message and from its engine). Then the
+// automatic messages held while the upgrade was pending are sent, in
+// order. Each flag is cleared once sent, so it is sent once. A session
+// with a restored question is not woken: the question is shown again, and
+// its answer wakes it. A resume marked quiet goes as a quiet note and wakes
+// nothing (one continue per cut turn).
 func (s *Service) resumeFlagged() {
 	sent := 0
 	for _, ses := range s.all() {
+		ses.actMu.Lock()
+		msg, quiet, agents, queued := ses.resume, ses.resumeQuiet, ses.cutAgents, ses.queued
+		ses.actMu.Unlock()
 		if ses.restoredAsk() != nil {
 			ses.showRestored()
-			continue
+			msg = "" // it goes with the answer (restoredReply)
 		}
-		msg := ses.resumeNote()
-		if msg == "" {
-			continue
+		if msg != "" {
+			var err error
+			if quiet {
+				agents = nil
+				err = ses.send(proto.NewCommand("", &proto.ServiceNotice{Quiet: true,
+					Text: strings.TrimPrefix(msg, resumePrefix) + notContinued}))
+			} else {
+				err = ses.send(proto.NewCommand("", &proto.User{Content: msg}))
+			}
+			if err != nil {
+				log.Printf("dund: could not resume %s: %v", ses.id, err)
+				continue
+			}
+			ses.actMu.Lock()
+			ses.resume, ses.resumeQuiet, ses.continued = "", false, !quiet
+			ses.actMu.Unlock()
+			sent++
 		}
-		if err := ses.send(proto.NewCommand("", &proto.User{Content: msg})); err != nil {
-			log.Printf("dund: could not resume %s: %v", ses.id, err)
-			continue
+		for _, n := range agents {
+			c := proto.NewCommand("", &proto.AgentCmd{ID: strconv.Itoa(n), Action: "continue", Content: agentContinue})
+			if err := ses.send(c); err != nil {
+				log.Printf("dund: could not resume sub-agent #%d of %s: %v", n, ses.id, err)
+			}
 		}
-		ses.setResume("")
-		sent++
+		for _, m := range queued {
+			if err := ses.send(proto.NewCommand("", &proto.User{Content: m, Auto: true})); err != nil {
+				log.Printf("dund: could not deliver a held message to %s: %v", ses.id, err)
+			}
+		}
+		if len(agents) > 0 || len(queued) > 0 {
+			ses.actMu.Lock()
+			ses.cutAgents, ses.queued = nil, nil
+			ses.actMu.Unlock()
+			sent++
+		}
 	}
 	if sent > 0 {
 		if err := s.saveRegistry(); err != nil {
 			log.Printf("dund: registry: %v", err)
 		}
-		log.Printf("dund: resumed %d session(s) cut short by the last stop", sent)
+		log.Printf("dund: resumed %d session(s) after the last stop", sent)
 	}
 }

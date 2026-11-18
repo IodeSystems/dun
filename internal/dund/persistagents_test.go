@@ -39,21 +39,22 @@ func TestPersistIsPassedToEveryEngineStart(t *testing.T) {
 	}
 }
 
-// A persisted session's restart message does not call its sub-agents
-// stopped: the engine restarts them and says so itself.
-func TestPersistedRestartDoesNotCallAgentsStopped(t *testing.T) {
+// A restart message never calls a cut sub-agent stopped, persisted or not:
+// dund resumes each one with its task (USER 2026-11-17), and records which.
+func TestRestartResumesCutAgents(t *testing.T) {
 	svc, _, _ := newSvc(t)
 	id, _ := svc.Create(alice, t.TempDir(), nil, "")
 	ses, _ := svc.Get(alice, id)
-	ses.track(proto.NewEvent(&proto.Agents{Agents: []proto.AgentInfo{{ID: 2, State: "running"}}}))
-	ses.prepareStop("dund restarted")
-	if !strings.Contains(ses.resumeNote(), "sub-agents: #2") {
-		t.Fatalf("not persisted: %q", ses.resumeNote())
-	}
-	_, _, _ = svc.SetPersist(alice, id, "on")
-	ses.track(proto.NewEvent(&proto.Agents{Agents: []proto.AgentInfo{{ID: 2, State: "running"}}}))
-	ses.prepareStop("dund restarted")
-	if strings.Contains(ses.resumeNote(), "sub-agents") {
-		t.Errorf("persisted: %q", ses.resumeNote())
+	for _, persist := range []string{"off", "on"} {
+		_, _, _ = svc.SetPersist(alice, id, persist)
+		ses.track(proto.NewEvent(&proto.Agents{Agents: []proto.AgentInfo{{ID: 2, State: "running", Prompt: "fix the build"}}}))
+		ses.recordStop("dund restarted")
+		n := ses.resumeNote()
+		if !strings.Contains(n, "#2 (fix the build)") || !strings.Contains(n, "resumes each with its task") || strings.Contains(n, "stopped") {
+			t.Errorf("persist %s: %q", persist, n)
+		}
+		if !slices.Equal(ses.cutAgents, []int{2}) {
+			t.Errorf("persist %s: cut %v", persist, ses.cutAgents)
+		}
 	}
 }
