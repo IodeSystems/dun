@@ -207,3 +207,28 @@ func TestPrepareTurnLeavesPairedCallsAlone(t *testing.T) {
 		t.Errorf("pending = %d; want nothing to react to", h.store.pending())
 	}
 }
+
+// Held for dund's upgrade (HoldPending), the news that would start a turn
+// goes into the conversation now, and stays pending for the next turn: no
+// turn runs for it, and a restart keeps it.
+func TestHoldPendingKeepsNewsForTheNextTurn(t *testing.T) {
+	h := newNoteHarness(t)
+	h.Notify("background job #1 finished")
+	h.Aside("context only")
+	if n := h.HoldPending(); n != 1 {
+		t.Fatalf("held %d items, want the notification alone", n)
+	}
+	if h.store.pending() != 1 {
+		t.Errorf("pending = %d: the next turn must react to it", h.store.pending())
+	}
+	found := false
+	for _, e := range h.store.entries {
+		found = found || strings.Contains(e.Content, "job #1 finished")
+	}
+	if !found {
+		t.Error("the notification is not in the conversation")
+	}
+	if h.Queued() != 0 {
+		t.Errorf("still buffered: %d", h.Queued())
+	}
+}

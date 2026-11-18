@@ -24,6 +24,7 @@ func init() {
 	command[Upgrade]("upgrade")
 	command[JobUsageReq]("job_usage")
 	command[ServiceNotice]("service_notice")
+	command[UpgradeHold]("upgrade_hold")
 	command[WebSet]("web_set")
 
 	event[SessionList]("sessions")
@@ -34,6 +35,29 @@ func init() {
 	event[UpgradeStatus]("upgrade")
 	event[JobUsage]("job_usage")
 	event[WebState]("web")
+	event[WakeHeld]("wake_held")
+}
+
+// UpgradeHold tells an engine that an upgrade is pending (On) or no longer
+// is (USER 2026-11-17). While held, the engine starts no turn of its own
+// accord — a finished job, a peer's dun_msg, a server's wake, an aside
+// that escalates: everything that goes through its wake. It writes that
+// news into the conversation instead (persisted, so the restart keeps it)
+// and says so with WakeHeld; dund then wakes the session after the
+// restart. A person's message still starts a turn, and so does a
+// ServiceNotice that is not quiet (dund's one wake while pending). Off,
+// what was held runs at once. dund sends it to every engine when an
+// upgrade becomes pending, to each engine that starts while one is, and
+// Off when the upgrade fails.
+type UpgradeHold struct {
+	On bool `json:"on"`
+}
+
+// WakeHeld is an engine saying that, held (UpgradeHold), it kept Count
+// items of news that would have started a turn: they are in the
+// conversation now, and the next turn reads them.
+type WakeHeld struct {
+	Count int `json:"count"`
 }
 
 // WebSet changes dund's HTTP listener while it runs (`dun dund enable|disable

@@ -1717,6 +1717,31 @@ func (h *Harness) AgentTell(id int, text string) string {
 	return out
 }
 
+// AgentContinue is dund's resume of a child that a restart cut mid-run
+// (USER 2026-11-17): restarted from its transcript if it came back stopped,
+// then told text, so it carries on with its task rather than wait idle.
+// The parent is told, in an aside, that the child was resumed.
+func (h *Harness) AgentContinue(id int, text string) string {
+	sa := h.agentByID(id)
+	if sa == nil {
+		return fmt.Sprintf("no agent #%d", id)
+	}
+	if state, _, _, _ := sa.snapshot(); state == agentDismissed {
+		return fmt.Sprintf("agent #%d was dismissed", id)
+	}
+	if sa.harness() == nil {
+		if out := h.resumeAgent(sa); sa.harness() == nil {
+			return out
+		}
+	}
+	out := sa.tell(text)
+	if strings.HasPrefix(out, "Told agent") {
+		h.Aside(fmt.Sprintf("Agent #%d (%s) was working when dund restarted; dund resumed it with its task. "+
+			"Its next report comes as usual.", id, oneLine(sa.prompt, 80)))
+	}
+	return out
+}
+
 // AgentPrompt is what a child was asked to do, for the UI's task line.
 func (h *Harness) AgentPrompt(id int) string {
 	if sa := h.agentByID(id); sa != nil {

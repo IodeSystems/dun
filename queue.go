@@ -320,6 +320,13 @@ func (h *Harness) flushQueued() int {
 	return len(items)
 }
 
+// HoldPending is flushQueued for an engine dund told to hold its own wakes
+// (proto.UpgradeHold, USER 2026-11-17): the news that would start a turn is
+// written into the conversation now — persisted, so a restart keeps it —
+// and no turn runs for it. The next turn reads it: dund's wake after the
+// restart, or the one that runs when the hold ends. Returns how many items.
+func (h *Harness) HoldPending() int { return h.flushQueued() }
+
 // flushSilent appends the buffered items that must never CAUSE a turn to the
 // conversation, without marking them inbox arrivals, immediately before a turn
 // about to run for some other reason. The model reads them in that turn's

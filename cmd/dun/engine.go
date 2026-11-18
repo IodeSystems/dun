@@ -588,6 +588,8 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			h.AgentUnwatch(n)
 		case "tell":
 			em.emit(&proto.AgentTold{Agent: n, Message: h.AgentTell(n, content)})
+		case "continue": // dund, after a restart that cut the child's run
+			em.emit(&proto.AgentTold{Agent: n, Message: h.AgentContinue(n, content)})
 		}
 	})
 	// A message that arrives while a turn is running does NOT wait for it. It is
@@ -637,8 +639,12 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 		// provider) is delivered now, in ONE turn — including a message the user
 		// sent to nudge a dead session back to life.
 		if autoContinue && h.Pending() > 0 {
-			autoContinue = continueTurn(ctx, h, em)
-			continue
+			if !mayWake() { // dund is upgrading: kept for after the restart
+				holdWakes(h, em)
+			} else {
+				autoContinue = continueTurn(ctx, h, em)
+				continue
+			}
 		}
 		if users == nil { // input is done; finish the background work, then leave
 			if !drainStep(ctx, h, em) {
@@ -665,7 +671,15 @@ func runProgrammatic(ctx context.Context, h *dun.Harness, em *emitter, in *input
 			autoContinue = true
 		case <-h.Wake():
 			// A background job finished; run a turn to process its notification.
+			if !mayWake() {
+				holdWakes(h, em)
+				continue
+			}
 			autoContinue = continueTurn(ctx, h, em)
+		case <-wakeHoldChanged:
+			// Held: what is pending now is kept (the top of the loop). The
+			// hold ended without a restart: what it kept runs now.
+			autoContinue = true
 		case <-ctx.Done():
 			// Only ctrl-C reaches here now: --timeout bounds a turn, not the
 			// session. Say so, rather than dying silently and leaving the TUI to
@@ -798,6 +812,39 @@ var turnTimeout time.Duration
 
 // A turn that hangs is cut off without taking the session with it — the next
 // message starts a fresh turn against a live context. See beginTurn.
+
+// wakeHold is dund's proto.UpgradeHold: while on, the engine starts no turn
+// of its own (a wake, or news left pending after a turn); it writes the news
+// into the conversation and reports wake_held, and dund wakes the session
+// after its restart (USER 2026-11-17). A person's message is not held.
+// wakePass lets one wake through: dund's waking ServiceNotice, its one wake
+// while an upgrade is pending. wakeHoldChanged pokes the loop.
+var (
+	wakeHold        atomic.Bool
+	wakePass        atomic.Bool
+	wakeHoldChanged = make(chan struct{}, 1)
+)
+
+func setWakeHold(on bool) {
+	wakeHold.Store(on)
+	wakePass.Store(false)
+	select {
+	case wakeHoldChanged <- struct{}{}:
+	default:
+	}
+}
+
+// mayWake reports whether a turn of the engine's own may start now, using up
+// the pass if that is what lets it.
+func mayWake() bool { return !wakeHold.Load() || wakePass.Swap(false) }
+
+// holdWakes keeps the pending news for after dund's restart: into the
+// conversation, and dund is told.
+func holdWakes(h *dun.Harness, em *emitter) {
+	if n := h.HoldPending(); n > 0 {
+		em.emit(&proto.WakeHeld{Count: n})
+	}
+}
 
 // turnActive is true while a turn is in flight, so the input reader knows to
 // BUFFER a user message (delivered inside the running turn, via the lift path)

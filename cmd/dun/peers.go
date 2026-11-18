@@ -148,7 +148,7 @@ func (p *peerLink) Send(ctx context.Context, to, text string, wake bool) (dun.Pe
 	if err != nil {
 		return dun.PeerSent{}, err
 	}
-	return dun.PeerSent{ID: rep.ID, Name: rep.Name, Busy: rep.Busy, Started: rep.Started}, nil
+	return dun.PeerSent{ID: rep.ID, Name: rep.Name, Busy: rep.Busy, Started: rep.Started, Queued: rep.Queued}, nil
 }
 
 // peerIn routes the peer frames the input reader gets: dund's reply to this
@@ -176,11 +176,19 @@ func peerIn(link *peerLink, h *dun.Harness, em *emitter) func(typ string, line [
 			var n proto.ServiceNotice
 			if json.Unmarshal(line, &n) == nil && strings.TrimSpace(n.Text) != "" {
 				em.emit(&proto.Notification{Kind: "service", Text: n.Text})
+				if !n.Quiet && wakeHold.Load() {
+					wakePass.Store(true) // dund's one wake while held
+				}
 				if n.Quiet {
 					h.ServiceNoticeQuiet(n.Text)
 				} else {
 					h.ServiceNotice(n.Text)
 				}
+			}
+		case "upgrade_hold":
+			var u proto.UpgradeHold
+			if json.Unmarshal(line, &u) == nil {
+				setWakeHold(u.On)
 			}
 		case "mcp_notify":
 			// A shared server's notification, from dund's gateway.

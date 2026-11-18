@@ -1006,6 +1006,11 @@ type Ack struct {
 	Error string `json:"error,omitempty"`
 	// Reused: a create with ReuseIdle handed back an existing session.
 	Reused bool `json:"reused,omitempty"`
+	// Queued: an automatic message (User.Auto) was not delivered, because an
+	// upgrade is pending; dund keeps it in its registry and sends it after
+	// the restart. The text says so, for the caller to show. Sent also for
+	// a command without a cid.
+	Queued string `json:"queued,omitempty"`
 }
 
 // Snapshot replaces a replay the log can no longer give: a client that

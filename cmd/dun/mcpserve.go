@@ -401,7 +401,7 @@ func (s *mcpServer) call(name string, a map[string]any) (string, error) {
 		if str("session") == "" || str("text") == "" {
 			return "", errors.New("session and text are required")
 		}
-		return s.send(str("session"), proto.NewCommand("", &proto.User{Content: str("text")}), str("text"), wait)
+		return s.send(str("session"), proto.NewCommand("", &proto.User{Content: str("text"), Auto: true}), str("text"), wait)
 	case "dun_wait":
 		if str("session") == "" {
 			return "", errors.New("session is required")
@@ -587,7 +587,7 @@ func (s *mcpServer) start(ws, prompt, model, provider string, settle bool, wait 
 	if err != nil {
 		return "", fmt.Errorf("start a session in %s: %w", abs, err)
 	}
-	return s.send(ev.Session, proto.NewCommand("", &proto.User{Content: prompt}), prompt, wait)
+	return s.send(ev.Session, proto.NewCommand("", &proto.User{Content: prompt, Auto: true}), prompt, wait)
 }
 
 // send subscribes to the session from its last event, sends cmd, and waits
@@ -725,13 +725,22 @@ func (s *mcpServer) follow(session string, after uint64, cmd *proto.Command, ech
 		return "", err
 	}
 	if cmd != nil {
+		// A cid, so dund answers the send itself: an error, or "queued"
+		// (an upgrade is pending and the message waits for the restart).
+		if cmd.CID == "" {
+			cmd.CID = "mcp-send"
+		}
 		if err := c.enc.Encode(*cmd); err != nil {
 			return "", err
 		}
 	}
 	r := mcpReply{session: session, seq: after, mine: echo == ""}
+	acked, ackOnly := cmd == nil, false
 	if wait <= 0 {
-		return r.render("sent"), nil
+		if acked {
+			return r.render("sent"), nil
+		}
+		wait, ackOnly = sendAckWait, true // only the send's answer, not the turn
 	}
 	_ = c.SetReadDeadline(time.Now().Add(wait))
 	for {
@@ -739,9 +748,29 @@ func (s *mcpServer) follow(session string, after uint64, cmd *proto.Command, ech
 		if err := c.dec.Decode(&ev); err != nil {
 			var ne net.Error
 			if errors.As(err, &ne) && ne.Timeout() {
+				if ackOnly {
+					return r.render("sent"), nil
+				}
 				return r.render("working"), nil
 			}
 			return "", err
+		}
+		if !acked && ev.Re == cmd.CID {
+			acked = true
+			if a, ok := ev.Payload.(*proto.Ack); ok {
+				switch {
+				case a.Error != "":
+					r.err = a.Error
+					return r.render("error"), nil
+				case a.Queued != "":
+					r.queued = a.Queued
+					return r.render("queued"), nil
+				}
+			}
+			if ackOnly {
+				return r.render("sent"), nil
+			}
+			continue
 		}
 		if ev.Session != session {
 			continue
@@ -758,6 +787,10 @@ func (s *mcpServer) follow(session string, after uint64, cmd *proto.Command, ech
 	}
 }
 
+// sendAckWait bounds the wait for dund's answer to a send made with no
+// wait for the turn (timeout_s 0).
+const sendAckWait = 10 * time.Second
+
 // mcpReply gathers one turn's events into the text a caller reads.
 type mcpReply struct {
 	session string
@@ -767,6 +800,7 @@ type mcpReply struct {
 	tools   map[string]int
 	ask     *proto.Ask
 	err     string
+	queued  string // dund holds the message for after its restart
 }
 
 // take reads one event; it returns how the wait ends, or "".
@@ -874,6 +908,8 @@ func (r mcpReply) render(end string) string {
 		b.WriteString("answer with dun_answer\n")
 	case "error":
 		fmt.Fprintf(&b, "error: %s\n", r.err)
+	case "queued":
+		fmt.Fprintf(&b, "queued: %s\n", r.queued)
 	}
 	if len(r.reply) > 0 {
 		b.WriteString("\n" + strings.Join(r.reply, "\n\n") + "\n")

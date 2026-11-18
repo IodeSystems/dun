@@ -33,6 +33,9 @@ type PeerSession struct {
 type PeerSent struct {
 	ID, Name      string
 	Busy, Started bool
+	// Queued: idle, and not woken now because dund is upgrading; it reads
+	// the message after the restart.
+	Queued bool
 }
 
 // PeerLink is the way to dund. Its errors are dund's refusals, worded for
@@ -104,6 +107,8 @@ func withPeers(inner agent.ToolDispatcher, link PeerLink, onCall func(string, ma
 				out = "ERROR: " + err.Error()
 			case sent.Busy:
 				out = fmt.Sprintf("delivered to %s (%s): it is busy and reads it in its current turn.", sent.Name, sent.ID)
+			case sent.Queued:
+				out = fmt.Sprintf("queued: dund is upgrading. %s (%s) holds the message and reads it after the restart.", sent.Name, sent.ID)
 			case sent.Started:
 				out = fmt.Sprintf("delivered to %s (%s): it was idle; a turn started there.", sent.Name, sent.ID)
 			default:
