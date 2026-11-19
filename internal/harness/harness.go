@@ -99,7 +99,7 @@ type Config struct {
 	// ChildEffortSource ChildEffort's ("--child-effort" or "facets.child"),
 	// SideCallSources each side_calls entry's ("config"; absent: default).
 	EffortSource, MainSource, ChildSource, ChildEffortSource string
-	SideCallSources                                         map[string]string
+	SideCallSources                                          map[string]string
 	// Files configures the built-in file tools (files.go); nil = the defaults
 	// (DefaultFileTools: read, edit, write), rooted at Workspace.
 	Files *mcpserver.FilesConfig

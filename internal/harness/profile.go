@@ -141,12 +141,13 @@ func (h *Harness) runnerProfile(ctx context.Context, provider, model string, r a
 }
 
 // runProfile is the profile of the model a child runs on: the session's when
-// it runs on the parent's own client.
-func (h *Harness) runProfile(ctx context.Context, run childRun) ModelProfile {
+// it runs on the parent's own client. No window is asked for: the child
+// learns its own.
+func (h *Harness) runProfile(run childRun) ModelProfile {
 	if run.model == "" || run.client == h.cfg.Client {
 		return h.sessionProfile()
 	}
-	return h.runnerProfile(ctx, run.provider, run.model, run.client)
+	return ProfileOf(run.provider, run.model, run.client, 0)
 }
 
 // declareThinkingOnly records, on the session's client, that its model list

@@ -144,7 +144,13 @@ func (h *Harness) profileOf(ctx context.Context, provider, model string) ModelPr
 	if err != nil || c.Runner == nil {
 		return ModelProfile{Provider: provider, Model: model}
 	}
-	return h.runnerProfile(ctx, provider, model, c.Runner)
+	// No model-list GET here: the table is built on the settings path. A
+	// window is asked only by a side call that needs it (tierRetry).
+	p := ProfileOf(provider, model, c.Runner, 0)
+	if v, ok := h.windows.Load(provider + "\x00" + model); ok && p.Window == 0 {
+		p.Window = v.(int)
+	}
+	return p
 }
 
 // sessionOpts writes role's effort on opts, clamped to the session's own
@@ -341,12 +347,22 @@ func (c RoleChoice) Line(session string) string {
 	if wanted == "" {
 		wanted = "unset"
 	}
-	why := c.Effort.Reason
-	if c.Note != "" {
-		why = strings.TrimPrefix(why+"; "+c.Note, "; ")
-	}
 	return fmt.Sprintf("%-12s %-24s %-7s %-7s %s · %s / %s", c.Role, c.ModelName(session), wanted,
-		c.Effort.Effective, orStr(why, "-"), c.ModelSource, orStr(c.EffortSource, "-"))
+		c.Effort.Effective, orStr(c.Why(), "-"), c.ModelSource, orStr(c.EffortSource, "-"))
+}
+
+// RoleHeader is the table's header, aligned with Line.
+func RoleHeader() string {
+	return fmt.Sprintf("%-12s %-24s %-7s %-7s %s", "role", "model", "wanted", "sent", "reason · source of model / effort")
+}
+
+// Why is the reason column: why the effort sent is not the one wanted, and
+// why the model is not the one the role's layers name.
+func (c RoleChoice) Why() string {
+	if c.Note == "" {
+		return c.Effort.Reason
+	}
+	return strings.TrimPrefix(c.Effort.Reason+"; "+c.Note, "; ")
 }
 
 func orStr(s, or string) string {

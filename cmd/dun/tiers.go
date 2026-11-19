@@ -1,10 +1,14 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"strings"
+	"sync"
 
+	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/mcpserver"
@@ -44,20 +48,61 @@ func startTiers(fc dunconfig.DunConfig, ws string, noDir bool, w io.Writer) (dun
 // settings event: /model shows them rather than re-reading the config.
 var engineTiers dunconfig.TierSet
 
-// tiersProto is set for the settings event.
-func tiersProto(set dunconfig.TierSet) []proto.TierInfo {
-	out := make([]proto.TierInfo, 0, len(set.Tiers))
+// tiersProto is set for the settings event, then the role table: every
+// role as roles resolves it (harness.Harness.Roles; none before the
+// harness is up).
+func tiersProto(set dunconfig.TierSet, roles []harness.RoleChoice) []proto.TierInfo {
+	out := make([]proto.TierInfo, 0, len(set.Tiers)+len(roles))
 	for _, t := range set.Tiers {
 		out = append(out, proto.TierInfo{Name: t.Name, Provider: t.Provider, Model: t.Model, Effort: t.Effort, Source: t.Source, Off: t.Off})
 	}
+	for _, r := range roles {
+		out = append(out, proto.TierInfo{Name: r.Role, Role: r.Role, Provider: r.Provider, Model: r.Model, Source: r.ModelSource,
+			Wanted: r.Effort.Wanted, Effective: r.Effort.Effective, Reason: r.Why(), EffortSource: r.EffortSource})
+	}
 	return out
+}
+
+// rolesResend is harness.OnCapsChanged's func for the engine: the settings
+// event and the command list (the /effort picker's marks) again when the
+// role table changed since the last it sent. An effort translation can come
+// on every request; the table changes once.
+func rolesResend(emit func(any), commands func() any) func() {
+	var mu sync.Mutex
+	last := ""
+	return func() {
+		ev := settingsEvent()
+		b, _ := json.Marshal(ev.Tiers)
+		mu.Lock()
+		same := string(b) == last
+		last = string(b)
+		mu.Unlock()
+		if same {
+			return
+		}
+		emit(ev)
+		emit(commands())
+	}
 }
 
 // harnessTiers is set as the harness takes it.
 func harnessTiers(set dunconfig.TierSet) []harness.Tier {
 	out := make([]harness.Tier, 0, len(set.Tiers))
 	for _, t := range set.Tiers {
-		out = append(out, harness.Tier{Name: t.Name, Provider: t.Provider, Model: t.Model, Effort: t.Effort, Use: t.Use, Off: t.Off})
+		out = append(out, harness.Tier{Name: t.Name, Provider: t.Provider, Model: t.Model, Effort: t.Effort, Use: t.Use, Off: t.Off, Source: t.Source})
+	}
+	return out
+}
+
+// sideCallSources says which side calls a side_calls entry in config.json
+// places (the role table's source); the others are on their default.
+func sideCallSources(fc dunconfig.DunConfig) map[string]string {
+	sides, _ := fc.SideCallTiers()
+	out := map[string]string{}
+	for k := range fc.SideCalls {
+		if v, ok := sides[k]; ok && v == strings.TrimSpace(fc.SideCalls[k]) {
+			out[k] = dunconfig.SourceConfig
+		}
 	}
 	return out
 }
@@ -85,4 +130,52 @@ func (d *doctor) tiers() {
 	for _, w := range append(set.Warnings, warn...) {
 		d.add("warn", "tier", w, "/login the provider, or change or remove the entry in "+dunconfig.ConfigPath())
 	}
+	d.add("ok", "role", harness.RoleHeader(), "")
+	main := cfg.Resolve(dunconfig.FacetMain, modelFlags, os.Getenv)
+	for _, r := range doctorRoles(cfg, set, sides).All() {
+		d.add("ok", "role", r.Line(main.Model), "")
+	}
+}
+
+// doctorRoles is the role resolver over the config as an engine started
+// here would have it, its profiles from the stored capability records (a
+// client is built for each model, no request is made).
+func doctorRoles(fc dunconfig.DunConfig, set dunconfig.TierSet, sides map[string]string) harness.RoleResolver {
+	main := fc.Resolve(dunconfig.FacetMain, modelFlags, os.Getenv)
+	child := fc.Resolve(dunconfig.FacetChild, modelFlags, os.Getenv)
+	cfg := harness.Config{Endpoint: harness.Endpoint{URL: main.URL, Model: main.Model}, Provider: main.Provider, MainSource: main.Source,
+		ChildModel: child.Model, ChildProvider: child.Provider, ChildSource: child.Source,
+		Tiers: harnessTiers(set), DefaultTier: set.Default, SideCallTiers: sides, SideCallSources: sideCallSources(fc)}
+	if l, ok := harness.NormalizeEffort(child.Effort); ok {
+		cfg.ChildEffort, cfg.ChildEffortSource = l, "facets.child"
+	}
+	saved, isSaved := harness.SavedEffort()
+	mainEffort, mainSrc := saved, "/effort"
+	if !isSaved {
+		mainEffort, mainSrc = harness.EffortDefault, "default"
+		if l, ok := harness.NormalizeEffort(main.Effort); ok && l != "" {
+			mainEffort, mainSrc = l, "facets.main"
+		}
+	}
+	profile := func(provider, model string) harness.ModelProfile {
+		url, m := main.URL, model
+		if m == "" {
+			m = main.Model
+		}
+		if provider != "" {
+			if p, ok := fc.Named(provider); ok {
+				url = p.URL
+			}
+		}
+		if url == "" || m == "" {
+			return harness.ModelProfile{Provider: provider, Model: m}
+		}
+		c := llm.NewClient(url, "", m)
+		harness.TrackCaps(c, effortOff(fc, url))
+		if d, err := reasoningDialect(fc, url); err == nil {
+			c.SetReasoningDialect(d)
+		}
+		return harness.ProfileOf(provider, m, c, 0)
+	}
+	return harness.RoleResolver{Cfg: cfg, MainEffort: mainEffort, MainSource: mainSrc, Saved: saved, Profile: profile}
 }

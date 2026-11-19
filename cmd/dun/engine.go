@@ -507,6 +507,13 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 					msg = "effort: " + enginecmd.EffortLevel + " — " + h.EffortWords(enginecmd.EffortLevel) + " (saved; from the next request)"
 				}
 			}
+			// The saved level is kept; what this model is sent is said beside it.
+			if eff, why := h.EffortSent(); eff != h.Effort() {
+				msg += "; sent as " + eff
+				if why != "" {
+					msg += ": " + why
+				}
+			}
 			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 			em.emit(commandsEvent(h))
 			em.emit(settingsEvent())
@@ -818,8 +825,13 @@ func settingsEvent() *proto.Settings {
 	ev := &proto.Settings{Model: engineModel, Provider: engineProvider, URL: engineURL,
 		Rephrase: enginecmd.RephraseOn, Suggest: enginecmd.SuggestMode, Effort: enginecmd.EffortLevel}
 	ev.EffortWords = enginecmd.EffortWords(enginecmd.EffortLevel)
-	ev.Tiers, ev.DefaultTier = tiersProto(engineTiers), engineTiers.Default
-	if h, _ := enginecmd.EngineHarness.Load().(*harness.Harness); h != nil {
+	var roles []harness.RoleChoice
+	h, _ := enginecmd.EngineHarness.Load().(*harness.Harness)
+	if h != nil {
+		roles = h.Roles()
+	}
+	ev.Tiers, ev.DefaultTier = tiersProto(engineTiers, roles), engineTiers.Default
+	if h != nil {
 		max, from, buf, lod, nudge := h.ContextSettings()
 		ev.Context = &proto.ContextSettings{Max: max, MaxFrom: from, CompactBuffer: buf, ToolLOD: lod, RecapNudge: nudge}
 	}

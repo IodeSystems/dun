@@ -146,6 +146,13 @@ func (h *Harness) EffortPicker() []EffortPick {
 	return out
 }
 
+// EffortSent is what the session's rounds send for the level in force, on
+// its model now, and why it differs (the main role's clamp).
+func (h *Harness) EffortSent() (effective, reason string) {
+	c := efforts.Clamp(h.sessionProfile(), h.Effort())
+	return c.Effective, c.Reason
+}
+
 // Effort is the level in force.
 func (h *Harness) Effort() string {
 	if l, ok := h.effort.Load().(string); ok && l != "" {

@@ -288,13 +288,15 @@ type tuiModel struct {
 	// resolved them at its start (the settings event); nil from an older one.
 	engineTiers       []dunconfig.TierPick
 	engineDefaultTier string
-	jobViewing        bool           // a job's view has the convo pane (jobview.go; owns the keys)
-	jv                jobView        // the job view (valid while jobViewing)
-	jvGen             int            // which opening of the job view its read timer belongs to
-	dumpSig           chan os.Signal // SIGUSR1 → dump the rendered screen to a debug file
-	paletteSel        int            // highlighted row in the "/" command palette
-	model, url        string         // this session's LLM settings (for /config)
-	keySet            bool           // whether an API key is configured
+	// engineRoles is the engine's role table (the settings event; roles.go).
+	engineRoles []roleRow
+	jobViewing  bool           // a job's view has the convo pane (jobview.go; owns the keys)
+	jv          jobView        // the job view (valid while jobViewing)
+	jvGen       int            // which opening of the job view its read timer belongs to
+	dumpSig     chan os.Signal // SIGUSR1 → dump the rendered screen to a debug file
+	paletteSel  int            // highlighted row in the "/" command palette
+	model, url  string         // this session's LLM settings (for /config)
+	keySet      bool           // whether an API key is configured
 	// First run (onboarding.go): a message sent before any login is held,
 	// not sent, and comes back in the composer once a model is picked;
 	// switchNote is the line the restart after a pick confirms it with;

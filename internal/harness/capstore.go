@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
@@ -158,10 +159,43 @@ func TrackCaps(c *llm.Client, effortOff string) {
 			}
 		}()
 		log.Printf("dun: capabilities: %s %s: %s = %q (%s: %s)", l.Endpoint, l.Model, l.Key, l.Fact.Value, l.Fact.Source, l.Fact.Evidence)
+		capsChanged()
 	}
-	// A translation changes what goes on the wire; it is never silent.
+	// A translation changes what goes on the wire; it is never silent. An
+	// effort one changes the role table's effective level.
 	c.OnTranslate = func(t llm.Translation) {
-		log.Printf("dun: capabilities: sent %s=%q (asked %q)", t.Key, t.Sent, t.Wanted)
+		if t.Reason != "" {
+			log.Printf("dun: capabilities: sent %s=%q (asked %q): %s", t.Key, t.Sent, t.Wanted, t.Reason)
+		} else {
+			log.Printf("dun: capabilities: sent %s=%q (asked %q)", t.Key, t.Sent, t.Wanted)
+		}
+		if t.Key == "effort" {
+			capsChanged()
+		}
+	}
+}
+
+// onCapsChanged is what runs when a client learns a fact or changes the
+// effort it sends (OnCapsChanged).
+var onCapsChanged atomic.Pointer[func()]
+
+// OnCapsChanged sets what runs, in the background, each time a client
+// TrackCaps tracks learns a fact or sends another effort than asked: the
+// engine re-sends the settings event, whose role table shows the effective
+// levels. nil stops it.
+func OnCapsChanged(f func()) {
+	if f == nil {
+		onCapsChanged.Store(nil)
+		return
+	}
+	onCapsChanged.Store(&f)
+}
+
+// capsChanged runs the OnCapsChanged func off the request's goroutine: it
+// must not block the request nor re-enter the Client.
+func capsChanged() {
+	if f := onCapsChanged.Load(); f != nil {
+		go (*f)()
 	}
 }
 

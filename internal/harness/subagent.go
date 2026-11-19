@@ -73,9 +73,9 @@ type subAgent struct {
 	// level it inherits, clamped to its model; roles.go), for the strip and
 	// dun ps; why says why it is not the level asked for.
 	effective, effortWhy string
-	parent   *Harness
-	iso      isolation // where it works, when not in its parent's tree (subisolation.go)
-	callID   string    // the parent's agent call that spawned it, "" for one from before (agentRecord); under mu
+	parent               *Harness
+	iso                  isolation // where it works, when not in its parent's tree (subisolation.go)
+	callID               string    // the parent's agent call that spawned it, "" for one from before (agentRecord); under mu
 
 	mu sync.Mutex
 	h  *Harness // nil for a stopped child until it is resumed
@@ -669,7 +669,7 @@ func (h *Harness) spawnAgentFor(ctx context.Context, prompt, tier, provider, mod
 		case err != nil:
 			note = "tier " + role.Tier + " unavailable: " + err.Error()
 		case role.Tier != "" && run.fellBack == "":
-			if p := h.runProfile(ctx, run); p.NoTools() {
+			if p := h.runProfile(run); p.NoTools() {
 				note = "tier " + role.Tier + " unavailable: " + run.name() + " takes no tool calls (" + CapToolsSupported + "=false)"
 			}
 		}
@@ -701,7 +701,7 @@ func (h *Harness) spawnAgentFor(ctx context.Context, prompt, tier, provider, mod
 	// The effort, clamped to the model the child runs on (a tier's own, not
 	// the session's). Unset: the child loads the saved /effort level, as
 	// before roles; shown clamped to its model.
-	prof := h.runProfile(ctx, run)
+	prof := h.runProfile(run)
 	eff := efforts.Clamp(prof, role.Effort.Wanted)
 	if role.Effort.Wanted == "" {
 		eff = efforts.Clamp(prof, LoadEffort())
@@ -1751,11 +1751,11 @@ func askParent(h *Harness, question string) string {
 
 // AgentInfo is one child as the UI sees it.
 type AgentInfo struct {
-	ID      int    `json:"id"`
-	Model   string `json:"model,omitempty"`
-	Tier    string `json:"tier,omitempty"` // the tier that picked Model; "" none did
+	ID    int    `json:"id"`
+	Model string `json:"model,omitempty"`
+	Tier  string `json:"tier,omitempty"` // the tier that picked Model; "" none did
 	// Effort is the level its requests send (roles.go: clamped to its model).
-	Effort string `json:"effort,omitempty"`
+	Effort  string `json:"effort,omitempty"`
 	State   string `json:"state"`
 	Status  string `json:"status,omitempty"`
 	Prompt  string `json:"prompt"`

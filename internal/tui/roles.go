@@ -79,19 +79,89 @@ func (m tuiModel) tierNote() []string {
 	return out
 }
 
-// tiersFromEvent reads the settings event's tiers.
+// tiersFromEvent reads the settings event's tiers: the rows that are not
+// the role table's.
 func tiersFromEvent(ev evMsg) []dunconfig.TierPick {
 	raw, _ := ev["tiers"].([]any)
 	var out []dunconfig.TierPick
 	for _, r := range raw {
 		t, ok := r.(map[string]any)
-		if !ok {
+		if !ok || str(t["role"]) != "" {
 			continue
 		}
 		out = append(out, dunconfig.TierPick{Name: str(t["name"]), Provider: str(t["provider"]), Model: str(t["model"]),
 			Effort: str(t["effort"]), Source: str(t["source"]), Off: str(t["off"])})
 	}
 	return out
+}
+
+// roleRow is one row of the engine's role table (the settings event's tiers
+// with role set; harness/roles.go), as sent.
+type roleRow struct {
+	role, provider, model, source, wanted, effective, reason, effortSource string
+}
+
+// rolesFromEvent reads the settings event's role table.
+func rolesFromEvent(ev evMsg) []roleRow {
+	raw, _ := ev["tiers"].([]any)
+	var out []roleRow
+	for _, r := range raw {
+		t, ok := r.(map[string]any)
+		if !ok || str(t["role"]) == "" {
+			continue
+		}
+		out = append(out, roleRow{role: str(t["role"]), provider: str(t["provider"]), model: str(t["model"]), source: str(t["source"]),
+			wanted: str(t["wanted"]), effective: str(t["effective"]), reason: str(t["reason"]), effortSource: str(t["effortSource"])})
+	}
+	return out
+}
+
+// roleTable is the roles window's note of the engine's role table: per role
+// the model, the effort wanted and sent, why they differ, and the sources.
+// The session's model stands for a row with none. None from an engine older
+// than roles.
+func (m tuiModel) roleTable() []string {
+	if len(m.engineRoles) == 0 {
+		return nil
+	}
+	row := func(role, model, wanted, sent, rest string) string {
+		return fmt.Sprintf("%-12s %-22s %-8s %-8s %s", role, model, wanted, sent, rest)
+	}
+	out := wholeRows("what each request runs on now (the engine's; dun doctor shows the same):", m.w, listIndent, StDim)
+	out = append(out, listIndent+"  "+StDim.Render(row("role", "model", "wanted", "sent", "reason · model / effort from")))
+	for _, r := range m.engineRoles {
+		model := r.model
+		if model == "" {
+			model = m.model
+		}
+		if r.provider != "" {
+			model += " on " + r.provider
+		}
+		wanted := r.wanted
+		if wanted == "" {
+			wanted = "unset"
+		}
+		why := r.reason
+		if why == "" {
+			why = "-"
+		}
+		src := r.effortSource
+		if src == "" {
+			src = "-"
+		}
+		out = append(out, wholeRows(row(r.role, model, wanted, r.effective, why+" · "+r.source+" / "+src), m.w, listIndent+"  ", StDim)...)
+	}
+	return out
+}
+
+// mainRole is the role table's main row; false before the engine sent one.
+func (m tuiModel) mainRole() (roleRow, bool) {
+	for _, r := range m.engineRoles {
+		if r.role == "main" {
+			return r, true
+		}
+	}
+	return roleRow{}, false
 }
 
 // updateRoles owns the keys while the roles window is open.
@@ -261,6 +331,9 @@ func (m tuiModel) rolesPanel() string {
 	notes = append(notes, wholeRows(restartNote, m.w, listIndent, StDim))
 	notes = append(notes, wholeRows("the raglit server has its own roles: /rag setup", m.w, listIndent, StDim))
 	if n := m.tierNote(); len(n) > 0 {
+		notes = append(notes, n)
+	}
+	if n := m.roleTable(); len(n) > 0 {
 		notes = append(notes, n)
 	}
 	for _, n := range cfg.UnknownFacets() {
