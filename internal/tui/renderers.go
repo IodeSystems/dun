@@ -160,7 +160,7 @@ func init() {
 
 // execRender: did the command work, and if not, why.
 func execRender(rc renderCtx) (string, string) {
-	body := stSecondary.Render(rc.result)
+	body := execOutput(rc.result)
 	if isDiff(rc.result) {
 		body = colorizeDiff(rc.result)
 	}

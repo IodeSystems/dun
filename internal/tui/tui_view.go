@@ -48,6 +48,9 @@ var (
 	// stBrand is the wordmark: bold, not the accent — the accent is for
 	// where you are.
 	stBrand = lipgloss.NewStyle().Bold(true)
+	// stPlain is text in the terminal's own foreground: a call's head in
+	// the run's tree, where only its ✓/✗ is coloured.
+	stPlain = lipgloss.NewStyle()
 )
 
 // divider is the single rule between the panes: one dim "─" across the full

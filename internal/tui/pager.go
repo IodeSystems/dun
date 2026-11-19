@@ -35,7 +35,7 @@ import (
 type pageNode struct {
 	head string
 	body string
-	err  bool        // marks the head as a failure
+	err  bool        // a failure: the head is red, or only its glyph when it has one
 	pre  bool        // the head's spacing is kept (a table row), not collapsed
 	sub  string      // a second line under the head, dim: what a narrow screen moves off it
 	insp *inspSource // a call: "i" opens it in the inspector
@@ -45,6 +45,13 @@ type pageNode struct {
 	// group names what the node shows (the plan's node id): the selected
 	// node's other rows of the same group get the ◆ gutter (planview.go).
 	group string
+	// glyph, when set, is drawn before the head in its own colour (a call's
+	// ✓ or ✗): the head's style is then for the text alone.
+	glyph string
+	// rows, when set, lays the body out at a width in place of the word
+	// wrap of body (an exec step: its command breaks at its operators,
+	// execstep.go).
+	rows func(w int) []string
 }
 
 // inspSource is what the inspector shows for a call.
@@ -161,15 +168,15 @@ func (p *pager) layout(doc pageDoc, w, h int) {
 		if n.pre {
 			h = strings.ReplaceAll(n.head, "\n", " ")
 		}
-		head, _ := fitPlain(h, p.w-3)
+		head, _ := fitPlain(h, p.w-3-lipgloss.Width(n.glyph))
 		st := StTool
 		if n.style != nil {
 			st = *n.style
 		}
-		if n.err {
+		if n.err && n.glyph == "" { // a glyph carries the failure itself
 			st = StErr
 		}
-		r := gutter + StDim.Render(mark) + st.Render(head)
+		r := gutter + StDim.Render(mark) + n.glyph + st.Render(head)
 		if i == p.cur {
 			r = band.row(r, p.w, p.phase)
 		}
@@ -179,7 +186,11 @@ func (p *pager) layout(doc pageDoc, w, h int) {
 			p.rows = append(p.rows, gutter+"    "+StDim.Render(sub))
 		}
 		if p.open[i] {
-			for _, r := range wrapRows(n.body, p.w-4) {
+			body := n.rows
+			if body == nil {
+				body = func(w int) []string { return wrapRows(n.body, w) }
+			}
+			for _, r := range body(p.w - 4) {
 				p.rows = append(p.rows, "    "+r)
 			}
 		}
