@@ -178,6 +178,11 @@ func (s *sessionStore) Loaded() int {
 // to the structured onDocs UI path instead of the plain onNotify.
 const tagDocs = "docs"
 
+// tagIdleCheck is agentkit's tag on the turn-end check's notification
+// (Session.OnIdle, agent/session.go). It is addressed to the model: no
+// onNotify ping, and not in the history the UI shows.
+const tagIdleCheck = "idle_check"
+
 // blobMarker prefixes a ref where an entry's content was extracted to a blob.
 // It leads with NUL so it can't collide with real tool output or prose.
 const blobMarker = "\x00dun-blob:"
@@ -349,8 +354,9 @@ func (s *sessionStore) Append(_ context.Context, _ string, e agent.Entry) error 
 	if e.Kind == agent.KindToolResult && onResult != nil {
 		onResult(e)
 	}
-	// Docs notifications drive a structured UI path (onDocs); skip the plain ping.
-	if e.Kind == agent.KindNotification && e.Tag != tagDocs && cb != nil {
+	// Docs notifications drive a structured UI path (onDocs); skip the plain
+	// ping. The turn-end check is the model's, not the person's.
+	if e.Kind == agent.KindNotification && e.Tag != tagDocs && e.Tag != tagIdleCheck && cb != nil {
 		cb(e.Content)
 	}
 	return nil

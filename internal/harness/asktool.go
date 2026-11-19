@@ -67,27 +67,27 @@ const systemAsks = "\n\nThe person's messages collect in the intake: acknowledge
 	"mark each ask done as you finish it, and one you will not finish this turn (deferred, waiting, a list of later items) " +
 	"file as plan_add nodes and mark it filed with them, so nothing asked is lost."
 
+// asksToolDef is the tool's schema, flat (docs/decisions.md "The person's
+// message ends the prompt"): ids are integers, 0 the intake; split is the
+// new asks' titles, not objects. No union types and no nested objects, which
+// Gemini's function schema takes least well.
 func asksToolDef() llm.ToolDef {
 	str := map[string]any{"type": "string"}
-	piece := map[string]any{
-		"title": str,
-		"text":  str,
-		"state": map[string]any{"type": "string", "enum": []string{"open", "done", "filed", "blocked"}},
-		"nodes": map[string]any{"type": "array", "items": str},
-		"note":  str,
-	}
+	num := map[string]any{"type": "integer"}
 	item := map[string]any{
-		"id":         str,
-		"split":      map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": piece}},
-		"merge_into": str,
-	}
-	for k, v := range piece {
-		item[k] = v
+		"id":         num,
+		"split":      map[string]any{"type": "array", "items": str},
+		"merge_into": num,
+		"title":      str,
+		"text":       str,
+		"state":      map[string]any{"type": "string", "enum": []string{"open", "done", "filed", "blocked"}},
+		"nodes":      map[string]any{"type": "array", "items": str},
+		"note":       str,
 	}
 	var td llm.ToolDef
 	td.Type = "function"
 	td.Function.Name = asksToolName
-	td.Function.Description = `Acknowledge the intake (id "intake": split into asks, merge_into an ask, or a state) and ` +
+	td.Function.Description = `Acknowledge the intake (id 0: split into asks by title, merge_into an ask's number, or a state) and ` +
 		`mark asks (id: its number): title, state (done/blocked: note; filed: nodes), nodes links plan nodes.`
 	td.Function.Parameters = map[string]any{
 		"type": "object",
@@ -102,7 +102,7 @@ func asksToolDef() llm.ToolDef {
 // askItem is one item of an asks call, and one piece of a split.
 type askItem struct {
 	ID        json.RawMessage `json:"id"`
-	Split     []askItem       `json:"split"`
+	Split     []askPiece      `json:"split"`
 	MergeInto json.RawMessage `json:"merge_into"`
 	Title     string          `json:"title"`
 	Text      string          `json:"text"`
@@ -111,14 +111,34 @@ type askItem struct {
 	Note      string          `json:"note"`
 }
 
-// askID reads an id: "intake", or an ask's number as 3, "3" or "#3".
-// 0 and false for intake; 0 and true for none.
+// askPiece is one piece of a split: a title, as the schema says, or an
+// object {title, text, state, nodes, note}, the shape before 2026-11-19,
+// still read. A title takes the item's state, nodes and note.
+type askPiece struct {
+	askItem
+	titleOnly bool
+}
+
+func (p *askPiece) UnmarshalJSON(b []byte) error {
+	var s string
+	if json.Unmarshal(b, &s) == nil {
+		p.Title, p.titleOnly = s, true
+		return nil
+	}
+	return json.Unmarshal(b, &p.askItem)
+}
+
+// askID reads an id: 0 or "intake" for the intake, or an ask's number as
+// 3, "3" or "#3". 0 and false for intake; 0 and true for none.
 func askID(raw json.RawMessage) (n int, intake bool, ok bool) {
 	var s string
 	if json.Unmarshal(raw, &s) != nil {
 		var f float64
 		if json.Unmarshal(raw, &f) != nil {
 			return 0, false, false
+		}
+		if f == 0 {
+			return 0, true, true
 		}
 		return int(f), false, int(f) > 0
 	}
@@ -145,7 +165,7 @@ func withAsks(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[st
 	}
 }
 
-const asksUsage = `asks {asks: [{id, split?, merge_into?, text?, title?, state?, nodes?, note?}]}: id "intake" or an ask's number`
+const asksUsage = `asks {asks: [{id, split?, merge_into?, text?, title?, state?, nodes?, note?}]}: id 0 for the intake or an ask's number; split: the new asks' titles`
 
 // asksCall runs one asks call: each item in order, each one's result on its
 // own line. The intake is acknowledged when an item on it succeeded; the
@@ -173,7 +193,7 @@ func (h *Harness) asksCall(raw string) string {
 	for _, it := range args.Asks {
 		n, isIntake, ok := askID(it.ID)
 		if !ok {
-			lines = append(lines, "ERROR: id "+string(it.ID)+`: "intake" or an ask's number`)
+			lines = append(lines, "ERROR: id "+string(it.ID)+`: 0 for the intake or an ask's number`)
 			continue
 		}
 		if !isIntake {
@@ -218,7 +238,13 @@ func (h *Harness) asksCall(raw string) string {
 			note(r)
 			lines = append(lines, line)
 		case len(it.Split) > 0 || it.State != "":
-			pieces := it.Split
+			var pieces []askItem
+			for _, p := range it.Split {
+				if p.titleOnly {
+					p.askItem = askItem{Title: p.Title, State: it.State, Nodes: it.Nodes, Note: it.Note}
+				}
+				pieces = append(pieces, p.askItem)
+			}
 			if len(pieces) == 0 {
 				pieces = []askItem{{Title: it.Title, Text: it.Text, State: it.State, Nodes: it.Nodes, Note: it.Note}}
 			}
@@ -498,7 +524,7 @@ func (h *Harness) asksBlock() string {
 	d := h.asksLocked()
 	var b strings.Builder
 	if n := len(d.Intake); n > 0 {
-		fmt.Fprintf(&b, "- intake, not acknowledged (%s):", plurals(n, "message"))
+		fmt.Fprintf(&b, "- intake (id 0), not acknowledged (%s):", plurals(n, "message"))
 		from := max(0, n-askBlockIntake)
 		if from > 0 {
 			fmt.Fprintf(&b, " +%d earlier,", from)
@@ -545,11 +571,15 @@ func (h *Harness) asksTurnLine() {
 	h.asks.mu.Unlock()
 	switch {
 	case b != "":
-		h.AsideWith("[asks] "+b, AsideOpts{Key: "asks"})
+		h.AsideWith("[asks] "+b, AsideOpts{Key: "asks", Tag: asksTag})
 	case was:
-		h.AsideWith("[asks] no open asks.", AsideOpts{Key: "asks"})
+		h.AsideWith("[asks] no open asks.", AsideOpts{Key: "asks", Tag: asksTag})
 	}
 }
+
+// asksTag tags the block's entry: the model reads "[asks] Open asks: …",
+// not "[notification] [asks] …".
+const asksTag = "asks"
 
 // asksFoldAsk is the ask a fold must keep (fold.go noteAsk) where asks are
 // kept, and remembered as the fold's ask (askNow, which the note after a

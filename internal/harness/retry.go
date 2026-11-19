@@ -274,7 +274,7 @@ func turnRetryPolicy(client agent.LLMRunner) (initial, max, budget time.Duration
 //
 // Retrying a turn is cheap and safe because the conversation is PERSISTED: the
 // next attempt rebuilds context from the store, so tool calls that already ran
-// are not run again — only the interrupted generation is redone. prepareTurn runs
+// are not run again — only the interrupted generation is redone. prepareAttempt runs
 // before every attempt, which is what makes a message typed during the wait ride
 // along with the retry instead of waiting for it.
 func (h *Harness) runTurn(ctx context.Context, turn func(context.Context) (agent.TurnResult, error)) (agent.TurnResult, error) {
@@ -311,7 +311,7 @@ func (h *Harness) runTurn(ctx context.Context, turn func(context.Context) (agent
 		}
 	}()
 	for attempt := 1; ; attempt++ {
-		h.prepareTurn(ctx)
+		h.prepareAttempt(ctx)
 		// Before the attempt, not after the failure: the id may have been issued
 		// during THIS attempt's own request-scope retries, and the next attempt
 		// is the one that has to present it.

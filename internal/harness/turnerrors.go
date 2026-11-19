@@ -19,6 +19,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 )
 
@@ -78,6 +79,37 @@ func (h *Harness) noteTurnError(ctx context.Context, err error) {
 	if e := appendTurnError(TurnErrorsFile(h.cfg.SessionFile), rec); e != nil {
 		log.Printf("dun: keep turn error: %v", e)
 	}
+}
+
+// noteEmptyReply tells the person when their turn ended with no text from
+// the model in any round (agentkit sets Reply only from a round with text),
+// and keeps it with the turn errors. Gemini 4, 2026-11-19: every round came
+// back empty and the turn ended with Reply "" and no error, so the person
+// saw nothing at all. An automatic turn may end quietly: nobody waits on it.
+//
+// TODO(agentkit): name the last round's finish_reason here once agentkit's
+// TurnResult hands it on (v0.37.0 keeps it inside llm/client.go).
+func (h *Harness) noteEmptyReply(ctx context.Context, res agent.TurnResult, err error) {
+	if err != nil || ctx.Err() != nil || strings.TrimSpace(res.Reply) != "" {
+		return
+	}
+	if o, _ := h.turnOriginNow(); o != originPerson {
+		return
+	}
+	model := h.cfg.Endpoint.Model
+	if model == "" {
+		model = "the model"
+	}
+	msg := emptyReplyText(model)
+	if h.cfg.OnNotify != nil {
+		h.cfg.OnNotify(msg)
+	}
+	h.noteTurnError(ctx, errors.New(msg))
+}
+
+// emptyReplyText is the notice for a turn that ended with no reply.
+func emptyReplyText(model string) string {
+	return model + " returned an empty reply: the turn ended with no text from the model"
 }
 
 var statusInText = regexp.MustCompile(`\bstatus (\d{3})\b`)

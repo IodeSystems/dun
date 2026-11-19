@@ -36,12 +36,17 @@ type AsideOpts struct {
 	// OnEscalate runs once, outside the queue lock, when the aside becomes a
 	// notification; never when it is delivered as an aside.
 	OnEscalate func()
+	// Tag is the entry's tag where the aside is appended as an entry
+	// (flushSilent): the model reads it as "[<Tag>] …", not
+	// "[notification] …". Text then starts "[<Tag>] ", which the entry's
+	// content leaves out; a tool result it is lifted into keeps it.
+	Tag string
 }
 
 // AsideWith queues text as an aside with the delivery rule o.
 func (h *Harness) AsideWith(text string, o AsideOpts) {
 	now := time.Now()
-	q := queued{kind: queuedAside, text: text, key: o.Key, turnScoped: o.TurnScoped, onEscalate: o.OnEscalate}
+	q := queued{kind: queuedAside, text: text, key: o.Key, turnScoped: o.TurnScoped, onEscalate: o.OnEscalate, tag: o.Tag}
 	if o.EscalateAfter > 0 {
 		q.escalateAt = now.Add(o.EscalateAfter)
 	}

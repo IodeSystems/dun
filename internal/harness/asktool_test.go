@@ -18,7 +18,7 @@ func (h *Harness) askOpen(text string) bool {
 	if !h.intakeAdd(text) {
 		return false
 	}
-	return !strings.Contains(h.asksCall(`{"asks":[{"id":"intake","state":"open"}]}`), "ERROR")
+	return !strings.Contains(h.asksCall(`{"asks":[{"id":0,"state":"open"}]}`), "ERROR")
 }
 
 func askRecOf(t *testing.T, h *Harness, n int) AskLedger {
@@ -254,7 +254,7 @@ func TestAsks_PinnedBlockAndFold(t *testing.T) {
 		h.intakeAdd("message " + string(rune('a'+i)))
 	}
 	b := h.asksBlock()
-	for _, w := range []string{"Open asks:", "- intake, not acknowledged (8 messages): +3 earlier,", "message h", "- 1 fix the stubs dir"} {
+	for _, w := range []string{"Open asks:", "- intake (id 0), not acknowledged (8 messages): +3 earlier,", "message h", "- 1 fix the stubs dir"} {
 		if !strings.Contains(b, w) {
 			t.Errorf("block lacks %q:\n%s", w, b)
 		}
@@ -290,6 +290,66 @@ func TestAsks_PinnedBlockAndFold(t *testing.T) {
 func toolDefBytes() int {
 	b, _ := json.Marshal(asksToolDef())
 	return len(b)
+}
+
+// The schema is flat: the ids are integers, split is an array of strings,
+// and no item property is an object. A split of titles makes one open ask
+// per title, each with the whole intake as its text; id 0 is the intake.
+func TestAsks_FlatSchema(t *testing.T) {
+	var def struct {
+		Properties struct {
+			Asks struct {
+				Items struct {
+					Properties map[string]struct {
+						Type  string `json:"type"`
+						Items *struct {
+							Type string `json:"type"`
+						} `json:"items"`
+					} `json:"properties"`
+					Required []string `json:"required"`
+				} `json:"items"`
+			} `json:"asks"`
+		} `json:"properties"`
+	}
+	b, _ := json.Marshal(asksToolDef().Function.Parameters)
+	if err := json.Unmarshal(b, &def); err != nil {
+		t.Fatal(err)
+	}
+	props := def.Properties.Asks.Items.Properties
+	if props["id"].Type != "integer" || props["merge_into"].Type != "integer" {
+		t.Errorf("id %q merge_into %q, want integer", props["id"].Type, props["merge_into"].Type)
+	}
+	if s := props["split"]; s.Type != "array" || s.Items == nil || s.Items.Type != "string" {
+		t.Errorf("split %+v, want an array of strings", s)
+	}
+	for k, p := range props {
+		if p.Type == "object" || (p.Items != nil && p.Items.Type == "object") {
+			t.Errorf("%s is nested: %+v", k, p)
+		}
+	}
+	t.Logf("tool def: %d bytes", toolDefBytes())
+
+	h, _, _ := startAsks(t)
+	t.Cleanup(h.Close)
+	h.intakeAdd("fix the login test and update the docs")
+	out := h.asksCall(`{"asks":[{"id":0,"split":["fix the login test","update the docs"]}]}`)
+	if strings.Contains(out, "ERROR") {
+		t.Fatal(out)
+	}
+	asks, _ := asksBy(h)
+	if len(asks) != 2 || asks[1].Title != "fix the login test" || asks[2].Title != "update the docs" || asks[2].State != "open" {
+		t.Fatalf("asks %+v", asks)
+	}
+	if a := askRecOf(t, h, 2); a.Text != "fix the login test and update the docs" {
+		t.Errorf("text %q, want the intake", a.Text)
+	}
+	if out := h.asksCall(`{"asks":[{"id":1,"state":"done","note":"fixed"}]}`); !strings.Contains(out, "ask 1: done") {
+		t.Errorf("result %q", out)
+	}
+	h.intakeAdd("one more")
+	if out := h.asksCall(`{"asks":[{"id":0,"merge_into":0}]}`); !strings.Contains(out, "merge_into takes an ask's number") {
+		t.Errorf("merge_into 0: %q", out)
+	}
 }
 
 // A sidecar from before the ledger moves in: the ask nodes leave the

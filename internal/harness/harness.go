@@ -1056,6 +1056,7 @@ func (h *Harness) AskAs(ctx context.Context, id, task string) (agent.TurnResult,
 func (h *Harness) turnThenTriggers(ctx context.Context) (agent.TurnResult, error) {
 	res, err := h.runTurnWithRescue(ctx, h.Session.Turn)
 	h.noteTurnError(ctx, err) // <session>.errors.jsonl, for dun errors (turnerrors.go)
+	h.noteEmptyReply(ctx, res, err)
 	// Held churn episodes become candidate lessons once the task verifies
 	// (learn.go): after the turn, so no request of the turn waits on it.
 	h.learnAfterTurn(ctx, err)
