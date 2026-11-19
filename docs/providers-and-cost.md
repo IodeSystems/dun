@@ -55,7 +55,8 @@ Code: `internal/dunconfig/facets.go`. Every model dun uses is a role in
 pages for dund), `embed`, `segment`, `identity` (dund's retrieval,
 `rag.md`). Each is `{provider, model, effort}`: `provider` is a saved
 provider's name (empty: the active one; for `child`, the session's), `effort`
-an `/effort` level (empty: the saved level).
+an effort level (empty: the saved level; the levels are under "Roles and
+effort" below).
 
 ```json
 "facets": {
@@ -140,11 +141,40 @@ Code: `internal/dunconfig/tiers.go`; the decision is "Model tiers" in
   plan_summary, journal, worklog, commit, rephrase, rules, learn, repaint)
   to a tier or `session`. The defaults keep the calls sized from the
   session's window (suggest, fold, remember, rescue) on the session's
-  model, and putting one on a tier is warned about. A tier call refused
-  before it replies is asked once more on the session's model. Spend from a side call on a tier is filed under the role `model`,
-  as a child's is.
+  model. One put on a tier runs there only when the tier model's window
+  (its capability record, else its model list) holds the input; otherwise
+  on the session's model, logged. A tier call refused before it replies is
+  asked once more on the session's model. Spend from a side call on a tier
+  is filed under the role `model`, as a child's is.
 - `/model` lists the tiers the engine runs (its settings event); `dun doctor` the tiers, the side calls and the
   warnings.
+
+## Roles and effort
+
+Code: `internal/harness/roles.go` (resolver), `profile.go` (model
+profiles), `effortclamp.go` (the clamp, over agentkit's `EffortFor`); the
+decision is "Roles and model profiles" in `decisions.md`.
+
+- Every request is for a role: `main`, `child:fast|work|think`, or a side
+  call kind. Each resolves to a model and a wanted effort by one order:
+  the call's argument > a flag or env var > the repo's dun.json (only
+  `use`, `default_tier`) > `$DUN_HOME` (tiers, facets, side_calls,
+  `/effort`) > the role's default.
+- Defaults: main unset (nothing sent), fast `lowest`, work unset (the
+  child loads the saved `/effort` level), think `high`, fold and rescue
+  `lowest`, every other side call unset. A tier's default applies only
+  when the tier names a model.
+- Levels: `default`, `none` (`off` is read as it), `minimal`, `low`,
+  `medium`, `high`, `xhigh`, `max`; config and flags also take `lowest`,
+  the lowest level the model accepts (none, or minimal and up on a model
+  that cannot turn thinking off).
+- The wanted level is clamped to the model it runs on (agentkit's
+  `Client.Effective`): `/effort`'s picker marks levels the session's model
+  does not take, with agentkit's reason; `/status` shows the saved level
+  and what is sent.
+- `/model` and `dun doctor` show the role table: role, model, wanted,
+  sent, reason, sources. The sub-agent strip and `dun ps` show each
+  child's level as sent.
 
 ## Spend meter
 
