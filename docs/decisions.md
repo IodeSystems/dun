@@ -851,23 +851,24 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
 
 ## Asks and the turn ledger (USER 2026-11-17)
 
-- **Each message the person types is an ask: a top-level plan node**
-  `ask: <first line>` (`internal/harness/asks.go`), the whole message (cut at
-  4,000 runes) in its details, status `doing`, marked as the person's in the
-  plan sidecar's `by` (`user`, beside `suggest`). The agent closes it with the
-  plan tools (`plan_close` done with the account, or drop with the reason). A
-  message typed mid-turn (`SayAs`) is its own ask and the earlier one stays
-  open; the plan board is queued again so the model reads the new node with
-  the message. Not an ask: a message that starts with a bracketed lowercase
+- **An ask is a top-level plan node** `ask: <title>`
+  (`internal/harness/asks.go`), its text (cut at 4,000 runes) in its details,
+  status `doing`, marked as the person's in the plan sidecar's `by` (`user`,
+  beside `suggest`). The agent closes it with the asks tool or the plan
+  tools (`plan_close` done with the account, or drop with the reason).
+  Changed 2026-11-18: a message the person types no longer opens an ask
+  itself, and a message typed mid-turn is not its own ask: each message
+  grows the intake, and the model makes asks of it ("Asks are acknowledged
+  and folded" below). Not on the intake: a message that starts with a bracketed lowercase
   tag (`[automatic] …`, `[control/plan] …`, `[settle] …`: what dun or dund
   sends in the person's place; a person who starts a message with `[wip]` is
   misread, accepted), a sub-agent's, a `--non-interactive` run's (nobody
   reads the plan; the benchmarks' turns stay as they were), a session with no
   plan tools, and `Config.NoAsks` (embedders, and tests of other things).
-- **The turn-end check raises a forgotten ask.** The interactive check lists
-  open plan nodes (`idlecheck.go`, USER 2026-11-07); an ask's line adds
-  `the user wrote: "<text, 300 runes>"`. So an interactive turn that has not
-  closed its ask gets the check's round. The plan nudges (no plan, stalled
+- **The turn-end check raises a forgotten ask.** Changed 2026-11-18: asks
+  are no longer among the open nodes the check lists, with the person's
+  text; the check names the intake and the touched asks not marked ("Asks
+  are acknowledged and folded" below). The plan nudges (no plan, stalled
   plan, the forced tool) count only the agent's own nodes (`openWork`): an
   ask is the person's request, not a plan the agent wrote, and the stall's
   node ids and the no-plan nudge stay as measured.
@@ -917,6 +918,55 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   others do. The idle suggestion call's done nodes name the turn
   (`recorded after turn N by the idle suggestion call`): the ask or turn
   entry of turn N holds its facts.
+
+## Asks are acknowledged and folded (USER 2026-11-18)
+
+"There should be a single unacknowledged ask that grows as the user adds to
+it." A real session listed 14 asks, all `working`: "continue", "resume",
+"retry", "rety", "test" each opened one, none closed, and every open ask
+spun. `internal/harness/asktool.go` unless named.
+
+- **One intake.** A message the person types goes on the intake, the one
+  ask not acknowledged, kept in `<session>.asks.json` (`intake`). No word
+  list: "continue", a typo, a pasted list of four requests all grow it.
+  Rejected: matching control words and typos by edit distance (USER: "kinda
+  dumb"), and one `new` ask per message merged away later (14 rows again
+  until the model acts).
+- **The model acknowledges it with the `asks` tool**, one call of several
+  items, at any point in the turn: on `intake`, `split` (asks with short
+  titles, each with its part of the text), `merge_into` an ask (the text is
+  added to its `continued`, a closed one reopens: the person carried on
+  with it), or `state` alone (one ask, closed at once); on an ask,
+  `title` (reword; the text stays) and `state` `done` (note), `filed`
+  (`nodes`: plan node ids; the node closes as `filed → 12, 13`) or `open`.
+  Each ask keeps the intake it came from word for word (`source`). Messages
+  that arrive during the call stay on the intake. 1,816 bytes of tool def.
+- **The turn-end check** (`idleAsks`, in `idlecheck.go`'s note), in a turn
+  the person started only: the intake while it has messages, and each ask
+  the turn touched (a plan change under it, or merged into) that the model
+  did not mark in the turn; nothing else, and nothing when there is
+  nothing. 123 bytes for an intake of one message, about 60 plus the title
+  per ask. Asks left the open-node list and its 300-rune quote.
+- **Automatic rounds** never grow the intake (not the person's). They may
+  use the tool, unprompted: acknowledging and closing only lower the open
+  asks, which tightens the automatic-turn budget ("Unrequested turns");
+  opening work is what that decision bounds, and this opens none. The
+  intake counts as an open ask for the budget and the network wait.
+- **Shown.** dund's plan event carries each ask node's `ask` (state, when,
+  `working`, `filed`) and the `intake`. Only the ask the turn works (the
+  intake until acknowledged, then the first open ask the call made or
+  merged into) is `working`; the TUI spins it while a turn runs, other open
+  asks show `open · <age>`. The intake is one row above the asks,
+  `▸ new · 3 messages · "the tools and stubs dir…" +2`. Done and filed asks
+  fold into one row, `▸ N done · M filed`, that opens: in /plan (a closed
+  ask is cut from the nodes that need it, which show as roots) and in
+  /journal (the entries' `outcome`). Mobile renders the same; web is the
+  TUI's pty.
+- **"Current ask: continue"** was the fold's node (`fold.go` `planAsk`): one
+  plan node holding the latest user message, which a fold copies into its
+  summary. Where asks are kept the fold now takes the ask from the asks
+  (the one the turn works, with what was merged, or the intake) and writes
+  no node; an open one from before is dropped on the first message.
 
 ## dund's HTTP listener: runtime, one listener, chooser (USER 2026-11-17)
 
