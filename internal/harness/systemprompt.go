@@ -99,6 +99,12 @@ const (
 const systemRecap = "\n\nWhile work remains in a turn, recap what is settled (failed attempts, finished " +
 	"exploration, big results you have used): every later request is smaller by it. Not at the end of a turn."
 
+// systemMidTurn says who writes the framed text a tool result may end with
+// (midreply.go, USER 2026-11-18): a model that reads it as tool output keeps
+// calling tools and never answers. Fixed text, so it keeps the cache; only
+// where a person reads along.
+const systemMidTurn = "\n\nText in a tool result headed \"[the person wrote mid-turn\" is the person, now: answer it first."
+
 // systemSessionSearch is said with session_search (sessionindex_dund.go): a
 // summary that replaced a span reads as all there is, unless the model is
 // told the detail is still there.

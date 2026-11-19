@@ -236,6 +236,7 @@ func (h *Harness) ForceToolCall(tc llm.ToolCall) {
 // of them as if the model had generated them.
 func (h *Harness) mergeForcedToolCalls(tcs []llm.ToolCall) []llm.ToolCall {
 	h.settle.tools.Add(int64(len(tcs))) // the turn used tools (settle.go)
+	h.midRound(len(tcs))                // a reply owed to the person (midreply.go)
 	h.noteMu.Lock()
 	defer h.noteMu.Unlock()
 	if len(h.forcedToolCalls) == 0 {
@@ -277,14 +278,24 @@ func (h *Harness) liftQueued(result string) string {
 	// Trailing newlines on the tool's own output would compound with the separator
 	// below into a run of blank lines.
 	b.WriteString(strings.TrimRight(result, "\n"))
+	// The person's words go last, framed as theirs (midreply.go).
+	var person []string
 	for _, q := range items {
+		if q.kind == queuedUser && PersonText(q.text) {
+			person = append(person, q.text)
+			continue
+		}
 		if b.Len() > 0 {
 			b.WriteString("\n\n")
 		}
 		b.WriteString(q.policy().prefix)
 		b.WriteString(q.text)
 	}
-	return b.String()
+	if len(person) == 0 {
+		return b.String()
+	}
+	h.midLifted()
+	return h.deliverMidTurn(b.String(), midTurnFrame(person))
 }
 
 // drain removes every buffered item matching pred and returns it, leaving the

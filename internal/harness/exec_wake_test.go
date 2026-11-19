@@ -28,7 +28,7 @@ func TestExec_SayDuringWaitHandsOverAtOnce(t *testing.T) {
 	if el := time.Since(start); el > 3*time.Second {
 		t.Fatalf("the message must end the wait, not the timeout: %s", el)
 	}
-	for _, want := range []string{"still running", "background job #1", "user wrote", "[user] how far along is it?"} {
+	for _, want := range []string{"still running", "background job #1", "user wrote", "«how far along is it?»"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("result missing %q:\n%s", want, out)
 		}
@@ -54,7 +54,7 @@ func TestExec_MessageQueuedBeforeTheCallReleasesIt(t *testing.T) {
 	if el := time.Since(start); el > 3*time.Second {
 		t.Fatalf("a queued message must not wait out the grace: %s", el)
 	}
-	if !strings.Contains(out, "background job #1") || !strings.Contains(out, "[user] stop and look") {
+	if !strings.Contains(out, "background job #1") || !strings.Contains(out, "«stop and look»") {
 		t.Fatalf("want the handoff and the message: %q", out)
 	}
 	if _, err := h.KillJob(1, "test"); err != nil {
@@ -132,7 +132,7 @@ func TestExec_SayReleasesEveryWait(t *testing.T) {
 			if !strings.Contains(out, "still running") {
 				t.Errorf("want a handoff: %q", out)
 			}
-			if strings.Contains(out, "[user] both of you") {
+			if strings.Contains(out, "«both of you") {
 				lifted++
 			}
 		case <-time.After(3 * time.Second):

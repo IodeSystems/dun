@@ -37,7 +37,8 @@ import (
 // person); the open nodes are not listed again while the plan is unchanged
 // since the last check, in this turn or an earlier one; the count is the
 // turn's, not the attempt's (turnBegin), so a retried turn gets no new
-// checks.
+// checks. A text-only reply right after a lifted person message ends the
+// turn with no check (midreply.go).
 
 // idleChecklist is the --non-interactive check.
 // The wording keeps the turn open when a requirement fails: TB2.1
@@ -100,6 +101,11 @@ func (h *Harness) onIdle(_ context.Context, rounds, _ int) string {
 	// work never ran (textcall.go).
 	if note := h.textCallCheck(); note != "" {
 		return note
+	}
+	// A text-only reply to the person's mid-turn message: the turn ends on
+	// it, with no check that sends the model back to its tools (midreply.go).
+	if h.midAnswered() {
+		return ""
 	}
 	asks := h.idle.count()
 	if asks >= idleChecksMax {

@@ -412,6 +412,7 @@ type Harness struct {
 	turnRounds turnRounds   // this turn's tool-call rounds, for the turn limit
 	nudge      planNudge    // this turn's plan nudge (plannudge.go)
 	idle       idleState    // changes since this turn's last check (idlecheck.go)
+	mid        midReply     // the reply a mid-turn message is owed (midreply.go)
 	learn      learnState   // resolved churn waiting for its lesson (learn.go)
 	settle     settleState  // the delayed end-of-turn report (settle.go)
 	auto       autoState    // turn origins and the automatic-turn budget (autoturn.go)

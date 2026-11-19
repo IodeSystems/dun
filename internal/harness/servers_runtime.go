@@ -927,6 +927,7 @@ func (h *Harness) rebuildTools() {
 			sys += noDirSystem
 		}
 		if !cfg.NonInteractive && !cfg.Worker && !h.isChild() { // a child's reply goes to its parent
+			sys += systemMidTurn
 			sys += replyFormatSystem
 			sys += h.formatPromptSystem()
 		}

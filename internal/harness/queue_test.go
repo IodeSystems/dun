@@ -90,7 +90,7 @@ func TestSayLiftsIntoToolResult(t *testing.T) {
 	if !strings.Contains(out, "wrote 3 lines") {
 		t.Errorf("tool result lost: %q", out)
 	}
-	if !strings.Contains(out, "[user] actually, skip the tests") {
+	if !strings.Contains(out, "«actually, skip the tests") {
 		t.Errorf("message was not lifted into the tool result: %q", out)
 	}
 	if h.Pending() != 0 || h.Queued() != 0 {
@@ -110,13 +110,10 @@ func TestQueueBatchesWithoutLimit(t *testing.T) {
 		t.Fatalf("Queued() = %d; want 3 buffered", h.Queued())
 	}
 	out := h.liftQueued("tool output")
-	for _, want := range []string{"tool output", "[user] one", "[background] background job #1", "[user] two"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("lifted result missing %q:\n%s", want, out)
-		}
-	}
-	if i, j := strings.Index(out, "[user] one"), strings.Index(out, "[user] two"); i > j {
-		t.Error("messages delivered out of order")
+	// The person's messages go last, under one header, in order (midreply.go).
+	want := "tool output\n\n[background] background job #1 finished\n\n" + midTurnHead + "\n«one»\n«two»"
+	if out != want {
+		t.Errorf("lifted result:\n%s\nwant:\n%s", out, want)
 	}
 	// And the next round starts empty, so a third message rides the following
 	// result rather than being repeated.
@@ -177,7 +174,7 @@ func TestPrepareTurnHealsOrphanCallAndLiftsMessage(t *testing.T) {
 	if !strings.Contains(last.Content, "INTERRUPTED") {
 		t.Errorf("healed result does not say what happened: %q", last.Content)
 	}
-	if !strings.Contains(last.Content, "[user] connection dropped") {
+	if !strings.Contains(last.Content, "«connection dropped") {
 		t.Errorf("the queued message did not ride the healed result: %q", last.Content)
 	}
 	if h.store.pending() == 0 {
