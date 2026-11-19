@@ -1745,6 +1745,21 @@ rescue), and agentkit's capability record on the wire. Code:
 
 ## Sessions, supervision and diagnosis
 
+- **Turn errors are kept beside the session, structured (2026-11-18; aw4
+  i_1m7rqbptp6z6f22q6jgff8).** `<session>.errors.jsonl`
+  (`internal/harness/turnerrors.go`, written from `turnThenTriggers`, so
+  engine, `-p` and children alike): time, session, provider, endpoint host,
+  model, error text, HTTP status, the server's body; payload and text at most
+  8 KiB, the newest 200 per file; the endpoint's key, Authorization and key
+  headers and fields, bearer and `sk-` tokens become `[redacted]`. A
+  canceled or held turn is not kept. A sidecar, not a transcript entry: the
+  transcript's `error` entry (`turnerror.go`) keeps only the text, and
+  reading it back means every transcript. `dun errors [--session <id>]
+  [--json] [-n N]` prints them from `$DUN_HOME` with no dund. Limit:
+  agentkit v0.37.0 keeps only an SSE error event's `error.message`
+  (`llm/client.go` ~2028-2069, then `fmt.Errorf("%s")` in
+  `agent/session.go` ~1113); type, code, metadata and the raw event are
+  dropped, so a record of one holds the text alone.
 - **Engines outlive a dund restart (USER 2026-11-17).** dund starts each
   engine with `--listen <home>/dund/engines` (its own unix socket; stdin
   `/dev/null`, output to `engines/<pid>.log`) and, under systemd, in a
