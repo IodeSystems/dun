@@ -489,6 +489,9 @@ type Harness struct {
 	reloads atomic.Int32
 	// effort is /effort's level (effort.go), applied on every request.
 	effort atomic.Value
+	// offNoted is set once the person was told their model cannot turn
+	// reasoning off (reasoningoff.go).
+	offNoted atomic.Bool
 	// thinking is what the server's model list says /effort default does
 	// (effort.go); nil until it says.
 	thinking atomic.Pointer[ServerThinking]

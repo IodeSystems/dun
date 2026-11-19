@@ -33,6 +33,9 @@ type reasoningTee struct {
 	// force, when set, may force a plan call on this request: it returns the
 	// options to send, nil for as they are (plannudge.go).
 	force func(tools []llm.ToolDef, opts *llm.ChatOpts) *llm.ChatOpts
+	// offRefused, when set, is told when a round's off was refused and sent
+	// at the lowest effort instead (reasoningoff.go).
+	offRefused func()
 }
 
 // teeTurn is the turn's runner: teed for live reasoning (when on is set) and
@@ -42,7 +45,7 @@ func (h *Harness) teeTurn(r agent.LLMRunner, on func(string)) agent.LLMRunner {
 		return r
 	}
 	h.req = h.newReqMeter()
-	return &reasoningTee{LLMRunner: r, on: on, round: &h.round, req: h.req, force: h.planForceOpts}
+	return &reasoningTee{LLMRunner: r, on: on, round: &h.round, req: h.req, force: h.planForceOpts, offRefused: h.noteOffRefused}
 }
 
 // untee is the runner under a tee, for a call that is not the turn's.
@@ -62,10 +65,12 @@ func (t *reasoningTee) ChatStream(ctx context.Context, msgs []llm.Message, tools
 	t.req.begin() // the request is sent from here: ttft counts from now
 	var in <-chan llm.StreamChunk
 	var err error
+	// A model that refuses /effort off gets the round at the lowest effort.
+	r := offGuard{LLMRunner: t.LLMRunner, refused: t.offRefused}
 	if forced := t.forced(tools, opts); forced != nil {
-		in, err = planForcedStream(ctx, t.LLMRunner, msgs, tools, opts, forced)
+		in, err = planForcedStream(ctx, r, msgs, tools, opts, forced)
 	} else {
-		in, err = t.LLMRunner.ChatStream(ctx, msgs, tools, opts)
+		in, err = r.ChatStream(ctx, msgs, tools, opts)
 	}
 	if err != nil || in == nil {
 		t.req.end()
