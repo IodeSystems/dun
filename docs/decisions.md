@@ -851,27 +851,20 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
 
 ## Asks and the turn ledger (USER 2026-11-17)
 
-- **An ask is a top-level plan node** `ask: <title>`
-  (`internal/harness/asks.go`), its text (cut at 4,000 runes) in its details,
-  status `doing`, marked as the person's in the plan sidecar's `by` (`user`,
-  beside `suggest`). The agent closes it with the asks tool or the plan
-  tools (`plan_close` done with the account, or drop with the reason).
-  Changed 2026-11-18: a message the person types no longer opens an ask
-  itself, and a message typed mid-turn is not its own ask: each message
-  grows the intake, and the model makes asks of it ("Asks are acknowledged
-  and folded" below). Not on the intake: a message that starts with a bracketed lowercase
-  tag (`[automatic] …`, `[control/plan] …`, `[settle] …`: what dun or dund
-  sends in the person's place; a person who starts a message with `[wip]` is
-  misread, accepted), a sub-agent's, a `--non-interactive` run's (nobody
-  reads the plan; the benchmarks' turns stay as they were), a session with no
-  plan tools, and `Config.NoAsks` (embedders, and tests of other things).
-- **The turn-end check raises a forgotten ask.** Changed 2026-11-18: asks
-  are no longer among the open nodes the check lists, with the person's
-  text; the check names the intake and the touched asks not marked ("Asks
-  are acknowledged and folded" below). The plan nudges (no plan, stalled
-  plan, the forced tool) count only the agent's own nodes (`openWork`): an
-  ask is the person's request, not a plan the agent wrote, and the stall's
-  node ids and the no-plan nudge stay as measured.
+- **Each message the person types is an ask: a top-level plan node.**
+  Reversed 2026-11-18: asks are dun's own ledger, not plan nodes or plan
+  roots, and a message grows the intake instead of opening an ask ("Asks
+  are acknowledged and folded" below). Not on the intake: a message that
+  starts with a bracketed lowercase tag (`[automatic] …`, `[control/plan]
+  …`, `[settle] …`: what dun or dund sends in the person's place; a person
+  who starts a message with `[wip]` is misread, accepted), a sub-agent's, a
+  `--non-interactive` run's (nobody reads the asks; the benchmarks' turns
+  stay as they were), a session without the asks tool, and `Config.NoAsks`
+  (embedders, and tests of other things).
+- **The turn-end check raises a forgotten ask.** Changed 2026-11-18: the
+  check names the intake, the touched asks not marked, and once an ask long
+  untouched ("Asks are acknowledged and folded" below). The plan nudges
+  count every open plan node again: no plan node is an ask.
 - **The turn ledger: facts from the turn's own tool events, no model call**
   (`internal/harness/ledger.go`). `withLedger` is the outermost dispatcher
   wrapper, in the root and in each sub-agent (a child's facts carry its
@@ -894,18 +887,18 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   Every list stops at 50 with `… +N more`; the totals count everything.
   Events between turns (a job ending while idle) go to the next turn.
 - **Facts go to the asks open during the turn** (open as it began, or
-  opened in it). When the turn's plan changes touch an ask or a node that
-  descends from one (`needs` followed up: the graph's "under"), the facts go
-  to those asks only; otherwise to every open ask, and the turn is marked
-  shared on each. Chosen as the simplest rule that uses what the agent
-  already says; a turn that touched nothing cannot be split honestly, so it
-  is counted in full in each. A turn with no ask open and a tool call is its
-  own `/journal` entry, kind `turn`, indexed as `kind:ledger`; one with no
-  tool call gets nothing.
+  made in it). When the turn names asks (the asks tool acted on them, or a
+  plan change touched a node that serves one or descends from one: `needs`
+  followed up), the facts go to those asks only; otherwise to every open
+  ask, and the turn is marked shared on each. Chosen as the simplest rule
+  that uses what the agent already says; a turn that touched nothing cannot
+  be split honestly, so it is counted in full in each. A turn with no ask
+  open and a tool call is its own `/journal` entry, kind `turn`, indexed as
+  `kind:ledger`; one with no tool call gets nothing.
 - **An ask's `/journal` entry** (kind `ask`, indexed as `kind:ask` so
   `session_search` finds "which ask changed X") is written at the end of the
-  turn in which its node is closed (by the agent, or the person's `/plan`
-  edit: the turn end reads the plan), with its text, outcome and note, the
+  turn in which it is closed (the asks tool marks it done or filed; the
+  turn end reads the ledger), with its text, outcome and note, the
   turns that served it (numbers, times, shared, interrupted) and the facts
   summed. Row: `ask 3 · done · "fix the flaky test" · turns 12–15 · 6 files
   (+120/−34) · 1 commit · 11 cmds (1 failed) · 9m` (the time is the turns'
@@ -919,54 +912,89 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   (`recorded after turn N by the idle suggestion call`): the ask or turn
   entry of turn N holds its facts.
 
+
 ## Asks are acknowledged and folded (USER 2026-11-18)
 
 "There should be a single unacknowledged ask that grows as the user adds to
 it." A real session listed 14 asks, all `working`: "continue", "resume",
 "retry", "rety", "test" each opened one, none closed, and every open ask
-spun. `internal/harness/asktool.go` unless named.
+spun. Then: asks are a ledger, pinned in the prompt, not plan roots.
+`internal/harness/asktool.go` and `asks.go` unless named.
 
+- **Asks are a ledger, not plan nodes.** This reverses "each message is an
+  ask: a top-level plan node" (2026-11-17). `<session>.asks.json` holds the
+  intake and the asks: a number, a title, the text, the person's words
+  (`source`, `continued`), a state (open, blocked, done, filed) and the plan
+  nodes that serve the ask (`nodes`). The plan graph has no ask nodes; a
+  plan node carries its ask only as that link, shown on /plan as a tag
+  `ask N` (chosen over grouping nodes under asks: one word per row, and the
+  tree stays the plan's own).
 - **One intake.** A message the person types goes on the intake, the one
-  ask not acknowledged, kept in `<session>.asks.json` (`intake`). No word
-  list: "continue", a typo, a pasted list of four requests all grow it.
-  Rejected: matching control words and typos by edit distance (USER: "kinda
-  dumb"), and one `new` ask per message merged away later (14 rows again
-  until the model acts).
-- **The model acknowledges it with the `asks` tool**, one call of several
-  items, at any point in the turn: on `intake`, `split` (asks with short
-  titles, each with its part of the text), `merge_into` an ask (the text is
-  added to its `continued`, a closed one reopens: the person carried on
-  with it), or `state` alone (one ask, closed at once); on an ask,
-  `title` (reword; the text stays) and `state` `done` (note), `filed`
-  (`nodes`: plan node ids; the node closes as `filed → 12, 13`) or `open`.
-  Each ask keeps the intake it came from word for word (`source`). Messages
-  that arrive during the call stay on the intake. 1,816 bytes of tool def.
+  ask not acknowledged. No word list: "continue", a typo, a pasted list of
+  four requests all grow it. Rejected: matching control words and typos by
+  edit distance (USER: "kinda dumb"), and one `new` ask per message merged
+  away later (14 rows again until the model acts).
+- **The `asks` tool**, one call of several items, at any point in the turn:
+  on `intake`, `split` (asks with short titles, each with its part of the
+  text), `merge_into` an ask (the intake's messages go to its `continued`,
+  word for word; `text` is a note on them, never in their place; a closed
+  ask reopens: the person carried on with it), or `state` alone (one ask in
+  that state); on an ask (its number), `title` (the text stays), `nodes`
+  (links), and `state` `done` (note), `filed` (nodes), `blocked` (the
+  question: what ask_user's refusal tells an automatic round to do) or
+  `open`. Messages that arrive during the call stay on the intake. 911
+  bytes of tool def (was 1,816). Not offered to sub-agents: the tool is
+  listed where `asksWanted` holds (root, interactive, not `NoAsks`), and
+  `asksOn` is that plus the tool in the set, so the two cannot differ.
+- **Pinned in the prompt.** The model reads the intake (its newest 5
+  messages, 200 runes each, and `+N earlier`) and the open asks (up to 12,
+  number and title; done and filed not listed) in one block, `Open asks:`:
+  an aside keyed `asks` as each turn begins (beside the plan's line,
+  `planTurnLine`), and in what a fold keeps: the fold's ask is the ask the
+  turn works, with its newest 3 merged messages and the intake's newest
+  (`+N earlier` past that), remembered for the note after the fold and the
+  summary check (`askNow`), and the note after a fold prints the block. One
+  system line (300 bytes): acknowledge the intake, mark each ask done as it
+  finishes, and file one not finished this turn (deferred, waiting, a list
+  of later items) as `plan_add` nodes marked filed with them, so nothing
+  asked is lost (USER: "keep track of delayed user asks with the plan
+  tool"). Cost per request: the 300-byte line and 911-byte tool def, against
+  1,816 bytes of tool def before; per turn the block (175 bytes for one ask
+  and an intake of 8 messages), against the plan board's line per ask node
+  and the check's 300-rune quote of each open ask.
 - **The turn-end check** (`idleAsks`, in `idlecheck.go`'s note), in a turn
-  the person started only: the intake while it has messages, and each ask
-  the turn touched (a plan change under it, or merged into) that the model
-  did not mark in the turn; nothing else, and nothing when there is
-  nothing. 123 bytes for an intake of one message, about 60 plus the title
-  per ask. Asks left the open-node list and its 300-rune quote.
+  the person started only: the intake while it has messages, each ask the
+  turn touched (by the tool, or a plan change to a node that serves it)
+  and did not mark in the turn, and, once, an ask left open and untouched
+  for 5 of the person's turns (`still open: N …` — file it, mark it, or keep
+  it). Nothing when there is nothing. 123 bytes for an intake of one
+  message, about 25 plus the title per ask.
 - **Automatic rounds** never grow the intake (not the person's). They may
   use the tool, unprompted: acknowledging and closing only lower the open
-  asks, which tightens the automatic-turn budget ("Unrequested turns");
-  opening work is what that decision bounds, and this opens none. The
-  intake counts as an open ask for the budget and the network wait.
-- **Shown.** dund's plan event carries each ask node's `ask` (state, when,
-  `working`, `filed`) and the `intake`. Only the ask the turn works (the
-  intake until acknowledged, then the first open ask the call made or
-  merged into) is `working`; the TUI spins it while a turn runs, other open
-  asks show `open · <age>`. The intake is one row above the asks,
-  `▸ new · 3 messages · "the tools and stubs dir…" +2`. Done and filed asks
-  fold into one row, `▸ N done · M filed`, that opens: in /plan (a closed
-  ask is cut from the nodes that need it, which show as roots) and in
-  /journal (the entries' `outcome`). Mobile renders the same; web is the
-  TUI's pty.
+  asks, which tightens the automatic-turn budget ("Unrequested turns").
+  Only the intake and an open ask the person's last 5 turns touched hold
+  the budget off; an ask left open stops counting, so an open ask never
+  disables it for good. The network wait resumes the intake (one id per
+  intake) and the open asks not blocked, each counted on its own.
+- **Shown.** dund's plan event carries the ledger beside the rows (`asks`,
+  `intake`; a row's `ask`). Only the ask the turn works (the intake until
+  acknowledged, then the first open ask the call made or merged into) is
+  `working`; the TUI spins it while a turn runs, other open asks show
+  `open · <age>`. /plan lists the asks on top: the intake as one row,
+  `▸ new · 3 messages · "the tools and stubs dir…" +2`, the open asks, and
+  done and filed asks in one row, `▸ N done · M filed`, that opens. /journal
+  folds done and filed ask entries the same way (the entries' `outcome`).
+  Mobile renders the same; web is the TUI's pty; `dun ps` and `dun_list`
+  show the newest open ask (`AskBrief`) before the plan's first line.
+- **Old sessions** are moved into the ledger on first use (`asksMigrate`):
+  each ask node leaves the graph, its state goes to the record, a node that
+  needed it serves it, and closed ones get no second entry. Chosen over
+  leaving them as plain nodes: those would stay 14 `ask:` roots nobody
+  closes.
 - **"Current ask: continue"** was the fold's node (`fold.go` `planAsk`): one
   plan node holding the latest user message, which a fold copies into its
-  summary. Where asks are kept the fold now takes the ask from the asks
-  (the one the turn works, with what was merged, or the intake) and writes
-  no node; an open one from before is dropped on the first message.
+  summary. Where asks are kept the fold takes the ask from the ledger and
+  writes no node; an open one from before is dropped.
 
 ## dund's HTTP listener: runtime, one listener, chooser (USER 2026-11-17)
 

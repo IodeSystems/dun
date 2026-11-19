@@ -118,10 +118,12 @@ use `/journal view <n>`. Kept in `<session>.journal.jsonl`.
 
 **Asks.** Each message the person types grows the intake, one ask not yet
 acknowledged (one row on `/plan`). The model makes asks of it with the `asks` tool:
-split into top-level plan nodes `ask: <title>`, merged into the ask it continues, or
-closed at once; it marks asks done, filed (with plan node ids) or open, several in a
-call. The turn-end check of a person's turn names the intake and the touched asks
-not marked. Done and filed asks fold into one row. What each turn did — files
+split into asks with short titles, merged into the ask it continues, or closed at
+once; it marks asks done, filed (with plan node ids), blocked or open, several in a
+call. Asks are dun's own ledger, not plan nodes: the model reads the open ones in a
+block as each turn begins and after a fold, and a plan node can serve an ask (`ask N`
+on /plan). The turn-end check of a person's turn names the intake and the touched
+asks not marked. Done and filed asks fold into one row. What each turn did — files
 (+/− lines), commits, commands (exit, time), background jobs, sub-agents, tool errors,
 tokens, cost, wall time, interrupted — is recorded from the turn's tool events, with
 no model call, and goes to the asks open during it (to the one the turn's plan
