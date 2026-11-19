@@ -1275,6 +1275,58 @@ weeks; the version was checked only in `dun doctor` and `dun tools`.
   so the service's PATH no longer matters for these tools; doctor's
   service-PATH warning is kept for git only.
 
+## Model tiers (USER 2026-11-18)
+
+The `agent` tool took a raw model id per child, with no guidance on which
+model fits which work, and every side call ran on the session's model.
+Code: `internal/dunconfig/tiers.go` (resolution), `internal/harness/tiers.go`
+(spawns and side calls), `cmd/dun/tiers.go` (wiring, doctor).
+
+- **Three fixed tiers: fast, work, think.** `"tiers": {"fast": {"provider",
+  "model", "effort", "use"}, …}` and `"default_tier"` in
+  `$DUN_HOME/config.json`, beside `facets` (the file that holds the
+  providers a tier names; `default_via` is in mcp.json, which holds no
+  models). Shipped `use` texts: fast "mechanical work (renames, formatting,
+  file operations, summarizing given text; no judgment)", work "scoped
+  research, code reading, single-area fixes", think "planning, tradeoffs,
+  architecture, review".
+- **A repo narrows only the guidance.** A repo's dun.json layers (the
+  same files as `files` and `rag`) may set `tiers.<name>.use` and
+  `default_tier`. A provider, model or effort there is ignored and dun
+  doctor names it: a committed file does not pick what a machine pays for.
+- **Precedence (standards CFG-3).** Field by field as facets: flag
+  (`--tier-fast`/`--tier-work`/`--tier-think`, `[provider/]model`) > env
+  (`DUN_TIER_FAST`…) > config. default_tier: `--default-tier` >
+  `DUN_DEFAULT_TIER` > the repo's > config's > work. Like `--child-model`,
+  the tier flags are not among dund's allowed engine flags.
+- **Agent tool.** A `tier` enum param, and one line per tier in the
+  description (its `use` and the model it resolves to). A `model` given
+  overrides the tier, effort included; the tier's effort applies unless the
+  call gives `effort`. A tier with no model runs on the child default
+  (facets.child, `--child-model`, else the session's model). With no tier
+  naming a model the param and the lines are left out: the tool is byte for
+  byte as before (3473 bytes in the test; three tiers with the shipped texts
+  add 509).
+- **Side calls.** `"side_calls": {"<kind>": "<tier>|session"}` in
+  config.json. Defaults: suggest, fold and remember `session`; plan_summary,
+  journal, worklog, commit, rephrase and rules `fast`; rescue, learn and
+  repaint `work`. A tier with no model, or a client that cannot be built,
+  is the runner the call used before. Side calls take the tier's model, not
+  its effort: each sets its own options (fold turns thinking off).
+- **Why fold, suggest and remember stay on the session's model.** They send
+  the session's prompt-cache prefix and its history (fold since
+  SessionPrefix; suggest and remember are forks of the turn's prefix). The
+  cache hits only on the model that wrote it, so on a tier model they would
+  read the whole history uncached, and the history may not fit a smaller
+  model's window. The proposal had suggest on fast; that is one
+  `side_calls` line for a user whose fast model is cheap enough to pay it.
+- **Shown.** A child a tier picked the model of carries the tier: the
+  sub-agent strip (`#2 fast running`), its report and the agents pane
+  (`fast: model`), the sidecar a resume reads, and `dun ps` (the session's
+  label and its tree's rows). `/model` lists the tiers and what each
+  resolves to; `dun doctor` lists the tiers, the default, each side call's
+  tier and what it runs on, and the warnings.
+
 ## Release updates
 
 - **para shares dun's signing key (Carl, 2026-11-10); manifests are bound to
