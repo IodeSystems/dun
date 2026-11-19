@@ -154,6 +154,10 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "watch" {
 		os.Exit(watchCmd(os.Args[2:], os.Stdout, os.Stderr))
 	}
+	// `dun errors`: the turn errors kept beside the sessions (errorscmd.go).
+	if len(os.Args) > 1 && os.Args[1] == "errors" {
+		os.Exit(errorsCmd(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	// `dun tmux`: the tmux.conf lines that show dun's window mark (tmux.go).
 	if len(os.Args) > 1 && os.Args[1] == "tmux" {
 		os.Exit(tmuxCmd(os.Stdout, os.Getenv("TMUX") != "", os.Getenv("LC_TERMINAL") == "iTerm2", execTmuxQuery))

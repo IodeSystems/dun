@@ -263,6 +263,11 @@ func toolLOD() map[string]agent.LODKeep {
 	}
 }
 
+// foldKeepPct is the share of the target a fold leaves the prompt at: the
+// newest entries stay verbatim up to it, and only the oldest are folded (USER
+// 2026-11-18: fold only to ~55% of target). docs/compaction.md has the why.
+const foldKeepPct = 55
+
 // shaperPolicy is dun's shaping policy for a window (0 = not yet known).
 //
 // Assembled field by field rather than from agent.PolicyFor, because PolicyFor
@@ -284,6 +289,7 @@ func shaperPolicy(window int, foldUser bool) agent.ShaperPolicy {
 		LODTruncateAboveChars:  lodChars(), // /context config --tool-lod
 		PreserveLastMessages:   6,
 		PreserveLastToolCalls:  4,
+		FoldKeepPct:            foldKeepPct,
 		// One result, wherever it sits: LOD skips the preserved tail, so a huge
 		// recent result is sent whole every round until it ages out. exec clips
 		// at 20k itself (execInlineMax); node_read and MCP results did not.

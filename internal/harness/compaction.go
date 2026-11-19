@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/agent"
+	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/tokenmeter"
 )
 
@@ -13,7 +14,9 @@ import (
 type CompactionNote struct {
 	Subsumed      int    // entries folded into the summary
 	TokensBefore  int    // estimated active-window tokens before
-	TokensAfter   int    // and after
+	TokensAfter   int    // and after: what the next build sends (LOD-rendered)
+	Kept          int    // the newest entries kept verbatim
+	KeptTokens    int    // and their tokens, without LOD
 	Summary       string // the summary that replaced them
 	Turn          int    // how many folds this turn — >1 is thrashing
 	SinceLastSecs int    // seconds since the previous fold (0 = first)
@@ -22,8 +25,13 @@ type CompactionNote struct {
 
 // String renders the note as one reviewable line.
 func (n CompactionNote) String() string {
-	s := fmt.Sprintf("compacted %d entries: %d → %d tokens (saved %d)",
-		n.Subsumed, n.TokensBefore, n.TokensAfter, n.TokensBefore-n.TokensAfter)
+	s := fmt.Sprintf("compacted %d entries", n.Subsumed)
+	if n.Kept > 0 {
+		s += fmt.Sprintf(", kept %d verbatim (%s)", n.Kept, numfmt.TokN(n.KeptTokens))
+	}
+	// The arrow ends at TokensAfter, not agentkit's TokensAfterFull (the
+	// window without LOD): TokensAfter is what the next build sends.
+	s += fmt.Sprintf(": %d → %d tokens (saved %d)", n.TokensBefore, n.TokensAfter, n.TokensBefore-n.TokensAfter)
 	if n.Cause != "" {
 		s += " · " + n.Cause
 	}
@@ -118,6 +126,8 @@ func (h *Harness) noteCompactionCause(ci agent.CompactionInfo, cause foldCause) 
 		Subsumed:     ci.SubsumedCount,
 		TokensBefore: ci.TokensBefore,
 		TokensAfter:  ci.TokensAfter,
+		Kept:         ci.KeptCount,
+		KeptTokens:   ci.KeptTokens,
 		Summary:      ci.Summary,
 		Turn:         h.compactTurn,
 	}
