@@ -287,11 +287,32 @@ func (r RoleResolver) child(t string, arg RoleArg, noTier bool) RoleChoice {
 	case r.Cfg.ChildEffort != "":
 		c.Effort.Wanted, c.EffortSource = r.Cfg.ChildEffort, orStr(r.Cfg.ChildEffortSource, "facets.child")
 	case onTier && roleDefaults[ChildRole(t)] != "":
-		c.Effort.Wanted, c.EffortSource = roleDefaults[ChildRole(t)], srcDefault+" (tier "+t+")"
+		c.Effort.Wanted, c.EffortSource = roleDefaults[ChildRole(t)], tierDefaultSource(t)
 	default:
 		c.EffortSource = srcInherit
 	}
 	return c
+}
+
+// tierDefaultSource is the source label of tier t's built-in effort:
+// "tier default (fast→lowest)".
+func tierDefaultSource(t string) string {
+	return "tier default (" + t + "→" + roleDefaults[ChildRole(t)] + ")"
+}
+
+// TierDefaultNotes are the start notes for tiers whose spawns now take the
+// tier's built-in effort: a configured tier with a model and no effort, which
+// before roles inherited the saved /effort level. One per tier, said once
+// at engine start.
+func (r RoleResolver) TierDefaultNotes() []string {
+	var out []string
+	for _, t := range TierNames {
+		c := r.child(t, RoleArg{}, false)
+		if c.EffortSource == tierDefaultSource(t) {
+			out = append(out, fmt.Sprintf("tier %s (%s) has no effort set: its spawns run at %s, the tier's default (before, the saved /effort level); set tiers.%s.effort to choose", t, c.Model, c.Effort.Wanted, t))
+		}
+	}
+	return out
 }
 
 // side is side call kind: its side_calls tier's model, else the session's;

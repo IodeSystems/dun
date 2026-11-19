@@ -15,13 +15,17 @@
             "type": "boolean"
           },
           "effort": {
-            "description": "how much this child thinks before it answers: off is fastest, high thinks as long as it needs, default leaves it to the server",
+            "description": "how much this child thinks before it answers: none is fastest, max thinks most, lowest is the least the model allows, default leaves it to the server",
             "enum": [
               "default",
-              "off",
+              "none",
+              "minimal",
               "low",
               "medium",
-              "high"
+              "high",
+              "xhigh",
+              "max",
+              "lowest"
             ],
             "type": "string"
           },
@@ -88,13 +92,17 @@
             "type": "boolean"
           },
           "effort": {
-            "description": "how much this child thinks before it answers: off is fastest, high thinks as long as it needs, default leaves it to the server",
+            "description": "how much this child thinks before it answers: none is fastest, max thinks most, lowest is the least the model allows, default leaves it to the server",
             "enum": [
               "default",
-              "off",
+              "none",
+              "minimal",
               "low",
               "medium",
-              "high"
+              "high",
+              "xhigh",
+              "max",
+              "lowest"
             ],
             "type": "string"
           },

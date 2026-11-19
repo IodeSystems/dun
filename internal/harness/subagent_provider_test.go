@@ -177,7 +177,7 @@ func TestSubAgent_OwnEffort(t *testing.T) {
 func TestAgentToolDef_Effort(t *testing.T) {
 	td := agentToolDef("", "", EffortLow, nil, nil, "")
 	p := td.Function.Parameters.(map[string]any)["properties"].(map[string]any)["effort"].(map[string]any)
-	if strings.Join(p["enum"].([]string), ",") != "default,off,low,medium,high" {
+	if strings.Join(p["enum"].([]string), ",") != "default,none,minimal,low,medium,high,xhigh,max,lowest" {
 		t.Errorf("effort enum %v", p["enum"])
 	}
 	if !strings.Contains(td.Function.Description, "Default effort: low.") {

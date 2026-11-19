@@ -645,7 +645,7 @@ func (h *Harness) spawnAgentFor(ctx context.Context, prompt, tier, provider, mod
 	if effort != "" {
 		e, ok := NormalizeEffort(effort)
 		if !ok {
-			return nil, fmt.Errorf("effort %q: want %s (off is none)", effort, strings.Join(EffortLevels, ", "))
+			return nil, fmt.Errorf("effort %q: want %s", effort, EffortChoices)
 		}
 		effort = e
 	}
@@ -654,6 +654,20 @@ func (h *Harness) spawnAgentFor(ctx context.Context, prompt, tier, provider, mod
 	arg := RoleArg{Provider: provider, Model: model, Effort: effort}
 	role := rr.Resolve(ChildRole(tier), arg)
 	tierName := strings.TrimPrefix(role.Role, "child:")
+	// A level from the layers below the call (--child-effort, facets.child,
+	// a tier) that is no level is refused, not dropped: cmd/dun warned at
+	// start, and a typo must not quietly mean the saved level.
+	checkEffort := func(c RoleChoice) error {
+		if w := c.Effort.Wanted; w != "" {
+			if _, ok := NormalizeEffort(w); !ok {
+				return fmt.Errorf("effort %q (%s): want %s", w, c.EffortSource, EffortChoices)
+			}
+		}
+		return nil
+	}
+	if err := checkEffort(role); err != nil {
+		return nil, err
+	}
 	// A tier that cannot be served (its provider not logged in, no client
 	// for its model, a model the profile knows takes no tool calls) is the
 	// child default for this spawn, said in the result (note): one bad tier
@@ -676,6 +690,9 @@ func (h *Harness) spawnAgentFor(ctx context.Context, prompt, tier, provider, mod
 	}
 	if note != "" {
 		role = rr.ChildDefault(tierName, RoleArg{Effort: effort})
+		if err := checkEffort(role); err != nil {
+			return nil, err
+		}
 		if run, err = h.clientFor(role.Provider, role.Model); err != nil {
 			return nil, fmt.Errorf("%s; the child default: %w", note, err)
 		}
@@ -1019,7 +1036,7 @@ func (h *Harness) restoreAgents() (resumed []*subAgent, cut map[int]bool) {
 		rec := loadAgentState(path)
 		sa := &subAgent{
 			num: num, parent: h, state: agentStopped, restore: path,
-			prompt: rec.Prompt, iso: loadIsolation(path), tier: rec.Tier, model: rec.Model, provider: rec.Provider, effort: rec.Effort,
+			prompt: rec.Prompt, iso: loadIsolation(path), tier: rec.Tier, model: rec.Model, provider: rec.Provider, effort: loadedEffort(rec.Effort),
 			callID: rec.CallID,
 		}
 		if sa.prompt == "" {
@@ -1338,11 +1355,9 @@ func roleSystem(child bool) string {
 
 // ── the tools ───────────────────────────────────────────────────────
 
-// agentEffortEnum is the agent tool's effort enum: the five levels it had
-// before agentkit's scale, so the tool is byte for byte as before (it is
-// sent on every round). off is read as none; any level of EffortLevels is
-// taken if a model sends one.
-var agentEffortEnum = []string{EffortDefault, effortAlias, EffortLow, EffortMedium, EffortHigh}
+// agentEffortEnum is the agent tool's effort enum: every level, and lowest
+// (the least the child's model allows). off, the old name, is still read.
+var agentEffortEnum = append(append([]string(nil), EffortLevels...), EffortLowest)
 
 // agentToolDef is the agent tool. providers are the logged-in ones; with
 // more than one, a spawn may name another. tiers (tiers.go) add the tier
@@ -1380,7 +1395,7 @@ func agentToolDef(defaultModel, defaultProvider, defaultEffort string, providers
 		"properties": map[string]any{
 			"model": map[string]any{"type": "string", "description": "run this child on a specific model"},
 			"effort": map[string]any{"type": "string", "enum": agentEffortEnum,
-				"description": "how much this child thinks before it answers: off is fastest, high thinks as long as it needs, default leaves it to the server"},
+				"description": "how much this child thinks before it answers: none is fastest, max thinks most, lowest is the least the model allows, default leaves it to the server"},
 			"wait": map[string]any{"type": "boolean", "description": "block until it answers, instead of being notified later"},
 			"node": map[string]any{"type": "string", "description": "the plan node a new child works: a ready one (todo, no child on it, " +
 				"its needs done). Its title, details and done_when are the child's brief; it owns the node alone and owes you a " +

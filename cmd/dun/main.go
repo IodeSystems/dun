@@ -433,21 +433,15 @@ func main() {
 		engineProvider = p.Name
 	}
 	// The session's effort: the saved /effort level, else facets.main's.
-	var mainEffort string
-	if _, saved := harness.SavedEffort(); !saved {
-		if l, ok := harness.NormalizeEffort(mainRole.Effort); ok && l != "" {
-			mainEffort = l
-			enginecmd.EffortLevel = mainEffort
-		}
-	}
 	// The child default's effort, off read as none, and where it came from
-	// (the role table, harness/roles.go).
-	childEffortLevel, childEffortSrc := "", ""
-	if l, ok := harness.NormalizeEffort(childRole.Effort); ok {
-		childEffortLevel, childEffortSrc = l, "facets.child"
-		if *childEffort != "" {
-			childEffortSrc = "--child-effort"
-		}
+	// (the role table, harness/roles.go); a value that is no level is said
+	// now (dun/tiers.go).
+	el := resolveEfforts(mainRole, childRole, *childEffort, os.Stderr)
+	mainEffort, childEffortLevel, childEffortSrc := el.main, el.child, el.childSrc
+	if _, saved := harness.SavedEffort(); saved {
+		mainEffort = ""
+	} else if mainEffort != "" {
+		enginecmd.EffortLevel = mainEffort
 	}
 	// Dev self-update: if this is a source-stamped build and the tree changed,
 	// rebuild in place and re-exec the fresh binary. Skipped for spawned children
@@ -1063,6 +1057,11 @@ func main() {
 	}
 
 	dropKeyEnv(fc, effKey)
+	// A configured tier whose spawns now take the tier's built-in effort
+	// (fast lowest, think high) where they inherited /effort: said once, now.
+	for _, n := range (harness.RoleResolver{Cfg: cfg}).TierDefaultNotes() {
+		fmt.Fprintln(os.Stderr, "dun: "+n)
+	}
 	h, err := harness.Start(ctx, cfg)
 	if h != nil {
 		started.Store(h)

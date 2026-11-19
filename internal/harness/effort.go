@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,14 +61,34 @@ var EffortAbout = func() map[string]string {
 }()
 
 // NormalizeEffort is l as a level: trimmed, lower case, off read as none.
-// False when it is no level.
+// lowest (a role intent, effortclamp.go) is taken too: the flags, the
+// config and the agent tool offer it. False when it is neither.
 func NormalizeEffort(l string) (string, bool) {
 	l = strings.ToLower(strings.TrimSpace(l))
 	if l == effortAlias {
 		l = EffortOff
 	}
-	return l, validEffort(l)
+	return l, validEffort(l) || l == EffortLowest
 }
+
+// loadedEffort is a child's effort as its sidecar kept it (agentRecord),
+// normalized: an older sidecar's off is none, so the child's rounds and its
+// /effort none note see it. A value that is no level is the saved level
+// (""), logged.
+func loadedEffort(l string) string {
+	if l == "" {
+		return ""
+	}
+	n, ok := NormalizeEffort(l)
+	if !ok {
+		log.Printf("dun: a sub-agent's saved effort %q is no level (%s); it resumes on the saved /effort level", l, EffortChoices)
+		return ""
+	}
+	return n
+}
+
+// EffortChoices names what NormalizeEffort takes, for an error.
+var EffortChoices = strings.Join(EffortLevels, ", ") + ", lowest (off is none)"
 
 // effortFile is where the level is kept.
 func effortFile() string { return filepath.Join(DunHome(), "effort.json") }
@@ -109,7 +130,7 @@ func validEffort(l string) bool {
 func (h *Harness) SetEffort(level string) error {
 	level, ok := NormalizeEffort(level)
 	if !ok {
-		return fmt.Errorf("effort %q: want %s (off is none)", level, strings.Join(EffortLevels, ", "))
+		return fmt.Errorf("effort %q: want %s", level, EffortChoices)
 	}
 	b, _ := json.Marshal(map[string]string{"level": level})
 	if err := os.MkdirAll(DunHome(), 0o700); err != nil {

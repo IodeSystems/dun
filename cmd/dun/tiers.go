@@ -63,6 +63,41 @@ func tiersProto(set dunconfig.TierSet, roles []harness.RoleChoice) []proto.TierI
 	return out
 }
 
+// effortLayers are the effort layers cmd/dun hands the role resolver.
+type effortLayers struct {
+	main, child, childSrc string
+}
+
+// resolveEfforts reads facets.main's and the child default's effort (flag
+// --child-effort, else facets.child), off read as none. A value that is no
+// level is said on w: main's is ignored, as before; the child's is kept, so
+// a spawn that would take it refuses it (harness spawnAgentFor) rather than
+// quietly running on the saved level.
+func resolveEfforts(main, child dunconfig.Resolved, childFlag string, w io.Writer) effortLayers {
+	var e effortLayers
+	if main.Effort != "" {
+		if l, ok := harness.NormalizeEffort(main.Effort); ok {
+			e.main = l
+		} else {
+			fmt.Fprintf(w, "dun: facets.main.effort %q is not a level (%s); ignored\n", main.Effort, dunconfig.EffortWords)
+		}
+	}
+	if child.Effort == "" {
+		return e
+	}
+	e.childSrc = "facets.child"
+	if childFlag != "" {
+		e.childSrc = "--child-effort"
+	}
+	l, ok := harness.NormalizeEffort(child.Effort)
+	if !ok {
+		fmt.Fprintf(w, "dun: %s %q is not a level (%s); a spawn that takes it is refused\n", e.childSrc, child.Effort, dunconfig.EffortWords)
+		l = strings.TrimSpace(child.Effort)
+	}
+	e.child = l
+	return e
+}
+
 // rolesResend is harness.OnCapsChanged's func for the engine: the settings
 // event and the command list (the /effort picker's marks) again when the
 // role table changed since the last it sent. An effort translation can come
@@ -70,16 +105,18 @@ func tiersProto(set dunconfig.TierSet, roles []harness.RoleChoice) []proto.TierI
 func rolesResend(emit func(any), commands func() any) func() {
 	var mu sync.Mutex
 	last := ""
+	// Built, compared and sent under one lock: two changes in quick
+	// succession (each run on its own goroutine) cannot send the older table
+	// after the newer one.
 	return func() {
+		mu.Lock()
+		defer mu.Unlock()
 		ev := settingsEvent()
 		b, _ := json.Marshal(ev.Tiers)
-		mu.Lock()
-		same := string(b) == last
-		last = string(b)
-		mu.Unlock()
-		if same {
+		if string(b) == last {
 			return
 		}
+		last = string(b)
 		emit(ev)
 		emit(commands())
 	}
@@ -132,29 +169,39 @@ func (d *doctor) tiers() {
 	}
 	d.add("ok", "role", harness.RoleHeader(), "")
 	main := cfg.Resolve(dunconfig.FacetMain, modelFlags, os.Getenv)
-	for _, r := range doctorRoles(cfg, set, sides).All() {
+	var bad strings.Builder
+	rr := doctorRoles(cfg, set, sides, &bad)
+	for _, r := range rr.All() {
 		d.add("ok", "role", r.Line(main.Model), "")
+	}
+	for _, n := range rr.TierDefaultNotes() {
+		d.add("ok", "role", n, "")
+	}
+	for _, l := range strings.Split(strings.TrimSpace(bad.String()), "\n") {
+		if l != "" {
+			d.add("warn", "role", strings.TrimPrefix(l, "dun: "), "set a level in "+dunconfig.ConfigPath()+" or the flag")
+		}
 	}
 }
 
 // doctorRoles is the role resolver over the config as an engine started
 // here would have it, its profiles from the stored capability records (a
-// client is built for each model, no request is made).
-func doctorRoles(fc dunconfig.DunConfig, set dunconfig.TierSet, sides map[string]string) harness.RoleResolver {
+// client is built for each model, no request is made). Effort values that
+// are no level are said on warn.
+func doctorRoles(fc dunconfig.DunConfig, set dunconfig.TierSet, sides map[string]string, warn io.Writer) harness.RoleResolver {
 	main := fc.Resolve(dunconfig.FacetMain, modelFlags, os.Getenv)
 	child := fc.Resolve(dunconfig.FacetChild, modelFlags, os.Getenv)
 	cfg := harness.Config{Endpoint: harness.Endpoint{URL: main.URL, Model: main.Model}, Provider: main.Provider, MainSource: main.Source,
 		ChildModel: child.Model, ChildProvider: child.Provider, ChildSource: child.Source,
 		Tiers: harnessTiers(set), DefaultTier: set.Default, SideCallTiers: sides, SideCallSources: sideCallSources(fc)}
-	if l, ok := harness.NormalizeEffort(child.Effort); ok {
-		cfg.ChildEffort, cfg.ChildEffortSource = l, "facets.child"
-	}
+	el := resolveEfforts(main, child, modelFlags[dunconfig.FacetChild].Effort, warn)
+	cfg.ChildEffort, cfg.ChildEffortSource = el.child, el.childSrc
 	saved, isSaved := harness.SavedEffort()
 	mainEffort, mainSrc := saved, "/effort"
 	if !isSaved {
 		mainEffort, mainSrc = harness.EffortDefault, "default"
-		if l, ok := harness.NormalizeEffort(main.Effort); ok && l != "" {
-			mainEffort, mainSrc = l, "facets.main"
+		if el.main != "" {
+			mainEffort, mainSrc = el.main, "facets.main"
 		}
 	}
 	profile := func(provider, model string) harness.ModelProfile {

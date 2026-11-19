@@ -98,6 +98,8 @@ func TestAgentToolDef_Tiers(t *testing.T) {
 // With no tier naming a model, the agent tool is main's from before tiers,
 // byte for byte: testdata/agent_tool_notier.golden.json is main's
 // agentToolDef output (87e2564), written by that tree's code, not this one.
+// Changed on purpose once since (2026-11-18, roles): the effort enum is
+// agentkit's full scale plus lowest, +75 bytes (3473 to 3548 plain).
 func TestAgentToolDef_NoTiersMatchesMain(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join("testdata", "agent_tool_notier.golden.json"))
 	if err != nil {

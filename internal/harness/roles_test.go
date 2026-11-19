@@ -76,7 +76,7 @@ func TestResolve_Precedence(t *testing.T) {
 	}{
 		{"main: /effort", RoleMain, RoleArg{}, nil, want{"", srcSession, "", EffortHigh, srcEffort}},
 		{"main: the call", RoleMain, RoleArg{Effort: EffortLow}, nil, want{"", srcSession, "", EffortLow, srcCall}},
-		{"fast: built-in lowest", ChildRole(TierFast), RoleArg{}, nil, want{"small", "tier fast · flag", TierFast, EffortLowest, "default (tier fast)"}},
+		{"fast: built-in lowest", ChildRole(TierFast), RoleArg{}, nil, want{"small", "tier fast · flag", TierFast, EffortLowest, "tier default (fast→lowest)"}},
 		{"think: tier's effort over the built-in high", ChildRole(TierThink), RoleArg{}, nil, want{"big-think", "tier think · config", TierThink, EffortMedium, "tiers.think.effort"}},
 		{"think: the call's effort", ChildRole(TierThink), RoleArg{Effort: EffortOff}, nil, want{"big-think", "tier think · config", TierThink, EffortOff, srcCall}},
 		{"work: no model is the child default, inheriting", ChildRole(TierWork), RoleArg{}, nil, want{"child-m", "facets.child · config", "", "", srcInherit}},
@@ -87,7 +87,7 @@ func TestResolve_Precedence(t *testing.T) {
 			want{"big-think", "tier think · config", TierThink, EffortMedium, "tiers.think.effort"}},
 		{"facets.child's effort over the built-in", ChildRole(TierFast), RoleArg{}, func(c *Config) { c.ChildEffort, c.ChildEffortSource = EffortLow, "facets.child" },
 			want{"small", "tier fast · flag", TierFast, EffortLow, "facets.child"}},
-		{"the default tier", "child:", RoleArg{}, func(c *Config) { c.DefaultTier = TierFast }, want{"small", "tier fast · flag", TierFast, EffortLowest, "default (tier fast)"}},
+		{"the default tier", "child:", RoleArg{}, func(c *Config) { c.DefaultTier = TierFast }, want{"small", "tier fast · flag", TierFast, EffortLowest, "tier default (fast→lowest)"}},
 		{"journal on its side_calls tier", "journal", RoleArg{}, nil, want{"small", "side_calls fast · config", TierFast, "", ""}},
 		{"fold: lowest on its tier", "fold", RoleArg{}, nil, want{"small", "side_calls fast · default", TierFast, EffortLowest, srcDefault}},
 		{"rescue: the session's", "rescue", RoleArg{}, nil, want{"", srcSession, "", EffortLowest, srcDefault}},
@@ -302,5 +302,54 @@ func TestRoles_NoConfigSendsAsBefore(t *testing.T) {
 		if o.Effort != w || o.ReasoningBudgetTokens != nil {
 			t.Errorf("%s sends %+v", k, o)
 		}
+	}
+}
+
+// lowest is a level wherever one is taken; a typo from the child default
+// is refused at spawn, not dropped; a resumed child's off is none.
+func TestEffort_LowestTypoAndResume(t *testing.T) {
+	if l, ok := NormalizeEffort(" Lowest "); !ok || l != EffortLowest {
+		t.Errorf("lowest: %q %v", l, ok)
+	}
+	if _, ok := NormalizeEffort("hgih"); ok {
+		t.Error("a typo was taken")
+	}
+	if loadedEffort("off") != EffortOff || loadedEffort("hgih") != "" || loadedEffort("") != "" {
+		t.Errorf("loaded: %q %q", loadedEffort("off"), loadedEffort("hgih"))
+	}
+	var asked []askedFor
+	h := startParentOn(t, &scriptRunner{rounds: []roundFn{textRound("done")}}, &asked)
+	h.cfg.ChildEffort, h.cfg.ChildEffortSource = "hgih", "--child-effort"
+	if _, err := h.spawnAgentFor(context.Background(), "x", "", "", "", "", "", "", ""); err == nil || !strings.Contains(err.Error(), `effort "hgih" (--child-effort)`) {
+		t.Errorf("typo spawn: %v", err)
+	}
+	h.cfg.ChildEffort = "lowest"
+	sa, err := h.spawnAgentFor(context.Background(), "x", "", "", "", "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitIdle(t, sa)
+	if sa.effort != EffortOff {
+		t.Errorf("lowest on a fake child: %q", sa.effort)
+	}
+}
+
+// A configured fast or think tier with no effort now takes the tier's
+// default: the source says so, and one start note per such tier.
+func TestTierDefaultNotes(t *testing.T) {
+	r := RoleResolver{Cfg: Config{Tiers: []Tier{
+		{Name: TierFast, Model: "small"},
+		{Name: TierWork, Model: "w"},
+		{Name: TierThink, Model: "big", Effort: EffortMedium},
+	}}}
+	notes := r.TierDefaultNotes()
+	if len(notes) != 1 || !strings.HasPrefix(notes[0], "tier fast (small) has no effort set: its spawns run at lowest") {
+		t.Errorf("notes %q", notes)
+	}
+	if c := r.Resolve(ChildRole(TierFast), RoleArg{}); c.EffortSource != "tier default (fast→lowest)" {
+		t.Errorf("source %q", c.EffortSource)
+	}
+	if n := (RoleResolver{}).TierDefaultNotes(); len(n) != 0 {
+		t.Errorf("no tiers: %q", n)
 	}
 }

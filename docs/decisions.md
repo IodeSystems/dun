@@ -1369,7 +1369,7 @@ Code: `internal/dunconfig/tiers.go` (resolution), `internal/harness/tiers.go`
   (facets.child, `--child-model`, else the session's model). With no tier
   naming a model the param and the lines are left out: the tool is byte for
   byte as before, checked against main's output in
-  `harness/testdata/agent_tool_notier.golden.json` (3473 bytes; three tiers
+  `harness/testdata/agent_tool_notier.golden.json` (3473 bytes, 3548 since the roles enum; three tiers
   with the shipped texts add 509).
 - **Side calls.** `"side_calls": {"<kind>": "<tier>|session"}` in
   config.json. Defaults: suggest, fold, remember and rescue `session`;
@@ -1453,16 +1453,27 @@ rescue), and agentkit's capability record on the wire. Code:
   max; off is read as none, so an old effort.json still works. The picker
   marks a level the session's model does not take, with the reason;
   `/status` keeps the saved level and says what is sent. The agent tool's
-  effort enum stays the five old names (it is sent every round; any level
-  is taken). The window-derived thinking budget is still not sent (as
-  before: the level decides).
-- **Wire changes with no config:** none on a model whose record is empty.
-  On a record that says thinking-only, fold, rescue and `/effort none`
-  rounds send minimal (agentkit's lowest) from the start instead of none
-  then agentkit's rewrite. agentkit v0.35.0's own changes: OpenRouter low and
-  medium send `reasoning.effort` (no max_tokens 1024/4096), an
-  Anthropic-compatible high sends a 16k budget (dun's high sent no thinking
-  there before), and a refused level clamps lower first.
+  effort enum is the full scale plus lowest (+75 bytes on every round:
+  3473 to 3548 for the tool with no tiers; the golden changed on purpose).
+  `lowest` is taken wherever a level is (flags, facets, tiers, the agent
+  call, `/effort`). A value that is no level is said at engine start and in
+  doctor; one from `--child-effort`/facets.child is kept, so a spawn that
+  would take it is refused, as before roles, not dropped. A resumed child's
+  saved off is read as none. The window-derived thinking budget is still
+  not sent (as before: the level decides).
+- **Tier defaults change configured tiers.** A fast or think tier with a
+  model and no effort inherited `/effort` before; it now runs at lowest or
+  high. The table's source says `tier default (fast→lowest)`, and the engine
+  says it once at start (and doctor): "tier fast (m) has no effort set …".
+- **Wire changes from dun's side with no config:** none on a model whose
+  record is empty. On a record that says thinking-only, fold, rescue and
+  `/effort none` rounds send minimal (agentkit's lowest) from the start
+  instead of none then agentkit's rewrite.
+- **Wire changes from v0.35** (intended; agentkit, USER): OpenRouter low and
+  medium send `reasoning.effort` instead of max_tokens 1024/4096; an
+  Anthropic-compatible high sends a 16k thinking budget (dun's high sent no
+  thinking there before); llama.cpp none adds `reasoning_budget_tokens: 0`;
+  a refused level clamps lower first.
 - **One view.** `/model` (the roles window) and `dun doctor` show the
   table: role, model, wanted, sent, reason, sources. The settings event
   carries it in `Settings.Tiers` after the three tier rows (rows with
