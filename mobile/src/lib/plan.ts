@@ -13,13 +13,42 @@ export type PlanRow = {
   ready: boolean;
   depth: number;
   repeat: boolean;
+  /** The ask an ask node holds (proto.PlanAsk); absent on other nodes. */
+  ask?: PlanAsk;
 };
 
-export type Plan = { mode: boolean; approved: boolean; total: number; done: number; rows: PlanRow[] };
+/** state: open | blocked | done | filed | dropped; at: unix seconds. */
+export type PlanAsk = { state: string; at: number; working: boolean; filed: string[] };
+
+/** The person's messages the model has not acknowledged (proto.PlanIntake). */
+export type PlanIntake = { messages: { at: number; text: string }[]; working: boolean };
+
+export type Plan = {
+  mode: boolean;
+  approved: boolean;
+  total: number;
+  done: number;
+  rows: PlanRow[];
+  intake?: PlanIntake;
+};
 
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
 const strs = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+const obj = (v: unknown) => (v && typeof v === 'object' ? (v as Record<string, unknown>) : undefined);
+
+function parseAsk(v: unknown): PlanAsk | undefined {
+  const a = obj(v);
+  return a && { state: str(a.state) || 'open', at: num(a.at), working: a.working === true, filed: strs(a.filed) };
+}
+
+function parseIntake(v: unknown): PlanIntake | undefined {
+  const o = obj(v);
+  if (!o) return undefined;
+  const ms = (Array.isArray(o.messages) ? o.messages : []) as Record<string, unknown>[];
+  const messages = ms.map((m) => ({ at: num(m.at), text: str(m.text) }));
+  return messages.length ? { messages, working: o.working === true } : undefined;
+}
 
 export function parsePlan(ev: Record<string, unknown>): Plan {
   const rows = (Array.isArray(ev.rows) ? ev.rows : []) as Record<string, unknown>[];
@@ -28,6 +57,7 @@ export function parsePlan(ev: Record<string, unknown>): Plan {
     approved: ev.approved === true,
     total: num(ev.total),
     done: num(ev.done),
+    intake: parseIntake(ev.intake),
     rows: rows.map((r) => ({
       id: str(r.id),
       title: str(r.title),
@@ -39,8 +69,37 @@ export function parsePlan(ev: Record<string, unknown>): Plan {
       ready: r.ready === true,
       depth: num(r.depth),
       repeat: r.repeat === true,
+      ask: parseAsk(r.ask),
     })),
   };
+}
+
+/** A done, filed or dropped ask: folded into one row (askfold.go). */
+export const askClosed = (r: PlanRow) =>
+  !!r.ask && (r.ask.state === 'done' || r.ask.state === 'filed' || r.ask.state === 'dropped');
+
+/** How long ago unix second at was, short: now, 5m, 3h, 2d (askAge). */
+export function askAge(nowMs: number, at: number): string {
+  const m = Math.floor((nowMs / 1000 - at) / 60);
+  if (!at || m < 1) return 'now';
+  if (m < 60) return `${m}m`;
+  if (m < 48 * 60) return `${Math.floor(m / 60)}h`;
+  return `${Math.floor(m / 1440)}d`;
+}
+
+/** The intake's row: ▸ new · 3 messages · "the tools and stubs dir…" +2 (intakeHead). */
+export function intakeLine(i: PlanIntake): string {
+  const n = i.messages.length;
+  const first = (i.messages[0]?.text ?? '').trim().split('\n')[0] ?? '';
+  const clip = first.length > 30 ? first.slice(0, 30) + '…' : first;
+  return `▸ new · ${n} message${n === 1 ? '' : 's'} · "${clip}"` + (n > 1 ? ` +${n - 1}` : '');
+}
+
+/** The fold row's head: ▸ 3 done · 2 filed, with dropped when any. */
+export function askFoldLine(rows: PlanRow[]): string {
+  const c = { done: 0, filed: 0, dropped: 0 };
+  for (const r of rows) if (r.ask && !r.repeat && r.ask.state in c) c[r.ask.state as keyof typeof c]++;
+  return `▸ ${c.done} done · ${c.filed} filed` + (c.dropped ? ` · ${c.dropped} dropped` : '');
 }
 
 /** A status in one cell (planMark). */
@@ -82,7 +141,7 @@ export type Motion = { mark: string; tone: 'ask' | 'notice' | 'working' | 'agent
  * ? while it asks you, its colour alternating; an idle owner's are still.
  * phase counts 100 ms ticks (0 always, with reduced motion).
  */
-export function motion(r: PlanRow, live: Live): Motion {
+export function motion(r: PlanRow, live: Live, nowMs = Date.now()): Motion {
   const mark = planMark(r.status);
   const open = r.status === 'todo' || r.status === 'doing';
   const n = ownerAgent(r.owner);
@@ -91,6 +150,12 @@ export function motion(r: PlanRow, live: Live): Motion {
     if (state === 'running' && open)
       return { mark: spin[live.phase % spin.length]!, tone: 'agent', tag: `agent ${n} working` };
     return { mark, tone: 'agent', tag: `agent ${n} ${state}` };
+  }
+  // An ask moves only when it is the one the turn works (askMotion).
+  const a = r.ask;
+  if (a && !askClosed(r) && !(live.asking && a.working)) {
+    if (a.working && live.busy) return { mark: spin[live.phase % spin.length]!, tone: 'working', tag: 'working' };
+    return { mark, tone: null, tag: a.state === 'blocked' ? '' : `open · ${askAge(nowMs, a.at)}` };
   }
   if (r.status !== 'doing') return { mark, tone: null, tag: '' };
   if (live.asking) return { mark: '?', tone: Math.trunc(live.phase / 4) % 2 ? 'notice' : 'ask', tag: 'asking you' };

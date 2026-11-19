@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import { Sheet } from '@/components/header/Sheet';
@@ -5,7 +6,19 @@ import { OpenAgent } from '@/components/agents/AgentOpen';
 import { usePhase, useReducedMotion } from '@/components/header/motion';
 import { Button } from '@/components/ui';
 import { confirm } from '@/lib/confirm';
-import { droppable, modeWord, motion, ownerAgent, type Live, type Plan } from '@/lib/plan';
+import {
+  askClosed,
+  askFoldLine,
+  droppable,
+  intakeLine,
+  modeWord,
+  motion,
+  ownerAgent,
+  spin,
+  type Live,
+  type Plan,
+  type PlanRow,
+} from '@/lib/plan';
 import { font, mono, space, TOUCH, useColors, type Colors } from '@/lib/theme';
 
 const toneColor = (c: Colors, t: ReturnType<typeof motion>['tone']) =>
@@ -15,6 +28,8 @@ const toneColor = (c: Colors, t: ReturnType<typeof motion>['tone']) =>
  * The plan, as the TUI's /plan screen (planview.go): the tree with a mark per
  * status, done/total and the mode. Approve and drop are the engine's /plan
  * commands (control plan approve | drop <id>); edit and tell stay in the TUI.
+ * The person's messages not yet acknowledged are one intake row on top, and
+ * done and filed asks fold into one row that opens (askfold.go).
  */
 export function PlanSheet({
   plan,
@@ -32,7 +47,52 @@ export function PlanSheet({
   const moving = !reduced && (live.busy || live.asking || Object.values(live.agents).includes('running'));
   const phase = usePhase(moving);
   const lv: Live = { ...live, phase };
+  const [foldOpen, setFoldOpen] = useState(false);
   const approve = plan.mode && !plan.approved && plan.rows.length > 0;
+  const closed = plan.rows.filter(askClosed);
+  const intake = plan.intake;
+  const intakeWorks = !!intake?.working && live.busy;
+  const row = (r: PlanRow, i: number) => {
+    const m = motion(r, lv);
+    const done = r.status === 'done' || r.status === 'dropped';
+    return (
+      <View key={r.id + ':' + i} style={{ flexDirection: 'row', gap: space.sm, paddingLeft: r.depth * space.lg }}>
+        <Text style={{ color: toneColor(c, m.tone), fontSize: font.md, fontFamily: mono, width: font.md }}>
+          {m.mark}
+        </Text>
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text style={{ color: done ? c.muted : c.text, fontSize: font.md }}>
+            {r.title}
+            {r.repeat ? ' ↑' : ''}
+          </Text>
+          <Text style={{ color: c.muted, fontSize: font.sm }}>
+            {[
+              r.id,
+              r.ask?.state === 'filed' ? 'filed → ' + r.ask.filed.join(', ') : r.status,
+              m.tag,
+              r.waiting.length ? 'waits on ' + r.waiting.join(', ') : '',
+              r.why,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          </Text>
+          {ownerAgent(r.owner) ? <OpenAgent agent={ownerAgent(r.owner)} /> : null}
+        </View>
+        {droppable(r) && !r.repeat ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Drop ${r.id}`}
+            onPress={() =>
+              void confirm('Drop', `Drop "${r.title}" from the plan?`).then((ok) => ok && run('drop ' + r.id))
+            }
+            style={{ minHeight: TOUCH, minWidth: TOUCH, alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Text style={{ color: c.muted, fontSize: font.sm }}>Drop</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    );
+  };
   return (
     <Sheet
       title={`Plan · ${plan.done}/${plan.total} done`}
@@ -46,41 +106,25 @@ export function PlanSheet({
       }
     >
       <Text style={{ color: c.muted, fontSize: font.sm }}>plan mode {modeWord(plan)}</Text>
-      {plan.rows.map((r, i) => {
-        const m = motion(r, lv);
-        const done = r.status === 'done' || r.status === 'dropped';
-        return (
-          <View key={r.id + ':' + i} style={{ flexDirection: 'row', gap: space.sm, paddingLeft: r.depth * space.lg }}>
-            <Text style={{ color: toneColor(c, m.tone), fontSize: font.md, fontFamily: mono, width: font.md }}>
-              {m.mark}
-            </Text>
-            <View style={{ flex: 1, gap: 2 }}>
-              <Text style={{ color: done ? c.muted : c.text, fontSize: font.md }}>
-                {r.title}
-                {r.repeat ? ' ↑' : ''}
-              </Text>
-              <Text style={{ color: c.muted, fontSize: font.sm }}>
-                {[r.id, r.status, m.tag, r.waiting.length ? 'waits on ' + r.waiting.join(', ') : '', r.why]
-                  .filter(Boolean)
-                  .join(' · ')}
-              </Text>
-              {ownerAgent(r.owner) ? <OpenAgent agent={ownerAgent(r.owner)} /> : null}
-            </View>
-            {droppable(r) && !r.repeat ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Drop ${r.id}`}
-                onPress={() =>
-                  void confirm('Drop', `Drop "${r.title}" from the plan?`).then((ok) => ok && run('drop ' + r.id))
-                }
-                style={{ minHeight: TOUCH, minWidth: TOUCH, alignItems: 'center', justifyContent: 'center' }}
-              >
-                <Text style={{ color: c.muted, fontSize: font.sm }}>Drop</Text>
-              </Pressable>
-            ) : null}
-          </View>
-        );
-      })}
+      {intake ? (
+        <Text style={{ color: intakeWorks ? c.working : c.notice, fontSize: font.md }}>
+          {intakeWorks ? spin[phase % spin.length] + ' ' : ''}
+          {intakeLine(intake)}
+          {intakeWorks ? ' · working' : ''}
+        </Text>
+      ) : null}
+      {plan.rows.filter((r) => !askClosed(r)).map(row)}
+      {closed.length ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={foldOpen ? 'Hide the closed asks' : 'Show the closed asks'}
+          onPress={() => setFoldOpen(!foldOpen)}
+          style={{ minHeight: TOUCH, justifyContent: 'center' }}
+        >
+          <Text style={{ color: c.muted, fontSize: font.md }}>{askFoldLine(closed)}</Text>
+        </Pressable>
+      ) : null}
+      {foldOpen ? closed.map(row) : null}
     </Sheet>
   );
 }
