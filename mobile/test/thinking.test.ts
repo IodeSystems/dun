@@ -25,6 +25,22 @@ test.each([
   ['inside a fence it still counts', '```sh\n# Thinking: in a script\n```\nafter', true, 'in a script'],
   ['a markdown title as the fallback', '# Plan\nbody', false, 'Plan'],
   ['inner whitespace collapses', '# Thinking:  two\tspaced   words', true, 'two spaced words'],
+  ['live: the latest bold title', '**Read the config**\n\nbody\n\n**Find the bug**\nmore', true, 'Find the bug'],
+  [
+    'done, no summary: the latest bold title',
+    '**Read the config**\n\nbody\n\n**Find the bug**\nmore',
+    false,
+    'Find the bug',
+  ],
+  ['a colon inside the bold', '**Checking the exec path:**\nbody', true, 'Checking the exec path'],
+  ['a colon after the bold', '**Plan**:\nbody', true, 'Plan'],
+  ['underscores', '  __Plan__  \nbody', true, 'Plan'],
+  ['bold inside a sentence is not a title', 'I will **not** guess.\nmore', true, 'I will **not** guess.'],
+  ['two bold spans are not a title', '**a** and **b**', true, '**a** and **b**'],
+  ['a bold title still arriving', '**Read**\n\n**Find the b', true, 'Read'],
+  ['an empty bold is not a title', '****\nbody', true, '****'],
+  ['an old summary wins over a later bold title', '**a**\n# Summary: done\n**b**', false, 'done'],
+  ['bold and old headings: the latest', '# Thinking: a\n**b**', true, 'b'],
 ])('thinkHeadline: %s', (_name, text, live, want) => {
   expect(thinkHeadline(text, live)).toBe(want);
 });
@@ -56,6 +72,13 @@ test('the open header, as thinkHeader', () => {
   expect(thinkHeader(t({ text: 'a b', start: 1, end: 3001 }), 0)).toBe('✻ thought for 3s · 2 words');
   expect(thinkHeader(t({ text: 'a', start: 1, end: 2001, cut: true }), 0)).toBe('✻ interrupted after 2s · 1 words');
   expect(thinkHeader(t({ text: 'a' }), 0)).toBe('✻ thought · 1 words');
+  // A title takes the place of "thinking…" / "thought for".
+  expect(thinkHeader(t({ text: '**Checking**\nbody', start: 0, live: true }), 5000)).toBe('✻ Checking · 5s… · 2 words');
+  expect(thinkHeader(t({ text: '**Checking**', start: 1, end: 12_001 }), 0)).toBe('✻ Checking · 12s · 1 words');
+  expect(thinkHeader(t({ text: '**Checking**', start: 1, end: 3001, cut: true }), 0)).toBe(
+    '✻ Checking · ⏹ 3s · 1 words',
+  );
+  expect(thinkHeader(t({ text: '**Checking**' }), 0)).toBe('✻ Checking · 1 words');
 });
 
 const run = (evs: Record<string, unknown>[], v: View = empty) => evs.reduce(apply, v);

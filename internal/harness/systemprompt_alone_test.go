@@ -25,15 +25,15 @@ func TestSystemFor_ContainmentOnlyWhenIsolated(t *testing.T) {
 	}
 }
 
-// --non-interactive leaves out the thinking headings, which only the TUI's thought line
+// --non-interactive leaves out the thinking titles, which only the TUI's thought line
 // uses.
-func TestSystemFor_BareDropsThinkingHeadings(t *testing.T) {
+func TestSystemFor_BareDropsThinkingTitles(t *testing.T) {
 	tools := []mcpmgr.MCPTool{{Name: "eval", ServerID: mcpserver.ServerShell}}
-	if !strings.Contains(systemFor(tools, nil, nil, "", false), "# Thinking:") {
-		t.Error("a client-facing run lost the thinking headings")
+	if !strings.Contains(systemFor(tools, nil, nil, "", false), "**<what") {
+		t.Error("a client-facing run lost the thinking titles")
 	}
-	if strings.Contains(systemFor(tools, nil, nil, "", true), "# Thinking:") {
-		t.Error("--non-interactive still asks for thinking headings")
+	if strings.Contains(systemFor(tools, nil, nil, "", true), "**<what") {
+		t.Error("--non-interactive still asks for thinking titles")
 	}
 }
 
@@ -55,7 +55,7 @@ func TestSystemFor_FinishAlwaysAloneOnlyNonInteractive(t *testing.T) {
 	}
 }
 
-// What --non-interactive is, end to end: no ask_user (no Ask), no thinking headings or
+// What --non-interactive is, end to end: no ask_user (no Ask), no thinking titles or
 // Markdown note, and the {OUTPUT} note KEPT, since the engine expands slots
 // and a script gets the output without the model retyping it.
 func TestBare_KeepsOutputSlotsDropsClientNotes(t *testing.T) {
@@ -69,7 +69,7 @@ func TestBare_KeepsOutputSlotsDropsClientNotes(t *testing.T) {
 	if !strings.Contains(sys, "{OUTPUT}") {
 		t.Error("--non-interactive dropped the {OUTPUT} note")
 	}
-	for _, gone := range []string{"# Thinking:", "shown as Markdown"} {
+	for _, gone := range []string{"**<what", "shown as Markdown"} {
 		if strings.Contains(sys, gone) {
 			t.Errorf("--non-interactive kept %q", gone)
 		}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -36,6 +37,17 @@ func TestThinkHeadline(t *testing.T) {
 		{"crlf", "# Thinking: a\r\n# Summary: b\r\n", false, "b"},
 		{"inside a fence it still counts", "```sh\n# Thinking: in a script\n```\nafter", true, "in a script"},
 		{"a markdown title as the fallback", "# Plan\nbody", false, "Plan"},
+		{"live: the latest bold title", "**Read the config**\n\nbody\n\n**Find the bug**\nmore", true, "Find the bug"},
+		{"done, no summary: the latest bold title", "**Read the config**\n\nbody\n\n**Find the bug**\nmore", false, "Find the bug"},
+		{"a colon inside the bold", "**Checking the exec path:**\nbody", true, "Checking the exec path"},
+		{"a colon after the bold", "**Plan**:\nbody", true, "Plan"},
+		{"underscores", "  __Plan__  \nbody", true, "Plan"},
+		{"bold inside a sentence is not a title", "I will **not** guess.\nmore", true, "I will **not** guess."},
+		{"two bold spans are not a title", "**a** and **b**", true, "**a** and **b**"},
+		{"a bold title still arriving", "**Read**\n\n**Find the b", true, "Read"},
+		{"an empty bold is not a title", "****\nbody", true, "****"},
+		{"an old summary wins over a later bold title", "**a**\n# Summary: done\n**b**", false, "done"},
+		{"bold and old headings: the latest", "# Thinking: a\n**b**", true, "b"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if got := thinkHeadline(c.text, c.live); got != c.want {
@@ -113,7 +125,7 @@ func TestThinkFold_LiveFinishedAndToggle(t *testing.T) {
 
 			v.m = ctrlT(v.m)
 			scr = v.view()
-			if !strings.Contains(scr, "step two body") || !strings.Contains(scr, "thought for") {
+			if !strings.Contains(scr, "step two body") || !strings.Contains(scr, "✻ found it · ") {
 				t.Errorf("ctrl+t should show the thought whole:\n%s", scr)
 			}
 			v.m = ctrlT(v.m)
@@ -241,4 +253,78 @@ func TestThinkFold_ReplayAndPlainText(t *testing.T) {
 	}
 	w.m = ctrlT(w.m)
 	_ = w.view() // unfolded, empty: draws without panicking
+}
+
+// A title takes the place of "thinking…" / "thought for" in the unfolded
+// box's header; with none, the header says what it is as before.
+func TestThinkHeader_Title(t *testing.T) {
+	now := time.Now()
+	for _, c := range []struct {
+		name string
+		t    thinkBlock
+		want string
+	}{
+		{"live", thinkBlock{text: "**Checking the exec path**\nbody", live: true, start: now}, "✻ Checking the exec path · <1s… · 5 words"},
+		{"done", thinkBlock{text: "**Checking the exec path**\nbody", start: now.Add(-12 * time.Second), end: now}, "✻ Checking the exec path · 12s · 5 words"},
+		{"cut", thinkBlock{text: "**Checking**", cut: true, start: now.Add(-3 * time.Second), end: now}, "✻ Checking · ⏹ 3s · 1 words"},
+		{"from history", thinkBlock{text: "**Checking**"}, "✻ Checking · 1 words"},
+		{"no title, live", thinkBlock{text: "just text", live: true, start: now}, "✻ thinking… <1s · 2 words"},
+		{"no title, done", thinkBlock{text: "just text", start: now.Add(-2 * time.Second), end: now}, "✻ thought for 2s · 2 words"},
+	} {
+		if got := thinkHeader(&c.t); got != c.want {
+			t.Errorf("%s: thinkHeader = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// The folded line is the title, live and finished, in place of the generic
+// "thinking"; a reply's bold line is plain bold, with no title handling.
+func TestThoughtLine_BoldTitle(t *testing.T) {
+	now := time.Now()
+	live := &thinkBlock{text: "**Read the config**\n\nbody\n\n**Find the bug**\nmore", live: true, start: now}
+	if got := stripANSI(thoughtLine(live, 80)); !strings.HasPrefix(got, "✻ Find the bug  (") || !strings.Contains(got, "…,") {
+		t.Errorf("live: %q", got)
+	}
+	live.live, live.end = false, now
+	if got := stripANSI(thoughtLine(live, 80)); !strings.HasPrefix(got, "✻ Find the bug  (") || strings.Contains(got, "…") {
+		t.Errorf("finished: %q", got)
+	}
+	if got := stripANSI(renderMarkdown(newMarkdown(60), "**Plan**\nthe reply")); strings.Contains(got, "*") || !strings.Contains(got, "Plan the reply") {
+		t.Errorf("a reply's bold line should be plain bold: %q", got)
+	}
+}
+
+// The unfolded body is Markdown: titles and emphasis lose their marks, code
+// spans their backticks, a title is a paragraph of its own, and the prose is
+// in the thought's colour, not the reply's.
+func TestThinkBody_Markdown(t *testing.T) {
+	initMarkdownStyle()
+	for _, live := range []bool{true, false} {
+		tb := &thinkBlock{text: "**Checking the exec path**\nthe `cd` comes *first*\n\n- one\n- two", live: live}
+		out := thinkBody(tb, 60)
+		plain := stripANSI(out)
+		for _, gone := range []string{"**", "`", "*first*", "- one"} {
+			if strings.Contains(plain, gone) {
+				t.Errorf("live=%v: the body kept %q:\n%s", live, gone, plain)
+			}
+		}
+		rows := strings.Split(plain, "\n")
+		if strings.TrimSpace(rows[0]) != "Checking the exec path" || strings.TrimSpace(rows[1]) != "" {
+			t.Errorf("live=%v: the title should be a row of its own, first:\n%s", live, plain)
+		}
+		if !strings.Contains(plain, "• one") || !strings.Contains(plain, "first") {
+			t.Errorf("live=%v: body:\n%s", live, plain)
+		}
+		if fg := *thinkStyle().Document.Color; mdStyle != "notty" && !strings.Contains(out, ";5;"+fg+"m") {
+			t.Errorf("live=%v: the prose is not in the thought's colour: %q", live, out)
+		}
+		for _, r := range rows {
+			if n := len([]rune(r)); n > 60 {
+				t.Errorf("row of %d columns at 60: %q", n, r)
+			}
+		}
+		if again := thinkBody(tb, 60); again != out {
+			t.Error("an unchanged thought rendered differently")
+		}
+	}
 }

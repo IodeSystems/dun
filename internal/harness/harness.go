@@ -165,7 +165,7 @@ type Config struct {
 	// NonInteractive (--non-interactive): a run no one answers or reads
 	// along, such as a script or a benchmark. The system prompt says the
 	// model is on its own and leaves out what only a client uses (the
-	// thinking headings, the Markdown note); cmd/dun gives it no Ask, so
+	// thinking titles, the Markdown note); cmd/dun gives it no Ask, so
 	// there is no ask_user. {OUTPUT} stays: the engine expands it.
 	NonInteractive bool
 	// NoAsks: the person's messages do not become ask nodes (asks.go). For

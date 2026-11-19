@@ -50,9 +50,9 @@ const (
 	systemPreamble = "You are dun (" + Icon + "), a coding agent"
 
 	// systemThinking makes reasoning skimmable: the TUI shows a thought as one
-	// line, the latest heading while it streams and the summary after
-	// (thinkHeadline). Fixed text, so it keeps the cache.
-	systemThinking = " While you think, before you reply, title each step with a line `# Thinking: <what, in a few words>` and end with a line `# Summary: <what you concluded>`. These lines are for your private thinking only: never put them in your reply to the user."
+	// line, its latest bold title (thinkTitle). Claude writes these unasked;
+	// other models (DeepSeek, Qwen) do not. Fixed text, so it keeps the cache.
+	systemThinking = " While you think, open each step with a line that is only its title in bold: `**<what, in a few words>**`."
 
 	systemCode  = "\n- code (poly-lsp-mcp): node_query to find/navigate code by selector (call it with selector \"?\" to learn the grammar), node_read to read a symbol whole, node_edit to edit/rename/refactor. Edits return diagnostics."
 	systemShell = "\n- shell (mcpshell): eval runs sandboxed script code for computation, data wrangling, and jailed file ops."
@@ -140,7 +140,7 @@ func systemFor(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree, files str
 	return systemBuild(tools, exec, wt, files, alone, !alone, hosted...)
 }
 
-// systemBuild is systemFor with the thinking headings chosen apart from
+// systemBuild is systemFor with the thinking titles chosen apart from
 // alone: a sub-agent and an MCP worker are read by a model, so they have
 // neither (their reasoning reaches no TUI).
 func systemBuild(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree, files string, alone, thinking bool, hosted ...string) string {
