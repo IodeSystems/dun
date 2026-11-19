@@ -407,10 +407,16 @@ func TestAdoptedSharedServersAreSaid(t *testing.T) {
 		return false
 	})
 	ses, _ := svc2.Get(alice, id)
-	if hasEvent(logEvents(t, ses), func(ev proto.Event) bool {
-		n, ok := ev.Payload.(*proto.Notification)
-		return ok && strings.Contains(n.Text, "shared MCP servers")
-	}) != 1 {
+	told := func() int {
+		return hasEvent(logEvents(t, ses), func(ev proto.Event) bool {
+			n, ok := ev.Payload.(*proto.Notification)
+			return ok && strings.Contains(n.Text, "shared MCP servers")
+		})
+	}
+	// The engine relays the notice to its clients after it receives it, so
+	// the log entry can land a moment after the notice was sent.
+	waitFor(t, func() bool { return told() >= 1 })
+	if told() != 1 {
 		t.Fatal("clients were not told")
 	}
 }
