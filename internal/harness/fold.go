@@ -108,6 +108,9 @@ func (h *Harness) foldRestoreNote() string {
 	if a := h.askNow(); a.text != "" {
 		head = append(head, "The current ask, verbatim:\n<ask>\n"+a.block()+"\n</ask>")
 	}
+	if b := h.asksBlock(); b != "" { // the asks ledger's (asktool.go)
+		head = append(head, b)
+	}
 	// Without the rolling ask node: the ask is printed above, once.
 	if b := h.planOpenSansAsk(); b != "" {
 		head = append(head, "Open plan:\n"+b)
@@ -239,6 +242,11 @@ func (h *Harness) askNow() foldAsk {
 func (h *Harness) noteAsk(ctx context.Context) foldAsk {
 	if h.isChild() || h.store == nil {
 		return foldAsk{}
+	}
+	// Where asks are kept they hold the ask (asktool.go), and no node is
+	// written here: the latest message was "continue" as often as not.
+	if a, ok := h.asksFoldAsk(); ok {
+		return a
 	}
 	entries := h.store.History()
 	h.askMu.Lock()

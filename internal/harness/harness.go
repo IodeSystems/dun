@@ -1028,9 +1028,9 @@ func (h *Harness) AskAs(ctx context.Context, id, task string) (agent.TurnResult,
 	st := h.settleBegin(person)
 	h.turnBegin(origin)
 	h.planAutoArchive(ctx)
-	// Before prepareTurn: the turn's plan mark (suggestdone.go) and its
-	// plan line include the ask.
-	h.askOpen(task)
+	// Before prepareTurn: the turn's plan mark (suggestdone.go) reads the
+	// intake with the message on it (asks.go).
+	h.intakeAdd(task)
 	h.prepareTurn(ctx)
 	h.ledgerBegin()
 	h.workInput(task)

@@ -48,6 +48,8 @@ type planRow struct {
 	needs, waiting []string
 	ready, repeat  bool
 	depth          int
+	// ask: the number of the ask the node serves (askfold.go), 0 for none.
+	ask int
 }
 
 type planView struct {
@@ -70,6 +72,10 @@ type planView struct {
 	view int
 	// sum is the last /plan summary, or the one being made; nil before one.
 	sum *planSum
+	// asks and intake: the asks ledger, listed above the plan (askfold.go).
+	asks   []planAsk
+	intake *planIntake
+	now    func() time.Time // tests
 }
 
 // planSum is the plan event's summary (dun/plansummary.go).
@@ -273,6 +279,7 @@ func (v *planView) page() pageDoc {
 		v.order = append(v.order, planSumRow)
 		v.keys = append(v.keys, planSumKey)
 	}
+	nodes = v.askNodes(nodes) // the asks, above the plan (askfold.go)
 	info := v.occurrences(live)
 	for _, d := range live {
 		i, r := d.i, v.rows[d.i]
@@ -294,6 +301,9 @@ func (v *planView) page() pageDoc {
 		// every parent it sits under (USER 2026-11-18).
 		if len(in.waiting) > 0 {
 			tags = append(tags, fmt.Sprintf("waits %d", len(in.waiting)))
+		}
+		if r.ask > 0 {
+			tags = append(tags, "ask "+strconv.Itoa(r.ask))
 		}
 		if in.n > 1 && len(in.parents) > 0 {
 			tags = append(tags, "under "+strings.Join(in.parents, ", "))
@@ -517,6 +527,7 @@ func (m tuiModel) notePlan(ev evMsg) tuiModel {
 		v.sum = &planSum{text: str(o["text"]), made: str(o["made"]), err: str(o["error"])}
 		v.sum.running, _ = o["running"].(bool)
 	}
+	v.asks, v.intake = parseAsks(ev)
 	rows, _ := ev["rows"].([]any)
 	for _, x := range rows {
 		o, _ := x.(map[string]any)
@@ -525,6 +536,7 @@ func (m tuiModel) notePlan(ev evMsg) tuiModel {
 			needs: strList(o["needs"]), waiting: strList(o["waiting"]), depth: intOf(o["depth"])}
 		r.ready, _ = o["ready"].(bool)
 		r.repeat, _ = o["repeat"].(bool)
+		r.ask = intOf(o["ask"])
 		v.rows = append(v.rows, r)
 	}
 	if cur := m.planPaging(); cur != nil {

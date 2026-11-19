@@ -6,8 +6,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/iodesystems/agentkit/taskgraph"
 )
 
 // autoturn.go — turns nobody asked for (USER 2026-11-18: "don't stop work
@@ -20,8 +18,9 @@ import (
 // escalated, a child's report, a server's or a peer's wake, the settle, an
 // upgrade's "[automatic] continue").
 //
-//   - The budget. While an ask (asks.go) is open — todo or doing; a blocked
-//     ask is not open — automatic turns run as before. With none open, a
+//   - The budget. While an ask (asks.go) is open — the intake, or an ask
+//     not blocked and touched in the person's last askStaleTurns turns —
+//     automatic turns run as before. With none open, a
 //     session starts at most autoTurnsPerHour automatic turns in a rolling
 //     hour; past that a wake does not start a turn: what it brought is
 //     written into the conversation as a note (no inbox arrival), counted,
@@ -105,23 +104,13 @@ func textOrigin(text string) turnOrigin {
 
 // asksOn: this session keeps asks (asks.go), so the budget applies.
 func (h *Harness) asksOn() bool {
-	return !h.isChild() && !h.cfg.NonInteractive && !h.cfg.NoAsks && h.hasTool(taskgraph.ToolAdd)
+	return h.asksWanted() && h.hasTool(asksToolName)
 }
 
-// openAskNow reports whether an ask node is todo or doing. Blocked is not
-// open: it waits on the person.
-func (h *Harness) openAskNow() bool {
-	g, err := planStore{h}.View(context.Background())
-	if err != nil {
-		return false
-	}
-	for _, n := range g.Nodes {
-		if (n.Status == taskgraph.Todo || n.Status == taskgraph.Doing) && h.isAskNode(n.ID) {
-			return true
-		}
-	}
-	return false
-}
+// openAskNow reports whether an ask holds the budget off: the intake has
+// messages, or an ask is open, not blocked (it waits on the person), and
+// touched lately (asktool.go asksLiftBudget).
+func (h *Harness) openAskNow() bool { return h.asksLiftBudget() }
 
 // autoAllow reports whether an automatic turn may start now, and counts it
 // when it does and no ask is open.

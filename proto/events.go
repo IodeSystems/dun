@@ -1197,6 +1197,10 @@ type Plan struct {
 	// Summary is the last /plan summary, or the one being made; nil before
 	// the first.
 	Summary *PlanSummary `json:"summary,omitempty"`
+	// Asks are the person's asks, oldest first, and Intake the messages not
+	// yet acknowledged (nil with none): the clients' ask list.
+	Asks   []PlanAsk   `json:"asks,omitempty"`
+	Intake *PlanIntake `json:"intake,omitempty"`
 }
 
 // PlanNode is one row of a Plan.
@@ -1219,6 +1223,34 @@ type PlanNode struct {
 	// By is who wrote the node when not the agent: "suggest" for a done node
 	// the idle suggestion call recorded from the last turn.
 	By string `json:"by,omitempty"`
+	// Ask is the number of the ask the node serves (Plan.Asks); 0 for none.
+	Ask int `json:"ask,omitempty"`
+}
+
+// PlanAsk is one of the person's asks (harness asktool.go): a ledger of
+// its own, not a plan node. State: open, blocked, done, filed, dropped,
+// gone. Working: the one ask the turn works (one at most, or the intake).
+type PlanAsk struct {
+	N       int      `json:"n"`
+	Title   string   `json:"title"`
+	State   string   `json:"state"`
+	Why     string   `json:"why,omitempty"` // blocked: the question
+	At      int64    `json:"at"`            // unix seconds, when the person wrote it
+	Working bool     `json:"working,omitempty"`
+	Nodes   []string `json:"nodes,omitempty"` // the plan nodes that serve it
+}
+
+// PlanIntake is the person's messages the model has not acknowledged yet:
+// one ask that grows until it does.
+type PlanIntake struct {
+	Messages []PlanMessage `json:"messages"`
+	Working  bool          `json:"working,omitempty"`
+}
+
+// PlanMessage is one message on the intake.
+type PlanMessage struct {
+	At   int64  `json:"at"` // unix seconds
+	Text string `json:"text"`
 }
 
 // PlanSummary is the last /plan summary (dun/plansummary.go): Done / Doing /
@@ -1251,4 +1283,6 @@ type JournalItem struct {
 	Line   string `json:"line"` // the entry as /journal lists it
 	Text   string `json:"text"` // the entry: its own, or its file's
 	Path   string `json:"path,omitempty"`
+	// Outcome is an ask entry's: done, filed, dropped, gone; "" open.
+	Outcome string `json:"outcome,omitempty"`
 }

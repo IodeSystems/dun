@@ -49,10 +49,13 @@ type peerHop struct {
 // peerTaskMax clips a listed task line.
 const peerTaskMax = 120
 
-// sessionTask is what the session is doing: the first line of its plan's
-// brief (a variable: the tests' fake engine writes no plan, and the real one
-// is under the user's dun home).
+// sessionTask is what the session is doing: its newest open ask (the asks
+// ledger), else the first line of its plan's brief (a variable: the tests'
+// fake engine writes neither, and the real one is under the user's dun home).
 var sessionTask = func(workspace, id string) string {
+	if a := harness.AskBrief(harness.SessionFile(workspace, id)); a != "" {
+		return a
+	}
 	first, _, _ := strings.Cut(harness.PlanBrief(harness.SessionFile(workspace, id)), "\n")
 	return first
 }

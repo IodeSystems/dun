@@ -156,11 +156,9 @@ func (h *Harness) SayAs(id, text string) {
 		h.autoPersonReset() // the automatic-turn budget (autoturn.go)
 	}
 	h.workInput(text)
-	// A message typed mid-turn is its own ask; the open one stays open. The
-	// board is queued again, so the model reads the new node with the message.
-	if h.askOpen(text) {
-		h.planBoard()
-	}
+	// A message typed mid-turn grows the intake (asks.go): the model reads
+	// it with the message itself, so no board is queued.
+	h.intakeAdd(text)
 	h.noteMu.Lock()
 	h.queue = append(h.queue, queued{kind: queuedUser, text: text, id: id})
 	if h.userWaitCh != nil {
