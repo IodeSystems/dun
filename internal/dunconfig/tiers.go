@@ -5,6 +5,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/iodesystems/agentkit/llm"
 )
 
 // tiers.go: the three model tiers (USER 2026-11-18). A sub-agent is started
@@ -192,6 +194,10 @@ func (c DunConfig) ResolveTiers(flags TierFlags, env func(string) string, repo R
 		}
 		if t.Model != "" {
 			t.Effort = strings.TrimSpace(f.Effort)
+			if t.Effort != "" && !ValidEffort(t.Effort) {
+				set.Warnings = append(set.Warnings, fmt.Sprintf("tiers.%s.effort %q is not a level (%s); ignored", name, t.Effort, EffortWords))
+				t.Effort = ""
+			}
 			if t.Provider != "" {
 				if _, ok := c.Named(t.Provider); !ok {
 					t.Off = "no saved provider " + t.Provider
@@ -235,6 +241,24 @@ func (c DunConfig) ResolveTiers(flags TierFlags, env func(string) string, repo R
 		break
 	}
 	return set
+}
+
+// EffortWords names the effort values config.json and the flags take.
+const EffortWords = "default, none (or off), minimal, low, medium, high, xhigh, max, lowest"
+
+// ValidEffort says whether s is an effort a tier, a facet or a flag may set:
+// default, agentkit's levels (llm.ParseEffort), off (the old name of none),
+// or lowest (the lowest level the model takes).
+func ValidEffort(s string) bool {
+	s = strings.ToLower(strings.TrimSpace(s))
+	switch s {
+	case "default", "off", "lowest":
+		return true
+	case "":
+		return false
+	}
+	_, err := llm.ParseEffort(s)
+	return err == nil
 }
 
 // pickOf reads a flag or env value, "[provider/]model".
@@ -303,7 +327,7 @@ func (c DunConfig) SideCallTiers() (map[string]string, []string) {
 		default:
 			out[k] = v
 			if v != TierSession && slices.Contains(WindowSideCalls, k) {
-				warn = append(warn, fmt.Sprintf("side_calls.%s %q: %s sends up to the session's window, which a %s model may not hold (and it loses the session's prompt cache); a refusal is asked again on the session's model", k, v, k, v))
+				warn = append(warn, fmt.Sprintf("side_calls.%s %q: %s sends up to the session's window, and runs on %s only when its model's window holds the input (else on the session's model, logged); it loses the session's prompt cache, and a refusal is asked again on the session's model", k, v, k, v))
 			}
 		}
 	}

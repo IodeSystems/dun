@@ -106,7 +106,17 @@ func (m tuiModel) statusSections(w int) []statusSection {
 			if words == "" {
 				words = harness.EffortAbout[eff]
 			}
-			row := statusSection{label: "effort", value: eff + StDim.Render(" · "+words+" · /effort")}
+			v := eff
+			// The saved level, and what this model is sent when that differs
+			// (the engine's role table; USER 2026-11-18: keep the saved level,
+			// show the effective one).
+			if r, ok := m.mainRole(); ok && r.effective != "" && r.effective != eff {
+				v += StDim.Render(" (saved) · sent as ") + r.effective
+				if r.reason != "" {
+					v += StDim.Render(": " + r.reason)
+				}
+			}
+			row := statusSection{label: "effort", value: v + StDim.Render(" · "+words+" · /effort")}
 			out = append(out[:i+1], append([]statusSection{row}, out[i+1:]...)...)
 			break
 		}

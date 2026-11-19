@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/iodesystems/agentkit/llm"
@@ -14,24 +15,25 @@ import (
 // none; dun sent nothing to ask for it).
 func TestEffort(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	for level, want := range map[string]struct {
-		think  *bool
-		budget int // -1: none sent
-	}{
-		EffortDefault: {nil, -1},
-		EffortOff:     {ptr(false), -1},
-		EffortLow:     {ptr(true), 1024},
-		EffortMedium:  {ptr(true), 4096},
-		EffortHigh:    {ptr(true), -1},
+	// dun's names to agentkit's (effortclamp.go): default is unset, off the
+	// old name of none, the rest the same; a round's window budget is not
+	// sent, as before.
+	for level, want := range map[string]llm.Effort{
+		EffortDefault: llm.EffortUnset,
+		"off":         llm.EffortNone,
+		EffortOff:     llm.EffortNone,
+		EffortMinimal: llm.EffortMinimal,
+		EffortLow:     llm.EffortLow,
+		EffortMedium:  llm.EffortMedium,
+		EffortHigh:    llm.EffortHigh,
+		EffortXHigh:   llm.EffortXHigh,
+		EffortMax:     llm.EffortMax,
 	} {
-		o := &llm.ChatOpts{}
-		applyEffort(o, EffortHigh) // a level before, cleared by the next
-		applyEffort(o, level)
-		if (o.EnableThinking == nil) != (want.think == nil) || (o.EnableThinking != nil && *o.EnableThinking != *want.think) {
-			t.Errorf("%s: thinking %v", level, o.EnableThinking)
-		}
-		if (o.ReasoningBudgetTokens == nil) != (want.budget < 0) || (o.ReasoningBudgetTokens != nil && *o.ReasoningBudgetTokens != want.budget) {
-			t.Errorf("%s: budget %v", level, o.ReasoningBudgetTokens)
+		n := 9000
+		o := &llm.ChatOpts{Effort: llm.EffortHigh, ReasoningBudgetTokens: &n} // a level before, cleared by the next
+		efforts.Apply(o, level)
+		if o.Effort != want || o.ReasoningBudgetTokens != nil {
+			t.Errorf("%s: effort %q budget %v", level, o.Effort, o.ReasoningBudgetTokens)
 		}
 	}
 	h := &Harness{}
@@ -41,8 +43,28 @@ func TestEffort(t *testing.T) {
 	if err := h.SetEffort("HIGH"); err != nil || h.Effort() != EffortHigh || LoadEffort() != EffortHigh {
 		t.Errorf("set: %v %s %s", err, h.Effort(), LoadEffort())
 	}
-	if err := h.SetEffort("max"); err == nil {
+	if err := h.SetEffort("huge"); err == nil {
 		t.Error("an unknown level was taken")
+	}
+	if err := h.SetEffort("off"); err != nil || h.Effort() != EffortOff {
+		t.Errorf("off: %v %s", err, h.Effort())
+	}
+}
+
+// A level saved before agentkit's scale (off, low, medium, high) still
+// reads: off as none.
+func TestSavedEffort_OldValues(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	for saved, want := range map[string]string{"off": EffortOff, "low": EffortLow, "medium": EffortMedium, "high": EffortHigh, "default": EffortDefault} {
+		if err := os.MkdirAll(DunHome(), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(effortFile(), []byte(`{"level":"`+saved+`"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got, ok := SavedEffort(); !ok || got != want {
+			t.Errorf("saved %q: read %q %v", saved, got, ok)
+		}
 	}
 }
 

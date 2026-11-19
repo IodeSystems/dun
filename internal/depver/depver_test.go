@@ -70,12 +70,12 @@ func TestModuleLines(t *testing.T) {
 	deps[PolyLSP] = &debug.Module{Path: PolyLSP, Version: "v0.5.0", Replace: &debug.Module{Path: "/src/poly-lsp-mcp"}}
 	delete(deps, Gwag)
 	want := []string{
-		"agentkit v0.34.0",
+		"agentkit v0.35.0",
 		"openai-claude-api-shim v0.6.0",
 		"raglit v0.10.0 (ragcore)",
 		"poly-lsp-mcp devel (segment) — replaced by /src/poly-lsp-mcp; go.mod pins v0.5.3",
 		"gwag v2.11.0 (gat) — from go.mod: this binary's build info lists no modules",
-		"bubbleteandmd v0.6.0 (render)",
+		"bubbleteandmd v0.7.0 (render)",
 	}
 	if got := moduleLines(deps); strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("moduleLines:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

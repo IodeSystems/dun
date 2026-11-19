@@ -13,7 +13,7 @@ import (
 func asksOnHarness(t *testing.T) *Harness {
 	t.Helper()
 	h := planHarness(t, false)
-	names := []string{taskgraph.ToolAdd, taskgraph.ToolClose, taskgraph.ToolShow, "ask_user"}
+	names := []string{taskgraph.ToolAdd, taskgraph.ToolClose, taskgraph.ToolShow, "ask_user", asksToolName}
 	h.toolNames.Store(&names)
 	return h
 }
@@ -64,7 +64,7 @@ func TestAskGuard_RefusedInAutomaticRounds(t *testing.T) {
 	if out := call(); out != "a" {
 		t.Errorf("an automatic turn with an ask open: %q", out)
 	}
-	planCall(t, h, "plan_close", `{"outcome":"block","id":"1","reason":"which region?"}`)
+	h.asksCall(`{"asks":[{"id":1,"state":"blocked","note":"which region?"}]}`)
 	if out := call(); out != askAutoRefused || !strings.Contains(out, `"outcome":"block"`) {
 		t.Errorf("an automatic turn, the ask blocked: %q", out)
 	}

@@ -183,6 +183,16 @@ func (e JournalEntry) Body() string {
 	return strings.TrimSpace(s)
 }
 
+// AskOutcome is an ask entry's outcome (done, filed, dropped, gone), ""
+// for an open ask or another kind: the /journal screen folds done and
+// filed asks.
+func (e JournalEntry) AskOutcome() string {
+	if e.Ask == nil || e.Ask.Ended {
+		return ""
+	}
+	return e.Ask.Outcome
+}
+
 // Line is the entry as /journal lists it.
 func (e JournalEntry) Line(n int) string {
 	title := e.Title

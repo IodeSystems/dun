@@ -242,8 +242,8 @@ func (s *session) track(ev proto.Event) {
 			if a.State == "running" {
 				s.agents = append(s.agents, a)
 			}
-			if (a.State == "running" || a.State == "idle") && (a.Dir != "" || a.Tier != "") {
-				s.agentDirs = append(s.agentDirs, proto.ProcAgent{ID: a.ID, Dir: a.Dir, Tier: a.Tier})
+			if (a.State == "running" || a.State == "idle") && (a.Dir != "" || a.Tier != "" || a.Effort != "") {
+				s.agentDirs = append(s.agentDirs, proto.ProcAgent{ID: a.ID, Dir: a.Dir, Tier: a.Tier, Effort: a.Effort})
 			}
 		}
 	case *proto.EngineState:

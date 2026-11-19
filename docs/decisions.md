@@ -855,26 +855,20 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
 
 ## Asks and the turn ledger (USER 2026-11-17)
 
-- **Each message the person types is an ask: a top-level plan node**
-  `ask: <first line>` (`internal/harness/asks.go`), the whole message (cut at
-  4,000 runes) in its details, status `doing`, marked as the person's in the
-  plan sidecar's `by` (`user`, beside `suggest`). The agent closes it with the
-  plan tools (`plan_close` done with the account, or drop with the reason). A
-  message typed mid-turn (`SayAs`) is its own ask and the earlier one stays
-  open; the plan board is queued again so the model reads the new node with
-  the message. Not an ask: a message that starts with a bracketed lowercase
-  tag (`[automatic] …`, `[control/plan] …`, `[settle] …`: what dun or dund
-  sends in the person's place; a person who starts a message with `[wip]` is
-  misread, accepted), a sub-agent's, a `--non-interactive` run's (nobody
-  reads the plan; the benchmarks' turns stay as they were), a session with no
-  plan tools, and `Config.NoAsks` (embedders, and tests of other things).
-- **The turn-end check raises a forgotten ask.** The interactive check lists
-  open plan nodes (`idlecheck.go`, USER 2026-11-07); an ask's line adds
-  `the user wrote: "<text, 300 runes>"`. So an interactive turn that has not
-  closed its ask gets the check's round. The plan nudges (no plan, stalled
-  plan, the forced tool) count only the agent's own nodes (`openWork`): an
-  ask is the person's request, not a plan the agent wrote, and the stall's
-  node ids and the no-plan nudge stay as measured.
+- **Each message the person types is an ask: a top-level plan node.**
+  Reversed 2026-11-18: asks are dun's own ledger, not plan nodes or plan
+  roots, and a message grows the intake instead of opening an ask ("Asks
+  are acknowledged and folded" below). Not on the intake: a message that
+  starts with a bracketed lowercase tag (`[automatic] …`, `[control/plan]
+  …`, `[settle] …`: what dun or dund sends in the person's place; a person
+  who starts a message with `[wip]` is misread, accepted), a sub-agent's, a
+  `--non-interactive` run's (nobody reads the asks; the benchmarks' turns
+  stay as they were), a session without the asks tool, and `Config.NoAsks`
+  (embedders, and tests of other things).
+- **The turn-end check raises a forgotten ask.** Changed 2026-11-18: the
+  check names the intake, the touched asks not marked, and once an ask long
+  untouched ("Asks are acknowledged and folded" below). The plan nudges
+  count every open plan node again: no plan node is an ask.
 - **The turn ledger: facts from the turn's own tool events, no model call**
   (`internal/harness/ledger.go`). `withLedger` is the outermost dispatcher
   wrapper, in the root and in each sub-agent (a child's facts carry its
@@ -897,18 +891,18 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   Every list stops at 50 with `… +N more`; the totals count everything.
   Events between turns (a job ending while idle) go to the next turn.
 - **Facts go to the asks open during the turn** (open as it began, or
-  opened in it). When the turn's plan changes touch an ask or a node that
-  descends from one (`needs` followed up: the graph's "under"), the facts go
-  to those asks only; otherwise to every open ask, and the turn is marked
-  shared on each. Chosen as the simplest rule that uses what the agent
-  already says; a turn that touched nothing cannot be split honestly, so it
-  is counted in full in each. A turn with no ask open and a tool call is its
-  own `/journal` entry, kind `turn`, indexed as `kind:ledger`; one with no
-  tool call gets nothing.
+  made in it). When the turn names asks (the asks tool acted on them, or a
+  plan change touched a node that serves one or descends from one: `needs`
+  followed up), the facts go to those asks only; otherwise to every open
+  ask, and the turn is marked shared on each. Chosen as the simplest rule
+  that uses what the agent already says; a turn that touched nothing cannot
+  be split honestly, so it is counted in full in each. A turn with no ask
+  open and a tool call is its own `/journal` entry, kind `turn`, indexed as
+  `kind:ledger`; one with no tool call gets nothing.
 - **An ask's `/journal` entry** (kind `ask`, indexed as `kind:ask` so
   `session_search` finds "which ask changed X") is written at the end of the
-  turn in which its node is closed (by the agent, or the person's `/plan`
-  edit: the turn end reads the plan), with its text, outcome and note, the
+  turn in which it is closed (the asks tool marks it done or filed; the
+  turn end reads the ledger), with its text, outcome and note, the
   turns that served it (numbers, times, shared, interrupted) and the facts
   summed. Row: `ask 3 · done · "fix the flaky test" · turns 12–15 · 6 files
   (+120/−34) · 1 commit · 11 cmds (1 failed) · 9m` (the time is the turns'
@@ -921,6 +915,90 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   others do. The idle suggestion call's done nodes name the turn
   (`recorded after turn N by the idle suggestion call`): the ask or turn
   entry of turn N holds its facts.
+
+
+## Asks are acknowledged and folded (USER 2026-11-18)
+
+"There should be a single unacknowledged ask that grows as the user adds to
+it." A real session listed 14 asks, all `working`: "continue", "resume",
+"retry", "rety", "test" each opened one, none closed, and every open ask
+spun. Then: asks are a ledger, pinned in the prompt, not plan roots.
+`internal/harness/asktool.go` and `asks.go` unless named.
+
+- **Asks are a ledger, not plan nodes.** This reverses "each message is an
+  ask: a top-level plan node" (2026-11-17). `<session>.asks.json` holds the
+  intake and the asks: a number, a title, the text, the person's words
+  (`source`, `continued`), a state (open, blocked, done, filed) and the plan
+  nodes that serve the ask (`nodes`). The plan graph has no ask nodes; a
+  plan node carries its ask only as that link, shown on /plan as a tag
+  `ask N` (chosen over grouping nodes under asks: one word per row, and the
+  tree stays the plan's own).
+- **One intake.** A message the person types goes on the intake, the one
+  ask not acknowledged. No word list: "continue", a typo, a pasted list of
+  four requests all grow it. Rejected: matching control words and typos by
+  edit distance (USER: "kinda dumb"), and one `new` ask per message merged
+  away later (14 rows again until the model acts).
+- **The `asks` tool**, one call of several items, at any point in the turn:
+  on `intake`, `split` (asks with short titles, each with its part of the
+  text), `merge_into` an ask (the intake's messages go to its `continued`,
+  word for word; `text` is a note on them, never in their place; a closed
+  ask reopens: the person carried on with it), or `state` alone (one ask in
+  that state); on an ask (its number), `title` (the text stays), `nodes`
+  (links), and `state` `done` (note), `filed` (nodes), `blocked` (the
+  question: what ask_user's refusal tells an automatic round to do) or
+  `open`. Messages that arrive during the call stay on the intake. 911
+  bytes of tool def (was 1,816). Not offered to sub-agents: the tool is
+  listed where `asksWanted` holds (root, interactive, not `NoAsks`), and
+  `asksOn` is that plus the tool in the set, so the two cannot differ.
+- **Pinned in the prompt.** The model reads the intake (its newest 5
+  messages, 200 runes each, and `+N earlier`) and the open asks (up to 12,
+  number and title; done and filed not listed) in one block, `Open asks:`:
+  an aside keyed `asks` as each turn begins (beside the plan's line,
+  `planTurnLine`), and in what a fold keeps: the fold's ask is the ask the
+  turn works, with its newest 3 merged messages and the intake's newest
+  (`+N earlier` past that), remembered for the note after the fold and the
+  summary check (`askNow`), and the note after a fold prints the block. One
+  system line (300 bytes): acknowledge the intake, mark each ask done as it
+  finishes, and file one not finished this turn (deferred, waiting, a list
+  of later items) as `plan_add` nodes marked filed with them, so nothing
+  asked is lost (USER: "keep track of delayed user asks with the plan
+  tool"). Cost per request: the 300-byte line and 911-byte tool def, against
+  1,816 bytes of tool def before; per turn the block (175 bytes for one ask
+  and an intake of 8 messages), against the plan board's line per ask node
+  and the check's 300-rune quote of each open ask.
+- **The turn-end check** (`idleAsks`, in `idlecheck.go`'s note), in a turn
+  the person started only: the intake while it has messages, each ask the
+  turn touched (by the tool, or a plan change to a node that serves it)
+  and did not mark in the turn, and, once, an ask left open and untouched
+  for 5 of the person's turns (`still open: N …` — file it, mark it, or keep
+  it). Nothing when there is nothing. 123 bytes for an intake of one
+  message, about 25 plus the title per ask.
+- **Automatic rounds** never grow the intake (not the person's). They may
+  use the tool, unprompted: acknowledging and closing only lower the open
+  asks, which tightens the automatic-turn budget ("Unrequested turns").
+  Only the intake and an open ask the person's last 5 turns touched hold
+  the budget off; an ask left open stops counting, so an open ask never
+  disables it for good. The network wait resumes the intake (one id per
+  intake) and the open asks not blocked, each counted on its own.
+- **Shown.** dund's plan event carries the ledger beside the rows (`asks`,
+  `intake`; a row's `ask`). Only the ask the turn works (the intake until
+  acknowledged, then the first open ask the call made or merged into) is
+  `working`; the TUI spins it while a turn runs, other open asks show
+  `open · <age>`. /plan lists the asks on top: the intake as one row,
+  `▸ new · 3 messages · "the tools and stubs dir…" +2`, the open asks, and
+  done and filed asks in one row, `▸ N done · M filed`, that opens. /journal
+  folds done and filed ask entries the same way (the entries' `outcome`).
+  Mobile renders the same; web is the TUI's pty; `dun ps` and `dun_list`
+  show the newest open ask (`AskBrief`) before the plan's first line.
+- **Old sessions** are moved into the ledger on first use (`asksMigrate`):
+  each ask node leaves the graph, its state goes to the record, a node that
+  needed it serves it, and closed ones get no second entry. Chosen over
+  leaving them as plain nodes: those would stay 14 `ask:` roots nobody
+  closes.
+- **"Current ask: continue"** was the fold's node (`fold.go` `planAsk`): one
+  plan node holding the latest user message, which a fold copies into its
+  summary. Where asks are kept the fold takes the ask from the ledger and
+  writes no node; an open one from before is dropped.
 
 ## dund's HTTP listener: runtime, one listener, chooser (USER 2026-11-17)
 
@@ -1025,7 +1103,9 @@ From the 2026-11-18 inventory of model calls nobody typed for.
   (`NoResendOnRefusal` unset), and stores the fact through `OnLearn`
   (`capstore.go`), so a new client starts with it. dun's own resend
   (`offGuard`) is gone: with both, a resend that failed again could cost a
-  third request. dun keeps the one `/effort off` note. Proof:
+  third request. dun keeps the one `/effort none` (off) note. Since
+  agentkit v0.35.0 the role resolver sends the lowest level from the start
+  once the record says thinking-only ("Roles and model profiles"). Proof:
   `TestReasoningOff_*` (fold, rescue fold, `/effort off`; llama.cpp named and
   detected, OpenRouter) passed with the guard disabled before it was
   removed.
@@ -1401,11 +1481,12 @@ Code: `internal/dunconfig/tiers.go` (resolution), `internal/harness/tiers.go`
 - **Agent tool.** A `tier` enum param, and one line per tier in the
   description (its `use` and the model it resolves to). A `model` given
   overrides the tier, effort included; the tier's effort applies unless the
-  call gives `effort`. A tier with no model runs on the child default
+  call or `--child-effort` gives one (the role order, "Roles and model
+  profiles"). A tier with no model runs on the child default
   (facets.child, `--child-model`, else the session's model). With no tier
   naming a model the param and the lines are left out: the tool is byte for
   byte as before, checked against main's output in
-  `harness/testdata/agent_tool_notier.golden.json` (3473 bytes; three tiers
+  `harness/testdata/agent_tool_notier.golden.json` (3473 bytes, 3548 since the roles enum; three tiers
   with the shipped texts add 509).
 - **Side calls.** `"side_calls": {"<kind>": "<tier>|session"}` in
   config.json. Defaults: suggest, fold, remember and rescue `session`;
@@ -1414,26 +1495,111 @@ Code: `internal/dunconfig/tiers.go` (resolution), `internal/harness/tiers.go`
   that cannot be built is the runner the call used before. A tier call
   refused before any reply (context too long, auth, model not found) is
   logged and asked once more on the session's runner. Side calls take the
-  tier's model, not its effort: each sets its own options (fold turns
-  thinking off).
-- **Window-sized calls stay on the session's model.** fold, suggest and
+  tier's model, not its effort: each has its role's (fold and rescue
+  `lowest`, the others nothing), clamped to the model it runs on.
+- **Window-sized calls default to the session's model.** fold, suggest and
   remember send the session's prompt-cache prefix and its history (fold
   since SessionPrefix; suggest and remember are forks of the turn's
   prefix); rescue sends up to half the window to recover a session that is
   over it. The cache hits only on the model that wrote it, and a smaller
   model's window may not hold the input: a rescue refused there would leave
   the session unable to recover. A `side_calls` entry that puts one of them
-  on a tier is warned about at engine start and in doctor; the retry on the
-  session's runner still covers a refusal. The proposal had suggest on
-  fast; that is one `side_calls` line, and its warning, for a user whose
-  fast model holds the history. The other side calls are not capped to the
-  tier model's window; the retry covers an input too large for it.
+  on a tier is warned about at engine start and in doctor (the lost cache).
+  Since roles (2026-11-18) such a call goes to the tier only when the tier
+  model's profile knows a window that holds the input and the reply's cap;
+  otherwise, and when no window is known, it runs on the session's model,
+  logged. The retry on the session's runner still covers a refusal. The
+  proposal had suggest on fast; that is one `side_calls` line for a user
+  whose fast model holds the history. The other side calls are not capped
+  to the tier model's window; the retry covers an input too large for it.
 - **Shown.** A child a tier picked the model of carries the tier: the
-  sub-agent strip (`#2 fast running`), its report and the agents pane
+  sub-agent strip (`#2 fast running · low`, the level as sent), its report and the agents pane
   (`fast: model`), the sidecar a resume reads, and `dun ps` (the session's
   label and its tree's rows). `/model` lists the engine's tiers and what each
   resolves to; `dun doctor` lists the tiers, the default, each side call's
-  tier and what it runs on, and the warnings.
+  tier and what it runs on, and the warnings. Both also show the role table
+  (below).
+
+## Roles and model profiles (USER 2026-11-18)
+
+Which model and thinking level a request got was decided in six places:
+`/effort` for rounds, `--child-effort`/facets.child and `tiers.<t>.effort`
+for children, the agent call's `effort`, a literal off in `foldOpts` (and
+rescue), and agentkit's capability record on the wire. Code:
+`internal/harness/roles.go` (resolver), `profile.go`, `effortclamp.go`.
+
+- **Roles.** `main` (the session's rounds), `child:fast|work|think`, and one
+  per side-call kind (`SideCallKinds`, the same list as dunconfig's). Each
+  resolves to {provider, model, wanted effort} with the source of each
+  field (`RoleChoice`; `RoleResolver.Resolve`). Every request path asks it:
+  rounds (`sessionOpts` in the prompt builder), spawns (`spawnAgentFor`),
+  side calls (`sideRunner`, `roleOpts` for fold and rescue). spawnTier, the
+  literal off and the per-path effort defaulting are gone.
+- **One order for every role**, field by field: the call's argument > a CLI
+  flag or env var > the repo's dun.json (only `use` and `default_tier`, the
+  tiers rule) > `$DUN_HOME` (config.json's tiers, facets, side_calls;
+  `/effort`'s effort.json, which beats facets.main as before) > the role's
+  built-in default. For a child `--child-effort` is the flag layer, so it
+  now beats `tiers.<t>.effort` (it did not before); facets.child's effort
+  stays under the tier's.
+- **Defaults state intent.** main unset (nothing sent; the server decides),
+  fast `lowest`, work unset (the child loads the saved `/effort` level, as
+  before), think `high`, fold and rescue `lowest`, the other side calls
+  unset (their options as built: nothing sent). A tier's default applies
+  only when the tier names a model; a tier with no model is the child
+  default, effort included. So with no config every request sends what it
+  did: `TestRoles_NoConfigSendsAsBefore`.
+- **lowest** is the lowest level the model accepts: none on a model that
+  can turn thinking off (fold still sends off there), else agentkit's clamp
+  of none, minimal and up, with its reason ("minimal (none not supported:
+  reasoning.thinking_only=true …)").
+- **Model profile** per provider+model (`ModelProfile`): the effort clamp
+  (agentkit's `Client.Effective`, `EffortSupport`), `thinking_only` (the
+  record; a model list's `thinking_modes` with no off is recorded so, as
+  declared), the window (the harness's for the session's model; the record's
+  `limits.context`, else one model-list GET, cached, for another), and tool
+  support (`tools.supported` in the record: dun's key, which nothing learns
+  yet). The profile decides: a window-sized side call's tier (above); a
+  child tier whose model is known to take no tools is the child default,
+  with "tier X unavailable: <model> takes no tool calls …; ran on <model>";
+  a tier's effort is clamped to the tier's model, not the session's.
+- **agentkit v0.35.0's scale** (bumped with this work). `ChatOpts.Effort`
+  replaces `ReasoningEffort`/`EnableThinking` and dun's `applyEffort`;
+  `effortclamp.go` is the one adapter (default is `EffortUnset`, off is
+  none). `/effort` offers default, none, minimal, low, medium, high, xhigh,
+  max; off is read as none, so an old effort.json still works. The picker
+  marks a level the session's model does not take, with the reason;
+  `/status` keeps the saved level and says what is sent. The agent tool's
+  effort enum is the full scale plus lowest (+75 bytes on every round:
+  3473 to 3548 for the tool with no tiers; the golden changed on purpose).
+  `lowest` is taken wherever a level is (flags, facets, tiers, the agent
+  call, `/effort`). A value that is no level is said at engine start and in
+  doctor; one from `--child-effort`/facets.child is kept, so a spawn that
+  would take it is refused, as before roles, not dropped. A resumed child's
+  saved off is read as none. The window-derived thinking budget is still
+  not sent (as before: the level decides).
+- **Tier defaults change configured tiers.** A fast or think tier with a
+  model and no effort inherited `/effort` before; it now runs at lowest or
+  high. The table's source says `tier default (fast→lowest)`, and the engine
+  says it once at start (and doctor): "tier fast (m) has no effort set …".
+- **Wire changes from dun's side with no config:** none on a model whose
+  record is empty. On a record that says thinking-only, fold, rescue and
+  `/effort none` rounds send minimal (agentkit's lowest) from the start
+  instead of none then agentkit's rewrite.
+- **Wire changes from v0.35** (intended; agentkit, USER): OpenRouter low and
+  medium send `reasoning.effort` instead of max_tokens 1024/4096; an
+  Anthropic-compatible high sends a 16k thinking budget (dun's high sent no
+  thinking there before); llama.cpp none adds `reasoning_budget_tokens: 0`;
+  a refused level clamps lower first.
+- **One view.** `/model` (the roles window) and `dun doctor` show the
+  table: role, model, wanted, sent, reason, sources. The settings event
+  carries it in `Settings.Tiers` after the three tier rows (rows with
+  `role` set; no parallel field), and the engine sends it again when a
+  client learns a fact or translates an effort (`OnCapsChanged`, from
+  agentkit's OnLearn and OnTranslate), only when the table changed. The
+  sub-agent strip (`#2 fast running · minimal`) and `dun ps` (`#2 fast,
+  effort minimal`) show each child's level as sent. Clients render what
+  the engine sends.
 
 ## Release updates
 

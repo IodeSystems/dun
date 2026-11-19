@@ -2,9 +2,8 @@ package harness
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
 	"log"
-	"strings"
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
@@ -14,7 +13,8 @@ import (
 // of work (fast, work, think) and the tier names the model; an explicit
 // model overrides it. Each automatic side call has a tier too. cmd/dun
 // resolves the tiers from the config and hands them here as Config.Tiers;
-// this package does not read the config.
+// this package does not read the config. Which tier, model and effort a
+// request gets is the role resolver's (roles.go).
 
 // The tier names, as dunconfig has them.
 const (
@@ -35,6 +35,8 @@ type Tier struct {
 	// Off is why the tier cannot be served (its provider is not logged
 	// in); a spawn on it runs on the child default, and says so.
 	Off string
+	// Source is the layer Model came from (flag, env, config).
+	Source string
 }
 
 // on says the tier names a model.
@@ -51,50 +53,6 @@ func tiered(tiers []Tier) bool {
 	return false
 }
 
-// tier is the named tier as configured; false when no tier has that name.
-func (h *Harness) tier(name string) (Tier, bool) {
-	for _, t := range h.cfg.Tiers {
-		if t.Name == name {
-			return t, true
-		}
-	}
-	return Tier{}, false
-}
-
-// defaultTier is the tier a spawn that names none runs on.
-func (h *Harness) defaultTier() string {
-	if h.cfg.DefaultTier != "" {
-		return h.cfg.DefaultTier
-	}
-	return TierWork
-}
-
-// spawnTier is what a spawn runs on: the provider, model and effort it
-// gives, or its tier's. A model given overrides the tier (and the tier's
-// effort with it); a tier with no model is the child default, as before
-// tiers. The tier returned is the one the child is shown with, "" when no
-// tier picked its model.
-func (h *Harness) spawnTier(tierArg, provider, model, effort string) (tier, p, m, e string, err error) {
-	tierArg = strings.ToLower(strings.TrimSpace(tierArg))
-	if tierArg != "" && !isTierName(tierArg) {
-		return "", "", "", "", fmt.Errorf("tier %q: want %s", tierArg, strings.Join(TierNames, ", "))
-	}
-	if provider != "" || model != "" {
-		return "", provider, model, effort, nil
-	}
-	name := tierArg
-	if name == "" {
-		name = h.defaultTier()
-	}
-	if t, ok := h.tier(name); ok && t.on() {
-		if effort == "" {
-			effort = t.Effort
-		}
-		return name, t.Provider, t.Model, effort, nil
-	}
-	return "", h.cfg.ChildProvider, h.cfg.ChildModel, effort, nil
-}
-
 func isTierName(s string) bool {
 	for _, n := range TierNames {
 		if n == s {
@@ -104,42 +62,91 @@ func isTierName(s string) bool {
 	return false
 }
 
-// sideRunner is the runner side call kind runs on: its tier's model
-// (Config.SideCallTiers), else fallback, the runner it used before tiers.
-// A tier with no model, TierSession, or a client that cannot be built is
-// fallback: a side call is best-effort and never fails over its tier.
+// sideRunner is the runner side call kind runs on: its role's model
+// (roles.go: its side_calls tier's), else fallback, the runner it used
+// before tiers. A tier with no model, TierSession, or a client that cannot
+// be built is fallback: a side call is best-effort and never fails over its
+// tier.
 func (h *Harness) sideRunner(kind string, fallback agent.LLMRunner) agent.LLMRunner {
-	name := h.cfg.SideCallTiers[kind]
-	if name == "" || name == TierSession || h.cfg.ClientFor == nil {
+	if h.cfg.ClientFor == nil {
 		return fallback
 	}
-	t, ok := h.tier(name)
-	if !ok || !t.on() {
+	c := h.resolver(context.Background()).side(kind, RoleArg{})
+	if c.Note != "" {
+		log.Printf("dun: side call %s: %s", kind, c.Note)
 		return fallback
 	}
-	if t.Off != "" {
-		log.Printf("dun: side call %s: tier %s unavailable: %s; on the session's model", kind, name, t.Off)
+	if c.Tier == "" {
 		return fallback
 	}
-	c, err := h.cfg.ClientFor(t.Provider, t.Model)
-	if err != nil || c.Runner == nil {
-		log.Printf("dun: side call %s: tier %s (%s): %v; on the session's model", kind, name, t.Model, err)
+	cl, err := h.cfg.ClientFor(c.Provider, c.Model)
+	if err != nil || cl.Runner == nil {
+		log.Printf("dun: side call %s: tier %s (%s): %v; on the session's model", kind, c.Tier, c.Model, err)
 		return fallback
 	}
-	return tierRetry{tier: c.Runner, fallback: fallback, kind: kind, name: name, model: t.Model}
+	return tierRetry{tier: cl.Runner, fallback: fallback, kind: kind, name: c.Tier, provider: c.Provider, model: c.Model,
+		effort: c.Effort.Wanted, window: windowSideCalls[kind], h: h}
 }
 
 // tierRetry is a side call on a tier model that is asked once more on the
 // session's runner when the tier refuses it: an error before any reply (a
 // context too long for the smaller model, a bad key, a model not found).
 // A failure after the reply has started is the call's, as before.
+//
+// A window-sized side call (windowSideCalls) goes to the tier only when the
+// tier model's window, as its profile knows it, holds the input and the
+// reply's cap; otherwise, or when the window is unknown, it runs on the
+// session's model, logged. The role's effort (fold's lowest) is clamped to
+// the tier model, not the session's: opts as the caller built them were
+// clamped to the session's, and the retry sends them so.
 type tierRetry struct {
-	tier, fallback    agent.LLMRunner
-	kind, name, model string
+	tier, fallback              agent.LLMRunner
+	kind, name, provider, model string
+	effort                      string // the role's wanted effort; "" leaves opts as built
+	window                      bool
+	h                           *Harness
+}
+
+// inputTokens estimates what a request sends and may get back: the
+// messages, the tool schemas and the reply's cap.
+func inputTokens(msgs []llm.Message, tools []llm.ToolDef, opts *llm.ChatOpts) int {
+	n := 0
+	for _, m := range msgs {
+		n += estimateTokens(m.Content)
+	}
+	if len(tools) > 0 {
+		b, _ := json.Marshal(tools)
+		n += estimateTokens(string(b))
+	}
+	if opts != nil {
+		n += opts.MaxTokens
+	}
+	return n
 }
 
 func (r tierRetry) ChatStream(ctx context.Context, msgs []llm.Message, tools []llm.ToolDef, opts *llm.ChatOpts) (<-chan llm.StreamChunk, error) {
-	ch, err := r.tier.ChatStream(ctx, msgs, tools, opts)
+	p := r.h.runnerProfile(ctx, r.provider, r.model, r.tier)
+	if r.window {
+		need := inputTokens(msgs, tools, opts)
+		switch {
+		case p.Window == 0:
+			log.Printf("dun: side call %s: tier %s (%s) has no known window for ~%d tokens; on the session's model", r.kind, r.name, r.model, need)
+			return r.fallback.ChatStream(ctx, msgs, tools, opts)
+		case need > p.Window:
+			log.Printf("dun: side call %s: ~%d tokens do not fit tier %s's window (%s, %d); on the session's model", r.kind, need, r.name, r.model, p.Window)
+			return r.fallback.ChatStream(ctx, msgs, tools, opts)
+		}
+	}
+	sent := opts
+	if r.effort != "" {
+		o := llm.ChatOpts{}
+		if opts != nil {
+			o = *opts
+		}
+		efforts.Apply(&o, efforts.Clamp(p, r.effort).Effective)
+		sent = &o
+	}
+	ch, err := r.tier.ChatStream(ctx, msgs, tools, sent)
 	if err != nil {
 		return r.retry(ctx, err.Error(), msgs, tools, opts)
 	}

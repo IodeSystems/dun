@@ -199,7 +199,7 @@ func effortOffRoundNotesOnce(t *testing.T, dialect string) {
 	r := h.teeTurn(srv.client(dialect), nil)
 	for range 2 {
 		opts := &llm.ChatOpts{}
-		applyEffort(opts, h.Effort())
+		h.sessionOpts(opts, RoleMain)
 		text, errMsg, _, err := collectText(context.Background(), r, []llm.Message{{Role: "user", Content: "hi"}}, nil, opts)
 		if err != nil || errMsg != "" || text != "hi" {
 			t.Fatalf("round: %q %q %v", text, errMsg, err)

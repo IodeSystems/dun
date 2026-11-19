@@ -25,47 +25,6 @@ func tierSet() []Tier {
 	}
 }
 
-func TestSpawnTier(t *testing.T) {
-	h := &Harness{cfg: Config{Tiers: tierSet(), ChildProvider: "kids", ChildModel: "child-m", ChildEffort: EffortMedium}}
-	for _, c := range []struct {
-		name                               string
-		tier, provider, model, effort      string
-		wantTier, wantP, wantM, wantEffort string
-	}{
-		{"configured tier", TierFast, "", "", "", TierFast, "local", "small", EffortLow},
-		{"call effort beats the tier's", TierThink, "", "", EffortOff, TierThink, "", "big-think", EffortOff},
-		{"default tier has no model: child default", "", "", "", "", "", "kids", "child-m", ""},
-		{"a tier with no model: child default", TierWork, "", "", "", "", "kids", "child-m", ""},
-		{"a model overrides the tier", TierFast, "", "named", "", "", "", "named", ""},
-		{"a provider and model override the tier", TierThink, "far", "m2", "", "", "far", "m2", ""},
-	} {
-		tier, p, m, e, err := h.spawnTier(c.tier, c.provider, c.model, c.effort)
-		if err != nil {
-			t.Fatalf("%s: %v", c.name, err)
-		}
-		if tier != c.wantTier || p != c.wantP || m != c.wantM || e != c.wantEffort {
-			t.Errorf("%s: got %q %q %q %q", c.name, tier, p, m, e)
-		}
-	}
-	if _, _, _, _, err := h.spawnTier("huge", "", "", ""); err == nil || !strings.Contains(err.Error(), "fast, work, think") {
-		t.Errorf("unknown tier: %v", err)
-	}
-	// The repo's (or config's) default_tier.
-	h.cfg.DefaultTier = TierThink
-	if tier, _, m, _, _ := h.spawnTier("", "", "", ""); tier != TierThink || m != "big-think" {
-		t.Errorf("default tier think: %q %q", tier, m)
-	}
-}
-
-// No tiers at all: everything is as before tiers.
-func TestSpawnTier_NoTiersIsTheChildDefault(t *testing.T) {
-	h := &Harness{cfg: Config{ChildModel: "child-m"}}
-	tier, p, m, e, err := h.spawnTier("", "", "", "")
-	if err != nil || tier != "" || p != "" || m != "child-m" || e != "" {
-		t.Errorf("got %q %q %q %q %v", tier, p, m, e, err)
-	}
-}
-
 // A spawn on a tier runs on its model and is shown with it: the report, the
 // agents pane and the record a resume reads.
 func TestSubAgent_OnATier(t *testing.T) {
@@ -139,6 +98,8 @@ func TestAgentToolDef_Tiers(t *testing.T) {
 // With no tier naming a model, the agent tool is main's from before tiers,
 // byte for byte: testdata/agent_tool_notier.golden.json is main's
 // agentToolDef output (87e2564), written by that tree's code, not this one.
+// Changed on purpose once since (2026-11-18, roles): the effort enum is
+// agentkit's full scale plus lowest, +75 bytes (3473 to 3548 plain).
 func TestAgentToolDef_NoTiersMatchesMain(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join("testdata", "agent_tool_notier.golden.json"))
 	if err != nil {

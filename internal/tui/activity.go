@@ -85,6 +85,7 @@ type agentRow struct {
 	prompt  string
 	model   string
 	tier    string // the model tier that picked model; "" none did
+	effort  string // the level its requests send (the engine's, clamped to its model)
 	tokens  int
 	seconds int
 	// at is when the engine said seconds. It pushes agents on a change, not
@@ -145,7 +146,7 @@ func agentRowsFromEvent(ev evMsg) []agentRow {
 		}
 		out = append(out, agentRow{
 			id: num(m["id"]), state: str(m["state"]), status: str(m["status"]),
-			prompt: str(m["prompt"]), model: str(m["model"]), tier: str(m["tier"]),
+			prompt: str(m["prompt"]), model: str(m["model"]), tier: str(m["tier"]), effort: str(m["effort"]),
 			tokens: num(m["tokens"]), seconds: num(m["seconds"]), at: at, changed: at,
 		})
 	}
@@ -314,6 +315,9 @@ func agentActRow(a agentRow, now time.Time) actRow {
 	label := fmt.Sprintf("#%d %s", a.id, a.state)
 	if a.tier != "" {
 		label = fmt.Sprintf("#%d %s %s", a.id, a.tier, a.state)
+	}
+	if a.effort != "" {
+		label += " · " + a.effort
 	}
 	if s := a.elapsed(now); s > 0 {
 		label += " " + compactDur(s)

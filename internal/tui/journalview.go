@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -30,6 +31,24 @@ type journalItem struct {
 	n                int
 	kind, line, text string
 	path             string
+	// outcome: an ask entry's (done, filed, dropped, gone), "" open.
+	outcome string
+}
+
+// folded: a done or filed ask, listed in the one fold row (askfold.go).
+func (it journalItem) folded() bool {
+	return it.kind == "ask" && (it.outcome == "done" || it.outcome == "filed")
+}
+
+// shown is how many entries are rows of their own: a folded ask is not.
+func (v *journalView) shown() int {
+	n := 0
+	for _, it := range v.items {
+		if !it.folded() {
+			n++
+		}
+	}
+	return n
 }
 
 type journalView struct {
@@ -41,17 +60,29 @@ func (v *journalView) lines(_ *tuiModel, w int) []string {
 }
 
 func (v *journalView) page() pageDoc {
-	nodes := make([]pageNode, 0, len(v.items))
+	nodes := make([]pageNode, 0, len(v.items)+1)
+	var counts askCounts
+	var folded []string
 	for i := len(v.items) - 1; i >= 0; i-- {
 		it := v.items[i]
+		if it.folded() {
+			counts.add(it.outcome)
+			folded = append(folded, it.line)
+			continue
+		}
 		body := it.text
 		if it.path != "" {
 			body += "\n\n" + it.path
 		}
 		nodes = append(nodes, pageNode{head: it.line, body: body, pre: true})
 	}
+	// Done and filed asks: one row, opened to list them; /journal view <n>
+	// shows one in full.
+	if len(folded) > 0 {
+		nodes = append(nodes, pageNode{head: counts.head(), body: strings.Join(folded, "\n"), pre: true, style: &StDim})
+	}
 	if len(nodes) == 0 {
-		nodes = append(nodes, pageNode{body: "The journal is empty. Each fold adds an entry, each message you type is an ask with what was done for it, /worklog write adds its account, and n (/journal now) writes one."})
+		nodes = append(nodes, pageNode{body: "The journal is empty. Each fold adds an entry, each ask made of what you type is listed with what was done for it, /worklog write adds its account, and n (/journal now) writes one."})
 	}
 	return pageDoc{title: entryCount(len(v.items)), nodes: nodes}
 }
@@ -87,10 +118,10 @@ func (m tuiModel) noteJournal(ev evMsg) tuiModel {
 	for _, x := range es {
 		o, _ := x.(map[string]any)
 		v.items = append(v.items, journalItem{n: intOf(o["n"]), kind: str(o["kind"]), line: str(o["line"]),
-			text: str(o["text"]), path: str(o["path"])})
+			text: str(o["text"]), path: str(o["path"]), outcome: str(o["outcome"])})
 	}
 	if cur := m.journalPaging(); cur != nil {
-		grew := len(v.items) - len(cur.items)
+		grew := v.shown() - cur.shown()
 		*cur = *v
 		if grew > 0 { // newest first: the selection stays on its entry
 			m.pg.cur += grew

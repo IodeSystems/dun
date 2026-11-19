@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
-	"github.com/iodesystems/agentkit/taskgraph"
 	"github.com/iodesystems/dun/internal/fsutil"
 )
 
@@ -212,20 +211,9 @@ func (h *Harness) noteRetry(n RetryNote) {
 	}
 }
 
-// openAsks is the open ask nodes (todo or doing), id and title.
-func (h *Harness) openAsks() (ids, titles []string) {
-	g, err := planStore{h}.View(context.Background())
-	if err != nil {
-		return nil, nil
-	}
-	for _, n := range g.Nodes {
-		if (n.Status == taskgraph.Todo || n.Status == taskgraph.Doing) && h.isAskNode(n.ID) {
-			ids = append(ids, n.ID)
-			titles = append(titles, strings.TrimPrefix(n.Title, "ask: "))
-		}
-	}
-	return ids, titles
-}
+// openAsks is what the network wait resumes: the intake, one id per
+// intake, and the open asks not blocked (asktool.go asksWaiting).
+func (h *Harness) openAsks() (ids, titles []string) { return h.asksWaiting() }
 
 // resumesLocked is ask id's resumes in the last 24 hours, pruned.
 func (h *Harness) resumesLocked(id string, now time.Time) int {

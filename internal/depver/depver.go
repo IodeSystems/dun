@@ -35,12 +35,12 @@ type Module struct {
 // require version: TestPinsMatchGoMod fails when go.mod moves and these do
 // not.
 var Modules = []Module{
-	{Name: "agentkit", Path: AgentKit, Pin: "v0.34.0"},
+	{Name: "agentkit", Path: AgentKit, Pin: "v0.35.0"},
 	{Name: "openai-claude-api-shim", Path: Shim, Pin: "v0.6.0"},
 	{Name: "raglit", Part: "ragcore", Path: Raglit, Pin: "v0.10.0"},
 	{Name: "poly-lsp-mcp", Part: "segment", Path: PolyLSP, Pin: "v0.5.3"},
 	{Name: "gwag", Part: "gat", Path: Gwag, Pin: "v2.11.0"},
-	{Name: "bubbleteandmd", Part: "render", Path: BubbleTeaMD, Pin: "v0.6.0"},
+	{Name: "bubbleteandmd", Part: "render", Path: BubbleTeaMD, Pin: "v0.7.0"},
 }
 
 // Devel is the version of a module replaced by a directory (a go.work or a

@@ -84,13 +84,7 @@ func (h *Harness) suggestDoneScope(ctx context.Context) (planTurnMark, taskgraph
 	if err != nil {
 		return m, taskgraph.Graph{}, false
 	}
-	work := 0 // the nodes that are not asks (asks.go): one for each message
-	for _, n := range g.Nodes {
-		if !h.isAskNode(n.ID) {
-			work++
-		}
-	}
-	if work == 0 && (h.store == nil || h.store.toolCallsNow() == m.calls) {
+	if len(g.Nodes) == 0 && (h.store == nil || h.store.toolCallsNow() == m.calls) {
 		return m, taskgraph.Graph{}, false // a plain chat: nothing to record
 	}
 	// Once per ask (USER 2026-11-18): the open asks this call's nodes would

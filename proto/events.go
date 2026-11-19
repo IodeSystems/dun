@@ -723,7 +723,10 @@ type AgentInfo struct {
 	Model string `json:"model"`
 	// Tier is the model tier that picked Model (fast, work, think); "" when
 	// none did, and from an engine older than tiers.
-	Tier    string `json:"tier,omitempty"`
+	Tier string `json:"tier,omitempty"`
+	// Effort is the level its requests send (its effort, or the /effort
+	// level it inherits, clamped to its model); "" from an older engine.
+	Effort  string `json:"effort,omitempty"`
 	State   string `json:"state"`
 	Status  string `json:"status"`
 	Prompt  string `json:"prompt"`
@@ -914,13 +917,20 @@ type Settings struct {
 	// config.json change applies from the next start), fast, work, think in
 	// order; DefaultTier is the one a spawn that names none runs on. Absent
 	// from an engine older than tiers.
+	//
+	// After the tiers, the role table (rows with Role set; harness/roles.go):
+	// every role (main, child:fast|work|think, each side call) as it resolves
+	// now: model, wanted and effective effort, why they differ, and where
+	// each came from. Sent again when the session's effort or a capability
+	// changes (agentkit OnLearn, OnTranslate). Clients render it as sent.
 	Tiers       []TierInfo `json:"tiers,omitempty"`
 	DefaultTier string     `json:"defaultTier,omitempty"`
 }
 
-// TierInfo is one model tier as the engine serves it. No Model: its spawns
-// run on the child default. Off: why it cannot be served. Source: where
-// Model came from (flag, env, config).
+// TierInfo is one model tier as the engine serves it, or one row of the
+// role table (Role set). No Model: its spawns run on the child default (a
+// role row: the session's model). Off: why it cannot be served. Source:
+// where Model came from (flag, env, config; a role row: its layer).
 type TierInfo struct {
 	Name     string `json:"name"`
 	Provider string `json:"provider,omitempty"`
@@ -928,6 +938,15 @@ type TierInfo struct {
 	Effort   string `json:"effort,omitempty"`
 	Source   string `json:"source,omitempty"`
 	Off      string `json:"off,omitempty"`
+	// The role table's columns. Role is the role (main, child:fast, fold…);
+	// Wanted the level asked for ("" unset), Effective what its requests
+	// send, Reason why they differ (or why the model is not the one its
+	// layers name), EffortSource where Wanted came from.
+	Role         string `json:"role,omitempty"`
+	Wanted       string `json:"wanted,omitempty"`
+	Effective    string `json:"effective,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+	EffortSource string `json:"effortSource,omitempty"`
 }
 
 // ContextSettings is /context config's settings in force: the window (0
@@ -1178,6 +1197,10 @@ type Plan struct {
 	// Summary is the last /plan summary, or the one being made; nil before
 	// the first.
 	Summary *PlanSummary `json:"summary,omitempty"`
+	// Asks are the person's asks, oldest first, and Intake the messages not
+	// yet acknowledged (nil with none): the clients' ask list.
+	Asks   []PlanAsk   `json:"asks,omitempty"`
+	Intake *PlanIntake `json:"intake,omitempty"`
 }
 
 // PlanNode is one row of a Plan.
@@ -1200,6 +1223,34 @@ type PlanNode struct {
 	// By is who wrote the node when not the agent: "suggest" for a done node
 	// the idle suggestion call recorded from the last turn.
 	By string `json:"by,omitempty"`
+	// Ask is the number of the ask the node serves (Plan.Asks); 0 for none.
+	Ask int `json:"ask,omitempty"`
+}
+
+// PlanAsk is one of the person's asks (harness asktool.go): a ledger of
+// its own, not a plan node. State: open, blocked, done, filed, dropped,
+// gone. Working: the one ask the turn works (one at most, or the intake).
+type PlanAsk struct {
+	N       int      `json:"n"`
+	Title   string   `json:"title"`
+	State   string   `json:"state"`
+	Why     string   `json:"why,omitempty"` // blocked: the question
+	At      int64    `json:"at"`            // unix seconds, when the person wrote it
+	Working bool     `json:"working,omitempty"`
+	Nodes   []string `json:"nodes,omitempty"` // the plan nodes that serve it
+}
+
+// PlanIntake is the person's messages the model has not acknowledged yet:
+// one ask that grows until it does.
+type PlanIntake struct {
+	Messages []PlanMessage `json:"messages"`
+	Working  bool          `json:"working,omitempty"`
+}
+
+// PlanMessage is one message on the intake.
+type PlanMessage struct {
+	At   int64  `json:"at"` // unix seconds
+	Text string `json:"text"`
 }
 
 // PlanSummary is the last /plan summary (dun/plansummary.go): Done / Doing /
@@ -1232,4 +1283,6 @@ type JournalItem struct {
 	Line   string `json:"line"` // the entry as /journal lists it
 	Text   string `json:"text"` // the entry: its own, or its file's
 	Path   string `json:"path,omitempty"`
+	// Outcome is an ask entry's: done, filed, dropped, gone; "" open.
+	Outcome string `json:"outcome,omitempty"`
 }
