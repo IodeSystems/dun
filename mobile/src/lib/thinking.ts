@@ -7,7 +7,8 @@
 // (`reasoning_end {round, cut?}`, docs/session-events.md "Thinking rounds");
 // a reasoning delta of another round opens a new block. Folded, the block is one line: the headline
 // (thinkHeadline) and how long and how much (thoughtMeta). Open, it is the
-// header (thinkHeader) and the full text.
+// header (thinkHeader) and the full text, as plain text (the TUI renders it
+// as Markdown; Markdown.tsx draws in the reply's colour and size only).
 
 /** A thought: its text, and when it started and ended (ms; 0 = unknown, as from history). */
 export type Thought = { text: string; start: number; end: number; live: boolean; cut?: boolean; round?: number };
@@ -36,35 +37,65 @@ function headingValue(rest: string): string {
 }
 
 /**
- * The line a folded thought shows, from its text (thinkHeadline). A line
- * `# Thinking: <what>` is a step's heading and `# Summary: <what>` the
- * conclusion, matched without regard to case, leading spaces or extra #s.
- * Live, it is the latest Thinking heading; finished, the last Summary. A
- * model that ignores the instruction gets the last Thinking, else its first
- * non-blank line. A line still arriving counts as it stands. "" for a
- * thought with no text.
+ * The line a folded thought shows, from its text (thinkHeadline): its title
+ * (thinkTitle), else its first non-blank line. "" for a thought with no text.
  */
 export function thinkHeadline(text: string, live: boolean): string {
-  let thinking = '';
+  const title = thinkTitle(text, live);
+  if (title) return title;
+  const first = text.split('\n').find((ln) => ln.trim());
+  return first ? first.trim().replace(/^#+/, '').trim() : '';
+}
+
+/**
+ * What the thought says it is doing, "" when it says nothing (thinkTitle).
+ * dun's prompt asks the model to open each step with a bold title line,
+ * `**<what>**`. A title is a line that is only a bold span, `**…**` or
+ * `__…__`, a colon after it or inside it allowed; bold inside a sentence is
+ * not one. Older logs have `# Thinking: <what>` step headings and a
+ * `# Summary: <what>`, matched without regard to case, leading spaces or
+ * extra #s. Live, it is the latest title; finished, the last Summary, else
+ * the latest title. A line still arriving counts as it stands: a bold span
+ * counts once it is closed.
+ */
+export function thinkTitle(text: string, live: boolean): string {
+  let title = '';
   let summary = '';
-  let first = '';
   for (const raw of text.split('\n')) {
     const ln = raw.trim();
-    if (!ln) continue;
-    if (!first) first = ln;
+    const bold = boldTitle(ln);
+    if (bold) {
+      title = bold;
+      continue;
+    }
     if (!ln.startsWith('#')) continue;
     const h = ln.slice(1).replace(/^#+/, '').trim();
     if (h.length >= 8 && h.slice(0, 8).toLowerCase() === 'thinking') {
       const v = headingValue(h.slice(8));
-      if (v) thinking = v;
+      if (v) title = v;
     } else if (h.length >= 7 && h.slice(0, 7).toLowerCase() === 'summary') {
       const v = headingValue(h.slice(7));
       if (v) summary = v;
     }
   }
   if (!live && summary) return summary;
-  if (thinking) return thinking;
-  return first.replace(/^#+/, '').trim();
+  return title;
+}
+
+/** The text of a line that is only a bold span — `**what**`, `__what__`, `**what**:`, `**what:**` — else "" (boldTitle). */
+export function boldTitle(ln: string): string {
+  if (ln.endsWith(':')) ln = ln.slice(0, -1);
+  for (const m of ['**', '__']) {
+    if (!ln.startsWith(m)) continue;
+    let inner = ln.slice(m.length);
+    if (!inner.endsWith(m)) return '';
+    inner = inner.slice(0, -m.length);
+    if (inner.includes(m)) return '';
+    inner = inner.trim();
+    if (inner.endsWith(':')) inner = inner.slice(0, -1);
+    return oneLine(inner).trim();
+  }
+  return '';
 }
 
 /** A duration the short way: <1s, 12s, 2m05s (thinkDur). */
@@ -107,9 +138,20 @@ export function thoughtMeta(t: Thought, now: number, narrow = false): string {
   return '(' + s.trim() + ')';
 }
 
-/** The open block's top line: what it is, how long, how much (thinkHeader). */
+/** The open block's top line: what it is (its title, if it has one), how long, how much (thinkHeader). */
 export function thinkHeader(t: Thought, now: number): string {
   const w = ` · ${words(t.text)} words`;
+  const title = thinkTitle(t.text, t.live);
+  if (title) {
+    let s = '✻ ' + title;
+    let d = thoughtTime(t, now);
+    if (d !== '–') {
+      if (t.live) d += '…';
+      else if (t.cut) d = '⏹ ' + d;
+      s += ' · ' + d;
+    }
+    return s + w;
+  }
   if (t.live) return '✻ thinking… ' + thinkDur(now - t.start) + w;
   if (t.cut && t.end) return '✻ interrupted after ' + thinkDur(t.end - t.start) + w;
   if (t.end) return '✻ thought for ' + thinkDur(t.end - t.start) + w;
