@@ -25,6 +25,18 @@ func TestAgentRow_RunningTimeCountsOn(t *testing.T) {
 	}
 }
 
+// A child a model tier picked the model of says the tier after its id.
+func TestAgentRow_ShowsTier(t *testing.T) {
+	a := agentRow{id: 3, state: "idle", tier: "think"}
+	if got := agentActRow(a, time.Now()).label; !strings.HasPrefix(got, "#3 think idle") {
+		t.Errorf("label %q", got)
+	}
+	a.tier = ""
+	if got := agentActRow(a, time.Now()).label; !strings.HasPrefix(got, "#3 idle") {
+		t.Errorf("untiered label %q", got)
+	}
+}
+
 // A line wrapped while the pane was narrow is wrapped again when it widens,
 // also to a width it still does not fit.
 func TestNotice_RewrapsWhenThePaneWidens(t *testing.T) {

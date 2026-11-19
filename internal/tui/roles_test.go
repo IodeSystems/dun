@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"github.com/charmbracelet/x/ansi"
 	"slices"
@@ -11,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/proto"
 )
 
 // rolesModel is a TUI with two saved providers and a config of facets,
@@ -460,5 +462,52 @@ func TestRoles_Round3(t *testing.T) {
 	}
 	if c := l.choices[len(dunconfig.FacetNames)]; !strings.HasPrefix(c.desc, "pick a model of") {
 		t.Errorf("provider row: %+v", c)
+	}
+}
+
+// settingsWithTiers is the settings event as the engine sends it, through
+// JSON, with tiers.
+func settingsWithTiers(t *testing.T, tiers []proto.TierInfo) evMsg {
+	t.Helper()
+	b, err := json.Marshal(map[string]any{"type": "settings", "model": "chat", "url": "http://127.0.0.1:1/w", "provider": "work",
+		"tiers": tiers, "defaultTier": "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ev evMsg
+	if err := json.Unmarshal(b, &ev); err != nil {
+		t.Fatal(err)
+	}
+	return ev
+}
+
+// /model lists the tiers as the ENGINE resolved them (the settings event),
+// not as the config now says: a config.json change applies from the next
+// engine start. With none set, one row; from an older engine, none.
+func TestRoles_ListsTiers(t *testing.T) {
+	m, _ := rolesModel(t, nil)
+	if n := m.tierNote(); n != nil {
+		t.Errorf("no settings tiers: %q", n)
+	}
+	m = m.handleEvent(settingsWithTiers(t, []proto.TierInfo{{Name: "fast"}, {Name: "work"}, {Name: "think"}}))
+	if n := m.tierNote(); len(n) != 1 || !strings.Contains(stripANSI(n[0]), "no model set") {
+		t.Errorf("no tiers: %q", n)
+	}
+	// The config says another model: not what this engine runs.
+	cfg := dunconfig.LoadConfig()
+	cfg.Tiers = map[string]dunconfig.Tier{dunconfig.TierFast: {Model: "config-only"}}
+	if err := dunconfig.SaveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	m = m.handleEvent(settingsWithTiers(t, []proto.TierInfo{{Name: "fast", Provider: "fast", Model: "small", Effort: "low", Source: "config"}, {Name: "work"}, {Name: "think"}}))
+	modelSlash(&m, nil)
+	p := stripANSI(m.rolesPanel())
+	for _, want := range []string{"tiers (sub-agents; default work", "fast   small on fast, effort low · config", "work   the child default (no model set)"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("panel lacks %q:\n%s", want, p)
+		}
+	}
+	if strings.Contains(p, "config-only") {
+		t.Errorf("the panel re-read the config:\n%s", p)
 	}
 }

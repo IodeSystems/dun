@@ -79,6 +79,17 @@ type Config struct {
 	// ChildEffort is the default effort for spawned sub-agents; empty = the
 	// saved /effort level. A spawn may override it.
 	ChildEffort string
+	// Tiers are the model tiers a spawn may name (tiers.go), fast, work and
+	// think in order; one with no Model runs on ChildModel. None with a model:
+	// the agent tool has no tier param.
+	Tiers []Tier
+	// DefaultTier is the tier a spawn that names neither a tier nor a model
+	// runs on. "" is TierWork.
+	DefaultTier string
+	// SideCallTiers is the tier each automatic side call runs on, by kind
+	// (noteSideCall's), or "session"; a kind not in it, or a tier with no
+	// model, is the session's model.
+	SideCallTiers map[string]string
 	// Effort is this harness's own effort level, in place of the saved one;
 	// a child spawned with an effort has it. Empty = the saved level.
 	Effort string

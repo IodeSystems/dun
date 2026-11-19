@@ -11,7 +11,7 @@ import (
 
 // spawnAgentIn is spawnAgent with a dir.
 func (h *Harness) spawnAgentIn(ctx context.Context, prompt, model, mode, dir string) (*subAgent, error) {
-	return h.spawnAgentFor(ctx, prompt, "", model, "", mode, dir, "")
+	return h.spawnAgentFor(ctx, prompt, "", "", model, "", mode, dir, "")
 }
 
 // gitRepoT is a repository at dir with one commit, holding sub/b.txt.

@@ -107,6 +107,45 @@ an `/effort` level (empty: the saved level).
   probes for main and child, OCR for vision (`ragd/probe.go`). `dun doctor`
   prints one line per role.
 
+## Model tiers
+
+Code: `internal/dunconfig/tiers.go`; the decision is "Model tiers" in
+`decisions.md`. Sub-agents and side calls run on one of three tiers, set in
+`config.json` beside `facets`:
+
+```json
+"tiers": {
+  "fast":  {"provider": "local", "model": "chat-fast", "effort": "low"},
+  "think": {"provider": "work", "model": "chat-big", "effort": "high"}
+},
+"default_tier": "work",
+"side_calls": {"suggest": "fast"}
+```
+
+- `agent{node, tier}` starts a child on a tier; `model` overrides it. A tier
+  with no model (here: work) is the child default: `facets.child`,
+  `--child-model`, else the session's model. With no tier set the agent
+  tool is as it was.
+- `use` (the agent tool's guidance per tier) and `default_tier` may also be
+  set in a repo's dun.json; a provider, model or effort there is ignored
+  and doctor warns. A repo's `default_tier` decides which of this
+  machine's tiers a spawn that names none uses.
+- The engine resolves the tiers at its start: a change in config.json
+  applies from the next engine start. A tier on a provider that is not
+  logged in is warned about then; its spawns run on the child default and
+  say so in the result.
+- Flags `--tier-fast`/`--tier-work`/`--tier-think` (`[provider/]model`) and
+  `--default-tier`; env `DUN_TIER_FAST`… and `DUN_DEFAULT_TIER`.
+- `side_calls` maps a side call (suggest, fold, remember, rescue,
+  plan_summary, journal, worklog, commit, rephrase, rules, learn, repaint)
+  to a tier or `session`. The defaults keep the calls sized from the
+  session's window (suggest, fold, remember, rescue) on the session's
+  model, and putting one on a tier is warned about. A tier call refused
+  before it replies is asked once more on the session's model. Spend from a side call on a tier is filed under the role `model`,
+  as a child's is.
+- `/model` lists the tiers the engine runs (its settings event); `dun doctor` the tiers, the side calls and the
+  warnings.
+
 ## Spend meter
 
 Code: `internal/harness/spend.go`, `ledger.go`. Source: agentkit reads what a gateway reports

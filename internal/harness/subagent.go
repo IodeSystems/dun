@@ -66,6 +66,8 @@ type subAgent struct {
 	prompt   string
 	model    string
 	provider string // "" is the parent session's
+	tier     string // the tier that picked its model (tiers.go); "" none did
+	note     string // why it is not on the model or tier asked for ("" it is); said once, in the spawn result
 	effort   string // "" is the saved /effort level
 	parent   *Harness
 	iso      isolation // where it works, when not in its parent's tree (subisolation.go)
@@ -460,9 +462,13 @@ func childSessionFile(parent string, num int) string {
 }
 
 // where is what the child runs on: its model, its provider when that is not
-// the session's, and its effort when it was given one.
+// the session's, and its effort when it was given one; led by its tier when
+// a tier picked the model ("fast: m (gw)").
 func (s *subAgent) where() string {
 	w := s.model
+	if s.tier != "" {
+		w = s.tier + ": " + w
+	}
 	if s.provider != "" {
 		w += " (" + s.provider + ")"
 	}
@@ -473,6 +479,22 @@ func (s *subAgent) where() string {
 		w += "effort " + s.effort
 	}
 	return w
+}
+
+// noted is s led by the spawn's note, when the child is not on the model or
+// tier asked for ("tier fast unavailable: …; ran on m.").
+func (s *subAgent) noted(out string) string {
+	if s.note == "" {
+		return out
+	}
+	return s.note + ".\n" + out
+}
+
+// tierName is the tier that picked the child's model, "" when none did.
+func (s *subAgent) tierName() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.tier
 }
 
 // ChildClient is what Config.ClientFor builds: the runner, and the endpoint
@@ -544,6 +566,17 @@ type childRun struct {
 	provider, model string
 	effort          string   // "": the saved /effort level
 	endpoint        Endpoint // zero: the parent's
+	// fellBack is why the model asked for is not the one this runs on
+	// (clientFor fell back to the parent's client); "" when it is.
+	fellBack string
+}
+
+// name is the model a child runs on, in words.
+func (r childRun) name() string {
+	if r.model == "" {
+		return "the session's model"
+	}
+	return r.model
 }
 
 // clientFor resolves the runner for a named model, falling back to the parent's
@@ -553,11 +586,19 @@ type childRun struct {
 func (h *Harness) clientFor(provider, model string) (childRun, error) {
 	parent := childRun{client: h.cfg.Client, model: h.cfg.ChildModel}
 	if provider == "" {
-		if model == "" || h.cfg.ClientFor == nil {
+		if model == "" {
+			return parent, nil
+		}
+		if h.cfg.ClientFor == nil {
+			parent.fellBack = "this session builds no client for another model"
 			return parent, nil
 		}
 		c, err := h.cfg.ClientFor("", model)
 		if err != nil || c.Runner == nil {
+			parent.fellBack = "no client for " + model
+			if err != nil {
+				parent.fellBack = err.Error()
+			}
 			return parent, nil
 		}
 		return childRun{client: c.Runner, model: model, endpoint: c.Endpoint}, nil
@@ -584,14 +625,57 @@ func (h *Harness) clientFor(provider, model string) (childRun, error) {
 // node's brief follows prompt. The model's only way here is spawnTool, which
 // always names a node (USER 2026-11-10); a child with no node is the tests'.
 // dir is where it works ("" is h's workspace; subisolation.go).
-func (h *Harness) spawnAgentFor(ctx context.Context, prompt, provider, model, effort, mode, dir, node string) (*subAgent, error) {
+func (h *Harness) spawnAgentFor(ctx context.Context, prompt, tier, provider, model, effort, mode, dir, node string) (*subAgent, error) {
 	if node != "" {
 		// Before the record is made, so the prompt kept (the agents pane,
 		// a resume) is the brief the child got.
 		prompt += h.planBrief(node)
 	}
-	if provider == "" && model == "" {
-		provider, model = h.cfg.ChildProvider, h.cfg.ChildModel
+	// The tier (tiers.go): a model given overrides it; a tier with no
+	// model is the child default.
+	asked := effort
+	tier, provider, model, effort, err := h.spawnTier(tier, provider, model, effort)
+	if err != nil {
+		return nil, err
+	}
+	// A tier that cannot be served (its provider not logged in, no client
+	// for its model) is the child default for this spawn, said in the
+	// result (note): one bad tier must not stop every spawn.
+	var note string
+	var run childRun
+	if t, ok := h.tier(tier); ok && t.Off != "" {
+		note = "tier " + tier + " unavailable: " + t.Off
+	} else {
+		run, err = h.clientFor(provider, model)
+		if err != nil && tier == "" {
+			return nil, err
+		}
+		if err != nil {
+			note = "tier " + tier + " unavailable: " + err.Error()
+		}
+	}
+	if note != "" {
+		tier, provider, model, effort = "", h.cfg.ChildProvider, h.cfg.ChildModel, asked
+		if run, err = h.clientFor(provider, model); err != nil {
+			return nil, fmt.Errorf("%s; the child default: %w", note, err)
+		}
+	}
+	if run.fellBack != "" {
+		what := model
+		if tier != "" {
+			what = "tier " + tier
+		}
+		if note != "" {
+			note += "; then "
+		}
+		note += what + " unavailable: " + run.fellBack
+		tier = ""
+	}
+	switch {
+	case run.fellBack != "":
+		note += "; ran on this session's model" // the parent's own client
+	case note != "":
+		note += "; ran on " + run.name()
 	}
 	if effort == "" {
 		effort = h.cfg.ChildEffort
@@ -599,10 +683,6 @@ func (h *Harness) spawnAgentFor(ctx context.Context, prompt, provider, model, ef
 	effort = strings.ToLower(strings.TrimSpace(effort))
 	if effort != "" && !validEffort(effort) {
 		return nil, fmt.Errorf("effort %q: want %s", effort, strings.Join(EffortLevels, ", "))
-	}
-	run, err := h.clientFor(provider, model)
-	if err != nil {
-		return nil, err
 	}
 	run.effort = effort
 	iso, err := h.newIsolation(mode, dir)
@@ -617,7 +697,7 @@ func (h *Harness) spawnAgentFor(ctx context.Context, prompt, provider, model, ef
 	}
 	h.agMu.Unlock()
 
-	sa := &subAgent{num: num, prompt: prompt, model: run.model, provider: run.provider, effort: run.effort, parent: h, hb: heartbeat.New(), iso: iso}
+	sa := &subAgent{num: num, prompt: prompt, tier: tier, note: note, model: run.model, provider: run.provider, effort: run.effort, parent: h, hb: heartbeat.New(), iso: iso}
 
 	// Start on a background context: a child outlives the TURN that spawned it
 	// (that is the whole point of an async spawn), so tying it to the caller's
@@ -916,7 +996,7 @@ func (h *Harness) restoreAgents() (resumed []*subAgent, cut map[int]bool) {
 		rec := loadAgentState(path)
 		sa := &subAgent{
 			num: num, parent: h, state: agentStopped, restore: path,
-			prompt: rec.Prompt, iso: loadIsolation(path), model: rec.Model, provider: rec.Provider, effort: rec.Effort,
+			prompt: rec.Prompt, iso: loadIsolation(path), tier: rec.Tier, model: rec.Model, provider: rec.Provider, effort: rec.Effort,
 			callID: rec.CallID,
 		}
 		if sa.prompt == "" {
@@ -956,6 +1036,7 @@ type agentRecord struct {
 	State    string `json:"state"`
 	Model    string `json:"model,omitempty"`
 	Provider string `json:"provider,omitempty"` // "" is the parent session's
+	Tier     string `json:"tier,omitempty"`     // "" no tier picked its model
 	Effort   string `json:"effort,omitempty"`   // "" is the saved /effort level
 	Prompt   string `json:"prompt,omitempty"`   // as asked: the transcript's first message has the isolation brief too
 	// CallID is the parent's agent tool call that spawned the child: what
@@ -975,7 +1056,7 @@ func agentFile(sessionFile string) string {
 // a child that was running then must resume as one that was.
 func (s *subAgent) saveState() {
 	s.mu.Lock()
-	rec, closed := agentRecord{State: string(s.state), Model: s.model, Provider: s.provider, Effort: s.effort, Prompt: s.prompt, CallID: s.callID}, s.closed
+	rec, closed := agentRecord{State: string(s.state), Model: s.model, Provider: s.provider, Tier: s.tier, Effort: s.effort, Prompt: s.prompt, CallID: s.callID}, s.closed
 	path := s.restore
 	if s.h != nil {
 		path = s.h.cfg.SessionFile
@@ -1111,6 +1192,11 @@ func (h *Harness) resumeAgent(sa *subAgent) string {
 	}
 
 	sa.mu.Lock()
+	note := ""
+	if run.fellBack != "" {
+		sa.tier = "" // clientFor fell back to the parent's client
+		note = model + " unavailable: " + run.fellBack + "; it runs on this session's model. "
+	}
 	sa.h, sa.cancel, sa.model, sa.provider = child, cancel, run.model, run.provider
 	// IDLE, not running, and with a ZEROED clock: a restored child has not been
 	// asked anything yet, and leaving `started` set made it show a growing age
@@ -1121,7 +1207,7 @@ func (h *Harness) resumeAgent(sa *subAgent) string {
 	sa.hook(child)
 	sa.saveState()
 	h.agentsChanged()
-	return fmt.Sprintf("agent #%d is back, idle, with its transcript loaded. "+
+	return note + fmt.Sprintf("agent #%d is back, idle, with its transcript loaded. "+
 		"Give it work with agent({id:%d, tell:\"…\"}).", sa.num, sa.num)
 }
 
@@ -1230,8 +1316,10 @@ func roleSystem(child bool) string {
 // ── the tools ───────────────────────────────────────────────────────
 
 // agentToolDef is the agent tool. providers are the logged-in ones; with
-// more than one, a spawn may name another.
-func agentToolDef(defaultModel, defaultProvider, defaultEffort string, providers []string) llm.ToolDef {
+// more than one, a spawn may name another. tiers (tiers.go) add the tier
+// param and a line per tier only when one names a model: with none the tool
+// is byte for byte as before tiers.
+func agentToolDef(defaultModel, defaultProvider, defaultEffort string, providers []string, tiers []Tier, defaultTier string) llm.ToolDef {
 	model := "the session's child model"
 	if defaultModel != "" {
 		model = defaultModel
@@ -1283,6 +1371,33 @@ func agentToolDef(defaultModel, defaultProvider, defaultEffort string, providers
 				"docker its worktree is branched from that directory's git repository, and it works in the same subdirectory of it"},
 		},
 	}
+	if tiered(tiers) {
+		if defaultTier == "" {
+			defaultTier = TierWork
+		}
+		lines := make([]string, 0, len(tiers))
+		for _, t := range tiers {
+			on := "the default model"
+			if t.on() && t.Off != "" {
+				on = "unavailable, " + t.Off + ": the default model"
+			} else if t.on() {
+				on = t.Model
+				if t.Provider != "" {
+					on += " on " + t.Provider
+				}
+				if t.Effort != "" {
+					on += ", effort " + t.Effort
+				}
+			}
+			lines = append(lines, t.Name+": "+t.Use+" ("+on+")")
+		}
+		td.Function.Description += " Pick the tier by the work: " + strings.Join(lines, "; ") +
+			". Default tier: " + defaultTier + ". A model given overrides the tier."
+		td.Function.Parameters.(map[string]any)["properties"].(map[string]any)["tier"] = map[string]any{
+			"type": "string", "enum": TierNames,
+			"description": "the kind of work, which picks the child's model and effort (the tiers above)",
+		}
+	}
 	if len(providers) > 1 {
 		td.Function.Parameters.(map[string]any)["properties"].(map[string]any)["provider"] = map[string]any{
 			"type": "string", "enum": providers,
@@ -1303,6 +1418,7 @@ func withAgent(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 			// (USER 2026-11-10, "Subagents should only be launchable via plan nodes").
 			Prompt    string `json:"prompt"`
 			Provider  string `json:"provider"`
+			Tier      string `json:"tier"`
 			Model     string `json:"model"`
 			Effort    string `json:"effort"`
 			Wait      bool   `json:"wait"`
@@ -1330,7 +1446,7 @@ func withAgent(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 				num = *args.ID
 			}
 		default:
-			out, num = spawnCall(ctx, h, tc.ID, args.Provider, args.Model, args.Effort, args.Isolation, strings.TrimSpace(args.Dir), args.Node, args.Wait)
+			out, num = spawnCall(ctx, h, tc.ID, args.Tier, args.Provider, args.Model, args.Effort, args.Isolation, strings.TrimSpace(args.Dir), args.Node, args.Wait)
 		}
 		if num > 0 {
 			h.toolCur.noteAgent(num)
@@ -1385,7 +1501,7 @@ const (
 // spawnTool is agent({node, …}): the model's only way to start a child. The
 // child's first message is node's brief (planBrief); nothing else.
 func spawnTool(ctx context.Context, h *Harness, provider, model, effort, isolation, node string, wait bool) string {
-	out, _ := spawnCall(ctx, h, "", provider, model, effort, isolation, "", node, wait)
+	out, _ := spawnCall(ctx, h, "", "", provider, model, effort, isolation, "", node, wait)
 	return out
 }
 
@@ -1411,7 +1527,7 @@ func (h *Harness) agentInDir(id int, dir string) bool {
 // child's number (0 when none started), and the child's sidecar keeps
 // callID, so a replayed history names the child its spawn started
 // (History, agentSpawns).
-func spawnCall(ctx context.Context, h *Harness, callID, provider, model, effort, isolation, dir, node string, wait bool) (string, int) {
+func spawnCall(ctx context.Context, h *Harness, callID, tier, provider, model, effort, isolation, dir, node string, wait bool) (string, int) {
 	node = strings.TrimSpace(node)
 	switch {
 	case node == "" && !h.hasTool(taskgraph.ToolAdd):
@@ -1423,7 +1539,7 @@ func spawnCall(ctx context.Context, h *Harness, callID, provider, model, effort,
 	if err := h.planCanAssign(node); err != nil {
 		return "ERROR: " + strings.TrimSuffix(err.Error(), ".") + ". No agent was started.", 0
 	}
-	sa, err := h.spawnAgentFor(ctx, "Work this plan node.", provider, model, effort, isolation, dir, node)
+	sa, err := h.spawnAgentFor(ctx, "Work this plan node.", tier, provider, model, effort, isolation, dir, node)
 	if err != nil {
 		return "ERROR: could not start the agent: " + err.Error(), 0
 	}
@@ -1457,19 +1573,19 @@ func spawnCall(ctx context.Context, h *Harness, callID, provider, model, effort,
 		if w := sa.where(); w != "" {
 			where = " on " + w + where
 		}
-		return fmt.Sprintf("Started agent #%d%s.%s It is working; you will be told when it finishes or asks you something. "+
+		return sa.noted(fmt.Sprintf("Started agent #%d%s.%s It is working; you will be told when it finishes or asks you something. "+
 			"Do other work, or end your turn if you have nothing to do until it answers.",
-			sa.num, where, owns), sa.num
+			sa.num, where, owns)), sa.num
 	}
 	select {
 	case <-sa.waitCh():
 	case <-ctx.Done():
-		return fmt.Sprintf("agent #%d is still running; the turn was cancelled.", sa.num), sa.num
+		return sa.noted(fmt.Sprintf("agent #%d is still running; the turn was cancelled.", sa.num)), sa.num
 	case <-h.userWaiting():
-		return fmt.Sprintf("agent #%d is still running; stopped waiting because a message arrived (the user wrote, or another dun session did) — "+
-			"it follows. You will be told when it finishes.", sa.num), sa.num
+		return sa.noted(fmt.Sprintf("agent #%d is still running; stopped waiting because a message arrived (the user wrote, or another dun session did) — "+
+			"it follows. You will be told when it finishes.", sa.num)), sa.num
 	}
-	return strings.TrimSpace(owns) + "\n" + sa.report(), sa.num
+	return sa.noted(strings.TrimSpace(owns) + "\n" + sa.report()), sa.num
 }
 
 // agentMonitor is the agent half of the jobs tool (jobs.go): list, or one
@@ -1608,6 +1724,7 @@ func askParent(h *Harness, question string) string {
 type AgentInfo struct {
 	ID      int    `json:"id"`
 	Model   string `json:"model,omitempty"`
+	Tier    string `json:"tier,omitempty"` // the tier that picked Model; "" none did
 	State   string `json:"state"`
 	Status  string `json:"status,omitempty"`
 	Prompt  string `json:"prompt"`
@@ -1625,7 +1742,7 @@ func (h *Harness) Agents() []AgentInfo {
 	for _, sa := range list {
 		state, status, _, since := sa.snapshot()
 		out = append(out, AgentInfo{
-			ID: sa.num, Model: sa.where(), State: string(state), Status: status,
+			ID: sa.num, Model: sa.where(), Tier: sa.tierName(), State: string(state), Status: status,
 			Prompt: sa.prompt, Tokens: sa.spent(), Seconds: int(since.Seconds()),
 			Dir: sa.iso.workspace(),
 		})

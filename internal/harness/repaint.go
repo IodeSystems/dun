@@ -49,7 +49,7 @@ func (h *Harness) RepaintReport(ctx context.Context, dir string) error {
 		return err
 	}
 	start := time.Now()
-	ch, err := untee(h.Session.Runner).ChatStream(ctx, []llm.Message{{Role: "user", Content: string(prompt)}}, nil, nil)
+	ch, err := h.sideRunner("repaint", untee(h.Session.Runner)).ChatStream(ctx, []llm.Message{{Role: "user", Content: string(prompt)}}, nil, nil)
 	if err != nil {
 		h.noteSideCall("repaint", start, nil)
 		return err

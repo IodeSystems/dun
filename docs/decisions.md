@@ -1304,6 +1304,79 @@ weeks; the version was checked only in `dun doctor` and `dun tools`.
   so the service's PATH no longer matters for these tools; doctor's
   service-PATH warning is kept for git only.
 
+## Model tiers (USER 2026-11-18)
+
+The `agent` tool took a raw model id per child, with no guidance on which
+model fits which work, and every side call ran on the session's model.
+Code: `internal/dunconfig/tiers.go` (resolution), `internal/harness/tiers.go`
+(spawns and side calls), `cmd/dun/tiers.go` (wiring, doctor).
+
+- **Three fixed tiers: fast, work, think.** `"tiers": {"fast": {"provider",
+  "model", "effort", "use"}, …}` and `"default_tier"` in
+  `$DUN_HOME/config.json`, beside `facets` (the file that holds the
+  providers a tier names; `default_via` is in mcp.json, which holds no
+  models). Shipped `use` texts: fast "mechanical work (renames, formatting,
+  file operations, summarizing given text; no judgment)", work "scoped
+  research, code reading, single-area fixes", think "planning, tradeoffs,
+  architecture, review".
+- **A repo narrows only the guidance.** A repo's dun.json layers (the
+  same files as `files` and `rag`) may set `tiers.<name>.use` and
+  `default_tier`. A provider, model or effort there is ignored and dun
+  doctor names it: a committed file does not pick what a machine pays for.
+  It does pick, with `default_tier`, which of the machine's tiers a spawn
+  that names none uses.
+- **Resolved at engine start.** A change to the tiers in config.json
+  applies from the next engine start. The engine sends its resolved tiers
+  in the settings event; `/model` shows those, not a fresh read of the
+  config.
+- **An unavailable tier does not stop spawns.** A tier on a provider that is
+  not logged in is said at engine start and in doctor; a spawn on it (or on
+  a tier whose client cannot be built) runs on the child default, and the
+  tool result leads with "tier fast unavailable: <reason>; ran on <model>".
+  The older silent fallback (a model on the session's provider with no
+  client) gets the same note.
+- **Precedence (standards CFG-3).** Field by field as facets: flag
+  (`--tier-fast`/`--tier-work`/`--tier-think`, `[provider/]model`) > env
+  (`DUN_TIER_FAST`…) > config. default_tier: `--default-tier` >
+  `DUN_DEFAULT_TIER` > the repo's > config's > work. Like `--child-model`,
+  the tier flags are not among dund's allowed engine flags.
+- **Agent tool.** A `tier` enum param, and one line per tier in the
+  description (its `use` and the model it resolves to). A `model` given
+  overrides the tier, effort included; the tier's effort applies unless the
+  call gives `effort`. A tier with no model runs on the child default
+  (facets.child, `--child-model`, else the session's model). With no tier
+  naming a model the param and the lines are left out: the tool is byte for
+  byte as before, checked against main's output in
+  `harness/testdata/agent_tool_notier.golden.json` (3473 bytes; three tiers
+  with the shipped texts add 509).
+- **Side calls.** `"side_calls": {"<kind>": "<tier>|session"}` in
+  config.json. Defaults: suggest, fold, remember and rescue `session`;
+  plan_summary, journal, worklog, commit, rephrase and rules `fast`; learn
+  and repaint `work`. A tier with no model, an unavailable one, or a client
+  that cannot be built is the runner the call used before. A tier call
+  refused before any reply (context too long, auth, model not found) is
+  logged and asked once more on the session's runner. Side calls take the
+  tier's model, not its effort: each sets its own options (fold turns
+  thinking off).
+- **Window-sized calls stay on the session's model.** fold, suggest and
+  remember send the session's prompt-cache prefix and its history (fold
+  since SessionPrefix; suggest and remember are forks of the turn's
+  prefix); rescue sends up to half the window to recover a session that is
+  over it. The cache hits only on the model that wrote it, and a smaller
+  model's window may not hold the input: a rescue refused there would leave
+  the session unable to recover. A `side_calls` entry that puts one of them
+  on a tier is warned about at engine start and in doctor; the retry on the
+  session's runner still covers a refusal. The proposal had suggest on
+  fast; that is one `side_calls` line, and its warning, for a user whose
+  fast model holds the history. The other side calls are not capped to the
+  tier model's window; the retry covers an input too large for it.
+- **Shown.** A child a tier picked the model of carries the tier: the
+  sub-agent strip (`#2 fast running`), its report and the agents pane
+  (`fast: model`), the sidecar a resume reads, and `dun ps` (the session's
+  label and its tree's rows). `/model` lists the engine's tiers and what each
+  resolves to; `dun doctor` lists the tiers, the default, each side call's
+  tier and what it runs on, and the warnings.
+
 ## Release updates
 
 - **para shares dun's signing key (Carl, 2026-11-10); manifests are bound to

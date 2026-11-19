@@ -120,10 +120,10 @@ func TestAgentToolDef_ProviderOnlyWithSeveral(t *testing.T) {
 	props := func(td llm.ToolDef) map[string]any {
 		return td.Function.Parameters.(map[string]any)["properties"].(map[string]any)
 	}
-	if _, ok := props(agentToolDef("", "", "", []string{"claude"}))["provider"]; ok {
+	if _, ok := props(agentToolDef("", "", "", []string{"claude"}, nil, ""))["provider"]; ok {
 		t.Error("one provider: nothing to choose")
 	}
-	td := agentToolDef("qwen3-8b", "local", "", []string{"claude", "local"})
+	td := agentToolDef("qwen3-8b", "local", "", []string{"claude", "local"}, nil, "")
 	p, ok := props(td)["provider"].(map[string]any)
 	if !ok || strings.Join(p["enum"].([]string), ",") != "claude,local" {
 		t.Errorf("provider argument %v", props(td)["provider"])
@@ -175,7 +175,7 @@ func TestSubAgent_OwnEffort(t *testing.T) {
 }
 
 func TestAgentToolDef_Effort(t *testing.T) {
-	td := agentToolDef("", "", EffortLow, nil)
+	td := agentToolDef("", "", EffortLow, nil, nil, "")
 	p := td.Function.Parameters.(map[string]any)["properties"].(map[string]any)["effort"].(map[string]any)
 	if strings.Join(p["enum"].([]string), ",") != strings.Join(EffortLevels, ",") {
 		t.Errorf("effort enum %v", p["enum"])

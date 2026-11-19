@@ -500,7 +500,7 @@ func sessionPrefix(s *agent.Session, system string) agent.SessionPrefix {
 // retry), and neither showed in /usage or any spend view before.
 func (r foldRunner) call(ctx context.Context, msgs []llm.Message, tools []llm.ToolDef, opts *llm.ChatOpts) (string, string, error) {
 	start := time.Now()
-	text, errMsg, usage, err := collectText(ctx, r.inner, msgs, tools, opts)
+	text, errMsg, usage, err := collectText(ctx, r.h.sideRunner("fold", r.inner), msgs, tools, opts)
 	r.h.noteSideCall("fold", start, usage)
 	return text, errMsg, err
 }

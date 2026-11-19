@@ -29,6 +29,9 @@ import (
 // token columns a turn gets — processed, cached, generated. They ride the
 // existing `usage` event, so /context shows them alongside the turn's.
 //
+// Each kind runs on its model tier (Config.SideCallTiers, sideRunner in
+// tiers.go), else on the runner it names here.
+//
 // Latency: the chunk's Usage.LatencyMS is the client-measured round-trip the
 // agentkit client stamps on the same call; the wall clock here is the same
 // span (start just before ChatStream, stop just after the Done chunk), so the
@@ -136,7 +139,7 @@ func (h *Harness) askOnce(ctx context.Context, kind, prompt string) (string, *ll
 		return "", nil, fmt.Errorf("no model to ask")
 	}
 	start := time.Now()
-	ch, err := untee(h.Session.Runner).ChatStream(ctx, []llm.Message{{Role: "user", Content: prompt}}, nil, nil)
+	ch, err := h.sideRunner(kind, untee(h.Session.Runner)).ChatStream(ctx, []llm.Message{{Role: "user", Content: prompt}}, nil, nil)
 	if err != nil {
 		h.noteSideCall(kind, start, nil)
 		return "", nil, err

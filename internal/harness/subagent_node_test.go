@@ -21,7 +21,7 @@ func planRowsSig(h *Harness) string {
 }
 
 func TestAgentNode_ToolSchemaHasNoPrompt(t *testing.T) {
-	props := agentToolDef("", "", "", nil).Function.Parameters.(map[string]any)["properties"].(map[string]any)
+	props := agentToolDef("", "", "", nil, nil, "").Function.Parameters.(map[string]any)["properties"].(map[string]any)
 	if _, ok := props["prompt"]; ok {
 		t.Error("the agent tool still offers prompt")
 	}

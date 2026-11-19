@@ -94,7 +94,7 @@ type session struct {
 	jobs        []proto.JobInfo   // the running ones
 	agents      []proto.AgentInfo // the running ones
 	// agentDirs are the live (running or idle) sub-agents that work in a
-	// tree of their own, for dun ps (procs.go).
+	// tree of their own or run on a model tier, for dun ps (procs.go).
 	agentDirs []proto.ProcAgent
 	// resume is the message a restart left for this session's agent: it was
 	// working when dund stopped, and is woken with it on the next start
@@ -242,8 +242,8 @@ func (s *session) track(ev proto.Event) {
 			if a.State == "running" {
 				s.agents = append(s.agents, a)
 			}
-			if (a.State == "running" || a.State == "idle") && a.Dir != "" {
-				s.agentDirs = append(s.agentDirs, proto.ProcAgent{ID: a.ID, Dir: a.Dir})
+			if (a.State == "running" || a.State == "idle") && (a.Dir != "" || a.Tier != "") {
+				s.agentDirs = append(s.agentDirs, proto.ProcAgent{ID: a.ID, Dir: a.Dir, Tier: a.Tier})
 			}
 		}
 	case *proto.EngineState:

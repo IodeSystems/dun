@@ -357,6 +357,12 @@ type ConfigFile struct {
 	// the binary run instead of the pinned copy (tools.go). Read from
 	// $DUN_HOME/mcp.json only; a project file's is ignored.
 	Tools map[string]ToolConfig `json:"tools,omitempty"`
+	// Tiers and DefaultTier are a project's word on the model tiers
+	// (dunconfig/tiers.go): each tier's use text, and the tier a spawn that
+	// names none runs on. A tier's provider, model and effort are read only
+	// to be ignored, with a warning (LoadTiers): they are $DUN_HOME/config.json's.
+	Tiers       map[string]RepoTier `json:"tiers,omitempty"`
+	DefaultTier string              `json:"default_tier,omitempty"`
 }
 
 // LoadDefaultVia is the global default mode for a server with no mode at any

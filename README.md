@@ -481,7 +481,10 @@ its tool servers (no second index), runs on `--child-model` if you set one, and
 cannot spawn agents of its own or reach you directly. With more than one provider
 logged in, a child can run on another one: `agent{node, provider, model}`, or
 `--child-provider` with `--child-model` for the default — a session on the Claude
-API can hand work to a smaller model on a local server. Its tokens count in the
+API can hand work to a smaller model on a local server. With model tiers set in
+`config.json` (`"tiers": {"fast": …, "work": …, "think": …}`,
+`docs/providers-and-cost.md`), `agent{node, tier}` picks the child's model by the
+kind of work and the tool lists each tier's use; `model` still overrides it. Its tokens count in the
 session's spend, billed to its own provider and key. `agent{effort}` (or
 `--child-effort`) sets how much a child thinks; without it a child has the saved
 `/effort` level, and a child's own level is never saved. It reports with

@@ -1,5 +1,13 @@
 package mcpserver
 
+import (
+	"maps"
+	"slices"
+	"strings"
+
+	"github.com/iodesystems/dun/internal/dunconfig"
+)
+
 // The sections of dun.json beside its servers: how /worktree commit writes
 // its message (commit.go), the file tools (files.go) and what dund's indexes
 // are given (rag_ingest.go), in internal/harness. They are read across the
@@ -128,4 +136,44 @@ func mergeRag(prev, next RagConfig) RagConfig {
 		prev.MaxDirMB = next.MaxDirMB
 	}
 	return prev
+}
+
+// RepoTier is a tier in dun.json. Only Use is honored.
+type RepoTier struct {
+	Use      string `json:"use,omitempty"`
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
+	Effort   string `json:"effort,omitempty"`
+}
+
+// LoadTiers is what a workspace's dun.json layers say of the model tiers:
+// use texts and default_tier, the later layer winning. $DUN_HOME/mcp.json is
+// not read: the tiers' home is $DUN_HOME/config.json. A provider, model or
+// effort set here is named in Ignored and has no effect.
+func LoadTiers(dir string) dunconfig.RepoTiers {
+	var out dunconfig.RepoTiers
+	for _, p := range serverConfigPaths(dir) {
+		f, err := ReadConfig(p)
+		if err != nil || f == nil {
+			continue
+		}
+		if s := strings.TrimSpace(f.DefaultTier); s != "" {
+			out.Default = s
+		}
+		for _, name := range slices.Sorted(maps.Keys(f.Tiers)) {
+			t := f.Tiers[name]
+			if s := strings.TrimSpace(t.Use); s != "" {
+				if out.Use == nil {
+					out.Use = map[string]string{}
+				}
+				out.Use[name] = s
+			}
+			for _, x := range []struct{ field, v string }{{"provider", t.Provider}, {"model", t.Model}, {"effort", t.Effort}} {
+				if strings.TrimSpace(x.v) != "" {
+					out.Ignored = append(out.Ignored, "tiers."+name+"."+x.field+" ("+p+")")
+				}
+			}
+		}
+	}
+	return out
 }

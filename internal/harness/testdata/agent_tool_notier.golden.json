@@ -1,0 +1,140 @@
+{
+  "child": {
+    "type": "function",
+    "function": {
+      "name": "agent",
+      "description": "Start a sub-agent on a plan node: for work that would cost you a lot of context for a small answer (reading a long log, scanning a large file), or for work on Y that does not depend on X, so X continues. Add the node with plan_add first, then agent({node:\"\u003cid\u003e\"}): the node's title, details and done_when are the child's whole brief (it cannot see your conversation), and it publishes its answer onto the node. It spends its own context; what it read never enters yours. isolation none: it has your tools, in your tree. worktree and docker: your tools, in its own tree. dir puts it in another directory, a git worktree of that directory's repo with worktree. nodir: NO project and NO file tools; its shell runs in a scratch dir, deleted on dismiss. Never use nodir for work that reads or edits project files. If a child drops its node with \"missing tools\", start it again with isolation none or worktree. It returns at once and you are notified each time the child ends a turn, unless wait:true. Then act on it by id: agent({id:N, tell:\"…\"}) answers its question or gives it new work, node gives it another plan node, resume restarts a stopped one, dismiss:true ends it. It stays resident until you dismiss it; nothing cleans it up for you. Default model: qwen3-8b on provider local. Default effort: low.",
+      "parameters": {
+        "properties": {
+          "dir": {
+            "description": "a new child's directory, absolute, ~/ or relative to your workspace (default: your workspace). With isolation none it works there in place; with worktree or docker its worktree is branched from that directory's git repository, and it works in the same subdirectory of it",
+            "type": "string"
+          },
+          "dismiss": {
+            "description": "with id: end it; what it did not finish of a plan node goes back",
+            "type": "boolean"
+          },
+          "effort": {
+            "description": "how much this child thinks before it answers: off is fastest, high thinks as long as it needs, default leaves it to the server",
+            "enum": [
+              "default",
+              "off",
+              "low",
+              "medium",
+              "high"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "description": "act on existing agent #id instead of starting one",
+            "type": "integer"
+          },
+          "isolation": {
+            "description": "where the child works. none (default): this tree. worktree: its own git worktree branched from this tree's last commit (uncommitted changes are not in it); it commits there and you merge its branch — use it for children that edit at the same time. docker: the same, its commands in a container. nodir: no project, no file tools, shell in a scratch dir deleted on dismiss; only for work that needs no project files.",
+            "enum": [
+              "none",
+              "worktree",
+              "docker",
+              "nodir"
+            ],
+            "type": "string"
+          },
+          "model": {
+            "description": "run this child on a specific model",
+            "type": "string"
+          },
+          "node": {
+            "description": "the plan node a new child works: a ready one (todo, no child on it, its needs done). Its title, details and done_when are the child's brief; it owns the node alone and owes you a publish of it (done with notes, or dropped with why); the node leaves your ready list. It gets plan tools that change only its own nodes. With id: give idle agent #id this node; tell adds to its brief",
+            "type": "string"
+          },
+          "provider": {
+            "description": "run this child on another logged-in provider (then name one of its models); omitted, it runs on this session's provider",
+            "enum": [
+              "claude",
+              "local"
+            ],
+            "type": "string"
+          },
+          "resume": {
+            "description": "with id: restart a stopped agent from its transcript",
+            "type": "boolean"
+          },
+          "tell": {
+            "description": "with id: its next message: the answer to its question, or new work",
+            "type": "string"
+          },
+          "wait": {
+            "description": "block until it answers, instead of being notified later",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  "plain": {
+    "type": "function",
+    "function": {
+      "name": "agent",
+      "description": "Start a sub-agent on a plan node: for work that would cost you a lot of context for a small answer (reading a long log, scanning a large file), or for work on Y that does not depend on X, so X continues. Add the node with plan_add first, then agent({node:\"\u003cid\u003e\"}): the node's title, details and done_when are the child's whole brief (it cannot see your conversation), and it publishes its answer onto the node. It spends its own context; what it read never enters yours. isolation none: it has your tools, in your tree. worktree and docker: your tools, in its own tree. dir puts it in another directory, a git worktree of that directory's repo with worktree. nodir: NO project and NO file tools; its shell runs in a scratch dir, deleted on dismiss. Never use nodir for work that reads or edits project files. If a child drops its node with \"missing tools\", start it again with isolation none or worktree. It returns at once and you are notified each time the child ends a turn, unless wait:true. Then act on it by id: agent({id:N, tell:\"…\"}) answers its question or gives it new work, node gives it another plan node, resume restarts a stopped one, dismiss:true ends it. It stays resident until you dismiss it; nothing cleans it up for you. Default model: the session's child model. Default effort: the session's /effort level.",
+      "parameters": {
+        "properties": {
+          "dir": {
+            "description": "a new child's directory, absolute, ~/ or relative to your workspace (default: your workspace). With isolation none it works there in place; with worktree or docker its worktree is branched from that directory's git repository, and it works in the same subdirectory of it",
+            "type": "string"
+          },
+          "dismiss": {
+            "description": "with id: end it; what it did not finish of a plan node goes back",
+            "type": "boolean"
+          },
+          "effort": {
+            "description": "how much this child thinks before it answers: off is fastest, high thinks as long as it needs, default leaves it to the server",
+            "enum": [
+              "default",
+              "off",
+              "low",
+              "medium",
+              "high"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "description": "act on existing agent #id instead of starting one",
+            "type": "integer"
+          },
+          "isolation": {
+            "description": "where the child works. none (default): this tree. worktree: its own git worktree branched from this tree's last commit (uncommitted changes are not in it); it commits there and you merge its branch — use it for children that edit at the same time. docker: the same, its commands in a container. nodir: no project, no file tools, shell in a scratch dir deleted on dismiss; only for work that needs no project files.",
+            "enum": [
+              "none",
+              "worktree",
+              "docker",
+              "nodir"
+            ],
+            "type": "string"
+          },
+          "model": {
+            "description": "run this child on a specific model",
+            "type": "string"
+          },
+          "node": {
+            "description": "the plan node a new child works: a ready one (todo, no child on it, its needs done). Its title, details and done_when are the child's brief; it owns the node alone and owes you a publish of it (done with notes, or dropped with why); the node leaves your ready list. It gets plan tools that change only its own nodes. With id: give idle agent #id this node; tell adds to its brief",
+            "type": "string"
+          },
+          "resume": {
+            "description": "with id: restart a stopped agent from its transcript",
+            "type": "boolean"
+          },
+          "tell": {
+            "description": "with id: its next message: the answer to its question, or new work",
+            "type": "string"
+          },
+          "wait": {
+            "description": "block until it answers, instead of being notified later",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      }
+    }
+  }
+}

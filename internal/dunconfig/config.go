@@ -79,6 +79,14 @@ type DunConfig struct {
 	// > the old fields above (model, vision_model) > a default. Writers
 	// (/model use) write this map; the old fields are read, not migrated.
 	Facets map[string]Facet `json:"facets,omitempty"`
+	// Tiers are the model tiers a sub-agent or a side call runs on (fast,
+	// work, think; tiers.go). Only this file names their models: a repo's
+	// dun.json may set use and default_tier, nothing else.
+	Tiers       map[string]Tier `json:"tiers,omitempty"`
+	DefaultTier string          `json:"default_tier,omitempty"`
+	// SideCalls is the tier (or "session") of each automatic side call, by
+	// kind; a kind not here has DefaultSideCalls'.
+	SideCalls map[string]string `json:"side_calls,omitempty"`
 }
 
 // Facet is one model role: the saved provider (ProviderConfig.Name) that

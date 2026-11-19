@@ -136,7 +136,7 @@ func (h *Harness) Suggestions(ctx context.Context) ([]Suggestion, error) {
 	}
 
 	start := time.Now()
-	ch, err := untee(h.Session.Runner).ChatStream(ctx, msgs, tools, opts)
+	ch, err := h.sideRunner("suggest", untee(h.Session.Runner)).ChatStream(ctx, msgs, tools, opts)
 	if err != nil {
 		return nil, err
 	}
