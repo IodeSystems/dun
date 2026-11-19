@@ -34,6 +34,10 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   `Render`, so the `[exit: ...]` verdict stays in the tail. Measured on one
   task: 456,772 tokens became 32,916. Recap removes churn that already cost;
   the cap stops it being charged.
+  2026-11-18 (USER): `file_read`'s `whole` parameter is dropped; a read with
+  no range returns the whole file when it fits the context left, and is
+  refused with the numbers when it does not (`docs/reading.md`, section 2).
+  A model sent `whole` with a range and got an error for it.
 - **What the human sees must be what the model saw.** Tools report the call
   from inside their own wrapper, before the outer cap runs, so the TUI showed
   a quarter-megabyte the model never read. `cappedReporter` (`internal/harness/recap.go`) forces

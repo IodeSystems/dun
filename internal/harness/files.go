@@ -208,12 +208,12 @@ func tmpReader(ts *filetools.Toolset, tmp []*filetools.Toolset, name, args strin
 	return nil
 }
 
-// wholeReader answers a read with whole:true on the toolset it was routed
-// to (Harness.readWhole, wholeread.go).
+// wholeReader answers an unranged read on the toolset it was routed to
+// (Harness.readWhole, wholeread.go).
 type wholeReader func(ctx context.Context, route *filetools.Toolset, name, args, id string) string
 
 // withFiles routes the file tools to the toolset and reports each call.
-// whole, when set, answers a read that asks for all of a file. A path
+// whole, when set, answers a read with no range: all of the file. A path
 // outside the workspace that is not open is the person's to open, asked in
 // the turn (fileaccess.go).
 func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, tmp []*filetools.Toolset, h *Harness, whole wholeReader, onCall func(string, map[string]any, string)) agent.ToolDispatcher {

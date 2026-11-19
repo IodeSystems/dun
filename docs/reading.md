@@ -39,7 +39,11 @@ is surfaced as short name plus path; its detail is a `file_read` away.
 
 ## 2. A whole read, bounded by the context left
 
-`file_read({path, whole: true})` breaks the fixed cap. The limit is the room
+A `file_read` with no range (no offset/limit/at) and no grep breaks the
+fixed 8KB unranged cap: it returns the whole file. A ranged read keeps
+agentkit's 64KB cap. (USER 2026-11-18 dropped the `whole` parameter that
+asked for this: `file_read({path, offset: 1, limit: 80, whole: true})` was
+refused as "whole or a range, not both".) The limit is the room
 left: the window, minus what is in use, minus a reserve for the reply (the
 window is tracked already: the `window` field of request events).
 
@@ -69,15 +73,28 @@ The refusal says the numbers ("X is N tokens; M are free") and then:
 ### As built (`internal/harness/wholeread.go`)
 
 - **Wrapper, not agentkit.** `withFiles` routes the call as before (tree, tmp,
-  `/file` paths) and hands a `whole` read to `Harness.readWhole`, which pages
-  the file with ranged reads on that same toolset and joins the pages under
-  one header. Root, refusals, the binary check and the read-before-write record
-  stay agentkit's. A line longer than a page comes back cut, as a ranged read
-  cuts it. The schema gains `whole` by wrapping the read def
-  (`wholeReadDefs`): one boolean property and one description line:
-  `{path:"docs/design.md", whole:true} reads all of a file, past those caps,
-  when it fits the context left.` `whole` with offset/limit/at is refused;
-  with grep it is a grep. Item paths answer first and ignore it.
+  `/file` paths) and hands an unranged read (`wantsWhole`: no grep or
+  pattern, offset and limit absent or 0, no at, as agentkit reads them) to
+  `Harness.readWhole`, which pages the file with ranged reads on that same
+  toolset and joins the pages under one header. Root, refusals, the binary
+  check and the read-before-write record stay agentkit's; agentkit's
+  unranged cap is never reached. A binary file goes to agentkit before the
+  size check (`isBinary`, the same 8000-byte NUL scan), so a large one gets
+  "binary file", not a size refusal. A line longer than a page comes back
+  cut, as a ranged read cuts it. Item paths answer first.
+- **Read-before-write.** A served whole read pages with ranged reads, and each
+  marks the file seen, so `file_write` may replace it after. A refused read
+  marks nothing (the 8KB head it used to return did), so a write over a file
+  too large to read needs a ranged read first or `overwrite:true`.
+- **The description.** `wholeReadDefs` replaces agentkit's unranged sentence
+  ("you get the first 8.0KB, or only the first 2.0KB of a file of 64.0KB or
+  more") with `With no offset/limit you get the whole file if it fits the
+  context left`; the rest is agentkit's. 485 → 354 bytes (−131), and the
+  `whole` property is gone from the schema.
+- **An old `whole`** (old transcripts, a model that learned it): not in the
+  schema and not read. agentkit decodes arguments with a plain
+  `json.Unmarshal`, so the extra field is ignored, not refused. With a range
+  the range wins; alone it is an unranged read; with grep it is a grep.
 - **The room**: `Window()`: window − max(last prompt, fixed overhead) −
   `outputReserve()` (the reply reserve already sent as `max_tokens`). Tool
   results since the last request are not counted.
@@ -117,7 +134,7 @@ The refusal says the numbers ("X is N tokens; M are free") and then:
 
 Mostly dun: the budget check, the aside and the refusal wrap agentkit's read;
 the namespaces are a resolver in front of it. An agentkit change only if
-`whole` and the cap override must live in agentkit's tool definition; that goes
+the cap override must live in agentkit's tool definition; that goes
 through agentkit-f2.
 
 ## Open
