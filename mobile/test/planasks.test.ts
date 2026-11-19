@@ -1,13 +1,13 @@
 /// <reference types="jest" />
-import { askAge, askClosed, askFoldLine, intakeLine, motion, parsePlan } from '../src/lib/plan';
+import { askAge, askClosed, askFoldLine, askTag, intakeLine, parsePlan } from '../src/lib/plan';
 
-// The cases are internal/tui/askfold_test.go's: the plan as the engine sends
-// it (proto.Plan), with the intake and each ask node's ask.
+// The cases are internal/tui/askfold_test.go's: the plan event (proto.Plan)
+// with the asks ledger beside the rows.
 const now = Date.parse('2026-11-18T12:00:00Z');
 const at = now / 1000 - 300;
 const plan = parsePlan({
-  total: 4,
-  done: 2,
+  total: 1,
+  done: 0,
   intake: {
     messages: [
       { at, text: 'the tools and stubs dir is not what I expect\nmore' },
@@ -15,14 +15,15 @@ const plan = parsePlan({
       { at, text: 'rety' },
     ],
   },
-  rows: [
-    { id: '73', title: 'ask: fix the stubs dir', status: 'doing', ask: { n: 1, state: 'open', at, working: true } },
-    { id: '75', title: 'ask: vehicle telemetry', status: 'doing', ask: { n: 2, state: 'open', at } },
-    { id: '76', title: 'ask: add plan nodes', status: 'done', ask: { n: 3, state: 'done', at } },
-    { id: '80', title: 'ask: locate tow yards', status: 'done', ask: { n: 4, state: 'filed', at, filed: ['90'] } },
+  asks: [
+    { n: 1, title: 'fix the stubs dir', state: 'open', at, working: true },
+    { n: 2, title: 'vehicle telemetry', state: 'open', at },
+    { n: 3, title: 'add plan nodes', state: 'done', at },
+    { n: 5, title: 'locate tow yards', state: 'filed', at, nodes: ['1'] },
+    { n: 6, title: 'deploy it', state: 'blocked', why: 'which region?', at },
   ],
+  rows: [{ id: '1', title: 'write the tow yard list', status: 'todo', ask: 5 }],
 });
-const live = { busy: true, asking: false, agents: {}, phase: 0 };
 
 test('the intake is one row', () => {
   expect(intakeLine(plan.intake!)).toBe('▸ new · 3 messages · "the tools and stubs dir is not…" +2');
@@ -30,16 +31,16 @@ test('the intake is one row', () => {
 });
 
 test('only the worked ask shows working; the others open with their age', () => {
-  const tags = plan.rows.filter((r) => !askClosed(r)).map((r) => motion(r, live, now).tag);
-  expect(tags).toEqual(['working', 'open · 5m']);
-  expect(motion(plan.rows[0]!, { ...live, busy: false }, now).tag).toBe('open · 5m');
+  const open = plan.asks!.filter((a) => !askClosed(a));
+  expect(open.map((a) => askTag(a, true, now))).toEqual(['working', 'open · 5m', 'blocked: which region?']);
+  expect(askTag(open[0]!, false, now)).toBe('open · 5m');
 });
 
-test('done and filed asks fold into one row', () => {
-  const closed = plan.rows.filter(askClosed);
-  expect(closed.map((r) => r.id)).toEqual(['76', '80']);
+test('done and filed asks fold into one row; a node names its ask', () => {
+  const closed = plan.asks!.filter(askClosed);
+  expect(closed.map((a) => a.n)).toEqual([3, 5]);
   expect(askFoldLine(closed)).toBe('▸ 1 done · 1 filed');
-  expect(plan.rows[3]!.ask!.filed).toEqual(['90']);
+  expect(plan.rows[0]!.ask).toBe(5);
 });
 
 test('ages', () => {
