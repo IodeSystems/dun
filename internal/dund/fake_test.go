@@ -188,6 +188,8 @@ func (e *fakeEngine) run(id string) {
 		case *proto.ServiceNotice:
 			// dund's notices are quiet (they start no turn); one that would
 			// wake the engine is recorded apart, so a test sees it.
+			// The real engine shows each to its clients (cmd/dun/peers.go).
+			e.emit(enc, &proto.Notification{Kind: "service", Text: p.Text})
 			if p.Quiet {
 				e.sp.record("notice " + id + ": " + p.Text)
 			} else {

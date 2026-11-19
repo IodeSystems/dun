@@ -63,6 +63,10 @@ type session struct {
 	gaveUp       bool
 	restarts     int
 	restartStart time.Time
+	// logPartial: this log does not hold the conversation from its start
+	// (the engine was adopted after a dund restart, so its history went to
+	// the dund before). A client following from the start gets a snapshot.
+	logPartial bool
 	// shown: an engine of this session already sent its conversation to
 	// clients (or the session outlived a dund restart), so the next engine's
 	// history is a restart, not a resume; switching: the next engine is on
@@ -688,11 +692,15 @@ func (s *session) subscribe(after uint64, epoch string) (*proto.Event, []proto.E
 	s.touch()
 	s.mu.Lock()
 	s.claimed = time.Time{} // its client is here: the subscription holds it now
+	partial := s.logPartial
 	s.mu.Unlock()
 	var replay []proto.Event
 	var sub *proto.Subscription
 	err := errEpoch
-	if epoch == "" || epoch == s.log.Epoch() {
+	// From the start of a log that starts mid-conversation: the kept events
+	// hold no history, so the client would show none (USER 2026-11-19: an
+	// empty screen after an upgrade). A snapshot carries it.
+	if (epoch == "" || epoch == s.log.Epoch()) && !(after == 0 && partial) {
 		replay, sub, err = s.log.Subscribe(after, subBuffer)
 		if err == nil && len(replay) <= maxReplay {
 			return nil, replay, sub, nil
