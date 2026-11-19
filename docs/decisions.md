@@ -938,7 +938,9 @@ spun. Then: asks are a ledger, pinned in the prompt, not plan roots.
   four requests all grow it. Rejected: matching control words and typos by
   edit distance (USER: "kinda dumb"), and one `new` ask per message merged
   away later (14 rows again until the model acts).
-- **The `asks` tool**, one call of several items, at any point in the turn:
+- **The `asks` tool**, one call of several items, at any point in the turn
+  (its schema flattened 2026-11-19: id 0 is the intake, split is a list of
+  titles; see "The person's message ends the prompt"):
   on `intake`, `split` (asks with short titles, each with its part of the
   text), `merge_into` an ask (the intake's messages go to its `continued`,
   word for word; `text` is a note on them, never in their place; a closed
@@ -1381,6 +1383,45 @@ and the turn-end check pushed it back to its tools.
   (`lastReplyID`). A recap over it keeps the words verbatim (`Said`). It
   still counts as the person's message where `SayAs` counts it: the intake,
   settle, the automatic-turn budget, the missed reply.
+
+## The person's message ends the prompt (2026-11-19)
+
+A repro with Gemini 4: every round came back empty, agentkit wrote no
+assistant entry, the turn-end check ran once ("Asks (the asks tool): …
+Acknowledge the intake"), the model was empty again, and the turn ended
+with `Reply ""` and no error. The person saw nothing. The prompt ended on
+an asks block, not on the person's message: `AskAs` ran `prepareTurn`, then
+published the message, and `runTurn` ran `prepareTurn` again, whose
+`planTurnLine` queued a second block that `flushSilent` wrote after the
+message. Each retried attempt added one more.
+
+- **One asks/plan block per turn, before the message.** `prepareTurn` (the
+  caller, once, before the message) writes it; `runTurn` calls
+  `prepareAttempt` before each attempt, which does the rest of the
+  preparation but not `planTurnLine` (`internal/harness/turn.go`). The
+  asides are flushed before the inbox arrivals, so a queued message of the
+  person's is also the last thing before the round.
+- **The block's entry is tagged `asks`** (`AsideOpts.Tag`): agentkit renders
+  a notification `[<Tag or kind>] <content>`, so the model reads `[asks] Open
+  asks: …`, not `[notification] [asks] …`. The history shows it the same.
+- **An empty reply is said.** A person's turn that ends with no text from
+  the model in any round (agentkit sets `Reply` only from a round with
+  text) gets a notice, `<model> returned an empty reply: …`, through
+  `OnNotify`, and a record in `<session>.errors.jsonl`, so `dun errors`
+  shows it (`noteEmptyReply`, `turnerrors.go`). An automatic turn may end
+  quietly: nobody waits on it. The finish reason is not in it: agentkit
+  v0.37.0's `TurnResult` does not carry it (TODO there).
+- **The turn-end check is the model's.** agentkit tags it `idle_check`; the
+  store does not ping `OnNotify` for it (no 🔔 in the TUI or the plain CLI)
+  and the history shown leaves it out. The model still reads it, and the
+  transcript keeps it.
+- **The asks tool's schema is flat.** `id` and `merge_into` are integers,
+  `id` 0 the intake; `split` is an array of the new asks' titles (each
+  takes the item's state, nodes and note, and the whole intake as text),
+  not an array of objects. No union-typed field and no nested object,
+  which Gemini's function schemas take least well. The call still reads
+  `"intake"`, `"3"`, `"#3"` and split objects, the shape before. 713 bytes
+  of tool def (was 911).
 
 ## Thinking titles are bold (USER 2026-11-18)
 
