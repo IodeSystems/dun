@@ -197,15 +197,20 @@ func (r *toolRun) live() bool {
 	return n > 0 && r.items[n-1].think != nil && r.items[n-1].think.live
 }
 
-// callLine is a call: its mark, short form and outcome preview.
-func callLine(it *runItem) string {
-	mark := StDim.Render("… ")
+// callMark is a call's status glyph, in its colour: … running, ✓, ✗.
+func callMark(it *runItem) string {
 	switch {
 	case it.done && it.failed:
-		mark = StErr.Render("✗ ")
+		return StErr.Render("✗ ")
 	case it.done:
-		mark = StTool.Render("✓ ")
+		return StTool.Render("✓ ")
 	}
+	return StDim.Render("… ")
+}
+
+// callLine is a call: its mark, short form and outcome preview.
+func callLine(it *runItem) string {
+	mark := callMark(it)
 	if it.head != "" {
 		return mark + it.head
 	}
@@ -367,7 +372,21 @@ func (r *toolRun) page() pageDoc {
 		n := pageNode{head: it.line(200), err: it.failed}
 		if it.think != nil {
 			n.body = strings.TrimSpace(it.think.text)
+			n.style = &stSecondary
 		} else {
+			// The status in the glyph's colour alone; the call in the
+			// default foreground (USER 2026-11-19: it was all green).
+			n.glyph, n.head = callMark(it), callText(it.tool, it.args, 200)
+			n.style = &stPlain
+			if it.tool == "exec" {
+				args, output := it.args, it.output
+				if cmd, _ := args["command"].(string); cmd != "" {
+					if _, rest := execCdPrefix(cmd); rest != cmd {
+						n.head = callText("exec", map[string]any{"command": rest}, 200)
+					}
+				}
+				n.rows = func(w int) []string { return execStepRows(args, output, w) }
+			}
 			// The renderer's full body (a table, laid-out values, a marked
 			// error) where it has one; the raw result otherwise.
 			res := strings.TrimRight(it.output, "\n")

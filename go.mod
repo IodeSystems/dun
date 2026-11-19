@@ -10,6 +10,7 @@ require (
 	charm.land/glamour/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.1.1
 	github.com/Masterminds/semver/v3 v3.5.0
+	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/charmbracelet/x/cellbuf v0.0.15
@@ -41,7 +42,6 @@ require (
 	connectrpc.com/connect v1.21.1 // indirect
 	github.com/AlexanderGrooff/mermaid-ascii v0.0.0-20261117200642-e7a2d2f81cdb // indirect
 	github.com/IodeSystems/graphql-go/v2 v2.1.0 // indirect
-	github.com/alecthomas/chroma/v2 v2.27.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/bufbuild/protocompile v0.14.1 // indirect
