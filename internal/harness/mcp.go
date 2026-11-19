@@ -61,6 +61,7 @@ var toolDocs = map[string]string{
 		"an error mcpshell raises itself is a string in catch. xs.sort(), xs.reverse() and xs.fill(v) mutate xs in place and return it (JS); " +
 		"sort(xs), xs |> sort and xs.toSorted() return copies. Dedup, count, sort etc. are pipe commands. " +
 		"On a hosted server's namespace, <ns>.help() or <ns>.help(\"cmd\") lists its commands.\n" +
+		"eval runs no shell commands (there is no Shell): run git, ls, builds etc. with the exec tool.\n" +
 		"`dun` is bound in every eval (reserved): dun.harness, dun.harness_version, dun.model_id, dun.effort, dun.provider.",
 }
 
