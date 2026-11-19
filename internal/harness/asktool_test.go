@@ -341,3 +341,22 @@ func TestAsks_NetWaitIDsPerIntake(t *testing.T) {
 		t.Errorf("ids %v then %v", ids, ids2)
 	}
 }
+
+// The asks tool is listed where asks are kept, and only there: not with
+// NoAsks, not in a sub-agent; asksOn reads the same condition back.
+func TestAsks_ToolGating(t *testing.T) {
+	h, _, _ := startAsks(t)
+	t.Cleanup(h.Close)
+	if !slices.Contains(h.ToolNames(), asksToolName) || !h.asksOn() {
+		t.Fatalf("root: tools %v", h.ToolNames())
+	}
+	dir := t.TempDir()
+	off := startLedger(t, &nudgeRunner{}, dir, filepath.Join(dir, "s.jsonl"), func(c *Config) { c.NoAsks = true })
+	t.Cleanup(off.Close)
+	if slices.Contains(off.ToolNames(), asksToolName) || off.asksOn() || off.intakeAdd("hi") {
+		t.Errorf("NoAsks: tools %v", off.ToolNames())
+	}
+	if child := (&Harness{parent: h}); child.asksWanted() {
+		t.Error("a sub-agent would be offered the asks tool")
+	}
+}
