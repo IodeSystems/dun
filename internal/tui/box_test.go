@@ -9,9 +9,11 @@ import (
 )
 
 // thinkLines streams lines from..from+n-1 of a thought and draws the tick.
+// Each is a list item, one row: the body is Markdown, which joins the lines
+// of a paragraph.
 func thinkLines(v *vtui, from, n int) {
 	for i := from; i < from+n; i++ {
-		v.event(map[string]any{"type": "reasoning", "text": fmt.Sprintf("line %d of the thought\n", i)})
+		v.event(map[string]any{"type": "reasoning", "text": fmt.Sprintf("- line %d of the thought\n", i)})
 	}
 	nm, _ := v.m.Update(renderTickMsg{})
 	v.m = nm.(tuiModel)
@@ -307,9 +309,9 @@ func TestBox_StreamingMovesTheScreenAtMostTheCap(t *testing.T) {
 func TestBox_Replay(t *testing.T) {
 	v := newVtui(80, 40)
 	v.m.thinkFull = true
-	thought := make([]string, 30)
+	thought := make([]string, 30) // list items: a row each
 	for k := range thought {
-		thought[k] = fmt.Sprintf("past line %d", k)
+		thought[k] = fmt.Sprintf("- past line %d", k)
 	}
 	v.event(map[string]any{"type": "history", "items": []any{
 		map[string]any{"kind": "user", "content": "hi"},

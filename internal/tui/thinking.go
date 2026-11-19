@@ -3,9 +3,12 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
+	glamouransi "charm.land/glamour/v2/ansi"
 	"charm.land/lipgloss/v2"
+	"github.com/iodesystems/bubbleteandmd"
 
 	"github.com/iodesystems/dun/internal/textfmt"
 )
@@ -22,10 +25,11 @@ import (
 //
 // FOLDED (the default) the block is ONE line (thoughtLine): the headline
 // (thinkHeadline) and how long and how much. dun's prompt asks the model to
-// start each step with `# Thinking: <what>` and end with `# Summary: <what>`;
-// the line is the latest Thinking heading while it streams, swapped in place,
-// and the Summary once it ends. ctrl+t unfolds every thought, those on
-// screen and in tool runs too, to its full text in a box (box.go) that
+// open each step with a bold title line, `**<what>**`; the line is the
+// latest title, swapped in place as the thought streams (thinkTitle has the
+// rules, and the older `# Thinking:` / `# Summary:` headings). ctrl+t
+// unfolds every thought, those on screen and in tool runs too, to its full
+// text, rendered as Markdown (thinkBody), in a box (box.go) that
 // follows its tail while it streams; ctrl+t again folds them. A folded
 // thought is one row live and finished, so the end of a round moves nothing;
 // toggling is the one time a block's height changes on screen, and the view
@@ -47,6 +51,7 @@ type thinkBlock struct {
 	cut        bool // the user interrupted the turn mid-thought
 	full       bool // drawn as its whole text, not the one line (ctrl+t)
 	round      int  // the model round it is from; 0 from history or an older engine
+	md         thinkMD
 }
 
 // liveThought is the thought still streaming and the block it is in — its
@@ -191,9 +196,21 @@ func (e *convoEntry) renderThink() {
 	e.invalidateWrap()
 }
 
-// thinkHeader is the unfolded box's top line: what it is, how long, how much.
+// thinkHeader is the unfolded box's top line: what it is, how long, how
+// much. A thought with a title (thinkTitle) says the title where the generic
+// "thinking…" / "thought for" was.
 func thinkHeader(t *thinkBlock) string {
 	words := fmt.Sprintf(" · %d words", len(strings.Fields(t.text)))
+	if title := thinkTitle(t.text, t.live); title != "" {
+		d := thoughtTime(t)
+		switch {
+		case t.live:
+			d += "…"
+		case t.cut:
+			d = "⏹ " + d
+		}
+		return "✻ " + title + " · " + d + words
+	}
 	switch {
 	case t.live:
 		return "✻ thinking… " + thinkDur(time.Since(t.start)) + words
@@ -215,44 +232,77 @@ func thinkDur(d time.Duration) string {
 	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
 }
 
-// thinkHeadline is the line a folded thought shows, from its text. A line
-// `# Thinking: <what>` is a step's heading and `# Summary: <what>` the
-// conclusion, matched without regard to case, leading spaces or extra #s.
-// Live, it is the latest Thinking heading; finished, the last Summary. A
-// model that ignores the instruction gets the last Thinking, else its first
-// non-blank line. A line still arriving counts as it stands, so a heading
-// grows in place; "# Thin" is not one yet. A heading inside a code fence
-// counts like any other. "" for a thought with no text.
+// thinkHeadline is the line a folded thought shows, from its text: its
+// title (thinkTitle), else its first non-blank line. "" for a thought with
+// no text.
 func thinkHeadline(text string, live bool) string {
-	var thinking, summary, first string
+	if title := thinkTitle(text, live); title != "" {
+		return title
+	}
+	for _, ln := range strings.Split(text, "\n") {
+		if ln = strings.TrimSpace(ln); ln != "" {
+			return strings.TrimSpace(strings.TrimLeft(ln, "#"))
+		}
+	}
+	return ""
+}
+
+// thinkTitle is what the thought says it is doing, "" when it says nothing.
+// dun's prompt asks the model to open each step with a bold title line,
+// `**<what>**` (USER 2026-11-18; Claude does it unasked). A title is a line
+// that is only a bold span, `**…**` or `__…__`, a colon after it or inside
+// it allowed; bold inside a sentence is not one. Logs from before that have
+// `# Thinking: <what>` step headings and a `# Summary: <what>`, matched
+// without regard to case, leading spaces or extra #s. Live, it is the latest
+// title; finished, the last Summary, else the latest title. A line still
+// arriving counts as it stands: "# Thin" is not a heading yet, and a bold
+// span counts once it is closed. A title inside a code fence counts like
+// any other.
+func thinkTitle(text string, live bool) string {
+	var title, summary string
 	for _, ln := range strings.Split(text, "\n") {
 		ln = strings.TrimSpace(ln)
-		if ln == "" {
+		if v := boldTitle(ln); v != "" {
+			title = v
 			continue
 		}
-		if first == "" {
-			first = ln
+		h, ok := strings.CutPrefix(ln, "#")
+		if !ok {
+			continue
 		}
-		if h, ok := strings.CutPrefix(ln, "#"); ok {
-			h = strings.TrimSpace(strings.TrimLeft(h, "#"))
-			if len(h) >= 8 && strings.EqualFold(h[:8], "thinking") {
-				if v := headingValue(h[8:]); v != "" {
-					thinking = v
-				}
-			} else if len(h) >= 7 && strings.EqualFold(h[:7], "summary") {
-				if v := headingValue(h[7:]); v != "" {
-					summary = v
-				}
+		h = strings.TrimSpace(strings.TrimLeft(h, "#"))
+		if len(h) >= 8 && strings.EqualFold(h[:8], "thinking") {
+			if v := headingValue(h[8:]); v != "" {
+				title = v
+			}
+		} else if len(h) >= 7 && strings.EqualFold(h[:7], "summary") {
+			if v := headingValue(h[7:]); v != "" {
+				summary = v
 			}
 		}
 	}
-	switch {
-	case !live && summary != "":
+	if !live && summary != "" {
 		return summary
-	case thinking != "":
-		return thinking
 	}
-	return strings.TrimSpace(strings.TrimLeft(first, "#"))
+	return title
+}
+
+// boldTitle is the text of a line that is only a bold span — `**what**`,
+// `__what__`, `**what**:` or `**what:**` — else "".
+func boldTitle(ln string) string {
+	ln = strings.TrimSuffix(ln, ":")
+	for _, m := range []string{"**", "__"} {
+		in, ok := strings.CutPrefix(ln, m)
+		if !ok {
+			continue
+		}
+		if in, ok = strings.CutSuffix(in, m); !ok || strings.Contains(in, m) {
+			return ""
+		}
+		in = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(in), ":"))
+		return textfmt.OneLine(in)
+	}
+	return ""
 }
 
 // headingValue is what follows a heading's keyword: ": text", else "".
@@ -312,4 +362,131 @@ func thoughtTime(t *thinkBlock) string {
 		return "–"
 	}
 	return thinkDur(t.end.Sub(t.start))
+}
+
+// ── the body as Markdown ───────────────────────────────────────────
+
+// An unfolded thought's body is Markdown, rendered like a reply (answer.go):
+// a bubbleteandmd Stream, Frame while it streams and Final once done, its
+// stable blocks kept in a cache so a frame costs the tail. The style is the
+// reply's with the prose in the thought's colour (stSecondary) and no
+// margin, so a thought still reads one step below the answer; bold titles
+// stay bold, code stays code. The prose column is the reply's rule
+// (proseW): the box's inner width, capped at readingCap.
+
+// thinkCache is the thoughts' rendered-block cache: its own, so a long
+// chain of thought does not push a reply's blocks out of answerCache.
+var thinkCache = bubbleteandmd.NewCache(256)
+
+// thinkRenderers are the thought renderers by prose column.
+var thinkRenderers struct {
+	sync.Mutex
+	rs map[int]*bubbleteandmd.DirectiveRenderer
+}
+
+// thinkMD is a thought's Stream and its last render.
+type thinkMD struct {
+	s        *bubbleteandmd.Stream
+	pw       int
+	src, out string
+	live     bool
+}
+
+// thinkStyle is the reply style with the prose in the thought's colour and
+// no document margin (the box's edge is the margin).
+func thinkStyle() glamouransi.StyleConfig {
+	s := mdStyleConfig()
+	fg := "246" // stSecondary (tui_view.go); 240 on a light terminal
+	if mdStyle == "light" {
+		fg = "240"
+	}
+	var zero uint
+	s.Document.Color, s.Document.Margin = &fg, &zero
+	return s
+}
+
+func thinkRenderer(pw int) *bubbleteandmd.DirectiveRenderer {
+	initMarkdownStyle() // no-op after the first call
+	thinkRenderers.Lock()
+	defer thinkRenderers.Unlock()
+	if r, ok := thinkRenderers.rs[pw]; ok {
+		return r
+	}
+	r, err := bubbleteandmd.NewRenderer(thinkStyle(), pw)
+	if err != nil {
+		return nil
+	}
+	if thinkRenderers.rs == nil || len(thinkRenderers.rs) >= answerRenderersMax {
+		thinkRenderers.rs = map[int]*bubbleteandmd.DirectiveRenderer{}
+	}
+	thinkRenderers.rs[pw] = r
+	return r
+}
+
+// thinkBody is t's text rendered for a box body ww columns wide; the
+// source, sanitized, when no renderer can be built. A render that did not
+// change (same text, width and liveness) is the last one.
+func thinkBody(t *thinkBlock, ww int) string {
+	src := strings.TrimSpace(t.text)
+	pw := max(20, min(ww, readingCap))
+	md := &t.md
+	if md.s != nil && md.pw == pw && md.src == src && md.live == t.live {
+		return md.out
+	}
+	if md.s == nil || md.pw != pw {
+		r := thinkRenderer(pw)
+		if r == nil {
+			return bubbleteandmd.Sanitize(src)
+		}
+		md.s = bubbleteandmd.NewStream(r, fmt.Sprintf("think/%s/%d", mdStyle, pw), thinkCache)
+		md.pw = pw
+	}
+	in := titleBlocks(demoteStepHeads(textfmt.FenceToolMarkup(src))) // demote: old logs' step headings
+	var out string
+	var err error
+	if t.live {
+		out, err = md.s.Frame(in)
+	} else {
+		out, err = md.s.Final(in)
+	}
+	if err != nil {
+		return bubbleteandmd.Sanitize(src)
+	}
+	// Glamour pads its rows to the column: a list or a code block starts
+	// with a row that is only spaces.
+	rows := strings.Split(out, "\n")
+	for len(rows) > 0 && strings.TrimSpace(stripANSI(rows[0])) == "" {
+		rows = rows[1:]
+	}
+	md.src, md.live, md.out = src, t.live, strings.TrimRight(strings.Join(rows, "\n"), "\n")
+	return md.out
+}
+
+// titleBlocks puts a title line (boldTitle) in a paragraph of its own:
+// Markdown joins it to the line under it ("**Plan**\nread x" is one line,
+// "Plan read x"), and the title is what the body is skimmed by. Fenced code
+// is left as written.
+func titleBlocks(text string) string {
+	if !strings.Contains(text, "**") && !strings.Contains(text, "__") {
+		return text
+	}
+	lines := strings.Split(text, "\n")
+	fence := ""
+	for i, ln := range lines {
+		t := strings.TrimSpace(ln)
+		if fence != "" {
+			if strings.HasPrefix(t, fence) {
+				fence = ""
+			}
+			continue
+		}
+		if strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") {
+			fence = t[:3]
+			continue
+		}
+		if boldTitle(t) != "" {
+			lines[i] = "\n" + ln + "\n"
+		}
+	}
+	return strings.Join(lines, "\n")
 }

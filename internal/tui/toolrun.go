@@ -169,7 +169,7 @@ func (r *toolRun) boxRows(w int) []string {
 		switch {
 		case it.think != nil && it.think.full:
 			rows = append(rows, "  "+StDim.Render("▾ "+thinkHeader(it.think)))
-			it.wrap.wrapBody(strings.TrimSpace(it.think.text), w, true, "    ")
+			it.wrap.wrapBody(thinkBody(it.think, max(1, w-4)), w, "    ")
 			rows = append(rows, it.wrap.rows...)
 		case it.think != nil:
 			rows = append(rows, "  "+thoughtLine(it.think, lw))

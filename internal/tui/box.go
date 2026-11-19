@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/cellbuf"
 )
 
@@ -50,15 +51,11 @@ type boxState struct {
 	capAt  int
 	inside bool // descended into: the keys scroll it (box.go, insideBox)
 
-	// The wrapped body, cached by source and width. A box that only grew —
-	// a thought streaming in — keeps the rows of its finished lines (stable
-	// bytes of src, stableRows rows) and wraps just what came after them, so
-	// a frame costs the new text, not the whole thought.
-	src        string
-	w          int
-	rows       []string
-	stable     int
-	stableRows int
+	// The wrapped body, cached by source and width. A thought's body is
+	// rendered Markdown (thinkBody), whose blocks are cached before this.
+	src  string
+	w    int
+	rows []string
 }
 
 // boxPush is the most rows a box may push the conversation up by, past the
@@ -77,46 +74,29 @@ func boxCap(top, bottom, paneH, grant int) int {
 // boxed says the entry is drawn as a box right now.
 func (e convoEntry) boxed() bool { return e.box != nil && e.state == viewMinimized }
 
-// wrapBody brings b.rows up to date with body at width w, each row behind
-// edge. plain says the body is unstyled text, dimmed row by row — which is
-// what lets it be wrapped a line at a time.
-func (b *boxState) wrapBody(body string, w int, plain bool, edge string) {
+// wrapBody brings b.rows up to date with body, styled text, at width w,
+// each row behind edge. A body that did not change keeps its rows.
+func (b *boxState) wrapBody(body string, w int, edge string) {
 	ww := max(1, w-lipgloss.Width(edge))
-	if !plain {
-		if b.src == body && b.w == w && b.rows != nil {
-			return
-		}
-		b.src, b.w, b.rows = body, w, b.rows[:0]
-		if strings.TrimSpace(stripANSI(body)) == "" {
-			return
-		}
-		rows := strings.Split(cellbuf.Wrap(body, ww, ""), "\n")
-		// A styled body can end in rows that are only padding and escapes.
-		for len(rows) > 0 && strings.TrimSpace(stripANSI(rows[len(rows)-1])) == "" {
-			rows = rows[:len(rows)-1]
-		}
-		for _, r := range rows {
-			b.rows = append(b.rows, edge+r)
-		}
+	if b.src == body && b.w == w && b.rows != nil {
 		return
 	}
-	if b.w != w || b.rows == nil || b.stable > len(body) || body[:b.stable] != b.src[:b.stable] {
-		b.stable, b.stableRows, b.rows = 0, 0, b.rows[:0]
-	}
-	b.src, b.w = body, w
-	b.rows = b.rows[:b.stableRows]
-	lines := strings.Split(body[b.stable:], "\n")
-	for k, ln := range lines {
+	b.src, b.w, b.rows = body, w, b.rows[:0]
+	// A row at a time, and only a row too wide is wrapped: this runs on
+	// every frame of a streaming thought, and wrapping (or stripping) the
+	// whole body was 34ms a frame for a 1,100-word thought.
+	for _, ln := range strings.Split(body, "\n") {
+		if ansi.StringWidth(ln) <= ww {
+			b.rows = append(b.rows, edge+ln)
+			continue
+		}
 		for _, r := range strings.Split(cellbuf.Wrap(ln, ww, ""), "\n") {
-			b.rows = append(b.rows, edge+stSecondary.Render(r))
-		}
-		if k < len(lines)-1 { // a finished line: its rows will not change
-			b.stable += len(ln) + 1
-			b.stableRows = len(b.rows)
+			b.rows = append(b.rows, edge+r)
 		}
 	}
-	if body == "" {
-		b.rows = b.rows[:0]
+	// A styled body can end in rows that are only padding and escapes.
+	for len(b.rows) > 0 && strings.TrimSpace(ansi.Strip(b.rows[len(b.rows)-1])) == strings.TrimSpace(ansi.Strip(edge)) {
+		b.rows = b.rows[:len(b.rows)-1]
 	}
 }
 
@@ -141,11 +121,12 @@ func (e *convoEntry) boxContent(w int) (string, []string) {
 	case e.think != nil && !e.think.full:
 		return thoughtLine(e.think, w), nil
 	case e.think != nil:
-		e.box.wrapBody(strings.TrimSpace(e.think.text), w, true, StDim.Render("│ "))
+		edge := StDim.Render("│ ")
+		e.box.wrapBody(thinkBody(e.think, max(1, w-lipgloss.Width(edge))), w, edge)
 		return StDim.Render(thinkHeader(e.think)), e.box.rows
 	case e.msg != nil:
 		edge := StDim.Render("│ ")
-		e.box.wrapBody(e.msg.body(max(1, w-lipgloss.Width(edge))), w, false, edge)
+		e.box.wrapBody(e.msg.body(max(1, w-lipgloss.Width(edge))), w, edge)
 		return e.msg.header(), e.box.rows
 	}
 	return e.collapsed, nil
