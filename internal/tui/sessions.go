@@ -167,20 +167,24 @@ func (m *tuiModel) switchSession(id string) tea.Cmd {
 	if id == "" {
 		return nil
 	}
-	if id == m.sessionID {
-		m.append(StDim.Render("already in session " + id))
-		m.refresh()
-		return nil
-	}
+	// The session on screen is attached again from its start: what shows is
+	// rebuilt from dund's replay, as when it is opened fresh — the way back
+	// when the screen lost its conversation (USER 2026-11-19, after an
+	// upgrade). It used to be refused ("already in session").
+	same := id == m.sessionID
 	m.leaveSession()
 	m.sessionID = id
 	m.skipHistory = false // this one we DO want replayed — it is a new transcript
-	if ws := m.sessWS[id]; ws != "" {
+	if ws := m.sessWS[id]; ws != "" && !same {
 		// A session dund runs in another workspace: follow it there.
 		m.workspace, m.opts.Workspace = ws, ws
 		m.append(StDim.Render("workspace " + ws))
 	}
-	m.append(StDim.Render("resuming session " + id + "…"))
+	if same {
+		m.append(StDim.Render("reloading session " + id + "…"))
+	} else {
+		m.append(StDim.Render("resuming session " + id + "…"))
+	}
 	m.refresh()
 
 	o := m.opts
