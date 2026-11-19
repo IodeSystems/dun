@@ -893,8 +893,9 @@ func (h *Harness) rebuildTools() {
 		tg := h.planTools()
 		toolDefs = append(toolDefs, h.planDefs(tg)...)
 		dispatch = withPlan(dispatch, tg, report)
-		// asks: the person's asks, where they are kept (asktool.go).
-		if !cfg.NonInteractive && !cfg.NoAsks {
+		// asks: the person's asks, where they are kept (asktool.go): the
+		// condition asksOn reads back as the tool in the set.
+		if h.asksWanted() {
 			toolDefs = append(toolDefs, asksToolDef())
 			dispatch = withAsks(dispatch, h, report)
 		}
@@ -949,6 +950,9 @@ func (h *Harness) rebuildTools() {
 	}
 	if slices.ContainsFunc(toolDefs, func(d llm.ToolDef) bool { return d.Function.Name == "recap" }) {
 		sys += systemRecap
+	}
+	if slices.ContainsFunc(toolDefs, func(d llm.ToolDef) bool { return d.Function.Name == asksToolName }) {
+		sys += systemAsks
 	}
 	if slices.ContainsFunc(toolDefs, func(d llm.ToolDef) bool { return d.Function.Name == agent.SessionSearchName }) {
 		sys += systemSessionSearch

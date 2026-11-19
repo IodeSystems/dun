@@ -414,6 +414,7 @@ func (h *Harness) planTurnLine() {
 	if h.isChild() {
 		return
 	}
+	h.asksTurnLine() // the open asks, beside the plan (asktool.go)
 	if line := h.planOpen(); line != "" {
 		h.AsideWith("[plan] "+line, AsideOpts{Key: "plan"})
 	}
@@ -502,8 +503,8 @@ type PlanRow struct {
 	Ready bool
 	// By: who wrote it when not the agent: planBySuggest, or "".
 	By string
-	// Ask: the ask an ask node holds (asktool.go), nil for another node.
-	Ask *PlanAsk
+	// Ask: the number of the ask the node serves (asktool.go), 0 for none.
+	Ask int
 }
 
 // PlanSnapshot is the plan for a screen.
@@ -511,7 +512,9 @@ type PlanSnapshot struct {
 	Mode, Approved bool
 	Rows           []PlanRow
 	Total, Done    int
-	// Intake: the messages not yet acknowledged; nil with none.
+	// Asks and Intake: the asks ledger (asktool.go), for the screens' ask
+	// list; Intake nil with none.
+	Asks   []PlanAsk
 	Intake *PlanIntake
 }
 
@@ -528,14 +531,14 @@ func (h *Harness) Plan() PlanSnapshot {
 			s.Done++
 		}
 	}
-	asks, intake := h.asksView(p.store.full())
-	s.Intake = intake
+	var serves map[string]int
+	s.Asks, s.Intake, serves = h.asksView()
 	for _, r := range g.Tree() {
 		n := r.Node
 		ready, _ := g.CanStart(n.ID)
 		row := PlanRow{ID: n.ID, Title: n.Title, Details: n.Details, Status: string(n.Status), DoneWhen: n.DoneWhen, Owner: n.Owner,
 			Why: n.Why, Account: n.Account, Replaces: n.Replaces, Needs: n.Needs,
-			Depth: r.Depth, Repeat: r.Repeat, Ready: ready, By: by[n.ID], Ask: asks[n.ID]}
+			Depth: r.Depth, Repeat: r.Repeat, Ready: ready, By: by[n.ID], Ask: serves[n.ID]}
 		if n.Status == taskgraph.Todo {
 			row.Waiting = g.Waiting(n.ID)
 		}

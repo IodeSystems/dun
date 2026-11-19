@@ -7,18 +7,19 @@ import (
 
 // planEvent is the session's task plan for a client's /plan screen
 // (dun/plan.go), with the last /plan summary (dun/plansummary.go) and the
-// asks: each ask node's state, and the intake (harness asktool.go).
+// asks ledger: the asks, the intake, and the ask each node serves
+// (harness asktool.go).
 func planEvent(h *harness.Harness, msg string) *proto.Plan {
 	s := h.Plan()
 	ev := &proto.Plan{Mode: s.Mode, Approved: s.Approved, Total: s.Total, Done: s.Done, Rows: []proto.PlanNode{}, Message: msg}
 	for _, r := range s.Rows {
-		n := proto.PlanNode{ID: r.ID, Title: r.Title, Details: r.Details, Status: r.Status, DoneWhen: r.DoneWhen,
+		ev.Rows = append(ev.Rows, proto.PlanNode{ID: r.ID, Title: r.Title, Details: r.Details, Status: r.Status, DoneWhen: r.DoneWhen,
 			Needs: r.Needs, Owner: r.Owner, Replaces: r.Replaces, Why: r.Why, Account: r.Account,
-			Waiting: r.Waiting, Ready: r.Ready, Depth: r.Depth, Repeat: r.Repeat, By: r.By}
-		if a := r.Ask; a != nil {
-			n.Ask = &proto.PlanAsk{N: a.N, State: a.State, At: a.At.Unix(), Working: a.Working, Filed: a.Filed}
-		}
-		ev.Rows = append(ev.Rows, n)
+			Waiting: r.Waiting, Ready: r.Ready, Depth: r.Depth, Repeat: r.Repeat, By: r.By, Ask: r.Ask})
+	}
+	for _, a := range s.Asks {
+		ev.Asks = append(ev.Asks, proto.PlanAsk{N: a.N, Title: a.Title, State: a.State, Why: a.Why, At: a.At.Unix(),
+			Working: a.Working, Nodes: a.Nodes})
 	}
 	if in := s.Intake; in != nil {
 		ev.Intake = &proto.PlanIntake{Messages: []proto.PlanMessage{}, Working: in.Working}

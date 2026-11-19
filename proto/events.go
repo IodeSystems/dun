@@ -1178,7 +1178,9 @@ type Plan struct {
 	// Summary is the last /plan summary, or the one being made; nil before
 	// the first.
 	Summary *PlanSummary `json:"summary,omitempty"`
-	// Intake is the messages not yet acknowledged; nil with none.
+	// Asks are the person's asks, oldest first, and Intake the messages not
+	// yet acknowledged (nil with none): the clients' ask list.
+	Asks   []PlanAsk   `json:"asks,omitempty"`
 	Intake *PlanIntake `json:"intake,omitempty"`
 }
 
@@ -1202,18 +1204,21 @@ type PlanNode struct {
 	// By is who wrote the node when not the agent: "suggest" for a done node
 	// the idle suggestion call recorded from the last turn.
 	By string `json:"by,omitempty"`
-	// Ask is the ask an ask node holds (harness asktool.go); nil otherwise.
-	Ask *PlanAsk `json:"ask,omitempty"`
+	// Ask is the number of the ask the node serves (Plan.Asks); 0 for none.
+	Ask int `json:"ask,omitempty"`
 }
 
-// PlanAsk is an ask node's ask. State: open, blocked, done, filed, dropped.
-// Working: the one ask the turn works (one at most, or the intake).
+// PlanAsk is one of the person's asks (harness asktool.go): a ledger of
+// its own, not a plan node. State: open, blocked, done, filed, dropped,
+// gone. Working: the one ask the turn works (one at most, or the intake).
 type PlanAsk struct {
 	N       int      `json:"n"`
+	Title   string   `json:"title"`
 	State   string   `json:"state"`
-	At      int64    `json:"at"` // unix seconds, when the person wrote it
+	Why     string   `json:"why,omitempty"` // blocked: the question
+	At      int64    `json:"at"`            // unix seconds, when the person wrote it
 	Working bool     `json:"working,omitempty"`
-	Filed   []string `json:"filed,omitempty"` // filed: the plan nodes it became
+	Nodes   []string `json:"nodes,omitempty"` // the plan nodes that serve it
 }
 
 // PlanIntake is the person's messages the model has not acknowledged yet:

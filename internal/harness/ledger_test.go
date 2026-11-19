@@ -86,7 +86,7 @@ func TestLedger_AskEntryFactsAndResume(t *testing.T) {
 		`exec {"command":"true"}`,
 		`exec {"command":"false"}`,
 		`exec {"command":"git add -A && git commit -qm 'feat: add b'"}`,
-		`plan_close {"outcome":"done","id":"1","account":"b.txt added"}`,
+		`asks {"asks":[{"id":1,"state":"done","note":"b.txt added"}]}`,
 	)}
 	h := startLedger(t, r, dir, sf, nil)
 	if _, err := h.Ask(context.Background(), "please add b\nand fix a"); err != nil {
@@ -223,9 +223,9 @@ func TestLedger_LineDiff(t *testing.T) {
 
 // ── asks ────────────────────────────────────────────────────────────────
 
-// A person's message, acknowledged, is an ask node; an automatic one never
-// reaches the intake. The asks are the person's, not the agent's open work,
-// and the turn-end check names the intake.
+// A person's message, acknowledged, is an ask in the ledger, not a plan
+// node; an automatic one never reaches the intake. The turn-end check names
+// the intake.
 func TestAsks_NodesAndTheTurnEndCheck(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	dir := t.TempDir()
@@ -240,15 +240,8 @@ func TestAsks_NodesAndTheTurnEndCheck(t *testing.T) {
 		}
 	}
 	h.askOpen("also update the docs")
-	rows := h.Plan().Rows
-	if len(rows) != 2 || rows[0].Title != "ask: fix the flaky test" || rows[1].Title != "ask: also update the docs" {
-		t.Fatalf("rows %+v", rows)
-	}
-	if !h.isAskNode("1") || !h.isAskNode("2") {
-		t.Error("the asks are not marked as the person's")
-	}
-	if g, _ := (planStore{h}).View(context.Background()); h.openWork(g) != 0 {
-		t.Error("asks count as the agent's open work (the plan nudges)")
+	if asks, _ := asksBy(h); len(asks) != 2 || asks[1].Title != "fix the flaky test" || asks[2].Title != "also update the docs" || len(h.Plan().Rows) != 0 {
+		t.Fatalf("asks %+v, plan rows %+v", asks, h.Plan().Rows)
 	}
 	h.turnBegin(originPerson)
 	h.SayAs(NewMessageID(), "and the changelog")
@@ -277,9 +270,12 @@ func TestAsks_AttributionDropAndSessionEnd(t *testing.T) {
 	edit := func(path string) {
 		h.ledgerNote(h, "file_edit", "edit", path, "", nil, "edited "+path+": +3 -1", false, &ledgerCall{}, time.Millisecond)
 	}
-	// Turn 1: a node under ask 2, and an edit: ask 2's only.
+	// A node that serves ask 2, made outside a turn.
+	planCall(t, h, "plan_add", `{"title":"write the page","done_when":"written"}`)
+	h.asksCall(`{"asks":[{"id":2,"nodes":["1"]}]}`)
+	// Turn 1: a change to that node, and an edit: ask 2's only.
 	h.ledgerBegin()
-	planCall(t, h, "plan_add", `{"title":"write the page","done_when":"written","needs":["2"]}`)
+	planCall(t, h, "plan_update", `{"id":"1","details":"the docs page"}`)
 	edit("docs/a.md")
 	h.ledgerEnd(context.Background(), nil)
 	// Turn 2: no plan change: both asks', shared.
@@ -302,14 +298,14 @@ func TestAsks_AttributionDropAndSessionEnd(t *testing.T) {
 		t.Errorf("row %q", open[1].Line(2))
 	}
 	// Drop ask 1; the next turn's end writes its entry.
-	planCall(t, h, "plan_close", `{"outcome":"drop","id":"1","reason":"cannot reproduce"}`)
+	h.asksCall(`{"asks":[{"id":1,"state":"done","note":"cannot reproduce"}]}`)
 	h.ledgerBegin()
 	h.ledgerEnd(context.Background(), nil)
 	kept := h.journalLocked()
-	if len(kept) != 1 || kept[0].Ask == nil || kept[0].Ask.Outcome != "dropped" || kept[0].Ask.Note != "cannot reproduce" {
+	if len(kept) != 1 || kept[0].Ask == nil || kept[0].Ask.Outcome != "done" || kept[0].Ask.Note != "cannot reproduce" {
 		t.Fatalf("kept %+v", kept)
 	}
-	if !strings.Contains(kept[0].Line(1), `ask 1 · dropped · "fix the flaky test"`) {
+	if !strings.Contains(kept[0].Line(1), `ask 1 · done · "fix the flaky test"`) {
 		t.Errorf("row %q", kept[0].Line(1))
 	}
 	// The session ends with ask 2 open: one entry, once.
@@ -331,7 +327,7 @@ func TestAsks_Indexed(t *testing.T) {
 	h.askOpen("fix the flaky test")
 	h.ledgerBegin()
 	h.ledgerNote(h, "file_edit", "edit", "t.go", "", nil, "edited t.go: +1 -1", false, &ledgerCall{}, time.Millisecond)
-	planCall(t, h, "plan_close", `{"outcome":"done","id":"1","account":"retry added"}`)
+	h.asksCall(`{"asks":[{"id":1,"state":"done","note":"retry added"}]}`)
 	h.ledgerEnd(context.Background(), nil)
 	files, _ := filepath.Glob(filepath.Join(foldsDir(sf), "ask-1-*.md"))
 	if len(files) != 1 {

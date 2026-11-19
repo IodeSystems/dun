@@ -12,7 +12,7 @@ import (
 func TestSuggestDone_OncePerAsk(t *testing.T) {
 	reply := `{` + sugsOnly + `,"done":[{"title":"Wrote the parser tests","under":""}]}`
 	h, r := idleHarness(t, reply, []string{"Parse the file"}, true)
-	names := []string{taskgraph.ToolAdd}
+	names := []string{taskgraph.ToolAdd, asksToolName}
 	h.toolNames.Store(&names)
 	if !h.askOpen("write the parser tests") {
 		t.Fatal("no ask")
@@ -38,7 +38,7 @@ func TestSuggestDone_OncePerAsk(t *testing.T) {
 	if _, err := h.Suggestions(ctx); err != nil || !r.asksDone() {
 		t.Fatalf("a new ask: %v, asked for done %v", err, r.asksDone())
 	}
-	if got := len(planGraph(t, h).Nodes); got != n+2 {
-		t.Errorf("the new ask's batch: %d nodes, want %d", got, n+2)
+	if got := len(planGraph(t, h).Nodes); got != n+1 { // its done node; the ask is not a node
+		t.Errorf("the new ask's batch: %d nodes, want %d", got, n+1)
 	}
 }

@@ -168,9 +168,9 @@ const askAutoRefused = "ERROR: ask_user is not available in this round: dun star
 
 // askBlockHow is what to do with a question no one may be there to answer:
 // ask_user's refusal and the file tools' (fileaccess.go) both end with it.
-const askBlockHow = "Mark the ask (or the plan node the question is about) blocked with " +
-	`the question as the reason — plan_close {"id":"<id>","outcome":"block","reason":"<the question>"} — and go on ` +
-	"with what needs no answer. The user sees the question in the plan."
+const askBlockHow = "Mark the ask blocked with the question — asks {\"asks\":[{\"id\":<n>,\"state\":\"blocked\",\"note\":\"<the question>\"}]} — " +
+	`or the plan node it is about — plan_close {"id":"<id>","outcome":"block","reason":"<the question>"} — and go on ` +
+	"with what needs no answer. The user sees the question with the asks or in the plan."
 
 // autoRound reports whether the round running now is one dun added: after
 // the turn-end check, right after a plan nudge, or in an automatic turn

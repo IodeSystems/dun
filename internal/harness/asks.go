@@ -19,25 +19,26 @@ import (
 	"github.com/iodesystems/dun/internal/fsutil"
 )
 
-// asks.go — what the person types becomes ASKS (USER 2026-11-17, and
+// asks.go — the person's ASKS, in dun's own ledger (USER 2026-11-17; and
 // 2026-11-18: "a single unacknowledged ask that grows as the user adds to
-// it"). Each message goes on the intake, the one ask not yet acknowledged;
-// the model makes asks of it with the asks tool (asktool.go): split, merged
-// into the ask it continues, or closed at once. An ask is a top-level plan
-// node "ask: <title>", with its text in the details, marked as the
-// person's (planState.by, planByUser), and keeps the person's words. The
-// asks tool or the plan tools close it. The turn-end check of a turn the
-// person started names the intake and the touched asks not marked.
+// it", then asks are a ledger, not plan nodes). Each message the person
+// types goes on the intake, the one ask not yet acknowledged; the model
+// makes asks of it with the asks tool (asktool.go): split, merged into the
+// ask it continues, or closed at once. An ask has a number, a title, its
+// text, the person's words (Source, Continued), a state (open, blocked,
+// done, filed) and the plan nodes it serves (Nodes). The model reads the
+// open ones in a block pinned to each turn (asksTurnLine) and to each fold.
 //
 // Not on the intake: a message that starts with a bracketed lowercase tag
 // ("[automatic] …", "[control/plan] …", "[settle] …": what dun or dund
 // sends in the person's place), a sub-agent's, a --non-interactive run's
-// (no one reads the plan there), and one in a session with no plan tools.
+// (no one reads the asks there), and one in a session with no asks tool.
 //
 // The turn ledger's facts (ledger.go) go to the asks open during the turn:
-// open as it began, or opened in it. When the turn's plan changes touch an
-// ask, or a node that descends from one (needs, followed up), the facts go
-// to those asks only; otherwise to every open ask. Facts given to more than
+// open as it began, or made in it. When the turn names asks (the asks tool
+// acted on them, or a plan change touched a node that serves one, or one
+// that descends from such a node: needs, followed up), the facts go to
+// those asks only; otherwise to every open ask. Facts given to more than
 // one ask are marked shared. A turn that served no ask and made a tool call
 // is a /journal entry of its own (kind "turn").
 //
@@ -47,9 +48,12 @@ import (
 // ends (Close) with asks open, each gets one entry saying so.
 //
 // Kept in <session>.asks.json with the session's turn counter, so a resumed
-// session keeps its asks and goes on numbering turns.
+// session keeps its asks and goes on numbering turns. A sidecar from before
+// the ledger (its asks were plan nodes) is moved in on first use
+// (asksMigrate).
 
-// planByUser is planState.by's word for an ask node.
+// planByUser is planState.by's word for an ask node: before the ledger,
+// read only to move them out (asksMigrate).
 const planByUser = "user"
 
 // Journal kinds of the ledger.
@@ -62,7 +66,15 @@ const (
 	askTitleMax = 60
 	askTextMax  = 4000
 	askTurnsMax = 200
-	askDoneWhen = "the person's message is answered, or dropped with why"
+	// askStaleTurns is how many of the person's turns an open ask may go
+	// untouched before the turn-end check names it, once, and it stops
+	// lifting the automatic-turn budget (autoturn.go).
+	askStaleTurns = 5
+	// askLedgerVersion 2: asks are the ledger's, not plan nodes.
+	askLedgerVersion = 2
+	// askTouchPrefix marks an ask the asks tool acted on, among the plan
+	// node ids the turn touched (ledgerState.touched).
+	askTouchPrefix = "ask:"
 )
 
 // askTurn is one turn that served an ask.
@@ -76,8 +88,9 @@ type askTurn struct {
 
 // AskLedger is one ask and what was done for it.
 type AskLedger struct {
-	N     int       `json:"n"`
-	Node  string    `json:"node"`
+	N int `json:"n"`
+	// Node: the plan node an ask was before the ledger (asksMigrate).
+	Node  string    `json:"node,omitempty"`
 	Title string    `json:"title"`
 	Text  string    `json:"text"`
 	At    time.Time `json:"at"`
@@ -89,6 +102,8 @@ type AskLedger struct {
 	Outcome string      `json:"outcome,omitempty"` // done | filed | dropped | gone; "" open
 	Note    string      `json:"note,omitempty"`
 	Closed  time.Time   `json:"closed,omitzero"`
+	// Blocked is the question an open ask waits on the person for.
+	Blocked string `json:"blocked,omitempty"`
 	// Ended: the session ended with the ask open (the entry's only).
 	Ended bool `json:"ended,omitempty"`
 	// Source is the intake the ask was made from, word for word: Title and
@@ -96,14 +111,16 @@ type AskLedger struct {
 	Source []askMsg `json:"source,omitempty"`
 	// Continued is what the person wrote later that the model merged into it.
 	Continued []askMsg `json:"continued,omitempty"`
-	// Filed is the plan nodes the ask was filed as (Outcome "filed").
-	Filed []string `json:"filed,omitempty"`
+	// Nodes are the plan nodes that serve the ask (filed as, or linked).
+	Nodes []string `json:"nodes,omitempty"`
 }
 
-// askMsg is one message the person typed.
+// askMsg is one message the person typed; Note is the model's word on it
+// (merge_into's text), never in place of it.
 type askMsg struct {
 	At   time.Time `json:"at"`
 	Text string    `json:"text"`
+	Note string    `json:"note,omitempty"`
 }
 
 // askIntakeID names the intake in the asks tool and in askState.cur.
@@ -123,14 +140,26 @@ type askRec struct {
 	// Marked is the turn in which the model last marked it (asktool.go):
 	// the turn-end check names an ask the turn touched and did not mark.
 	Marked int `json:"marked,omitempty"`
+	// Touched is the person's turn count when the ask was last made,
+	// marked, merged into or named by a plan change; StaleSaid: the check
+	// named it as long untouched.
+	Touched   int  `json:"touched,omitempty"`
+	StaleSaid bool `json:"stale_said,omitempty"`
+	// Journaled: its closed entry is written (asksFile).
+	Journaled bool `json:"journaled,omitempty"`
 }
 
 type askFileData struct {
-	Turn int       `json:"turn"`
-	Asks []*askRec `json:"asks,omitempty"`
+	Version int       `json:"version,omitempty"`
+	Turn    int       `json:"turn"`
+	Asks    []*askRec `json:"asks,omitempty"`
+	// PersonTurns counts the turns the person started (askStaleTurns).
+	PersonTurns int `json:"person_turns,omitempty"`
 	// Intake is the person's messages not yet acknowledged, oldest first:
-	// one ask that grows until the model makes asks of it.
-	Intake []askMsg `json:"intake,omitempty"`
+	// one ask that grows until the model makes asks of it. IntakeSeq
+	// numbers the intakes (the network wait counts resumes per intake).
+	Intake    []askMsg `json:"intake,omitempty"`
+	IntakeSeq int      `json:"intake_seq,omitempty"`
 }
 
 type askState struct {
@@ -138,9 +167,13 @@ type askState struct {
 	file string
 	read bool
 	d    askFileData
-	// cur is what the turn works: askIntakeID, an ask's node, or "" (not
+	// cur is what the turn works: askIntakeID, an ask's number, or "" (not
 	// kept: a restarted engine runs no turn).
-	cur         string
+	cur string
+	// migrated is the session file whose sidecar asksMigrate checked.
+	migrated string
+	// blockSent: the last turn line carried a block (asksTurnLine).
+	blockSent   bool
 	foldDropped atomic.Bool
 }
 
@@ -156,9 +189,10 @@ func (h *Harness) asksLocked() *askFileData {
 	if a.read && a.file == h.cfg.SessionFile {
 		return &a.d
 	}
-	a.read, a.file, a.d = true, h.cfg.SessionFile, askFileData{}
+	a.read, a.file, a.d = true, h.cfg.SessionFile, askFileData{Version: askLedgerVersion}
 	if a.file != "" {
 		if b, err := os.ReadFile(AsksFile(a.file)); err == nil {
+			a.d = askFileData{}
 			_ = json.Unmarshal(b, &a.d)
 		}
 	}
@@ -174,6 +208,93 @@ func (h *Harness) asksSaveLocked() {
 		return
 	}
 	_ = fsutil.WriteAtomic(AsksFile(h.asks.file), append(b, '\n'), 0o600)
+}
+
+// asksMigrate moves a sidecar's asks out of the plan, once per session
+// file: each ask node leaves the graph, its state goes to the record, and
+// a node that needed it now serves it (Nodes). Entries already written for
+// closed asks are not written again. Chosen over leaving them as plain
+// nodes: the plan would keep 14 "ask:" roots nobody closes.
+func (h *Harness) asksMigrate() {
+	h.asks.mu.Lock()
+	d := h.asksLocked()
+	if h.asks.migrated == h.asks.file {
+		h.asks.mu.Unlock()
+		return
+	}
+	h.asks.migrated = h.asks.file
+	if d.Version >= askLedgerVersion {
+		h.asks.mu.Unlock()
+		return
+	}
+	byNode := map[string]*askRec{}
+	for _, r := range d.Asks {
+		if r.Node != "" {
+			byNode[r.Node] = r
+		}
+	}
+	h.asks.mu.Unlock()
+	type moved struct {
+		status taskgraph.Status
+		why    string
+		under  []string
+	}
+	out := map[string]moved{}
+	p := h.planNow()
+	err := p.store.Update(context.Background(), func(g *taskgraph.Graph) error {
+		for id := range byNode {
+			n := g.Get(id)
+			if n == nil {
+				continue
+			}
+			m := moved{status: n.Status, why: n.Why}
+			for _, o := range g.Nodes {
+				if i := slices.Index(o.Needs, id); i >= 0 {
+					o.Needs = slices.Delete(slices.Clone(o.Needs), i, i+1)
+					m.under = append(m.under, o.ID)
+				}
+			}
+			out[id] = m
+		}
+		g.Nodes = slices.DeleteFunc(g.Nodes, func(n *taskgraph.Node) bool { _, ok := out[n.ID]; return ok })
+		h.planMu.Lock()
+		by := map[string]string{}
+		for k, v := range p.by {
+			if _, ok := out[k]; !ok {
+				by[k] = v
+			}
+		}
+		p.by = by
+		h.planMu.Unlock()
+		return nil
+	})
+	if err != nil {
+		return
+	}
+	h.planChanged()
+	h.asks.mu.Lock()
+	for id, m := range out {
+		r := byNode[id]
+		r.Nodes = append(r.Nodes, m.under...)
+		if r.Outcome == "" {
+			switch m.status {
+			case taskgraph.Done:
+				r.Outcome, r.Closed = "done", time.Now()
+			case taskgraph.Dropped:
+				r.Outcome, r.Note, r.Closed = "dropped", m.why, time.Now()
+			case taskgraph.Blocked:
+				r.Blocked = m.why
+			}
+		}
+	}
+	for _, r := range d.Asks {
+		r.Journaled = r.Journaled || r.Outcome != "" // the old turn end wrote them
+		r.Node = ""
+	}
+	d.Version = askLedgerVersion
+	h.asksSaveLocked()
+	h.asks.mu.Unlock()
+	h.dropFoldAskNode()
 }
 
 // autoTag is a message dun or dund sent in the person's place.
@@ -192,14 +313,18 @@ func (h *Harness) intakeAdd(text string) bool {
 	if !h.asksOn() || !personAsk(text) {
 		return false
 	}
+	h.asksMigrate()
 	h.dropFoldAskNode()
 	h.asks.mu.Lock()
 	d := h.asksLocked()
+	if len(d.Intake) == 0 {
+		d.IntakeSeq++
+	}
 	d.Intake = append(d.Intake, askMsg{At: time.Now(), Text: askCut(strings.TrimSpace(text))})
 	h.asks.cur = askIntakeID
 	h.asksSaveLocked()
 	h.asks.mu.Unlock()
-	h.planChanged() // the plan screens show the intake
+	h.planChanged() // the screens show the asks with the plan
 	return true
 }
 
@@ -212,8 +337,8 @@ func askCut(text string) string {
 }
 
 // dropFoldAskNode drops the fold's "Current ask: …" node once per process:
-// where asks are kept they hold the person's messages, and that node took
-// the latest one, "continue" too, for the ask (fold.go planAsk).
+// where asks are kept the ledger holds the person's messages, and that
+// node took the latest one, "continue" too, for the ask (fold.go planAsk).
 func (h *Harness) dropFoldAskNode() {
 	if h.asks.foldDropped.Swap(true) {
 		return
@@ -226,9 +351,8 @@ func (h *Harness) dropFoldAskNode() {
 	})
 }
 
-// askAdd makes an ask: a plan node "ask: <title>" with text in its details,
-// in progress, marked as the person's, and its record. src is the intake it
-// came from, kept word for word.
+// askAdd makes an ask in the ledger: its title (the text's first line when
+// empty), its text, and src, the intake it came from, word for word.
 func (h *Harness) askAdd(title, text string, src []askMsg) (*askRec, error) {
 	details := askCut(strings.TrimSpace(text))
 	first := headLine(strings.TrimSpace(title), askTitleMax)
@@ -238,37 +362,11 @@ func (h *Harness) askAdd(title, text string, src []askMsg) (*askRec, error) {
 	if first == "" {
 		return nil, errors.New("an ask needs a title or text")
 	}
-	p := h.planNow()
-	h.planMu.Lock()
-	prev := p.by
-	h.planMu.Unlock()
-	var id string
-	err := p.store.Update(context.Background(), func(g *taskgraph.Graph) error {
-		g.Seq++
-		id = strconv.Itoa(g.Seq)
-		g.Nodes = append(g.Nodes, &taskgraph.Node{ID: id, Title: "ask: " + first, Details: details,
-			Status: taskgraph.Doing, DoneWhen: askDoneWhen}) // being answered: asks or plan_close take it from here
-		h.planMu.Lock()
-		by := make(map[string]string, len(prev)+1)
-		for k, v := range prev {
-			by[k] = v
-		}
-		by[id] = planByUser
-		p.by = by // savePlan, after this returns, writes it with the graph
-		h.planMu.Unlock()
-		return nil
-	})
-	if err != nil {
-		h.planMu.Lock()
-		p.by = prev
-		h.planMu.Unlock()
-		return nil, err
-	}
-	h.planChanged()
 	h.asks.mu.Lock()
 	d := h.asksLocked()
 	n := len(d.Asks) + 1
-	r := &askRec{AskLedger: AskLedger{N: n, Node: id, Title: first, Text: details, At: time.Now(), Source: slices.Clone(src)}}
+	r := &askRec{AskLedger: AskLedger{N: n, Title: first, Text: details, At: time.Now(), Source: slices.Clone(src)},
+		Touched: d.PersonTurns}
 	if len(src) > 0 {
 		r.At = src[0].At
 	}
@@ -283,20 +381,11 @@ func (h *Harness) askAdd(title, text string, src []askMsg) (*askRec, error) {
 	return r, nil
 }
 
-// isAskNode reports whether plan node id is an ask.
-func (h *Harness) isAskNode(id string) bool {
-	p := h.planNow()
-	h.planMu.Lock()
-	defer h.planMu.Unlock()
-	return p.by[id] == planByUser
-}
-
-// openWork counts g's open nodes that are not asks: what the plan nudges
-// count (an ask is the person's, not a plan the agent wrote).
+// openWork counts g's open nodes: what the plan nudges count.
 func (h *Harness) openWork(g taskgraph.Graph) int {
 	n := 0
 	for _, nd := range g.Nodes {
-		if planOpen(nd) && !h.isAskNode(nd.ID) {
+		if planOpen(nd) {
 			n++
 		}
 	}
@@ -319,12 +408,17 @@ func (h *Harness) asksOpenNow() []int {
 	return out
 }
 
-// askTurnBegin counts a turn and returns its number.
+// askTurnBegin counts a turn, and a turn the person started, and returns
+// its number.
 func (h *Harness) askTurnBegin() int {
+	o, _ := h.turnOriginNow()
 	h.asks.mu.Lock()
 	defer h.asks.mu.Unlock()
 	d := h.asksLocked()
 	d.Turn++
+	if o == originPerson {
+		d.PersonTurns++
+	}
 	h.asksSaveLocked()
 	return d.Turn
 }
@@ -336,26 +430,47 @@ func (h *Harness) asksTurnNow() int {
 	return h.asksLocked().Turn
 }
 
-// askAncestors is the asks node id descends from, itself included: needs
-// followed up (a node "under" another needs it).
-func askAncestors(g taskgraph.Graph, id string, isAsk func(string) bool) []string {
-	var out []string
+// asksNamed is the asks the turn's touched ids name: the asks tool's own
+// ("ask:N"), and the asks a touched plan node serves, or a node it
+// descends from (needs, followed up). Under asks.mu.
+func asksNamed(g taskgraph.Graph, touched []string, asks []*askRec) []*askRec {
+	serves := map[string][]*askRec{}
+	byN := map[int]*askRec{}
+	for _, r := range asks {
+		byN[r.N] = r
+		for _, n := range r.Nodes {
+			serves[n] = append(serves[n], r)
+		}
+	}
+	var out []*askRec
+	add := func(r *askRec) {
+		if r != nil && !slices.Contains(out, r) {
+			out = append(out, r)
+		}
+	}
 	seen := map[string]bool{}
-	stack := []string{id}
-	for len(stack) > 0 {
-		cur := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
-		if seen[cur] {
+	for _, id := range touched {
+		if s, ok := strings.CutPrefix(id, askTouchPrefix); ok {
+			n, _ := strconv.Atoi(s)
+			add(byN[n])
 			continue
 		}
-		seen[cur] = true
-		if isAsk(cur) {
-			out = append(out, cur)
-			continue
+		stack := []string{id}
+		for len(stack) > 0 {
+			cur := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if seen[cur] {
+				continue
+			}
+			seen[cur] = true
+			for _, r := range serves[cur] {
+				add(r)
+			}
+			if n := g.Get(cur); n != nil {
+				stack = append(stack, n.Needs...)
+			}
 		}
-		if n := g.Get(cur); n != nil {
-			stack = append(stack, n.Needs...)
-		}
+		seen = map[string]bool{}
 	}
 	return out
 }
@@ -369,10 +484,8 @@ func (h *Harness) asksFile(ctx context.Context, f LedgerFacts, start time.Time, 
 	h.asks.mu.Lock()
 	d := h.asksLocked()
 	byN := map[int]*askRec{}
-	byNode := map[string]*askRec{}
 	for _, r := range d.Asks {
 		byN[r.N] = r
-		byNode[r.Node] = r
 	}
 	var cands []*askRec
 	for _, n := range asked {
@@ -380,14 +493,12 @@ func (h *Harness) asksFile(ctx context.Context, f LedgerFacts, start time.Time, 
 			cands = append(cands, r)
 		}
 	}
-	// The asks the turn's plan changes name, among the candidates.
+	// The asks the turn named, among the candidates.
 	var targets []*askRec
-	isAsk := func(id string) bool { return byNode[id] != nil }
-	for _, id := range touched {
-		for _, a := range askAncestors(g, id, isAsk) {
-			if r := byNode[a]; slices.Contains(cands, r) && !slices.Contains(targets, r) {
-				targets = append(targets, r)
-			}
+	for _, r := range asksNamed(g, touched, d.Asks) {
+		r.Touched, r.StaleSaid = d.PersonTurns, false
+		if slices.Contains(cands, r) {
+			targets = append(targets, r)
 		}
 	}
 	if len(targets) == 0 {
@@ -405,26 +516,16 @@ func (h *Harness) asksFile(ctx context.Context, f LedgerFacts, start time.Time, 
 		r.Facts.add(f)
 		r.Facts.capLists()
 	}
-	// Asks the plan now has closed (by the agent, or the person's edit).
+	// Asks closed since their last entry (the asks tool).
 	var closed []AskLedger
 	for _, r := range d.Asks {
-		if r.Outcome != "" {
+		if r.Outcome == "" || r.Journaled {
 			continue
 		}
-		n := g.Get(r.Node)
-		switch {
-		case n == nil:
-			r.Outcome = "gone"
-		case n.Status == taskgraph.Done && len(r.Filed) > 0:
-			r.Outcome, r.Note = "filed", n.Account
-		case n.Status == taskgraph.Done:
-			r.Outcome, r.Note, r.Filed = "done", n.Account, nil
-		case n.Status == taskgraph.Dropped:
-			r.Outcome, r.Note = "dropped", n.Why
-		default:
-			continue
+		r.Journaled = true
+		if r.Closed.IsZero() {
+			r.Closed = end
 		}
-		r.Closed = end
 		closed = append(closed, r.AskLedger)
 	}
 	h.asksSaveLocked()
@@ -523,6 +624,8 @@ func (a AskLedger) outcomeWord() string {
 	switch {
 	case a.Ended:
 		return "open at session end"
+	case a.Outcome == "" && a.Blocked != "":
+		return "blocked"
 	case a.Outcome == "":
 		return "open"
 	}
@@ -570,11 +673,17 @@ func (a AskLedger) Full() string {
 		b.WriteString("\n")
 	}
 	for _, m := range a.Continued {
-		b.WriteString("continued " + m.At.Local().Format("Jan 2 15:04") + ":\n" + m.Text + "\n\n")
+		b.WriteString("continued " + m.At.Local().Format("Jan 2 15:04") + ":\n" + m.Text + "\n")
+		if m.Note != "" {
+			b.WriteString("(the model: " + m.Note + ")\n")
+		}
+		b.WriteString("\n")
 	}
 	switch {
 	case a.Ended:
 		b.WriteString("still open when the session ended\n")
+	case a.Outcome == "" && a.Blocked != "":
+		b.WriteString("blocked: " + a.Blocked + "\n")
 	case a.Outcome == "":
 		b.WriteString("open\n")
 	default:

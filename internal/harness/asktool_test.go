@@ -2,6 +2,8 @@ package harness
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -19,46 +21,51 @@ func (h *Harness) askOpen(text string) bool {
 	return !strings.Contains(h.asksCall(`{"asks":[{"id":"intake","state":"open"}]}`), "ERROR")
 }
 
-func askRecOf(t *testing.T, h *Harness, node string) AskLedger {
+func askRecOf(t *testing.T, h *Harness, n int) AskLedger {
 	t.Helper()
 	h.asks.mu.Lock()
 	defer h.asks.mu.Unlock()
-	r := h.askByNodeLocked(node)
+	r := h.askByNLocked(n)
 	if r == nil {
-		t.Fatalf("no ask at node %s", node)
+		t.Fatalf("no ask %d", n)
 	}
 	return r.AskLedger
 }
 
-// planAsks is the plan's ask rows by node id, and which work.
-func planAsks(h *Harness) (map[string]PlanRow, []string) {
-	rows := map[string]PlanRow{}
-	var working []string
-	for _, r := range h.Plan().Rows {
-		if r.Ask != nil {
-			rows[r.ID] = r
-			if r.Ask.Working {
-				working = append(working, r.ID)
-			}
+// asksBy is the snapshot's asks by number, and which work.
+func asksBy(h *Harness) (map[int]PlanAsk, []int) {
+	out := map[int]PlanAsk{}
+	var working []int
+	for _, a := range h.Plan().Asks {
+		out[a.N] = a
+		if a.Working {
+			working = append(working, a.N)
 		}
 	}
-	return rows, working
+	return out, working
 }
 
-// Messages grow one intake; an automatic one does not. One call splits it
-// into three asks and merges a part into an existing ask. The intake is
-// then empty, one ask works, and the next message starts a new intake.
-// Another call marks several asks mid-turn. All of it survives a restart.
-func TestAsks_IntakeSplitMergeMarkAndRestart(t *testing.T) {
+func startAsks(t *testing.T) (*Harness, string, string) {
+	t.Helper()
 	t.Setenv("DUN_HOME", t.TempDir())
 	dir := t.TempDir()
 	sf := filepath.Join(dir, "s.jsonl")
-	h := startLedger(t, &nudgeRunner{}, dir, sf, nil)
+	return startLedger(t, &nudgeRunner{}, dir, sf, nil), dir, sf
+}
+
+// Messages grow one intake; an automatic one does not. One call splits it
+// into three asks and merges it into an existing ask, the person's words
+// kept whole. The intake is then empty, one ask works, and the next message
+// starts a new intake. Another call marks several asks mid-turn and links a
+// plan node. None of it is in the plan graph, and all of it survives a
+// restart.
+func TestAsks_IntakeSplitMergeMarkAndRestart(t *testing.T) {
+	h, dir, sf := startAsks(t)
 	if !h.askOpen("test the login flow") {
 		t.Fatal("a short real message did not become an ask")
 	}
-	if rows, _ := planAsks(h); len(rows) != 1 || rows["1"].Title != "ask: test the login flow" {
-		t.Fatalf("rows %+v", rows)
+	if asks, _ := asksBy(h); len(asks) != 1 || asks[1].Title != "test the login flow" || len(h.Plan().Rows) != 0 {
+		t.Fatalf("asks %+v rows %+v", asks, h.Plan().Rows)
 	}
 	h.ledgerBegin()
 	h.intakeAdd("Add plan items:\n1. locate tow yards\n2. vds: port 18020 is in use\n3. vehicle telemetry")
@@ -68,48 +75,49 @@ func TestAsks_IntakeSplitMergeMarkAndRestart(t *testing.T) {
 	if in == nil || len(in.Msgs) != 2 || in.Msgs[1].Text != "retry" || !in.Working {
 		t.Fatalf("intake %+v", in)
 	}
-	if rows, _ := planAsks(h); len(rows) != 1 {
-		t.Fatalf("a message opened an ask: %+v", rows)
-	}
 	out := h.asksCall(`{"asks":[{"id":"intake","split":[
 		{"title":"locate tow yards","text":"1. locate tow yards"},
 		{"title":"free port 18020 for vds","text":"2. vds: port 18020 is in use"},
 		{"title":"investigate vehicle telemetry","text":"3. vehicle telemetry"}]},
-		{"id":"intake","merge_into":"1","text":"retry"}]}`)
+		{"id":"intake","merge_into":1,"text":"the retry is for the login test"}]}`)
 	if strings.Contains(out, "ERROR") {
 		t.Fatal(out)
 	}
 	if h.Plan().Intake != nil {
 		t.Fatalf("the intake was not emptied: %+v", h.Plan().Intake)
 	}
-	rows, working := planAsks(h)
-	if len(rows) != 4 || rows["2"].Title != "ask: locate tow yards" || rows["4"].Ask.State != "open" {
-		t.Fatalf("rows %+v", rows)
+	asks, working := asksBy(h)
+	if len(asks) != 4 || asks[2].Title != "locate tow yards" || asks[4].State != "open" || len(h.Plan().Rows) != 0 {
+		t.Fatalf("asks %+v", asks)
 	}
-	if !slices.Equal(working, []string{"2"}) {
+	if !slices.Equal(working, []int{2}) {
 		t.Errorf("working %v, want only 2", working)
 	}
-	a2 := askRecOf(t, h, "2")
+	a2 := askRecOf(t, h, 2)
 	if a2.Text != "1. locate tow yards" || len(a2.Source) != 2 || !strings.Contains(a2.Source[0].Text, "vehicle telemetry") {
 		t.Errorf("split ask %+v", a2)
 	}
-	if a1 := askRecOf(t, h, "1"); len(a1.Continued) != 1 || a1.Continued[0].Text != "retry" {
-		t.Errorf("merged into ask 1: %+v", a1.Continued)
+	c := askRecOf(t, h, 1).Continued
+	if len(c) != 2 || !strings.Contains(c[0].Text, "locate tow yards") || c[1].Text != "retry" || c[1].Note != "the retry is for the login test" {
+		t.Errorf("merged into ask 1: the person's words lost: %+v", c)
 	}
-	// Several asks at once, mid-turn: done, filed, reworded.
+	// Several asks at once, mid-turn: done, filed, reworded, a bad id.
 	planCall(t, h, "plan_add", `{"title":"write the vds port fix","done_when":"vds starts"}`)
-	out = h.asksCall(`{"asks":[{"id":"2","state":"done","note":"three yards listed"},
-		{"id":"3","state":"filed","nodes":["5"]},
-		{"id":"4","title":"vehicle telemetry research"},
-		{"id":"9","state":"done","note":"x"}]}`)
-	if !strings.Contains(out, "ask 3: filed → 5") || !strings.Contains(out, "ERROR: 9") {
+	out = h.asksCall(`{"asks":[{"id":2,"state":"done","note":"three yards listed"},
+		{"id":"3","state":"filed","nodes":["1"]},
+		{"id":"#4","title":"vehicle telemetry research"},
+		{"id":9,"state":"done","note":"x"}]}`)
+	if !strings.Contains(out, "ask 3: filed → 1") || !strings.Contains(out, "ERROR: ask 9") {
 		t.Errorf("result:\n%s", out)
 	}
-	rows, _ = planAsks(h)
-	if rows["2"].Ask.State != "done" || rows["3"].Ask.State != "filed" || !slices.Equal(rows["3"].Ask.Filed, []string{"5"}) {
-		t.Errorf("states %+v %+v", rows["2"].Ask, rows["3"].Ask)
+	asks, _ = asksBy(h)
+	if asks[2].State != "done" || asks[3].State != "filed" || !slices.Equal(asks[3].Nodes, []string{"1"}) {
+		t.Errorf("states %+v %+v", asks[2], asks[3])
 	}
-	if a4 := askRecOf(t, h, "4"); a4.Title != "vehicle telemetry research" || a4.Text != "3. vehicle telemetry" || rows["4"].Title != "ask: vehicle telemetry research" {
+	if rows := h.Plan().Rows; len(rows) != 1 || rows[0].Ask != 3 {
+		t.Errorf("the node does not serve ask 3: %+v", rows)
+	}
+	if a4 := askRecOf(t, h, 4); a4.Title != "vehicle telemetry research" || a4.Text != "3. vehicle telemetry" {
 		t.Errorf("reworded %+v", a4)
 	}
 	h.ledgerEnd(context.Background(), nil)
@@ -120,7 +128,6 @@ func TestAsks_IntakeSplitMergeMarkAndRestart(t *testing.T) {
 	if !slices.Equal(outcomes, []string{"done", "filed"}) {
 		t.Errorf("journal outcomes %v", outcomes)
 	}
-	// The next message starts a new intake.
 	h.intakeAdd("one more thing")
 	if in := h.Plan().Intake; in == nil || len(in.Msgs) != 1 {
 		t.Fatalf("new intake %+v", in)
@@ -132,52 +139,47 @@ func TestAsks_IntakeSplitMergeMarkAndRestart(t *testing.T) {
 	if in := h2.Plan().Intake; in == nil || len(in.Msgs) != 1 || in.Msgs[0].Text != "one more thing" {
 		t.Fatalf("intake after restart %+v", in)
 	}
-	rows, _ = planAsks(h2)
-	if len(rows) != 4 || rows["3"].Ask.State != "filed" || rows["4"].Title != "ask: vehicle telemetry research" {
-		t.Fatalf("asks after restart %+v", rows)
+	asks, _ = asksBy(h2)
+	if len(asks) != 4 || asks[3].State != "filed" || asks[4].Title != "vehicle telemetry research" {
+		t.Fatalf("asks after restart %+v", asks)
 	}
-	if a1 := askRecOf(t, h2, "1"); len(a1.Continued) != 1 {
-		t.Errorf("ask 1 after restart: %+v", a1)
+	if c := askRecOf(t, h2, 1).Continued; len(c) != 2 {
+		t.Errorf("ask 1 after restart: %+v", c)
+	}
+	if got := len(journalOf(h2, JournalAsk)); got != 6 { // 2 closed, 2 open at session end, 2 open
+		t.Errorf("journal after restart: %d ask entries", got)
 	}
 }
 
 // Merging into a done ask reopens it: the person carried on with it.
 func TestAsks_MergeReopensDone(t *testing.T) {
-	t.Setenv("DUN_HOME", t.TempDir())
-	dir := t.TempDir()
-	h := startLedger(t, &nudgeRunner{}, dir, filepath.Join(dir, "s.jsonl"), nil)
+	h, _, _ := startAsks(t)
 	t.Cleanup(h.Close)
 	h.askOpen("fix the flaky test")
-	h.asksCall(`{"asks":[{"id":"1","state":"done","note":"retry added"}]}`)
+	h.asksCall(`{"asks":[{"id":1,"state":"done","note":"retry added"}]}`)
 	h.ledgerBegin()
 	h.ledgerEnd(context.Background(), nil)
-	if a := askRecOf(t, h, "1"); a.Outcome != "done" {
+	if a := askRecOf(t, h, 1); a.Outcome != "done" || len(journalOf(h, JournalAsk)) != 1 {
 		t.Fatalf("not done: %+v", a)
 	}
 	h.intakeAdd("still flaky")
-	out := h.asksCall(`{"asks":[{"id":"intake","merge_into":"1"}]}`)
-	if !strings.Contains(out, "reopened (it was done)") {
+	if out := h.asksCall(`{"asks":[{"id":"intake","merge_into":"1"}]}`); !strings.Contains(out, "reopened (it was done)") {
 		t.Errorf("result %q", out)
 	}
-	if a := askRecOf(t, h, "1"); a.Outcome != "" || !a.Closed.IsZero() {
+	if a := askRecOf(t, h, 1); a.Outcome != "" || !a.Closed.IsZero() || a.Continued[0].Text != "still flaky" {
 		t.Errorf("record not reopened: %+v", a)
 	}
-	rows, working := planAsks(h)
-	if rows["1"].Status != "doing" || rows["1"].Ask.State != "open" || !slices.Equal(working, []string{"1"}) {
-		t.Errorf("row %+v working %v", rows["1"], working)
-	}
-	if !strings.Contains(rows["1"].Details, "still flaky") {
-		t.Errorf("details %q", rows["1"].Details)
+	if asks, working := asksBy(h); asks[1].State != "open" || !slices.Equal(working, []int{1}) {
+		t.Errorf("asks %+v working %v", asks, working)
 	}
 }
 
 // The turn-end check names the intake while it has messages, and the asks
-// the turn touched that it did not mark; nothing else, and nothing in an
-// automatic turn.
+// the turn touched that it did not mark; once, an ask long untouched;
+// nothing else, and nothing in an automatic turn. An ask left untouched
+// stops lifting the automatic-turn budget.
 func TestAsks_TurnEndCheckListsOnlyWhatIsLeft(t *testing.T) {
-	t.Setenv("DUN_HOME", t.TempDir())
-	dir := t.TempDir()
-	h := startLedger(t, &nudgeRunner{}, dir, filepath.Join(dir, "s.jsonl"), nil)
+	h, _, _ := startAsks(t)
 	t.Cleanup(h.Close)
 	h.askOpen("fix the flaky test")
 	h.askOpen("update the docs")
@@ -188,66 +190,154 @@ func TestAsks_TurnEndCheckListsOnlyWhatIsLeft(t *testing.T) {
 	}
 	h.intakeAdd("continue")
 	a := h.idleAsks()
-	if !strings.Contains(a, `- intake: 1 message, not acknowledged: "continue"`) || strings.Contains(a, "ask: ") {
+	if !strings.Contains(a, `- intake: 1 message, not acknowledged: "continue"`) || strings.Contains(a, "- 1 ") {
 		t.Errorf("check %q", a)
 	}
 	t.Logf("intake check: %d bytes", len(a))
-	h.asksCall(`{"asks":[{"id":"intake","merge_into":"1"}]}`)
-	planCall(t, h, "plan_add", `{"title":"write the page","done_when":"written","needs":["2"]}`)
+	h.asksCall(`{"asks":[{"id":"intake","merge_into":1}]}`)
+	planCall(t, h, "plan_add", `{"title":"write the page","done_when":"written"}`)
+	h.asksCall(`{"asks":[{"id":2,"nodes":["1"]}]}`)
 	a = h.idleAsks()
-	if !strings.Contains(a, "- 1 ask: fix the flaky test") || !strings.Contains(a, "- 2 ask: update the docs") || strings.Contains(a, "intake") {
+	if !strings.Contains(a, "- 1 fix the flaky test") || !strings.Contains(a, "- 2 update the docs") || strings.Contains(a, "intake") {
 		t.Errorf("check %q", a)
 	}
 	t.Logf("two asks check: %d bytes", len(a))
-	h.asksCall(`{"asks":[{"id":"1","state":"done","note":"fixed"},{"id":"2","state":"open"}]}`)
+	h.asksCall(`{"asks":[{"id":1,"state":"done","note":"fixed"},{"id":2,"state":"open"}]}`)
 	if a := h.idleAsks(); a != "" {
 		t.Errorf("all marked: %q", a)
 	}
-	if note, _ := h.idleNote(1); strings.Contains(note, "ask:") {
-		t.Errorf("asks among the open nodes: %q", note)
+	if note, _ := h.idleNote(1); strings.Contains(note, "Asks") {
+		t.Errorf("asks in the check: %q", note)
+	}
+	h.ledgerEnd(context.Background(), nil)
+	// Ask 2 untouched for askStaleTurns of the person's turns: named once,
+	// and the budget is no longer off for it.
+	if !h.asksLiftBudget() {
+		t.Fatal("an open ask touched now does not lift the budget")
+	}
+	for range askStaleTurns {
+		h.turnBegin(originPerson)
+		h.ledgerBegin()
+		h.ledgerEnd(context.Background(), nil)
+	}
+	if h.asksLiftBudget() {
+		t.Error("an ask untouched for 5 turns still lifts the budget")
+	}
+	h.turnBegin(originPerson)
+	h.ledgerBegin()
+	if a := h.idleAsks(); !strings.Contains(a, "- still open: 2 update the docs") || !strings.Contains(a, "keep it (state open)") {
+		t.Errorf("stale check %q", a)
+	}
+	if a := h.idleAsks(); a != "" {
+		t.Errorf("named twice: %q", a)
 	}
 	h.ledgerEnd(context.Background(), nil)
 	h.turnBegin(originAuto)
 	h.ledgerBegin()
-	h.intakeAdd("ignored here") // as if typed; an automatic turn is not asked
+	h.intakeAdd("as if typed")
 	if a := h.idleAsks(); a != "" {
 		t.Errorf("automatic turn: %q", a)
 	}
 	h.ledgerEnd(context.Background(), nil)
 }
 
-// Where asks are kept the fold's ask is the asks' (the intake here), and no
-// "Current ask" node is written; an old one is dropped.
-func TestAsks_FoldAskFromTheAsks(t *testing.T) {
-	t.Setenv("DUN_HOME", t.TempDir())
-	dir := t.TempDir()
-	h := startLedger(t, &nudgeRunner{}, dir, filepath.Join(dir, "s.jsonl"), nil)
+// The model reads the intake and the open asks in one block: as each turn
+// begins (the keyed aside), in the fold's ask and in the note after a fold.
+// Done asks are not in it; the intake shows its newest messages.
+func TestAsks_PinnedBlockAndFold(t *testing.T) {
+	h, _, _ := startAsks(t)
 	t.Cleanup(h.Close)
-	_ = planStore{h}.Update(context.Background(), func(g *taskgraph.Graph) error {
-		n, err := g.Add(taskgraph.Node{Title: "Current ask: continue", Details: "continue\n\n" + askTag, DoneWhen: "x"})
-		if err != nil {
-			return err
+	h.askOpen("fix the stubs dir")
+	h.askOpen("add plan nodes")
+	h.asksCall(`{"asks":[{"id":2,"state":"done","note":"added"},{"id":1,"title":"fix the stubs dir"}]}`)
+	for i := range 8 {
+		h.intakeAdd("message " + string(rune('a'+i)))
+	}
+	b := h.asksBlock()
+	for _, w := range []string{"Open asks:", "- intake, not acknowledged (8 messages): +3 earlier,", "message h", "- 1 fix the stubs dir"} {
+		if !strings.Contains(b, w) {
+			t.Errorf("block lacks %q:\n%s", w, b)
 		}
-		return g.SetStatus(n.ID, taskgraph.Doing, "")
-	})
-	h.intakeAdd("the tools and stubs dir is not what I expect")
-	h.intakeAdd("continue")
+	}
+	if strings.Contains(b, "message c") || strings.Contains(b, "add plan nodes") {
+		t.Errorf("block shows an earlier message or a done ask:\n%s", b)
+	}
+	t.Logf("block: %d bytes; system line: %d bytes; tool def: %d bytes", len(b), len(systemAsks), toolDefBytes())
+	h.planTurnLine()
+	if q := strings.Join(queuedTexts(h), "\n"); !strings.Contains(q, "[asks] Open asks:") {
+		t.Errorf("the turn line has no asks block: %q", q)
+	}
+	// The fold: the ask the turn works is the intake here.
 	a := h.noteAsk(context.Background())
-	if a.text != "the tools and stubs dir is not what I expect" || len(a.later) != 1 || a.later[0].text != "continue" {
+	if a.text != "message a" || len(a.later) != 6 || !strings.Contains(a.later[0].text, "+2 earlier") || h.askNow().text != "message a" {
 		t.Errorf("fold ask %+v", a)
 	}
-	g := planGraph(t, h)
-	for _, n := range g.Nodes {
-		if strings.HasPrefix(n.Title, "Current ask") && planOpen(n) {
-			t.Errorf("open fold node %+v", n)
+	if n := h.foldRestoreNote(); !strings.Contains(n, "The current ask, verbatim") || !strings.Contains(n, "Open asks:") {
+		t.Errorf("restore note:\n%s", n)
+	}
+	for _, nd := range planGraph(t, h).Nodes {
+		if strings.HasPrefix(nd.Title, "Current ask") {
+			t.Errorf("a fold node was written: %+v", nd)
 		}
 	}
-	// Once acknowledged: the ask the turn works, with what was merged.
-	h.asksCall(`{"asks":[{"id":"intake","split":[{"title":"fix the stubs dir","text":"the tools and stubs dir is not what I expect"}]}]}`)
-	h.intakeAdd("retry")
-	h.asksCall(`{"asks":[{"id":"intake","merge_into":"2"}]}`)
-	a = h.noteAsk(context.Background())
-	if a.text != "the tools and stubs dir is not what I expect" || len(a.later) != 1 || a.later[0].text != "retry" {
+	// Acknowledged into ask 1: the fold keeps it and the merged words.
+	h.asksCall(`{"asks":[{"id":"intake","merge_into":1}]}`)
+	if a := h.noteAsk(context.Background()); a.text != "fix the stubs dir" || !strings.Contains(a.later[len(a.later)-1].text, "message h") {
 		t.Errorf("fold ask after ack %+v", a)
+	}
+}
+
+func toolDefBytes() int {
+	b, _ := json.Marshal(asksToolDef())
+	return len(b)
+}
+
+// A sidecar from before the ledger moves in: the ask nodes leave the
+// graph, their states go to the records, a node that needed one serves it,
+// and a closed one gets no second entry.
+func TestAsks_MigrateFromPlanNodes(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	dir := t.TempDir()
+	sf := filepath.Join(dir, "s.jsonl")
+	g := taskgraph.Graph{Seq: 4, Nodes: []*taskgraph.Node{
+		{ID: "1", Title: "ask: fix the flaky test", Status: taskgraph.Done, DoneWhen: "x", Account: "fixed"},
+		{ID: "2", Title: "ask: update the docs", Status: taskgraph.Doing, DoneWhen: "x"},
+		{ID: "3", Title: "write the page", Status: taskgraph.Todo, DoneWhen: "x", Needs: []string{"2"}},
+		{ID: "4", Title: "ask: which region", Status: taskgraph.Blocked, DoneWhen: "x", Why: "eu or us?"},
+	}}
+	plan, _ := json.Marshal(planFileData{Graph: g, By: map[string]string{"1": planByUser, "2": planByUser, "4": planByUser}})
+	_ = os.WriteFile(PlanFile(sf), plan, 0o600)
+	old := `{"turn":3,"asks":[{"n":1,"node":"1","title":"fix the flaky test","outcome":"done","facts":{}},
+		{"n":2,"node":"2","title":"update the docs","facts":{}},{"n":3,"node":"4","title":"which region","facts":{}}]}`
+	_ = os.WriteFile(AsksFile(sf), []byte(old), 0o600)
+	h := startLedger(t, &nudgeRunner{}, dir, sf, nil)
+	t.Cleanup(h.Close)
+	asks, _ := asksBy(h)
+	if asks[1].State != "done" || asks[2].State != "open" || asks[3].State != "blocked" || asks[3].Why != "eu or us?" ||
+		!slices.Equal(asks[2].Nodes, []string{"3"}) {
+		t.Errorf("migrated %+v", asks)
+	}
+	rows := h.Plan().Rows
+	if len(rows) != 1 || rows[0].ID != "3" || len(rows[0].Needs) != 0 || rows[0].Ask != 2 {
+		t.Errorf("plan after the move %+v", rows)
+	}
+	h.ledgerBegin()
+	h.ledgerEnd(context.Background(), nil)
+	if n := len(h.journalLocked()); n != 0 {
+		t.Errorf("a migrated closed ask got another entry: %d", n)
+	}
+}
+
+// The network wait counts resumes per intake, not under one id.
+func TestAsks_NetWaitIDsPerIntake(t *testing.T) {
+	h, _, _ := startAsks(t)
+	t.Cleanup(h.Close)
+	h.intakeAdd("fix it")
+	ids, _ := h.openAsks()
+	h.asksCall(`{"asks":[{"id":"intake","state":"done","note":"fixed"}]}`)
+	h.intakeAdd("and the other one")
+	ids2, _ := h.openAsks()
+	if !slices.Equal(ids, []string{"intake-1"}) || !slices.Equal(ids2, []string{"intake-2"}) {
+		t.Errorf("ids %v then %v", ids, ids2)
 	}
 }

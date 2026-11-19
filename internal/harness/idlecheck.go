@@ -68,8 +68,7 @@ func (h *Harness) idleOpenNodes() string {
 	var lines []string
 	more := 0
 	for _, n := range g.Nodes {
-		// An ask is the check's asks part (asktool.go idleAsks).
-		if n.Owner != "" || !planOpen(n) || n.Status == taskgraph.Blocked || h.isAskNode(n.ID) {
+		if n.Owner != "" || !planOpen(n) || n.Status == taskgraph.Blocked {
 			continue
 		}
 		if len(lines) == idlePlanMax {

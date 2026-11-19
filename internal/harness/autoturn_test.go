@@ -44,7 +44,7 @@ func TestAutoBudget_OpenAskRunsHeldAfterThreeAndPersonResets(t *testing.T) {
 			t.Fatalf("wake %d with the ask open: %v", i, err)
 		}
 	}
-	if out := planCall(t, h, "plan_close", `{"outcome":"done","id":"1","account":"watched"}`); !strings.Contains(out, "done") {
+	if out := h.asksCall(`{"asks":[{"id":1,"state":"done","note":"watched"}]}`); !strings.Contains(out, "done") {
 		t.Fatalf("close: %s", out)
 	}
 	for i := range 3 {
@@ -85,7 +85,7 @@ func TestAutoBudget_OpenAskRunsHeldAfterThreeAndPersonResets(t *testing.T) {
 	}
 	// The count started again: three more automatic turns run (the ask the
 	// message opened is closed first).
-	if out := planCall(t, h, "plan_close", `{"outcome":"done","id":"2","account":"told"}`); !strings.Contains(out, "done") {
+	if out := h.asksCall(`{"asks":[{"id":2,"state":"done","note":"told"}]}`); !strings.Contains(out, "done") {
 		t.Fatalf("close: %s", out)
 	}
 	for i := range 3 {
@@ -104,7 +104,7 @@ func TestAutoBudget_BlockedAskAndLoopFirings(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.asksCall(`{"asks":[{"id":"intake","state":"open"}]}`) // the model acknowledges it
-	if out := planCall(t, h, "plan_close", `{"outcome":"block","id":"1","reason":"which region?"}`); !strings.Contains(out, "blocked") {
+	if out := h.asksCall(`{"asks":[{"id":1,"state":"blocked","note":"which region?"}]}`); !strings.Contains(out, "blocked") {
 		t.Fatalf("block: %s", out)
 	}
 	if h.openAskNow() {
