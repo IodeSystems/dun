@@ -21,7 +21,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/iodesystems/agentkit v0.35.0
-	github.com/iodesystems/bubbleteandmd v0.6.0
+	github.com/iodesystems/bubbleteandmd v0.7.0
 	github.com/iodesystems/gwag/v2 v2.11.0
 	github.com/iodesystems/openai-claude-api-shim v0.6.0
 	github.com/iodesystems/poly-lsp-mcp v0.5.3
@@ -39,6 +39,7 @@ require (
 
 require (
 	connectrpc.com/connect v1.21.1 // indirect
+	github.com/AlexanderGrooff/mermaid-ascii v0.0.0-20261117200642-e7a2d2f81cdb // indirect
 	github.com/IodeSystems/graphql-go/v2 v2.1.0 // indirect
 	github.com/alecthomas/chroma/v2 v2.27.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
@@ -54,9 +55,11 @@ require (
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/dlclark/regexp2/v2 v2.13.0 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
+	github.com/elliotchance/orderedmap/v2 v2.2.0 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/getkin/kin-openapi v0.153.0 // indirect
 	github.com/go-openapi/jsonpointer v1.0.2 // indirect
+	github.com/gookit/color v1.5.4 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/hhrutter/tiff v1.0.8 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
@@ -72,6 +75,7 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
+	github.com/sirupsen/logrus v1.9.0 // indirect
 	github.com/smacker/go-tree-sitter v0.0.0-20240827094217-dd81d9e9be82 // indirect
 	github.com/spf13/pflag v1.1.0 // indirect
 	github.com/xdg-go/stringprep v1.0.4 // indirect
