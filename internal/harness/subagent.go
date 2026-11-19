@@ -69,6 +69,10 @@ type subAgent struct {
 	tier     string // the tier that picked its model (tiers.go); "" none did
 	note     string // why it is not on the model or tier asked for ("" it is); said once, in the spawn result
 	effort   string // "" is the saved /effort level
+	// effective is the level its requests send (its effort, or the saved
+	// level it inherits, clamped to its model; roles.go), for the strip and
+	// dun ps; why says why it is not the level asked for.
+	effective, effortWhy string
 	parent   *Harness
 	iso      isolation // where it works, when not in its parent's tree (subisolation.go)
 	callID   string    // the parent's agent call that spawned it, "" for one from before (agentRecord); under mu
@@ -631,37 +635,54 @@ func (h *Harness) spawnAgentFor(ctx context.Context, prompt, tier, provider, mod
 		// a resume) is the brief the child got.
 		prompt += h.planBrief(node)
 	}
-	// The tier (tiers.go): a model given overrides it; a tier with no
-	// model is the child default.
-	asked := effort
-	tier, provider, model, effort, err := h.spawnTier(tier, provider, model, effort)
-	if err != nil {
-		return nil, err
+	// The role (roles.go): child:<tier>, its model and effort by one
+	// precedence; a model given overrides the tier, a tier with no model is
+	// the child default.
+	tier = strings.ToLower(strings.TrimSpace(tier))
+	if tier != "" && !isTierName(tier) {
+		return nil, fmt.Errorf("tier %q: want %s", tier, strings.Join(TierNames, ", "))
 	}
-	// A tier that cannot be served (its provider not logged in, no client
-	// for its model) is the child default for this spawn, said in the
-	// result (note): one bad tier must not stop every spawn.
-	var note string
-	var run childRun
-	if t, ok := h.tier(tier); ok && t.Off != "" {
-		note = "tier " + tier + " unavailable: " + t.Off
-	} else {
-		run, err = h.clientFor(provider, model)
-		if err != nil && tier == "" {
-			return nil, err
+	if effort != "" {
+		e, ok := NormalizeEffort(effort)
+		if !ok {
+			return nil, fmt.Errorf("effort %q: want %s (off is none)", effort, strings.Join(EffortLevels, ", "))
 		}
-		if err != nil {
-			note = "tier " + tier + " unavailable: " + err.Error()
+		effort = e
+	}
+	rr := h.resolver(ctx)
+	rr.Profile = nil // clamped below, to the model the child gets
+	arg := RoleArg{Provider: provider, Model: model, Effort: effort}
+	role := rr.Resolve(ChildRole(tier), arg)
+	tierName := strings.TrimPrefix(role.Role, "child:")
+	// A tier that cannot be served (its provider not logged in, no client
+	// for its model, a model the profile knows takes no tool calls) is the
+	// child default for this spawn, said in the result (note): one bad tier
+	// must not stop every spawn.
+	note := role.Note
+	var run childRun
+	var err error
+	if note == "" {
+		run, err = h.clientFor(role.Provider, role.Model)
+		switch {
+		case err != nil && role.Tier == "":
+			return nil, err
+		case err != nil:
+			note = "tier " + role.Tier + " unavailable: " + err.Error()
+		case role.Tier != "" && run.fellBack == "":
+			if p := h.runProfile(ctx, run); p.NoTools() {
+				note = "tier " + role.Tier + " unavailable: " + run.name() + " takes no tool calls (" + CapToolsSupported + "=false)"
+			}
 		}
 	}
 	if note != "" {
-		tier, provider, model, effort = "", h.cfg.ChildProvider, h.cfg.ChildModel, asked
-		if run, err = h.clientFor(provider, model); err != nil {
+		role = rr.ChildDefault(tierName, RoleArg{Effort: effort})
+		if run, err = h.clientFor(role.Provider, role.Model); err != nil {
 			return nil, fmt.Errorf("%s; the child default: %w", note, err)
 		}
 	}
+	tier = role.Tier
 	if run.fellBack != "" {
-		what := model
+		what := role.Model
 		if tier != "" {
 			what = "tier " + tier
 		}
@@ -677,14 +698,16 @@ func (h *Harness) spawnAgentFor(ctx context.Context, prompt, tier, provider, mod
 	case note != "":
 		note += "; ran on " + run.name()
 	}
-	if effort == "" {
-		effort = h.cfg.ChildEffort
+	// The effort, clamped to the model the child runs on (a tier's own, not
+	// the session's). Unset: the child loads the saved /effort level, as
+	// before roles; shown clamped to its model.
+	prof := h.runProfile(ctx, run)
+	eff := efforts.Clamp(prof, role.Effort.Wanted)
+	if role.Effort.Wanted == "" {
+		eff = efforts.Clamp(prof, LoadEffort())
+	} else {
+		run.effort = eff.Effective
 	}
-	effort = strings.ToLower(strings.TrimSpace(effort))
-	if effort != "" && !validEffort(effort) {
-		return nil, fmt.Errorf("effort %q: want %s", effort, strings.Join(EffortLevels, ", "))
-	}
-	run.effort = effort
 	iso, err := h.newIsolation(mode, dir)
 	if err != nil {
 		return nil, err
@@ -697,7 +720,7 @@ func (h *Harness) spawnAgentFor(ctx context.Context, prompt, tier, provider, mod
 	}
 	h.agMu.Unlock()
 
-	sa := &subAgent{num: num, prompt: prompt, tier: tier, note: note, model: run.model, provider: run.provider, effort: run.effort, parent: h, hb: heartbeat.New(), iso: iso}
+	sa := &subAgent{num: num, prompt: prompt, tier: tier, note: note, model: run.model, provider: run.provider, effort: run.effort, effective: eff.Effective, effortWhy: eff.Reason, parent: h, hb: heartbeat.New(), iso: iso}
 
 	// Start on a background context: a child outlives the TURN that spawned it
 	// (that is the whole point of an async spawn), so tying it to the caller's
@@ -1315,6 +1338,12 @@ func roleSystem(child bool) string {
 
 // ── the tools ───────────────────────────────────────────────────────
 
+// agentEffortEnum is the agent tool's effort enum: the five levels it had
+// before agentkit's scale, so the tool is byte for byte as before (it is
+// sent on every round). off is read as none; any level of EffortLevels is
+// taken if a model sends one.
+var agentEffortEnum = []string{EffortDefault, effortAlias, EffortLow, EffortMedium, EffortHigh}
+
 // agentToolDef is the agent tool. providers are the logged-in ones; with
 // more than one, a spawn may name another. tiers (tiers.go) add the tier
 // param and a line per tier only when one names a model: with none the tool
@@ -1350,7 +1379,7 @@ func agentToolDef(defaultModel, defaultProvider, defaultEffort string, providers
 		"type": "object",
 		"properties": map[string]any{
 			"model": map[string]any{"type": "string", "description": "run this child on a specific model"},
-			"effort": map[string]any{"type": "string", "enum": EffortLevels,
+			"effort": map[string]any{"type": "string", "enum": agentEffortEnum,
 				"description": "how much this child thinks before it answers: off is fastest, high thinks as long as it needs, default leaves it to the server"},
 			"wait": map[string]any{"type": "boolean", "description": "block until it answers, instead of being notified later"},
 			"node": map[string]any{"type": "string", "description": "the plan node a new child works: a ready one (todo, no child on it, " +
@@ -1725,6 +1754,8 @@ type AgentInfo struct {
 	ID      int    `json:"id"`
 	Model   string `json:"model,omitempty"`
 	Tier    string `json:"tier,omitempty"` // the tier that picked Model; "" none did
+	// Effort is the level its requests send (roles.go: clamped to its model).
+	Effort string `json:"effort,omitempty"`
 	State   string `json:"state"`
 	Status  string `json:"status,omitempty"`
 	Prompt  string `json:"prompt"`
@@ -1742,7 +1773,7 @@ func (h *Harness) Agents() []AgentInfo {
 	for _, sa := range list {
 		state, status, _, since := sa.snapshot()
 		out = append(out, AgentInfo{
-			ID: sa.num, Model: sa.where(), Tier: sa.tierName(), State: string(state), Status: status,
+			ID: sa.num, Model: sa.where(), Tier: sa.tierName(), Effort: sa.effective, State: string(state), Status: status,
 			Prompt: sa.prompt, Tokens: sa.spent(), Seconds: int(since.Seconds()),
 			Dir: sa.iso.workspace(),
 		})

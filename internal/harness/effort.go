@@ -15,38 +15,59 @@ import (
 // Effort: how much the model thinks before it answers, set with /effort
 // (USER 2026-10-26). dun used to send nothing, so the server's default
 // decided; a server launched with thinking off showed no thinking at all.
-// A level asks for it on every request (agentkit's EnableThinking, sent as
-// chat_template_kwargs.enable_thinking, and a reasoning budget):
+// A level asks for it on every request: agentkit's ChatOpts.Effort (since
+// v0.35.0), which writes each dialect's fields and clamps the level to the
+// capability record (effortclamp.go):
 //
-//	default  nothing sent: the server's default (what dun did before; an
-//	         OpenRouter model may then think and send none of it back)
-//	off      thinking off
-//	low      on, at most 1,024 tokens of it
-//	medium   on, at most 4,096
-//	high     on, no budget
+//	default        nothing sent: the server's default (what dun did before;
+//	               an OpenRouter model may then think and send none of it back)
+//	none           thinking off; off, the old name, is read as it
+//	minimal … max  agentkit's levels, lowest first (llm.Efforts)
 //
 // The level is saved in $DUN_HOME/effort.json and is every session's.
 const (
 	EffortDefault = "default"
-	EffortOff     = "off"
+	EffortOff     = "none" // thinking off; "off" is read as it (NormalizeEffort)
+	EffortMinimal = "minimal"
 	EffortLow     = "low"
 	EffortMedium  = "medium"
 	EffortHigh    = "high"
+	EffortXHigh   = "xhigh"
+	EffortMax     = "max"
 )
 
-// EffortLevels are the levels, in the order a picker shows them.
-var EffortLevels = []string{EffortDefault, EffortOff, EffortLow, EffortMedium, EffortHigh}
+// effortAlias is off, the name dun saved before agentkit's scale.
+const effortAlias = "off"
+
+// EffortLevels are the levels, in the order a picker shows them: default,
+// then agentkit's.
+var EffortLevels = func() []string {
+	out := []string{EffortDefault}
+	for _, e := range llm.Efforts {
+		out = append(out, string(e))
+	}
+	return out
+}()
 
 // EffortAbout is each level in words, for a picker.
-var EffortAbout = map[string]string{
-	EffortDefault: "the server decides (nothing sent)",
-	EffortOff:     "no thinking: fastest",
-	EffortLow:     "thinks, up to ~1k tokens",
-	EffortMedium:  "thinks, up to ~4k tokens",
-	EffortHigh:    "thinks as long as it needs",
-}
+var EffortAbout = func() map[string]string {
+	out := map[string]string{EffortDefault: "the server decides (nothing sent)"}
+	for _, e := range llm.Efforts {
+		out[string(e)] = llm.EffortAbout[e]
+	}
+	out[EffortOff] = "no thinking: fastest"
+	return out
+}()
 
-var effortBudget = map[string]int{EffortLow: 1024, EffortMedium: 4096}
+// NormalizeEffort is l as a level: trimmed, lower case, off read as none.
+// False when it is no level.
+func NormalizeEffort(l string) (string, bool) {
+	l = strings.ToLower(strings.TrimSpace(l))
+	if l == effortAlias {
+		l = EffortOff
+	}
+	return l, validEffort(l)
+}
 
 // effortFile is where the level is kept.
 func effortFile() string { return filepath.Join(DunHome(), "effort.json") }
@@ -58,16 +79,21 @@ func LoadEffort() string {
 }
 
 // SavedEffort is the saved level, and whether one is saved (else default):
-// facets.main's effort applies only when /effort has saved none.
+// facets.main's effort applies only when /effort has saved none. An older
+// file's off reads as none.
 func SavedEffort() (string, bool) {
 	var f struct {
 		Level string `json:"level"`
 	}
 	b, err := os.ReadFile(effortFile())
-	if err != nil || json.Unmarshal(b, &f) != nil || !validEffort(f.Level) {
+	if err != nil || json.Unmarshal(b, &f) != nil {
 		return EffortDefault, false
 	}
-	return f.Level, true
+	l, ok := NormalizeEffort(f.Level)
+	if !ok {
+		return EffortDefault, false
+	}
+	return l, true
 }
 
 func validEffort(l string) bool {
@@ -81,9 +107,9 @@ func validEffort(l string) bool {
 
 // SetEffort sets the level for this harness's next request and saves it.
 func (h *Harness) SetEffort(level string) error {
-	level = strings.ToLower(strings.TrimSpace(level))
-	if !validEffort(level) {
-		return fmt.Errorf("effort %q: want %s", level, strings.Join(EffortLevels, ", "))
+	level, ok := NormalizeEffort(level)
+	if !ok {
+		return fmt.Errorf("effort %q: want %s (off is none)", level, strings.Join(EffortLevels, ", "))
 	}
 	b, _ := json.Marshal(map[string]string{"level": level})
 	if err := os.MkdirAll(DunHome(), 0o700); err != nil {
@@ -93,8 +119,31 @@ func (h *Harness) SetEffort(level string) error {
 		return err
 	}
 	h.effort.Store(level)
+	h.effortSrc.Store(srcEffort)
 	h.writeHarnessInfo()
 	return nil
+}
+
+// EffortPick is one row of the /effort picker: a level, what it does, and,
+// when the session's model does not take it as asked, why (agentkit's
+// EffortSupport Reason, "minimal (none not supported: …)").
+type EffortPick struct {
+	Level, About, Unavailable string
+}
+
+// EffortPicker is the /effort picker's rows for the session's model now:
+// default, then every level lowest first, each marked unavailable when the
+// model's clamp sends another.
+func (h *Harness) EffortPicker() []EffortPick {
+	out := []EffortPick{{Level: EffortDefault, About: h.EffortWords(EffortDefault)}}
+	for _, c := range h.sessionProfile().Support() {
+		p := EffortPick{Level: string(c.Wanted), About: EffortAbout[string(c.Wanted)]}
+		if c.Effective != c.Wanted {
+			p.Unavailable = c.Reason
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // Effort is the level in force.
@@ -103,33 +152,6 @@ func (h *Harness) Effort() string {
 		return l
 	}
 	return EffortDefault
-}
-
-// applyEffort sets level's thinking knobs on opts; default clears them.
-// agentkit sends them in the endpoint's dialect: chat_template_kwargs and a
-// budget to llama.cpp, a `reasoning` object to OpenRouter (the effort, or
-// the budget as max_tokens), a thinking budget to Anthropic.
-// applyEffort is the harness's way in to applyEffort. A model that refuses
-// off is agentkit's capability record's job: the provider's effort_off is
-// pinned there (capstore.go), and off is sent as it.
-func (h *Harness) applyEffort(opts *llm.ChatOpts, level string) { applyEffort(opts, level) }
-
-func applyEffort(opts *llm.ChatOpts, level string) {
-	if opts == nil {
-		return
-	}
-	opts.EnableThinking, opts.ReasoningBudgetTokens, opts.ReasoningEffort = nil, nil, ""
-	switch level {
-	case EffortOff:
-		f := false
-		opts.EnableThinking, opts.ReasoningEffort = &f, "none"
-	case EffortLow, EffortMedium, EffortHigh:
-		t := true
-		opts.EnableThinking, opts.ReasoningEffort = &t, level
-		if n, ok := effortBudget[level]; ok {
-			opts.ReasoningBudgetTokens = &n
-		}
-	}
 }
 
 // ServerThinking is what the model list says the session's model does when
@@ -179,6 +201,7 @@ func (h *Harness) LearnServerThinking(ctx context.Context) bool {
 	t, ok := listedThinking(cctx, h.cfg.Endpoint)
 	if ok {
 		h.thinking.Store(&t)
+		h.declareThinkingOnly(t)
 	}
 	return ok
 }

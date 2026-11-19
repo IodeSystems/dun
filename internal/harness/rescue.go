@@ -244,7 +244,7 @@ func (h *Harness) summarizeRescue(ctx context.Context, older []agent.Entry, budg
 	}
 
 	start := time.Now()
-	opts := h.foldOpts()
+	opts := h.roleOpts("rescue") // the rescue role: lowest, as a fold
 	opts.MaxTokens = agent.SummaryCap(budget)
 	if lim := h.outputLimit(); lim > 0 && opts.MaxTokens > lim {
 		opts.MaxTokens = lim // limits only narrow downstream (see applyGeneration)

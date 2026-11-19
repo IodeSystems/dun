@@ -93,6 +93,13 @@ type Config struct {
 	// Effort is this harness's own effort level, in place of the saved one;
 	// a child spawned with an effort has it. Empty = the saved level.
 	Effort string
+	// The Source fields say where cmd/dun's layers got each value, for the
+	// role table (roles.go): EffortSource Effort's ("facets.main", "spawn"),
+	// MainSource the session model's, ChildSource ChildModel's,
+	// ChildEffortSource ChildEffort's ("--child-effort" or "facets.child"),
+	// SideCallSources each side_calls entry's ("config"; absent: default).
+	EffortSource, MainSource, ChildSource, ChildEffortSource string
+	SideCallSources                                         map[string]string
 	// Files configures the built-in file tools (files.go); nil = the defaults
 	// (DefaultFileTools: read, edit, write), rooted at Workspace.
 	Files *mcpserver.FilesConfig
@@ -495,6 +502,12 @@ type Harness struct {
 	// thinking is what the server's model list says /effort default does
 	// (effort.go); nil until it says.
 	thinking atomic.Pointer[ServerThinking]
+	// effortSrc is where effort came from, for the role table (roles.go):
+	// "/effort", "facets.main" or "default".
+	effortSrc atomic.Value
+	// windows caches the windows of other clients' models (runnerProfile,
+	// profile.go): provider+model to tokens, 0 unknown.
+	windows sync.Map
 	// windowSrc is where the window in force came from (window.go).
 	windowSrc string
 	closed    chan struct{}
@@ -760,8 +773,12 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// own: a child spawned with an effort keeps it, and does not save it.
 	if cfg.Effort != "" {
 		h.effort.Store(cfg.Effort)
+		h.effortSrc.Store(orStr(cfg.EffortSource, "facets.main"))
+	} else if l, saved := SavedEffort(); saved {
+		h.effort.Store(l)
+		h.effortSrc.Store(srcEffort)
 	} else {
-		h.effort.Store(LoadEffort())
+		h.effort.Store(l)
 	}
 	if cfg.Parent == nil {
 		applyContextConfig(savedContext(cfg.Endpoint)) // /context config, saved for this model (window.go)
