@@ -68,13 +68,14 @@ without a fold) only the bounding rungs ever run.
   wraps the Shaper's Runner); `foldRestoreNote` always carries the ask
   verbatim (cap 8000) and the open plan, keyed so a second fold in the turn
   replaces the first note. Open: pin the latest user entry in the Shaper
-  itself (request to the agentkit owner). A fold that fits one request
-  sends the session's prefix (agentkit v0.33.1 `Shaper.SessionPrefix`, set
-  per build by `measuredBuild`): the round's system, tools and
-  PromptCacheKey, then the history, so it reads the history **from the
-  cache** up to the pinned latest user entry (`decisions.md`, "A fold shares
-  the session's prompt cache"). A staged fold (history over the budget)
-  keeps its own system prompt ("You are a compaction worker") and reads
+  itself (request to the agentkit owner). A fold's first request sends the
+  session's prefix (agentkit v0.33.1 `Shaper.SessionPrefix`, set per build
+  by `measuredBuild`): the round's system, tools and PromptCacheKey, then
+  the history, so it reads the history **from the cache** up to the pinned
+  latest user entry (`decisions.md`, "A fold shares the session's prompt
+  cache"). A fold too big for one request is split (agentkit v0.34.0): the
+  first request covers the head that fits, and the later stages keep the
+  worker's system prompt ("You are a compaction worker") and read
   uncached. The next round re-reads the new prompt uncached from the marker
   on.
 - **Rescue and overflow [D].** `internal/harness/rescue.go` folds when the endpoint refuses a

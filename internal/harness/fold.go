@@ -32,7 +32,7 @@ import (
 // llama.cpp the reasoning field is not in the history's cached bytes, so the
 // prefix still matches; on Anthropic a changed thinking setting drops the
 // cached messages. Neither is measured yet. A model that refuses off
-// folds at the lowest effort (offGuard, reasoningoff.go).
+// folds at the lowest effort: agentkit resends it so (reasoningoff.go).
 func (h *Harness) foldOpts() *llm.ChatOpts {
 	o := &llm.ChatOpts{}
 	h.applyEffort(o, EffortOff)
@@ -431,11 +431,13 @@ func foldSummaryProblems(summary string, ask string) []string {
 type foldRunner struct {
 	inner agent.LLMRunner
 	h     *Harness
-	sh    *agent.Shaper // its SessionPrefix names the prefix fold's system; nil in some tests
 }
 
+// ChatStream checks a fold request; any other passes through. agent.IsFold
+// tells them apart (agentkit v0.34.0): a fold's first request sends the
+// session's own system, so the system prompt does not.
 func (r foldRunner) ChatStream(ctx context.Context, msgs []llm.Message, tools []llm.ToolDef, opts *llm.ChatOpts) (<-chan llm.StreamChunk, error) {
-	if !r.isFold(msgs) {
+	if !agent.IsFold(ctx) {
 		return r.inner.ChatStream(ctx, msgs, tools, opts)
 	}
 	ask := r.h.askNow().text
@@ -473,25 +475,11 @@ func (r foldRunner) ChatStream(ctx context.Context, msgs []llm.Message, tools []
 	return replay(text, ""), nil
 }
 
-// isFold reports whether msgs is a fold request, by its system message. A
-// staged fold sends agentkit's own constant, not a copy
-// (TestFoldRunner_MatchesAgentkitSystem fails if the Shaper stops sending
-// it). A single-stage fold sends the session's prefix: its system is the one
-// sessionPrefix set on the Shaper for this build.
-func (r foldRunner) isFold(msgs []llm.Message) bool {
-	if len(msgs) == 0 || msgs[0].Role != "system" {
-		return false
-	}
-	if msgs[0].Content == agent.DefaultSummarySystem {
-		return true
-	}
-	return r.sh != nil && r.sh.SessionPrefix.System != "" && msgs[0].Content == r.sh.SessionPrefix.System
-}
-
-// sessionPrefix is the prefix a single-stage fold sends ahead of the history
-// (agent.Shaper.SessionPrefix, agentkit v0.33.1), so the provider serves the
-// history from the session's cache; before, the fold read all of it uncached
-// under the compaction worker's own prompt. system is the string
+// sessionPrefix is the prefix a fold's first request sends ahead of the
+// history (agent.Shaper.SessionPrefix, agentkit v0.33.1; a fold too big for
+// one request since v0.34.0), so the provider serves the history from the
+// session's cache; before, the fold read all of it uncached under the
+// compaction worker's own prompt. system is the string
 // agent.Session passes to Build: Turn's effective system, heredoc tool text
 // and slot note included, the bytes the round sends. The tools are the
 // round's (forkTools): the session's tools on the native transport, none on
@@ -508,8 +496,7 @@ func sessionPrefix(s *agent.Session, system string) agent.SessionPrefix {
 // retry), and neither showed in /usage or any spend view before.
 func (r foldRunner) call(ctx context.Context, msgs []llm.Message, tools []llm.ToolDef, opts *llm.ChatOpts) (string, string, error) {
 	start := time.Now()
-	// offGuard: a model that refuses off folds at the lowest effort.
-	text, errMsg, usage, err := collectText(ctx, offGuard{LLMRunner: r.h.sideRunner("fold", r.inner)}, msgs, tools, opts)
+	text, errMsg, usage, err := collectText(ctx, r.h.sideRunner("fold", r.inner), msgs, tools, opts)
 	r.h.noteSideCall("fold", start, usage)
 	return text, errMsg, err
 }
@@ -559,5 +546,5 @@ func (h *Harness) foldWire(sh *agent.Shaper) {
 	sh.SummaryOpts = h.foldOpts()
 	sh.TaskFunc = h.foldTask
 	sh.SummaryPrompt = foldSummaryPrompt
-	sh.Runner = foldRunner{inner: sh.Runner, h: h, sh: sh}
+	sh.Runner = foldRunner{inner: sh.Runner, h: h}
 }

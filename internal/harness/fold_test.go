@@ -412,12 +412,29 @@ func TestFold_HugeAskCapped(t *testing.T) {
 	}
 }
 
-// foldRunner finds the fold call by agentkit's own system message. If the
-// Shaper stops sending it, the check goes silent: this fails first.
-func TestFoldRunner_MatchesAgentkitSystem(t *testing.T) {
+// foldRunner finds the fold call by agent.IsFold on its ctx. If the Shaper
+// stops marking it, the check goes silent: this fails first.
+func TestFoldRunner_SeesTheShapersFold(t *testing.T) {
+	rec := &sysFake{}
+	shaperFold(t, rec)
+	if !rec.fold {
+		t.Fatal("the Shaper's fold request is not agent.IsFold")
+	}
+	if rec.calls != 2 {
+		t.Errorf("calls = %d: the check did not see the fold (want rejected then retried)", rec.calls)
+	}
+	// A request with the worker's system but no fold ctx is not checked.
 	h := newNoteHarness(t)
-	var sys string
-	rec := &sysFake{sys: &sys}
+	f := &sysFake{}
+	if _, _, _, err := collectText(context.Background(), foldRunner{inner: f, h: h}, foldMsgs(), nil, nil); err != nil || f.calls != 1 {
+		t.Errorf("calls = %d (%v): a request outside a fold was checked", f.calls, err)
+	}
+}
+
+// shaperFold runs one real Shaper fold with rec under foldRunner.
+func shaperFold(t *testing.T, rec agent.LLMRunner) {
+	t.Helper()
+	h := newNoteHarness(t)
 	sh := &agent.Shaper{Store: h.store, Runner: rec, Estimate: &h.meter,
 		Policy: agent.ShaperPolicy{BudgetTokens: 100000, PreserveLastMessages: 6, PreserveLastToolCalls: 4}}
 	h.foldWire(sh)
@@ -425,22 +442,31 @@ func TestFoldRunner_MatchesAgentkitSystem(t *testing.T) {
 	if _, did, err := sh.Compact(context.Background(), "dun"); err != nil || !did {
 		t.Fatalf("compact: %v %v", did, err)
 	}
-	if sys != agent.DefaultSummarySystem {
-		t.Fatalf("the Shaper sent system %q; foldRunner detects %q", sys, agent.DefaultSummarySystem)
+}
+
+// foldCtx is the ctx of a real fold request: agent.IsFold is true on it, as
+// on every request the Shaper sends to fold. agentkit keeps the key
+// unexported, so a test that calls foldRunner directly takes it from a fold.
+func foldCtx(t *testing.T) context.Context {
+	t.Helper()
+	rec := &sysFake{}
+	shaperFold(t, rec)
+	if rec.ctx == nil || !agent.IsFold(rec.ctx) {
+		t.Fatal("no fold ctx")
 	}
-	if rec.calls != 2 {
-		t.Errorf("calls = %d: the check did not see the fold (want rejected then retried)", rec.calls)
-	}
+	return context.WithoutCancel(rec.ctx) // the fold is over; its values stay
 }
 
 type sysFake struct {
-	sys   *string
 	calls int
+	fold  bool
+	ctx   context.Context
 }
 
-func (f *sysFake) ChatStream(_ context.Context, msgs []llm.Message, _ []llm.ToolDef, _ *llm.ChatOpts) (<-chan llm.StreamChunk, error) {
+func (f *sysFake) ChatStream(ctx context.Context, msgs []llm.Message, _ []llm.ToolDef, _ *llm.ChatOpts) (<-chan llm.StreamChunk, error) {
 	f.calls++
-	*f.sys = msgs[0].Content
+	f.fold = agent.IsFold(ctx)
+	f.ctx = ctx
 	return replay("no sections", ""), nil
 }
 
@@ -461,7 +487,7 @@ func TestFoldRunner_RetryKeptOnlyIfBetter(t *testing.T) {
 			h.ask = foldAsk{id: "u", text: repoAsk, at: 1}
 			f := &foldFake{replies: tc.replies}
 			r := foldRunner{inner: f, h: h}
-			text, _, _, err := collectText(context.Background(), r, []llm.Message{
+			text, _, _, err := collectText(foldCtx(t), r, []llm.Message{
 				{Role: "system", Content: agent.DefaultSummarySystem}, {Role: "user", Content: "events"}}, nil, nil)
 			if err != nil || text != tc.want {
 				t.Errorf("got %q (%v), want %q", text, err, tc.want)
@@ -497,7 +523,7 @@ func TestFoldRunner_RecordsSideCall(t *testing.T) {
 			h.sideCalls = &sideCallStats{}
 			h.ask = foldAsk{id: "u", text: repoAsk, at: 1}
 			r := foldRunner{inner: usageFake{reply: tc.reply}, h: h}
-			if _, _, _, err := collectText(context.Background(), r, []llm.Message{
+			if _, _, _, err := collectText(foldCtx(t), r, []llm.Message{
 				{Role: "system", Content: agent.DefaultSummarySystem}, {Role: "user", Content: "events"}}, nil, nil); err != nil {
 				t.Fatal(err)
 			}
