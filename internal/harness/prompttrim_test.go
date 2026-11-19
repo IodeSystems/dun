@@ -30,7 +30,7 @@ func sessionHas(h *Harness, name string) bool {
 	return false
 }
 
-// A worker (dun_start's session) is read by a model: no thinking headings, no
+// A worker (dun_start's session) is read by a model: no thinking titles, no
 // reply formatting, no peer or loop tools. ask_user stays. A root has all.
 func TestWorker_PromptAndToolSet(t *testing.T) {
 	start := func(worker bool) *Harness {
@@ -48,7 +48,7 @@ func TestWorker_PromptAndToolSet(t *testing.T) {
 		return h
 	}
 	root, w := start(false), start(true)
-	for _, want := range []string{"# Thinking:", "Your replies are shown as Markdown"} {
+	for _, want := range []string{"**<what", "Your replies are shown as Markdown"} {
 		if !strings.Contains(root.Session.System, want) {
 			t.Errorf("a root prompt lacks %q", want)
 		}
@@ -93,7 +93,7 @@ func TestChild_PromptAndTools(t *testing.T) {
 	if sessionHas(sa.h, "memory") {
 		t.Error("a child has the memory tool")
 	}
-	for _, not := range []string{"# Thinking:", "Your replies are shown as Markdown"} {
+	for _, not := range []string{"**<what", "Your replies are shown as Markdown"} {
 		if strings.Contains(sa.h.Session.System, not) {
 			t.Errorf("a child prompt has %q", not)
 		}
