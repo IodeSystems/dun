@@ -77,9 +77,6 @@ type TuiOpts struct {
 	// (--model, --url, --child-model…): /model says which role came from a
 	// flag (dunconfig.Resolve).
 	Flags dunconfig.Overrides
-	// TierFlags are the tier flags it was started with (--tier-fast…): /model
-	// lists the tiers as they resolve (dunconfig.ResolveTiers).
-	TierFlags dunconfig.TierFlags
 }
 
 // RunTUI launches the Bubble Tea app against a re-exec'd `dun --engine` subprocess.
@@ -287,13 +284,17 @@ type tuiModel struct {
 	ctxSettings  map[string]any // /context config's settings in force, from the settings event
 	effort       string         // /effort's level, from the settings event
 	effortWords  string         // what that level does, from the settings event (the server's default, when it says)
-	jobViewing   bool           // a job's view has the convo pane (jobview.go; owns the keys)
-	jv           jobView        // the job view (valid while jobViewing)
-	jvGen        int            // which opening of the job view its read timer belongs to
-	dumpSig      chan os.Signal // SIGUSR1 → dump the rendered screen to a debug file
-	paletteSel   int            // highlighted row in the "/" command palette
-	model, url   string         // this session's LLM settings (for /config)
-	keySet       bool           // whether an API key is configured
+	// engineTiers and engineDefaultTier are the model tiers as the engine
+	// resolved them at its start (the settings event); nil from an older one.
+	engineTiers       []dunconfig.TierPick
+	engineDefaultTier string
+	jobViewing        bool           // a job's view has the convo pane (jobview.go; owns the keys)
+	jv                jobView        // the job view (valid while jobViewing)
+	jvGen             int            // which opening of the job view its read timer belongs to
+	dumpSig           chan os.Signal // SIGUSR1 → dump the rendered screen to a debug file
+	paletteSel        int            // highlighted row in the "/" command palette
+	model, url        string         // this session's LLM settings (for /config)
+	keySet            bool           // whether an API key is configured
 	// First run (onboarding.go): a message sent before any login is held,
 	// not sent, and comes back in the composer once a model is picked;
 	// switchNote is the line the restart after a pick confirms it with;

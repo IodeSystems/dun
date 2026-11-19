@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -134,6 +136,34 @@ func TestAgentToolDef_Tiers(t *testing.T) {
 	}
 }
 
+// With no tier naming a model, the agent tool is main's from before tiers,
+// byte for byte: testdata/agent_tool_notier.golden.json is main's
+// agentToolDef output (87e2564), written by that tree's code, not this one.
+func TestAgentToolDef_NoTiersMatchesMain(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("testdata", "agent_tool_notier.golden.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var golden map[string]json.RawMessage
+	if err := json.Unmarshal(b, &golden); err != nil {
+		t.Fatal(err)
+	}
+	unset := []Tier{{Name: TierFast, Use: "a"}, {Name: TierWork, Use: "b"}, {Name: TierThink, Use: "c", Off: "x"}}
+	for name, td := range map[string]llm.ToolDef{
+		"plain": agentToolDef("", "", "", nil, unset, TierThink),
+		"child": agentToolDef("qwen3-8b", "local", "low", []string{"claude", "local"}, nil, ""),
+	} {
+		var want, got any
+		_ = json.Unmarshal(golden[name], &want)
+		_ = json.Unmarshal(toolJSON(t, td), &got)
+		w, _ := json.Marshal(want)
+		g, _ := json.Marshal(got)
+		if string(w) != string(g) {
+			t.Errorf("%s differs from main:\nmain %s\nnow  %s", name, w, g)
+		}
+	}
+}
+
 type namedRunner struct {
 	agent.LLMRunner
 	name string
@@ -155,7 +185,12 @@ func TestSideRunner(t *testing.T) {
 			return ChildClient{Runner: &namedRunner{name: provider + "/" + model}}, nil
 		},
 	}}
-	name := func(r agent.LLMRunner) string { return r.(*namedRunner).name }
+	name := func(r agent.LLMRunner) string {
+		if tr, ok := r.(tierRetry); ok {
+			r = tr.tier
+		}
+		return r.(*namedRunner).name
+	}
 	for kind, want := range map[string]string{
 		"journal": "local/small", // fast
 		"fold":    "session",     // session: the prompt cache
@@ -190,5 +225,113 @@ func TestFoldRunner_DefaultStaysOnTheSessionModel(t *testing.T) {
 	}
 	if len(inner.sent) != 1 || len(other.sent) != 0 {
 		t.Errorf("fold went to the session runner %d times, a tier's %d", len(inner.sent), len(other.sent))
+	}
+}
+
+// errRunner refuses every call: as an error from ChatStream, or as the
+// first chunk's error (a provider's 400, context too long).
+type errRunner struct {
+	inChunk bool
+	calls   int
+}
+
+func (r *errRunner) ChatStream(context.Context, []llm.Message, []llm.ToolDef, *llm.ChatOpts) (<-chan llm.StreamChunk, error) {
+	r.calls++
+	if !r.inChunk {
+		return nil, errors.New("401 bad key")
+	}
+	ch := make(chan llm.StreamChunk, 1)
+	ch <- llm.StreamChunk{Error: "400 context length exceeded", Done: true}
+	close(ch)
+	return ch, nil
+}
+
+// A side call the tier model refuses is asked once more on the session's
+// runner; a reply that started on the tier stays the tier's.
+func TestSideRunner_RetriesOnTheSession(t *testing.T) {
+	for _, inChunk := range []bool{false, true} {
+		tierR := &errRunner{inChunk: inChunk}
+		session := &scriptRunner{rounds: []roundFn{textRound("from the session")}}
+		h := &Harness{cfg: Config{
+			Tiers:         tierSet(),
+			SideCallTiers: map[string]string{"journal": TierFast},
+			ClientFor:     func(string, string) (ChildClient, error) { return ChildClient{Runner: tierR}, nil },
+		}}
+		text, errMsg, _, err := collectText(context.Background(), h.sideRunner("journal", session), []llm.Message{{Role: "user", Content: "x"}}, nil, nil)
+		if err != nil || errMsg != "" || text != "from the session" || tierR.calls != 1 || len(session.sent) != 1 {
+			t.Errorf("inChunk %v: %q %q %v, tier %d calls, session %d", inChunk, text, errMsg, err, tierR.calls, len(session.sent))
+		}
+	}
+	// It worked on the tier: the session is not asked.
+	tierR := &scriptRunner{rounds: []roundFn{textRound("from the tier")}}
+	session := &scriptRunner{}
+	h := &Harness{cfg: Config{
+		Tiers:         tierSet(),
+		SideCallTiers: map[string]string{"journal": TierFast},
+		ClientFor:     func(string, string) (ChildClient, error) { return ChildClient{Runner: tierR}, nil },
+	}}
+	text, _, _, _ := collectText(context.Background(), h.sideRunner("journal", session), []llm.Message{{Role: "user", Content: "x"}}, nil, nil)
+	if text != "from the tier" || len(session.sent) != 0 {
+		t.Errorf("%q, session asked %d times", text, len(session.sent))
+	}
+	// A tier whose provider is not logged in is the session's at once.
+	h.cfg.Tiers = []Tier{{Name: TierFast, Provider: "gone", Model: "small", Off: "no saved provider gone"}}
+	if got := h.sideRunner("journal", session); got != agent.LLMRunner(session) {
+		t.Errorf("an off tier got %T", got)
+	}
+}
+
+// A spawn on a tier that cannot be served runs on the child default, and
+// the result says so; it is not an error, so one bad tier does not stop
+// every spawn.
+func TestSubAgent_UnavailableTierFallsBack(t *testing.T) {
+	var asked []askedFor
+	h := startParentOn(t, &scriptRunner{rounds: []roundFn{textRound("done"), textRound("done")}}, &asked)
+	h.cfg.ChildModel = "child-m"
+	h.cfg.Tiers = []Tier{
+		{Name: TierFast, Provider: "nowhere", Model: "small", Off: "no saved provider nowhere"},
+		{Name: TierWork, Provider: "gone", Model: "w"}, // ClientFor refuses "gone"
+		{Name: TierThink},
+	}
+	sa, err := h.spawnAgentFor(context.Background(), "x", TierFast, "", "", "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitIdle(t, sa)
+	if sa.note != "tier fast unavailable: no saved provider nowhere; ran on child-m" || sa.tierName() != "" || sa.model != "child-m" {
+		t.Errorf("off tier: note %q tier %q model %q", sa.note, sa.tierName(), sa.model)
+	}
+	if out := sa.noted("Started."); !strings.HasPrefix(out, "tier fast unavailable") {
+		t.Errorf("result %q", out)
+	}
+	sa, err = h.spawnAgentFor(context.Background(), "x", TierWork, "", "", "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitIdle(t, sa)
+	if !strings.HasPrefix(sa.note, `tier work unavailable: provider "gone" is not logged in; ran on child-m`) {
+		t.Errorf("unbuildable tier: note %q", sa.note)
+	}
+}
+
+// The fallback clientFor always had, a model on this session's provider
+// with no client, is said too.
+func TestSubAgent_SilentFallbackIsSaid(t *testing.T) {
+	var asked []askedFor
+	h := startParentOn(t, &scriptRunner{}, &asked)
+	h.cfg.ClientFor = func(string, string) (ChildClient, error) { return ChildClient{}, errors.New("no such model") }
+	for _, c := range []struct{ tier, model, want string }{
+		{"", "missing", "missing unavailable: no such model; ran on this session's model"},
+		{TierFast, "", "tier fast unavailable: no such model; ran on this session's model"},
+	} {
+		h.cfg.Tiers = []Tier{{Name: TierFast, Model: "missing"}}
+		sa, err := h.spawnAgentFor(context.Background(), "x", c.tier, "", c.model, "", "", "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		waitIdle(t, sa)
+		if sa.note != c.want || sa.tierName() != "" {
+			t.Errorf("%+v: note %q, tier %q", c, sa.note, sa.tierName())
+		}
 	}
 }

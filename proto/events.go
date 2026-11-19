@@ -910,6 +910,24 @@ type Settings struct {
 	// default, what the server does when its model list says).
 	Effort      string `json:"effort,omitempty"`
 	EffortWords string `json:"effortWords,omitempty"`
+	// Tiers are the model tiers this engine resolved at its start (a
+	// config.json change applies from the next start), fast, work, think in
+	// order; DefaultTier is the one a spawn that names none runs on. Absent
+	// from an engine older than tiers.
+	Tiers       []TierInfo `json:"tiers,omitempty"`
+	DefaultTier string     `json:"defaultTier,omitempty"`
+}
+
+// TierInfo is one model tier as the engine serves it. No Model: its spawns
+// run on the child default. Off: why it cannot be served. Source: where
+// Model came from (flag, env, config).
+type TierInfo struct {
+	Name     string `json:"name"`
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
+	Effort   string `json:"effort,omitempty"`
+	Source   string `json:"source,omitempty"`
+	Off      string `json:"off,omitempty"`
 }
 
 // ContextSettings is /context config's settings in force: the window (0

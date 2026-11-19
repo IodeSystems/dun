@@ -818,6 +818,7 @@ func settingsEvent() *proto.Settings {
 	ev := &proto.Settings{Model: engineModel, Provider: engineProvider, URL: engineURL,
 		Rephrase: enginecmd.RephraseOn, Suggest: enginecmd.SuggestMode, Effort: enginecmd.EffortLevel}
 	ev.EffortWords = enginecmd.EffortWords(enginecmd.EffortLevel)
+	ev.Tiers, ev.DefaultTier = tiersProto(engineTiers), engineTiers.Default
 	if h, _ := enginecmd.EngineHarness.Load().(*harness.Harness); h != nil {
 		max, from, buf, lod, nudge := h.ContextSettings()
 		ev.Context = &proto.ContextSettings{Max: max, MaxFrom: from, CompactBuffer: buf, ToolLOD: lod, RecapNudge: nudge}

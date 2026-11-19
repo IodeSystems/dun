@@ -128,16 +128,22 @@ Code: `internal/dunconfig/tiers.go`; the decision is "Model tiers" in
   tool is as it was.
 - `use` (the agent tool's guidance per tier) and `default_tier` may also be
   set in a repo's dun.json; a provider, model or effort there is ignored
-  and doctor warns.
+  and doctor warns. A repo's `default_tier` decides which of this
+  machine's tiers a spawn that names none uses.
+- The engine resolves the tiers at its start: a change in config.json
+  applies from the next engine start. A tier on a provider that is not
+  logged in is warned about then; its spawns run on the child default and
+  say so in the result.
 - Flags `--tier-fast`/`--tier-work`/`--tier-think` (`[provider/]model`) and
   `--default-tier`; env `DUN_TIER_FAST`… and `DUN_DEFAULT_TIER`.
 - `side_calls` maps a side call (suggest, fold, remember, rescue,
   plan_summary, journal, worklog, commit, rephrase, rules, learn, repaint)
-  to a tier or `session`. The defaults keep the calls that send the
-  session's prompt-cache prefix (suggest, fold, remember) on the session's
-  model. Spend from a side call on a tier is filed under the role `model`,
+  to a tier or `session`. The defaults keep the calls sized from the
+  session's window (suggest, fold, remember, rescue) on the session's
+  model, and putting one on a tier is warned about. A tier call refused
+  before it replies is asked once more on the session's model. Spend from a side call on a tier is filed under the role `model`,
   as a child's is.
-- `/model` lists the tiers; `dun doctor` the tiers, the side calls and the
+- `/model` lists the tiers the engine runs (its settings event); `dun doctor` the tiers, the side calls and the
   warnings.
 
 ## Spend meter

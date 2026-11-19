@@ -73,6 +73,7 @@ func TestResolveTiers_Warnings(t *testing.T) {
 		"tiers.huge in", "the repo's tiers.tiny is not a tier",
 		"the repo's tiers.fast.model (/r/dun.json) is ignored",
 		"tiers.work sets no model", `default_tier in`, `"medium" is not a tier`,
+		"tier think is unavailable (no saved provider nowhere): its spawns run on the child default",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("warnings lack %q:\n%s", want, got)
@@ -98,7 +99,7 @@ func TestSideCallTiers(t *testing.T) {
 		t.Fatalf("defaults: %v %v", got, warn)
 	}
 	// The ones on the session's prompt cache stay on the session's model.
-	for _, k := range []string{"fold", "suggest", "remember"} {
+	for _, k := range WindowSideCalls {
 		if got[k] != TierSession {
 			t.Errorf("%s defaults to %q, want session", k, got[k])
 		}
@@ -111,8 +112,19 @@ func TestSideCallTiers(t *testing.T) {
 	if got["fold"] != TierWork || got["suggest"] != TierFast || got["journal"] != TierFast {
 		t.Errorf("overrides: %v", got)
 	}
-	if w := strings.Join(warn, "\n"); !strings.Contains(w, "side_calls.nope is not a side call") || !strings.Contains(w, `side_calls.journal "huge" is not a tier`) {
+	w := strings.Join(warn, "\n")
+	if !strings.Contains(w, "side_calls.nope is not a side call") || !strings.Contains(w, `side_calls.journal "huge" is not a tier`) {
 		t.Errorf("warnings: %v", warn)
+	}
+	// A window-sized call put on a tier is warned about, each one.
+	for _, k := range []string{"fold", "suggest"} {
+		if !strings.Contains(w, "side_calls."+k+` "`) || !strings.Contains(w, k+" sends up to the session's window") {
+			t.Errorf("no window warning for %s: %v", k, warn)
+		}
+	}
+	c.SideCalls = map[string]string{"rescue": TierSession, "journal": TierFast}
+	if _, warn = c.SideCallTiers(); len(warn) != 0 {
+		t.Errorf("session and a small call on fast are fine: %v", warn)
 	}
 	// Each kind lists in SideCallKinds once.
 	for _, k := range SideCallKinds {

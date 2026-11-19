@@ -67,6 +67,7 @@ type subAgent struct {
 	model    string
 	provider string // "" is the parent session's
 	tier     string // the tier that picked its model (tiers.go); "" none did
+	note     string // why it is not on the model or tier asked for ("" it is); said once, in the spawn result
 	effort   string // "" is the saved /effort level
 	parent   *Harness
 	iso      isolation // where it works, when not in its parent's tree (subisolation.go)
@@ -480,6 +481,15 @@ func (s *subAgent) where() string {
 	return w
 }
 
+// noted is s led by the spawn's note, when the child is not on the model or
+// tier asked for ("tier fast unavailable: …; ran on m.").
+func (s *subAgent) noted(out string) string {
+	if s.note == "" {
+		return out
+	}
+	return s.note + ".\n" + out
+}
+
 // tierName is the tier that picked the child's model, "" when none did.
 func (s *subAgent) tierName() string {
 	s.mu.Lock()
@@ -556,6 +566,17 @@ type childRun struct {
 	provider, model string
 	effort          string   // "": the saved /effort level
 	endpoint        Endpoint // zero: the parent's
+	// fellBack is why the model asked for is not the one this runs on
+	// (clientFor fell back to the parent's client); "" when it is.
+	fellBack string
+}
+
+// name is the model a child runs on, in words.
+func (r childRun) name() string {
+	if r.model == "" {
+		return "the session's model"
+	}
+	return r.model
 }
 
 // clientFor resolves the runner for a named model, falling back to the parent's
@@ -565,11 +586,19 @@ type childRun struct {
 func (h *Harness) clientFor(provider, model string) (childRun, error) {
 	parent := childRun{client: h.cfg.Client, model: h.cfg.ChildModel}
 	if provider == "" {
-		if model == "" || h.cfg.ClientFor == nil {
+		if model == "" {
+			return parent, nil
+		}
+		if h.cfg.ClientFor == nil {
+			parent.fellBack = "this session builds no client for another model"
 			return parent, nil
 		}
 		c, err := h.cfg.ClientFor("", model)
 		if err != nil || c.Runner == nil {
+			parent.fellBack = "no client for " + model
+			if err != nil {
+				parent.fellBack = err.Error()
+			}
 			return parent, nil
 		}
 		return childRun{client: c.Runner, model: model, endpoint: c.Endpoint}, nil
@@ -604,9 +633,49 @@ func (h *Harness) spawnAgentFor(ctx context.Context, prompt, tier, provider, mod
 	}
 	// The tier (tiers.go): a model given overrides it; a tier with no
 	// model is the child default.
+	asked := effort
 	tier, provider, model, effort, err := h.spawnTier(tier, provider, model, effort)
 	if err != nil {
 		return nil, err
+	}
+	// A tier that cannot be served (its provider not logged in, no client
+	// for its model) is the child default for this spawn, said in the
+	// result (note): one bad tier must not stop every spawn.
+	var note string
+	var run childRun
+	if t, ok := h.tier(tier); ok && t.Off != "" {
+		note = "tier " + tier + " unavailable: " + t.Off
+	} else {
+		run, err = h.clientFor(provider, model)
+		if err != nil && tier == "" {
+			return nil, err
+		}
+		if err != nil {
+			note = "tier " + tier + " unavailable: " + err.Error()
+		}
+	}
+	if note != "" {
+		tier, provider, model, effort = "", h.cfg.ChildProvider, h.cfg.ChildModel, asked
+		if run, err = h.clientFor(provider, model); err != nil {
+			return nil, fmt.Errorf("%s; the child default: %w", note, err)
+		}
+	}
+	if run.fellBack != "" {
+		what := model
+		if tier != "" {
+			what = "tier " + tier
+		}
+		if note != "" {
+			note += "; then "
+		}
+		note += what + " unavailable: " + run.fellBack
+		tier = ""
+	}
+	switch {
+	case run.fellBack != "":
+		note += "; ran on this session's model" // the parent's own client
+	case note != "":
+		note += "; ran on " + run.name()
 	}
 	if effort == "" {
 		effort = h.cfg.ChildEffort
@@ -614,10 +683,6 @@ func (h *Harness) spawnAgentFor(ctx context.Context, prompt, tier, provider, mod
 	effort = strings.ToLower(strings.TrimSpace(effort))
 	if effort != "" && !validEffort(effort) {
 		return nil, fmt.Errorf("effort %q: want %s", effort, strings.Join(EffortLevels, ", "))
-	}
-	run, err := h.clientFor(provider, model)
-	if err != nil {
-		return nil, err
 	}
 	run.effort = effort
 	iso, err := h.newIsolation(mode, dir)
@@ -632,10 +697,7 @@ func (h *Harness) spawnAgentFor(ctx context.Context, prompt, tier, provider, mod
 	}
 	h.agMu.Unlock()
 
-	if run.model != model {
-		tier = "" // clientFor fell back to the child default
-	}
-	sa := &subAgent{num: num, prompt: prompt, tier: tier, model: run.model, provider: run.provider, effort: run.effort, parent: h, hb: heartbeat.New(), iso: iso}
+	sa := &subAgent{num: num, prompt: prompt, tier: tier, note: note, model: run.model, provider: run.provider, effort: run.effort, parent: h, hb: heartbeat.New(), iso: iso}
 
 	// Start on a background context: a child outlives the TURN that spawned it
 	// (that is the whole point of an async spawn), so tying it to the caller's
@@ -1130,8 +1192,10 @@ func (h *Harness) resumeAgent(sa *subAgent) string {
 	}
 
 	sa.mu.Lock()
-	if run.model != model {
-		sa.tier = "" // clientFor fell back to the child default
+	note := ""
+	if run.fellBack != "" {
+		sa.tier = "" // clientFor fell back to the parent's client
+		note = model + " unavailable: " + run.fellBack + "; it runs on this session's model. "
 	}
 	sa.h, sa.cancel, sa.model, sa.provider = child, cancel, run.model, run.provider
 	// IDLE, not running, and with a ZEROED clock: a restored child has not been
@@ -1143,7 +1207,7 @@ func (h *Harness) resumeAgent(sa *subAgent) string {
 	sa.hook(child)
 	sa.saveState()
 	h.agentsChanged()
-	return fmt.Sprintf("agent #%d is back, idle, with its transcript loaded. "+
+	return note + fmt.Sprintf("agent #%d is back, idle, with its transcript loaded. "+
 		"Give it work with agent({id:%d, tell:\"…\"}).", sa.num, sa.num)
 }
 
@@ -1314,7 +1378,9 @@ func agentToolDef(defaultModel, defaultProvider, defaultEffort string, providers
 		lines := make([]string, 0, len(tiers))
 		for _, t := range tiers {
 			on := "the default model"
-			if t.on() {
+			if t.on() && t.Off != "" {
+				on = "unavailable, " + t.Off + ": the default model"
+			} else if t.on() {
 				on = t.Model
 				if t.Provider != "" {
 					on += " on " + t.Provider
@@ -1507,19 +1573,19 @@ func spawnCall(ctx context.Context, h *Harness, callID, tier, provider, model, e
 		if w := sa.where(); w != "" {
 			where = " on " + w + where
 		}
-		return fmt.Sprintf("Started agent #%d%s.%s It is working; you will be told when it finishes or asks you something. "+
+		return sa.noted(fmt.Sprintf("Started agent #%d%s.%s It is working; you will be told when it finishes or asks you something. "+
 			"Do other work, or end your turn if you have nothing to do until it answers.",
-			sa.num, where, owns), sa.num
+			sa.num, where, owns)), sa.num
 	}
 	select {
 	case <-sa.waitCh():
 	case <-ctx.Done():
-		return fmt.Sprintf("agent #%d is still running; the turn was cancelled.", sa.num), sa.num
+		return sa.noted(fmt.Sprintf("agent #%d is still running; the turn was cancelled.", sa.num)), sa.num
 	case <-h.userWaiting():
-		return fmt.Sprintf("agent #%d is still running; stopped waiting because a message arrived (the user wrote, or another dun session did) — "+
-			"it follows. You will be told when it finishes.", sa.num), sa.num
+		return sa.noted(fmt.Sprintf("agent #%d is still running; stopped waiting because a message arrived (the user wrote, or another dun session did) — "+
+			"it follows. You will be told when it finishes.", sa.num)), sa.num
 	}
-	return strings.TrimSpace(owns) + "\n" + sa.report(), sa.num
+	return sa.noted(strings.TrimSpace(owns) + "\n" + sa.report()), sa.num
 }
 
 // agentMonitor is the agent half of the jobs tool (jobs.go): list, or one

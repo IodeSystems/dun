@@ -490,7 +490,7 @@ func main() {
 	// one mode you had to ask for. `dun -p "task"` runs headless: that is the
 	// scripting path and scripts must not suddenly open a UI.
 	if *tuiFlag || (firstTask == "" && !*prog) {
-		if err := tui.RunTUI(tui.TuiOpts{Workspace: absWS, Model: *model, Url: *url, Key: effKey, Docker: resolveDockerImage(*docker), DockerNetwork: *dockerNetwork, Worktree: *worktree, Cont: *cont, Resume: *resume, DisableExit: *disableExit, Pick: *pick, Suggest: !*noSuggest, Rag: ragFlag.String(), Lsp: lspFlag.String(), Rephrase: *rephrase, Fresh: *fresh, NoDir: *noDir, NoTools: *noTools, ItermTabs: *itermTabs, Flags: modelFlags, TierFlags: tierFlags}); err != nil {
+		if err := tui.RunTUI(tui.TuiOpts{Workspace: absWS, Model: *model, Url: *url, Key: effKey, Docker: resolveDockerImage(*docker), DockerNetwork: *dockerNetwork, Worktree: *worktree, Cont: *cont, Resume: *resume, DisableExit: *disableExit, Pick: *pick, Suggest: !*noSuggest, Rag: ragFlag.String(), Lsp: lspFlag.String(), Rephrase: *rephrase, Fresh: *fresh, NoDir: *noDir, NoTools: *noTools, ItermTabs: *itermTabs, Flags: modelFlags}); err != nil {
 			fatal(err)
 		}
 		return
@@ -694,13 +694,10 @@ func main() {
 	for _, p := range fc.ProviderList() {
 		providerNames = append(providerNames, p.Name)
 	}
-	// The model tiers and the side calls' (dun/tiers.go); dun doctor shows
-	// the warnings.
-	tiers := resolveTiers(fc, absWS, *noDir)
-	sideTiers, sideWarn := fc.SideCallTiers()
-	for _, w := range append(tiers.Warnings, sideWarn...) {
-		fmt.Fprintln(os.Stderr, "dun: "+w)
-	}
+	// The model tiers and the side calls' (dun/tiers.go), their warnings
+	// said now, as facets.main's is.
+	tiers, sideTiers := startTiers(fc, absWS, *noDir, os.Stderr)
+	engineTiers = tiers
 	cfg := harness.Config{
 		// The context window set for this model is filed under it, and an
 		// OpenAI-compatible model list is asked with it (dun/window.go).

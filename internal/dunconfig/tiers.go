@@ -2,6 +2,7 @@ package dunconfig
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -194,6 +195,7 @@ func (c DunConfig) ResolveTiers(flags TierFlags, env func(string) string, repo R
 			if t.Provider != "" {
 				if _, ok := c.Named(t.Provider); !ok {
 					t.Off = "no saved provider " + t.Provider
+					set.Warnings = append(set.Warnings, "tier "+name+" is unavailable ("+t.Off+"): its spawns run on the child default, its side calls on the session's model")
 				}
 			}
 		} else if f.Provider != "" || f.Effort != "" {
@@ -248,18 +250,25 @@ var SideCallKinds = []string{
 	"worklog", "commit", "rephrase", "rules", "learn", "repaint",
 }
 
+// WindowSideCalls are the side calls whose input is sized from the
+// session's window: suggest, fold and remember send the session's history
+// (and its prompt-cache prefix, which hits only on the model that wrote
+// it); rescue sends up to half the window to recover a session that is
+// over it. A smaller tier model may refuse them, so they default to the
+// session's model, and a side_calls entry that puts one on a tier is
+// warned about.
+var WindowSideCalls = []string{"suggest", "fold", "remember", "rescue"}
+
 // DefaultSideCalls is the tier of each side call no side_calls entry
-// names. The ones that send the session's prompt-cache prefix and history
-// (suggest, fold, remember) stay on the session's model: the cache only
-// hits on the model that wrote it, and the history may not fit a smaller
-// model's window. The ones that send a prompt of their own go to fast, but
-// rescue and learn, which judge, go to work. A tier with no model is the
-// session's model, as before tiers.
+// names: the WindowSideCalls on the session's model, the ones that send a
+// prompt of their own on fast, but learn, which judges, and repaint on
+// work. A tier with no model is the session's model, as before tiers; a
+// tier call that fails is asked once more on the session's model.
 var DefaultSideCalls = map[string]string{
 	"suggest":      TierSession,
 	"fold":         TierSession,
 	"remember":     TierSession,
-	"rescue":       TierWork,
+	"rescue":       TierSession,
 	"plan_summary": TierFast,
 	"journal":      TierFast,
 	"worklog":      TierFast,
@@ -293,6 +302,9 @@ func (c DunConfig) SideCallTiers() (map[string]string, []string) {
 			warn = append(warn, fmt.Sprintf("side_calls.%s %q is not a tier (%s, or %s); ignored", k, v, strings.Join(TierNames, ", "), TierSession))
 		default:
 			out[k] = v
+			if v != TierSession && slices.Contains(WindowSideCalls, k) {
+				warn = append(warn, fmt.Sprintf("side_calls.%s %q: %s sends up to the session's window, which a %s model may not hold (and it loses the session's prompt cache); a refusal is asked again on the session's model", k, v, k, v))
+			}
 		}
 	}
 	return out, warn

@@ -633,6 +633,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 			m.ctxSettings = c
 		}
 		m.effort, m.effortWords = str(ev["effort"]), str(ev["effortWords"])
+		m.engineTiers, m.engineDefaultTier = tiersFromEvent(ev), str(ev["defaultTier"])
 		if p := str(ev["provider"]); p != "" {
 			m.provider = p
 		}

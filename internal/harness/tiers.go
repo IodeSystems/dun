@@ -1,11 +1,13 @@
 package harness
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strings"
 
 	"github.com/iodesystems/agentkit/agent"
+	"github.com/iodesystems/agentkit/llm"
 )
 
 // Model tiers (USER 2026-11-18, dunconfig/tiers.go): a spawn names the kind
@@ -30,6 +32,9 @@ type Tier struct {
 	Name, Provider, Model, Effort string
 	// Use is what the tier is for, as the agent tool describes it.
 	Use string
+	// Off is why the tier cannot be served (its provider is not logged
+	// in); a spawn on it runs on the child default, and says so.
+	Off string
 }
 
 // on says the tier names a model.
@@ -112,10 +117,64 @@ func (h *Harness) sideRunner(kind string, fallback agent.LLMRunner) agent.LLMRun
 	if !ok || !t.on() {
 		return fallback
 	}
+	if t.Off != "" {
+		log.Printf("dun: side call %s: tier %s unavailable: %s; on the session's model", kind, name, t.Off)
+		return fallback
+	}
 	c, err := h.cfg.ClientFor(t.Provider, t.Model)
 	if err != nil || c.Runner == nil {
 		log.Printf("dun: side call %s: tier %s (%s): %v; on the session's model", kind, name, t.Model, err)
 		return fallback
 	}
-	return c.Runner
+	return tierRetry{tier: c.Runner, fallback: fallback, kind: kind, name: name, model: t.Model}
+}
+
+// tierRetry is a side call on a tier model that is asked once more on the
+// session's runner when the tier refuses it: an error before any reply (a
+// context too long for the smaller model, a bad key, a model not found).
+// A failure after the reply has started is the call's, as before.
+type tierRetry struct {
+	tier, fallback    agent.LLMRunner
+	kind, name, model string
+}
+
+func (r tierRetry) ChatStream(ctx context.Context, msgs []llm.Message, tools []llm.ToolDef, opts *llm.ChatOpts) (<-chan llm.StreamChunk, error) {
+	ch, err := r.tier.ChatStream(ctx, msgs, tools, opts)
+	if err != nil {
+		return r.retry(ctx, err.Error(), msgs, tools, opts)
+	}
+	first, ok := <-ch
+	if !ok {
+		return r.retry(ctx, "no reply", msgs, tools, opts)
+	}
+	if first.Error != "" && first.Content == "" && first.ToolCall == nil {
+		go func() {
+			for range ch {
+			}
+		}()
+		return r.retry(ctx, first.Error, msgs, tools, opts)
+	}
+	out := make(chan llm.StreamChunk, cap(ch)+1)
+	go func() {
+		defer close(out)
+		out <- first
+		for c := range ch {
+			select {
+			case out <- c:
+			case <-ctx.Done():
+				for range ch {
+				}
+				return
+			}
+		}
+	}()
+	return out, nil
+}
+
+func (r tierRetry) retry(ctx context.Context, why string, msgs []llm.Message, tools []llm.ToolDef, opts *llm.ChatOpts) (<-chan llm.StreamChunk, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	log.Printf("dun: side call %s on tier %s (%s) failed: %s; once more on the session's model", r.kind, r.name, r.model, oneLine(why, 200))
+	return r.fallback.ChatStream(ctx, msgs, tools, opts)
 }

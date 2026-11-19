@@ -9,7 +9,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/iodesystems/dun/internal/dunconfig"
-	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // The roles window (/model): every role (dunconfig.FacetNames) with its
@@ -53,36 +52,44 @@ func (m tuiModel) resolvedRoles(cfg dunconfig.DunConfig) []dunconfig.Resolved {
 	return out
 }
 
-// resolvedTiers is the model tiers as a session started by this client
-// would resolve them: the config, this client's flags and env, and the
-// workspace's dun.json (use and default_tier only).
-func (m tuiModel) resolvedTiers(cfg dunconfig.DunConfig) dunconfig.TierSet {
-	var repo dunconfig.RepoTiers
-	if !m.opts.NoDir && m.opts.Workspace != "" {
-		repo = mcpserver.LoadTiers(m.opts.Workspace)
-	}
-	return cfg.ResolveTiers(m.opts.TierFlags, os.Getenv, repo)
-}
-
 // tierNote is the roles window's note on the model tiers sub-agents and side
-// calls run on: what each resolves to, or one row when none has a model.
-// One note, so it is shown whole or not at all. dun doctor lists the side
-// calls' tiers.
-func (m tuiModel) tierNote(cfg dunconfig.DunConfig) []string {
-	set := m.resolvedTiers(cfg)
-	if !set.Any() {
+// calls run on, as the engine resolved them at its start (the settings
+// event's tiers): what each resolves to, or one row when none has a model.
+// One note, so it is shown whole or not at all; none from an engine older
+// than tiers. dun doctor lists the side calls' tiers.
+func (m tuiModel) tierNote() []string {
+	if len(m.engineTiers) == 0 {
+		return nil
+	}
+	any := false
+	for _, t := range m.engineTiers {
+		any = any || t.On()
+	}
+	if !any {
 		return wholeRows("tiers fast, work, think: no model set; sub-agents run as child (tiers in config.json)", m.w, listIndent, StDim)
 	}
-	out := wholeRows("tiers (sub-agents; default "+set.Default+"; dun doctor: the side calls'):", m.w, listIndent, StDim)
-	for _, t := range set.Tiers {
+	out := wholeRows("tiers (sub-agents; default "+m.engineDefaultTier+"; from the engine's start; dun doctor: the side calls'):", m.w, listIndent, StDim)
+	for _, t := range m.engineTiers {
 		l := fmt.Sprintf("%-6s %s", t.Name, t.What())
 		if t.Source != "" {
 			l += " · " + t.Source
 		}
 		out = append(out, wholeRows(l, m.w, listIndent+"  ", StDim)...)
 	}
-	for _, w := range set.Warnings {
-		out = append(out, wholeRows(w, m.w, listIndent+"  ", StDim)...)
+	return out
+}
+
+// tiersFromEvent reads the settings event's tiers.
+func tiersFromEvent(ev evMsg) []dunconfig.TierPick {
+	raw, _ := ev["tiers"].([]any)
+	var out []dunconfig.TierPick
+	for _, r := range raw {
+		t, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		out = append(out, dunconfig.TierPick{Name: str(t["name"]), Provider: str(t["provider"]), Model: str(t["model"]),
+			Effort: str(t["effort"]), Source: str(t["source"]), Off: str(t["off"])})
 	}
 	return out
 }
@@ -253,7 +260,9 @@ func (m tuiModel) rolesPanel() string {
 	}
 	notes = append(notes, wholeRows(restartNote, m.w, listIndent, StDim))
 	notes = append(notes, wholeRows("the raglit server has its own roles: /rag setup", m.w, listIndent, StDim))
-	notes = append(notes, m.tierNote(cfg))
+	if n := m.tierNote(); len(n) > 0 {
+		notes = append(notes, n)
+	}
 	for _, n := range cfg.UnknownFacets() {
 		notes = append(notes, []string{listIndent + StDim.Render("facets."+n+": not a role; ignored")})
 	}
