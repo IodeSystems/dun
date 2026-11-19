@@ -77,6 +77,9 @@ type TuiOpts struct {
 	// (--model, --url, --child-model…): /model says which role came from a
 	// flag (dunconfig.Resolve).
 	Flags dunconfig.Overrides
+	// TierFlags are the tier flags it was started with (--tier-fast…): /model
+	// lists the tiers as they resolve (dunconfig.ResolveTiers).
+	TierFlags dunconfig.TierFlags
 }
 
 // RunTUI launches the Bubble Tea app against a re-exec'd `dun --engine` subprocess.

@@ -462,3 +462,23 @@ func TestRoles_Round3(t *testing.T) {
 		t.Errorf("provider row: %+v", c)
 	}
 }
+
+// /model lists the tiers and what each resolves to; with none set, one row.
+func TestRoles_ListsTiers(t *testing.T) {
+	m, _ := rolesModel(t, nil)
+	if n := m.tierNote(dunconfig.LoadConfig()); len(n) != 1 || !strings.Contains(stripANSI(n[0]), "no model set") {
+		t.Errorf("no tiers: %q", n)
+	}
+	cfg := dunconfig.LoadConfig()
+	cfg.Tiers = map[string]dunconfig.Tier{dunconfig.TierFast: {Provider: "fast", Model: "small", Effort: "low"}}
+	if err := dunconfig.SaveConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	modelSlash(&m, nil)
+	p := stripANSI(m.rolesPanel())
+	for _, want := range []string{"tiers (sub-agents; default work", "fast   small on fast, effort low · config", "work   the child default (no model set)"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("panel lacks %q:\n%s", want, p)
+		}
+	}
+}

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // The roles window (/model): every role (dunconfig.FacetNames) with its
@@ -47,6 +49,40 @@ func (m tuiModel) resolvedRoles(cfg dunconfig.DunConfig) []dunconfig.Resolved {
 			}
 			out[i] = r
 		}
+	}
+	return out
+}
+
+// resolvedTiers is the model tiers as a session started by this client
+// would resolve them: the config, this client's flags and env, and the
+// workspace's dun.json (use and default_tier only).
+func (m tuiModel) resolvedTiers(cfg dunconfig.DunConfig) dunconfig.TierSet {
+	var repo dunconfig.RepoTiers
+	if !m.opts.NoDir && m.opts.Workspace != "" {
+		repo = mcpserver.LoadTiers(m.opts.Workspace)
+	}
+	return cfg.ResolveTiers(m.opts.TierFlags, os.Getenv, repo)
+}
+
+// tierNote is the roles window's note on the model tiers sub-agents and side
+// calls run on: what each resolves to, or one row when none has a model.
+// One note, so it is shown whole or not at all. dun doctor lists the side
+// calls' tiers.
+func (m tuiModel) tierNote(cfg dunconfig.DunConfig) []string {
+	set := m.resolvedTiers(cfg)
+	if !set.Any() {
+		return wholeRows("tiers fast, work, think: no model set; sub-agents run as child (tiers in config.json)", m.w, listIndent, StDim)
+	}
+	out := wholeRows("tiers (sub-agents; default "+set.Default+"; dun doctor: the side calls'):", m.w, listIndent, StDim)
+	for _, t := range set.Tiers {
+		l := fmt.Sprintf("%-6s %s", t.Name, t.What())
+		if t.Source != "" {
+			l += " · " + t.Source
+		}
+		out = append(out, wholeRows(l, m.w, listIndent+"  ", StDim)...)
+	}
+	for _, w := range set.Warnings {
+		out = append(out, wholeRows(w, m.w, listIndent+"  ", StDim)...)
 	}
 	return out
 }
@@ -217,6 +253,7 @@ func (m tuiModel) rolesPanel() string {
 	}
 	notes = append(notes, wholeRows(restartNote, m.w, listIndent, StDim))
 	notes = append(notes, wholeRows("the raglit server has its own roles: /rag setup", m.w, listIndent, StDim))
+	notes = append(notes, m.tierNote(cfg))
 	for _, n := range cfg.UnknownFacets() {
 		notes = append(notes, []string{listIndent + StDim.Render("facets."+n+": not a role; ignored")})
 	}

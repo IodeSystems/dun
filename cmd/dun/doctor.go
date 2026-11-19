@@ -161,6 +161,7 @@ func runDoctor(fix bool) int {
 func check(fix bool) *doctor {
 	d := &doctor{fix: fix}
 	d.providers()
+	d.tiers()
 	d.tools()
 	d.polyLSP()
 	d.raglit()

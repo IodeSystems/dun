@@ -279,3 +279,21 @@ func TestSizeAge(t *testing.T) {
 		}
 	}
 }
+
+// A sub-agent on a model tier is named with it: on the rows of its own
+// tree, and in the session's label, a tiered child in its parent's tree
+// included (it has no rows of its own). A child with no dir matches no argv.
+func TestAttribute_AgentTiers(t *testing.T) {
+	snap, list, cwd := machine()
+	list.Sessions[0].Agents = []proto.ProcAgent{{ID: 2, Dir: "/w/a/.dun/wt/2", Tier: "fast"}, {ID: 4, Tier: "think"}}
+	rows := byPID(Attribute(snap, list, cwd))
+	if got := rows[105].Job; got != "sub-agent #2 (fast) poly-lsp proxy" {
+		t.Errorf("job %q", got)
+	}
+	if got := rows[100].Session; !strings.Contains(got, "(sub-agents: #2 fast, #4 think)") {
+		t.Errorf("session label %q", got)
+	}
+	if got := rows[101].Job; got != "shell (mcpshell)" {
+		t.Errorf("an empty dir matched an argv: %q", got)
+	}
+}

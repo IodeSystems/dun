@@ -180,6 +180,10 @@ func main() {
 	childModel := flag.String("child-model", "", "model for spawned sub-agents (default: facets.child, else same as --model)")
 	childProvider := flag.String("child-provider", "", "logged-in provider --child-model is on (default: facets.child's, else this session's)")
 	childEffort := flag.String("child-effort", "", "effort for spawned sub-agents: default, off, low, medium, high (default: facets.child's, else the saved /effort level)")
+	tierFast := flag.String("tier-fast", "", "[provider/]model of the fast tier (default: $DUN_TIER_FAST, else tiers.fast in config.json)")
+	tierWork := flag.String("tier-work", "", "[provider/]model of the work tier (default: $DUN_TIER_WORK, else tiers.work in config.json)")
+	tierThink := flag.String("tier-think", "", "[provider/]model of the think tier (default: $DUN_TIER_THINK, else tiers.think in config.json)")
+	defaultTier := flag.String("default-tier", "", "tier a sub-agent that names none runs on: fast, work, think (default: $DUN_DEFAULT_TIER, else the repo's default_tier, else config.json's, else work)")
 	// ship was removed 2026-10-27: repos state their own shipping rules. The
 	// flags stay accepted and do nothing, because an older TUI or dund passes
 	// them to this engine and a script may too.
@@ -414,6 +418,10 @@ func main() {
 		dunconfig.FacetMain:  {URL: *url, Key: *key, Model: *model},
 		dunconfig.FacetChild: {Provider: *childProvider, Model: *childModel, Effort: *childEffort},
 	}
+	tierFlags = dunconfig.TierFlags{
+		Picks:   map[string]string{dunconfig.TierFast: *tierFast, dunconfig.TierWork: *tierWork, dunconfig.TierThink: *tierThink},
+		Default: *defaultTier,
+	}
 	mainRole := fc.Resolve(dunconfig.FacetMain, modelFlags, os.Getenv)
 	childRole := fc.Resolve(dunconfig.FacetChild, modelFlags, os.Getenv)
 	if mainRole.Off != "" {
@@ -482,7 +490,7 @@ func main() {
 	// one mode you had to ask for. `dun -p "task"` runs headless: that is the
 	// scripting path and scripts must not suddenly open a UI.
 	if *tuiFlag || (firstTask == "" && !*prog) {
-		if err := tui.RunTUI(tui.TuiOpts{Workspace: absWS, Model: *model, Url: *url, Key: effKey, Docker: resolveDockerImage(*docker), DockerNetwork: *dockerNetwork, Worktree: *worktree, Cont: *cont, Resume: *resume, DisableExit: *disableExit, Pick: *pick, Suggest: !*noSuggest, Rag: ragFlag.String(), Lsp: lspFlag.String(), Rephrase: *rephrase, Fresh: *fresh, NoDir: *noDir, NoTools: *noTools, ItermTabs: *itermTabs, Flags: modelFlags}); err != nil {
+		if err := tui.RunTUI(tui.TuiOpts{Workspace: absWS, Model: *model, Url: *url, Key: effKey, Docker: resolveDockerImage(*docker), DockerNetwork: *dockerNetwork, Worktree: *worktree, Cont: *cont, Resume: *resume, DisableExit: *disableExit, Pick: *pick, Suggest: !*noSuggest, Rag: ragFlag.String(), Lsp: lspFlag.String(), Rephrase: *rephrase, Fresh: *fresh, NoDir: *noDir, NoTools: *noTools, ItermTabs: *itermTabs, Flags: modelFlags, TierFlags: tierFlags}); err != nil {
 			fatal(err)
 		}
 		return
@@ -686,6 +694,13 @@ func main() {
 	for _, p := range fc.ProviderList() {
 		providerNames = append(providerNames, p.Name)
 	}
+	// The model tiers and the side calls' (dun/tiers.go); dun doctor shows
+	// the warnings.
+	tiers := resolveTiers(fc, absWS, *noDir)
+	sideTiers, sideWarn := fc.SideCallTiers()
+	for _, w := range append(tiers.Warnings, sideWarn...) {
+		fmt.Fprintln(os.Stderr, "dun: "+w)
+	}
 	cfg := harness.Config{
 		// The context window set for this model is filed under it, and an
 		// OpenAI-compatible model list is asked with it (dun/window.go).
@@ -707,6 +722,9 @@ func main() {
 		ChildModel:      childRole.Model,
 		ChildProvider:   childRole.Provider,
 		ChildEffort:     childRole.Effort,
+		Tiers:           harnessTiers(tiers),
+		DefaultTier:     tiers.Default,
+		SideCallTiers:   sideTiers,
 		Effort:          mainEffort,
 		Exec:            backend,
 		Worktree:        wt,

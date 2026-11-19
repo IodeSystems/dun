@@ -14,7 +14,7 @@ import (
 // path under spawnTool, for tests about the child itself. The model has no
 // such path (USER 2026-11-10: sub-agents only via plan nodes).
 func (h *Harness) spawnAgent(ctx context.Context, prompt, provider, model, effort, mode string) (*subAgent, error) {
-	return h.spawnAgentFor(ctx, prompt, provider, model, effort, mode, "", "")
+	return h.spawnAgentFor(ctx, prompt, "", provider, model, effort, mode, "", "")
 }
 
 // testAgent is a child with no harness — enough to exercise the state machine,
@@ -220,7 +220,7 @@ func TestRoleSystem_TellsEachSideWhatItMayDo(t *testing.T) {
 	if root := roleSystem(false); root != "" {
 		t.Errorf("a root's role is the agent tool's description, not the prompt: %q", root)
 	}
-	desc := agentToolDef("", "", "", nil).Function.Description
+	desc := agentToolDef("", "", "", nil, nil, "").Function.Description
 	if !strings.Contains(desc, "dismiss:true ends it") || !strings.Contains(desc, "nothing cleans it up") {
 		t.Errorf("agent must say how to clean up a child: %q", desc)
 	}

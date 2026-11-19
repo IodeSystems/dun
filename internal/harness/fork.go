@@ -54,7 +54,7 @@ func (h *Harness) fork(ctx context.Context, kind, instruction string, only llm.T
 	}
 
 	start := time.Now()
-	ch, err := untee(s.Runner).ChatStream(ctx, msgs, tools, opts)
+	ch, err := h.sideRunner(kind, untee(s.Runner)).ChatStream(ctx, msgs, tools, opts)
 	if err != nil {
 		h.noteSideCall(kind, start, nil)
 		return nil, err

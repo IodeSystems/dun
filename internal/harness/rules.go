@@ -1112,7 +1112,7 @@ func (h *Harness) summarizeRules(ctx context.Context, set rulesSet) (string, err
 		}
 	}
 	start := time.Now()
-	ch, err := untee(h.Session.Runner).ChatStream(ctx, []llm.Message{{Role: "user", Content: b.String()}}, nil, nil)
+	ch, err := h.sideRunner("rules", untee(h.Session.Runner)).ChatStream(ctx, []llm.Message{{Role: "user", Content: b.String()}}, nil, nil)
 	if err != nil {
 		return "", err
 	}

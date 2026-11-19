@@ -216,6 +216,7 @@ func (a *attributor) walkSession(s proto.ProcSession) {
 	if s.NotesWaiting > 0 {
 		label += " (idle: " + strconv.Itoa(s.NotesWaiting) + " notes waiting)"
 	}
+	label += tieredAgents(s)
 	jobs := map[int]proto.ProcJob{}
 	for _, j := range s.Jobs {
 		if j.PGID != 0 {
@@ -388,20 +389,47 @@ func Owner(root string, sessions []proto.ProcSession) (proto.ProcSession, bool) 
 	return sessions[best], true
 }
 
-// agentOf is "sub-agent #N " when the argv names a sub-agent's tree.
+// agentOf is "sub-agent #N " when the argv names a sub-agent's tree, with
+// its tier when it has one ("sub-agent #N (fast) ").
 func agentOf(argv []string, s proto.ProcSession) string {
 	for _, ag := range s.Agents {
+		if ag.Dir == "" {
+			continue // a tiered child in its parent's tree: no tree of its own to match
+		}
 		d := filepath.Clean(ag.Dir)
 		for _, arg := range argv {
 			if _, v, ok := strings.Cut(arg, "="); ok && strings.HasPrefix(arg, "-") {
 				arg = v
 			}
 			if arg != "" && filepath.Clean(arg) == d {
-				return "sub-agent #" + itoa(ag.ID) + " "
+				return "sub-agent #" + itoa(ag.ID) + agentTier(ag) + " "
 			}
 		}
 	}
 	return ""
+}
+
+// agentTier is " (fast)" for a child a model tier picked the model of.
+func agentTier(ag proto.ProcAgent) string {
+	if ag.Tier == "" {
+		return ""
+	}
+	return " (" + ag.Tier + ")"
+}
+
+// tieredAgents is the session label's note of its tiered children:
+// " (sub-agents: #1 fast, #3 think)", "" with none.
+func tieredAgents(s proto.ProcSession) string {
+	var parts []string
+	for _, ag := range s.Agents {
+		if ag.Tier != "" {
+			parts = append(parts, "#"+itoa(ag.ID)+" "+ag.Tier)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " (sub-agents: " + strings.Join(parts, ", ") + ")"
 }
 
 // Roles from argv.

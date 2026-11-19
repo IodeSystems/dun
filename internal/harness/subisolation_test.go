@@ -157,7 +157,7 @@ func TestIsolation_SavedBesideTheTranscript(t *testing.T) {
 // A parent is told what a nodir child lacks: in the agent tool, in the spawn
 // result, and the child in its brief.
 func TestNoDir_SaysWhatTheChildLacks(t *testing.T) {
-	desc := agentToolDef("", "", "", nil).Function.Description
+	desc := agentToolDef("", "", "", nil, nil, "").Function.Description
 	for _, want := range []string{"NO project and NO file tools", "Never use nodir", "missing tools"} {
 		if !strings.Contains(desc, want) {
 			t.Errorf("agent description lacks %q", want)

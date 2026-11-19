@@ -92,7 +92,7 @@ func (h *Harness) Rephrase(ctx context.Context, task string) (string, error) {
 	}
 
 	start := time.Now()
-	ch, err := untee(h.Session.Runner).ChatStream(ctx,
+	ch, err := h.sideRunner("rephrase", untee(h.Session.Runner)).ChatStream(ctx,
 		[]llm.Message{{Role: "user", Content: func() string { p, _ := RephrasePrompt(); return p }() + task}}, nil, nil)
 	if err != nil {
 		return task, nil

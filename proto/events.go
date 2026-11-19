@@ -719,8 +719,11 @@ type Agents struct {
 }
 
 type AgentInfo struct {
-	ID      int    `json:"id"`
-	Model   string `json:"model"`
+	ID    int    `json:"id"`
+	Model string `json:"model"`
+	// Tier is the model tier that picked Model (fast, work, think); "" when
+	// none did, and from an engine older than tiers.
+	Tier    string `json:"tier,omitempty"`
 	State   string `json:"state"`
 	Status  string `json:"status"`
 	Prompt  string `json:"prompt"`

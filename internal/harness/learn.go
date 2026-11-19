@@ -373,7 +373,7 @@ func flatLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 // learnCall asks the model once, outside the conversation.
 func (h *Harness) learnCall(ctx context.Context, prompt string) (string, error) {
 	start := time.Now()
-	ch, err := untee(h.Session.Runner).ChatStream(ctx, []llm.Message{{Role: "user", Content: prompt}}, nil, &llm.ChatOpts{MaxTokens: learnMaxTokens})
+	ch, err := h.sideRunner("learn", untee(h.Session.Runner)).ChatStream(ctx, []llm.Message{{Role: "user", Content: prompt}}, nil, &llm.ChatOpts{MaxTokens: learnMaxTokens})
 	if err != nil {
 		h.noteSideCall("learn", start, nil)
 		return "", err
