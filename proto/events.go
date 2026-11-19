@@ -1178,6 +1178,8 @@ type Plan struct {
 	// Summary is the last /plan summary, or the one being made; nil before
 	// the first.
 	Summary *PlanSummary `json:"summary,omitempty"`
+	// Intake is the messages not yet acknowledged; nil with none.
+	Intake *PlanIntake `json:"intake,omitempty"`
 }
 
 // PlanNode is one row of a Plan.
@@ -1200,6 +1202,31 @@ type PlanNode struct {
 	// By is who wrote the node when not the agent: "suggest" for a done node
 	// the idle suggestion call recorded from the last turn.
 	By string `json:"by,omitempty"`
+	// Ask is the ask an ask node holds (harness asktool.go); nil otherwise.
+	Ask *PlanAsk `json:"ask,omitempty"`
+}
+
+// PlanAsk is an ask node's ask. State: open, blocked, done, filed, dropped.
+// Working: the one ask the turn works (one at most, or the intake).
+type PlanAsk struct {
+	N       int      `json:"n"`
+	State   string   `json:"state"`
+	At      int64    `json:"at"` // unix seconds, when the person wrote it
+	Working bool     `json:"working,omitempty"`
+	Filed   []string `json:"filed,omitempty"` // filed: the plan nodes it became
+}
+
+// PlanIntake is the person's messages the model has not acknowledged yet:
+// one ask that grows until it does.
+type PlanIntake struct {
+	Messages []PlanMessage `json:"messages"`
+	Working  bool          `json:"working,omitempty"`
+}
+
+// PlanMessage is one message on the intake.
+type PlanMessage struct {
+	At   int64  `json:"at"` // unix seconds
+	Text string `json:"text"`
 }
 
 // PlanSummary is the last /plan summary (dun/plansummary.go): Done / Doing /
@@ -1232,4 +1259,6 @@ type JournalItem struct {
 	Line   string `json:"line"` // the entry as /journal lists it
 	Text   string `json:"text"` // the entry: its own, or its file's
 	Path   string `json:"path,omitempty"`
+	// Outcome is an ask entry's: done, filed, dropped, gone; "" open.
+	Outcome string `json:"outcome,omitempty"`
 }

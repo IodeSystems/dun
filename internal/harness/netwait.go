@@ -212,12 +212,19 @@ func (h *Harness) noteRetry(n RetryNote) {
 	}
 }
 
-// openAsks is the open ask nodes (todo or doing), id and title.
+// openAsks is the open ask nodes (todo or doing), id and title, after the
+// intake when it has messages (asktool.go).
 func (h *Harness) openAsks() (ids, titles []string) {
 	g, err := planStore{h}.View(context.Background())
 	if err != nil {
 		return nil, nil
 	}
+	h.asks.mu.Lock()
+	if in := h.asksLocked().Intake; len(in) > 0 {
+		ids = append(ids, askIntakeID)
+		titles = append(titles, headLine(in[0].Text, askTitleMax))
+	}
+	h.asks.mu.Unlock()
 	for _, n := range g.Nodes {
 		if (n.Status == taskgraph.Todo || n.Status == taskgraph.Doing) && h.isAskNode(n.ID) {
 			ids = append(ids, n.ID)

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -38,6 +37,10 @@ import (
 // since the last check, in this turn or an earlier one; the count is the
 // turn's, not the attempt's (turnBegin), so a retried turn gets no new
 // checks.
+//
+// Asks (asktool.go, USER 2026-11-18): in a turn the person started, the
+// intake while it has messages and each ask the turn touched and did not
+// mark; asks are not among the open nodes listed.
 
 // idleChecklist is the --non-interactive check.
 // The wording keeps the turn open when a requirement fails: TB2.1
@@ -65,18 +68,15 @@ func (h *Harness) idleOpenNodes() string {
 	var lines []string
 	more := 0
 	for _, n := range g.Nodes {
-		if n.Owner != "" || !planOpen(n) || n.Status == taskgraph.Blocked {
+		// An ask is the check's asks part (asktool.go idleAsks).
+		if n.Owner != "" || !planOpen(n) || n.Status == taskgraph.Blocked || h.isAskNode(n.ID) {
 			continue
 		}
 		if len(lines) == idlePlanMax {
 			more++
 			continue
 		}
-		line := fmt.Sprintf("- %s %s; done_when: %s", n.ID, n.Title, n.DoneWhen)
-		if h.isAskNode(n.ID) { // the person's message, so a forgotten one is raised (asks.go)
-			line += "; the user wrote: " + strconv.Quote(workClip(n.Details, askIdleQuote))
-		}
-		lines = append(lines, line)
+		lines = append(lines, fmt.Sprintf("- %s %s; done_when: %s", n.ID, n.Title, n.DoneWhen))
 	}
 	if more > 0 {
 		lines = append(lines, fmt.Sprintf("- and %d more (plan_show)", more))
@@ -150,6 +150,14 @@ func (h *Harness) idleNote(rounds int) (string, planRev) {
 				}
 				note += fmt.Sprintf(idlePlanOpen, open)
 			}
+		}
+		// The asks: not bound to the plan's revision, since the intake
+		// grows outside it; only what is left to acknowledge or mark.
+		if a := h.idleAsks(); a != "" {
+			if note != "" {
+				note += "\n\n"
+			}
+			note += a
 		}
 	}
 	return note, rev

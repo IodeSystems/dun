@@ -35,6 +35,7 @@ func TestAutoBudget_OpenAskRunsHeldAfterThreeAndPersonResets(t *testing.T) {
 	if _, err := h.Ask(context.Background(), "watch the build"); err != nil {
 		t.Fatal(err)
 	}
+	h.asksCall(`{"asks":[{"id":"intake","state":"open"}]}`) // the model acknowledges it
 	if !h.openAskNow() {
 		t.Fatal("the person's message opened no ask")
 	}
@@ -73,6 +74,7 @@ func TestAutoBudget_OpenAskRunsHeldAfterThreeAndPersonResets(t *testing.T) {
 	if _, err := h.Ask(context.Background(), "what happened?"); err != nil {
 		t.Fatal(err)
 	}
+	h.asksCall(`{"asks":[{"id":"intake","state":"open"}]}`) // the model acknowledges it
 	if h.NotesWaiting() != 0 {
 		t.Errorf("notes after the person's message: %d", h.NotesWaiting())
 	}
@@ -101,6 +103,7 @@ func TestAutoBudget_BlockedAskAndLoopFirings(t *testing.T) {
 	if _, err := h.Ask(context.Background(), "deploy it"); err != nil {
 		t.Fatal(err)
 	}
+	h.asksCall(`{"asks":[{"id":"intake","state":"open"}]}`) // the model acknowledges it
 	if out := planCall(t, h, "plan_close", `{"outcome":"block","id":"1","reason":"which region?"}`); !strings.Contains(out, "blocked") {
 		t.Fatalf("block: %s", out)
 	}

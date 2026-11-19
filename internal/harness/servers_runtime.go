@@ -893,6 +893,11 @@ func (h *Harness) rebuildTools() {
 		tg := h.planTools()
 		toolDefs = append(toolDefs, h.planDefs(tg)...)
 		dispatch = withPlan(dispatch, tg, report)
+		// asks: the person's asks, where they are kept (asktool.go).
+		if !cfg.NonInteractive && !cfg.NoAsks {
+			toolDefs = append(toolDefs, asksToolDef())
+			dispatch = withAsks(dispatch, h, report)
+		}
 	} else if h.cfg.Parent != nil && h.cfg.Parent.planOwns(planOwner(h.cfg.AgentID)) {
 		tg := h.childPlanTool()
 		toolDefs = append(toolDefs, childPlanDefs(tg)...)

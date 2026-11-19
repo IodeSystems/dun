@@ -235,6 +235,11 @@ func (h *Harness) noteAsk(ctx context.Context) foldAsk {
 	if h.isChild() || h.store == nil {
 		return foldAsk{}
 	}
+	// Where asks are kept they hold the ask (asktool.go), and no node is
+	// written here: the latest message was "continue" as often as not.
+	if a, ok := h.asksFoldAsk(); ok {
+		return a
+	}
 	entries := h.store.History()
 	h.askMu.Lock()
 	for _, e := range entries {

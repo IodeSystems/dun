@@ -108,9 +108,12 @@ func (h *Harness) asksOn() bool {
 	return !h.isChild() && !h.cfg.NonInteractive && !h.cfg.NoAsks && h.hasTool(taskgraph.ToolAdd)
 }
 
-// openAskNow reports whether an ask node is todo or doing. Blocked is not
-// open: it waits on the person.
+// openAskNow reports whether an ask node is todo or doing, or the intake
+// has messages (asktool.go). Blocked is not open: it waits on the person.
 func (h *Harness) openAskNow() bool {
+	if h.intakeOpen() {
+		return true
+	}
 	g, err := planStore{h}.View(context.Background())
 	if err != nil {
 		return false

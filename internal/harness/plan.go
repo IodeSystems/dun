@@ -502,6 +502,8 @@ type PlanRow struct {
 	Ready bool
 	// By: who wrote it when not the agent: planBySuggest, or "".
 	By string
+	// Ask: the ask an ask node holds (asktool.go), nil for another node.
+	Ask *PlanAsk
 }
 
 // PlanSnapshot is the plan for a screen.
@@ -509,6 +511,8 @@ type PlanSnapshot struct {
 	Mode, Approved bool
 	Rows           []PlanRow
 	Total, Done    int
+	// Intake: the messages not yet acknowledged; nil with none.
+	Intake *PlanIntake
 }
 
 // Plan is the session's plan as the tree a person reads.
@@ -524,12 +528,14 @@ func (h *Harness) Plan() PlanSnapshot {
 			s.Done++
 		}
 	}
+	asks, intake := h.asksView(p.store.full())
+	s.Intake = intake
 	for _, r := range g.Tree() {
 		n := r.Node
 		ready, _ := g.CanStart(n.ID)
 		row := PlanRow{ID: n.ID, Title: n.Title, Details: n.Details, Status: string(n.Status), DoneWhen: n.DoneWhen, Owner: n.Owner,
 			Why: n.Why, Account: n.Account, Replaces: n.Replaces, Needs: n.Needs,
-			Depth: r.Depth, Repeat: r.Repeat, Ready: ready, By: by[n.ID]}
+			Depth: r.Depth, Repeat: r.Repeat, Ready: ready, By: by[n.ID], Ask: asks[n.ID]}
 		if n.Status == taskgraph.Todo {
 			row.Waiting = g.Waiting(n.ID)
 		}

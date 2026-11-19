@@ -80,6 +80,7 @@ func TestLedger_AskEntryFactsAndResume(t *testing.T) {
 	dir := ledgerRepo(t)
 	sf := filepath.Join(t.TempDir(), "s.jsonl")
 	r := &nudgeRunner{reply: script(
+		`asks {"asks":[{"id":"intake","split":[{"title":"please add b"}]}]}`,
 		`file_write {"path":"b.txt","content":"x\ny\n"}`,
 		`file_edit {"path":"a.txt","edits":[{"old":"two\n","new":"zwei\ndeux\n"}]}`,
 		`exec {"command":"true"}`,
@@ -112,7 +113,7 @@ func TestLedger_AskEntryFactsAndResume(t *testing.T) {
 	if f.NCommits != 1 || f.Commits[0].Subject != "feat: add b" || len(f.Commits[0].Hash) < 7 {
 		t.Errorf("commits %+v", f.Commits)
 	}
-	if f.ToolCalls != 6 || f.Rounds != 7 || f.Interrupted {
+	if f.ToolCalls != 7 || f.Rounds != 8 || f.Interrupted {
 		t.Errorf("totals: %d calls, %d rounds, interrupted %v", f.ToolCalls, f.Rounds, f.Interrupted)
 	}
 	row := asks[0].Line(1)
@@ -222,9 +223,9 @@ func TestLedger_LineDiff(t *testing.T) {
 
 // ── asks ────────────────────────────────────────────────────────────────
 
-// A person's message is an ask node; an automatic one is not. A message
-// typed mid-turn opens a second ask, the first still open, and the turn-end
-// check names both with what the person wrote.
+// A person's message, acknowledged, is an ask node; an automatic one never
+// reaches the intake. The asks are the person's, not the agent's open work,
+// and the turn-end check names the intake.
 func TestAsks_NodesAndTheTurnEndCheck(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	dir := t.TempDir()
@@ -234,11 +235,11 @@ func TestAsks_NodesAndTheTurnEndCheck(t *testing.T) {
 		t.Fatal("a person's message is not an ask")
 	}
 	for _, auto := range []string{"[automatic] resume after the upgrade", "[control/plan] Before you stop", "[settle] The user has been away"} {
-		if h.askOpen(auto) {
-			t.Errorf("%q became an ask", auto)
+		if h.intakeAdd(auto) {
+			t.Errorf("%q went on the intake", auto)
 		}
 	}
-	h.SayAs(NewMessageID(), "also update the docs")
+	h.askOpen("also update the docs")
 	rows := h.Plan().Rows
 	if len(rows) != 2 || rows[0].Title != "ask: fix the flaky test" || rows[1].Title != "ask: also update the docs" {
 		t.Fatalf("rows %+v", rows)
@@ -249,18 +250,17 @@ func TestAsks_NodesAndTheTurnEndCheck(t *testing.T) {
 	if g, _ := (planStore{h}).View(context.Background()); h.openWork(g) != 0 {
 		t.Error("asks count as the agent's open work (the plan nudges)")
 	}
+	h.turnBegin(originPerson)
+	h.SayAs(NewMessageID(), "and the changelog")
 	note, _ := h.idleNote(1)
-	for _, w := range []string{"1 ask: fix the flaky test", `the user wrote: "fix the flaky test it fails one run in ten"`,
-		"2 ask: also update the docs", `the user wrote: "also update the docs"`} {
-		if !strings.Contains(note, w) {
-			t.Errorf("the turn-end check lacks %q:\n%s", w, note)
-		}
+	if !strings.Contains(note, `- intake: 1 message, not acknowledged: "and the changelog"`) || strings.Contains(note, "1 ask:") {
+		t.Errorf("the turn-end check:\n%s", note)
 	}
 	if got := h.asksOpenNow(); !slices.Equal(got, []int{1, 2}) {
 		t.Errorf("open asks %v", got)
 	}
-	if h.cfg.NonInteractive = true; h.askOpen("a task") {
-		t.Error("--non-interactive made an ask")
+	if h.cfg.NonInteractive = true; h.intakeAdd("a task") {
+		t.Error("--non-interactive took a message")
 	}
 }
 
