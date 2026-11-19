@@ -356,9 +356,13 @@ func (h *Harness) HoldPending() int { return h.flushQueued() }
 func (h *Harness) flushSilent() int {
 	items := h.drain(func(q queued) bool { return !q.policy().causesTurn })
 	for _, q := range items {
+		content := q.text
+		if q.tag != "" { // rendered "[<tag>] …" (AsideOpts.Tag)
+			content = strings.TrimPrefix(content, "["+q.tag+"] ")
+		}
 		h.store.appendSilent(agent.Entry{
 			ID: uuid.New().String(), Kind: q.policy().entryKind,
-			Content: q.text, CreatedAt: time.Now().UnixNano(),
+			Tag: q.tag, Content: content, CreatedAt: time.Now().UnixNano(),
 		})
 	}
 	return len(items)

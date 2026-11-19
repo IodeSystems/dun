@@ -138,7 +138,17 @@ func historyItems(entries []agent.Entry) []HistoryItem {
 			out = append(out, HistoryItem{Kind: "tool_result", Tool: e.ToolName, CallID: e.ToolCallID, Content: e.Content,
 				IsError: ToolFailed(e.ToolName, e.Content), Agent: byCall[e.ToolCallID]})
 		case agent.KindNotification:
-			out = append(out, HistoryItem{Kind: "notification", Content: e.Content, Agent: NoticeAgent(e.Content)})
+			// The model's own turn-end check, not news for the person; the
+			// model still reads it (docs/decisions.md "The person's message
+			// ends the prompt").
+			if e.Tag == tagIdleCheck {
+				continue
+			}
+			content := e.Content
+			if e.Tag == asksTag { // shown as the model reads it (AsideOpts.Tag)
+				content = "[" + asksTag + "] " + content
+			}
+			out = append(out, HistoryItem{Kind: "notification", Content: content, Agent: NoticeAgent(content)})
 		case kindCommand:
 			out = append(out, HistoryItem{Kind: "command", Content: e.Content})
 		}
@@ -206,9 +216,20 @@ func (h *Harness) Continue(ctx context.Context) (agent.TurnResult, error) {
 //     from the dropped connection travel together, in one batch, costing no extra
 //     turn. Otherwise the buffer is published as ordinary inbox arrivals.
 //
-// Called before every attempt in runTurn, so a message typed during a backoff
-// wait joins the retry rather than queuing behind it.
-func (h *Harness) prepareTurn(ctx context.Context) {
+// The caller calls it once as the turn begins, before the person's message
+// (if any) is published. runTurn calls prepareAttempt before every attempt,
+// so a message typed during a backoff wait joins the retry rather than
+// queuing behind it.
+func (h *Harness) prepareTurn(ctx context.Context) { h.prepare(ctx, true) }
+
+// prepareAttempt is prepareTurn for an attempt of a turn already prepared:
+// no asks or plan block (planTurnLine). The turn's block went in once, before
+// the person's message. A second one after the message ended the prompt on a
+// status block (Gemini 4, 2026-11-19: every round came back empty; see
+// docs/decisions.md "The person's message ends the prompt").
+func (h *Harness) prepareAttempt(ctx context.Context) { h.prepare(ctx, false) }
+
+func (h *Harness) prepare(ctx context.Context, first bool) {
 	// A hint from a cut in a PREVIOUS turn is stale by definition: it is written
 	// in the present tense about the last response, and the last response is now
 	// the one that recovered. See clearOverflowHints.
@@ -220,16 +241,21 @@ func (h *Harness) prepareTurn(ctx context.Context) {
 	// (turnBegin, autoturn.go): a retried turn keeps its caps.
 	h.dropTurnScoped()    // asides about the turn that ended (asidettl.go)
 	h.settleResumeAside() // once, on the first user turn after a resume (settle.go)
-	if h.healOrphanToolCalls(ctx) == 0 {
-		h.flushQueued()
-	}
+	healed := h.healOrphanToolCalls(ctx) > 0
 	// Asides ride whatever turn is about to run — including the one a user
 	// message starts, which is where "the tool set changed" most often lands.
 	// Healing already lifted them into the interrupted call's result.
-	h.planTurnLine()     // before flushSilent: it rides this turn (plan.go)
+	if first {
+		h.planTurnLine() // before flushSilent: it rides this turn (plan.go)
+	}
 	h.planMarkTurn()     // what the idle suggestion call compares (suggestdone.go)
 	h.writeHarnessInfo() // $DUN_HARNESS: the branch may have moved since
+	// The asides before the inbox arrivals: a message of the person's that
+	// was queued is then the last thing the model reads before its round.
 	h.flushSilent()
+	if !healed {
+		h.flushQueued()
+	}
 }
 
 // healOrphanToolCalls answers every persisted tool call that has no result with
