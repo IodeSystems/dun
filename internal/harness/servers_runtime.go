@@ -744,8 +744,8 @@ func (h *Harness) rebuildTools() {
 	// worktree switch (Rehoist) moves their root with exec's.
 	ft := h.fileTools()
 	if ft != nil {
-		// file_read gains whole: all of a file, bounded by the context left
-		// (wholeread.go). A dun wrapper; agentkit's caps are unchanged.
+		// An unranged file_read is all of the file, bounded by the context
+		// left (wholeread.go). A dun wrapper; agentkit's caps are unchanged.
 		toolDefs = append(toolDefs, wholeReadDefs(ft.Defs(), ft.Name(filetools.Read))...)
 		dispatch = withFiles(dispatch, ft, h.tmpReaders(), h, h.readWhole, report)
 	}

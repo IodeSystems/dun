@@ -1,9 +1,11 @@
 package harness
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"strconv"
@@ -17,19 +19,23 @@ import (
 
 // A whole read, bounded by the context left (docs/reading.md, section 2).
 //
-// file_read({path, whole: true}) returns all of a file, past agentkit's caps
-// (8KB unranged, 64KB ranged; files/read.go), when it fits in the room this
-// session has left: the window, less the last prompt, less the reply's
-// reserve (outputReserve). Under wholeSmallTokens it is served as is; up to
-// 1/wholeRoomShare of the room with the recap cue; up to all of the room
-// with a stronger cue (recap it right after); past the room it is refused
-// with the numbers and the ways out that apply (USER 2026-11-09: refuse only
-// a read that would blow the context).
+// A file_read with no range (no offset/limit/at) and no grep returns all of
+// a file, past agentkit's 8KB unranged cap (files/read.go), when it fits in
+// the room this session has left: the window, less the last prompt, less the
+// reply's reserve (outputReserve). Under wholeSmallTokens it is served as is;
+// up to 1/wholeRoomShare of the room with the recap cue; up to all of the
+// room with a stronger cue (recap it right after); past the room it is
+// refused with the numbers and the ways out that apply (USER 2026-11-09:
+// refuse only a read that would blow the context). A ranged read is
+// agentkit's, with its 64KB cap. This was file_read({whole: true}) until
+// USER 2026-11-18 dropped the parameter; a call that still sends it is read
+// by its other arguments (wantsWhole).
 //
 // It wraps agentkit's read rather than changing it: the read is paged with
 // ranged reads on the same toolset the call was routed to, so the root,
 // the tmp and /file routes, the binary check and the read-before-write
-// record are agentkit's own. The schema gains `whole` in wholeReadDefs.
+// record are agentkit's own, and agentkit's unranged cap is never reached.
+// The description's unranged sentence is dun's (wholeReadDefs).
 
 // The thresholds are starting points (docs/reading.md, "Open"): measure on
 // real sessions. The reply's reserve is outputReserve (outbudget.go).
@@ -49,52 +55,58 @@ const (
 	wholeAsideBig = "This read is %d tokens, over a quarter of the room left. Take what you need from it and recap it right after, this turn or the next."
 )
 
-// wholeDesc is the line file_read's description gains.
-const wholeDesc = ` {path:"docs/design.md", whole:true} reads all of a file, past those caps, when it fits the context left.`
+// wholeDesc is what an unranged read returns, in file_read's description.
+const wholeDesc = "With no offset/limit you get the whole file if it fits the context left"
 
-// wholeReadDefs adds `whole` to the read tool's definition in defs.
+// wholeReadDefs puts wholeDesc in place of agentkit's unranged sentence (its
+// 8KB head) in the read tool's description in defs, or after the
+// description if that sentence moved.
 func wholeReadDefs(defs []llm.ToolDef, readName string) []llm.ToolDef {
 	for i, d := range defs {
 		if d.Function.Name != readName {
 			continue
 		}
-		params, ok := d.Function.Parameters.(map[string]any)
-		if !ok {
-			continue
+		desc := d.Function.Description
+		from := strings.Index(desc, "With no offset/limit")
+		to := strings.Index(desc[max(from, 0):], "; a ranged read")
+		if from >= 0 && to >= 0 {
+			desc = desc[:from] + wholeDesc + desc[from+to:]
+		} else {
+			desc += " " + wholeDesc + "."
 		}
-		props, _ := params["properties"].(map[string]any)
-		np := make(map[string]any, len(params))
-		for k, v := range params {
-			np[k] = v
-		}
-		nprops := make(map[string]any, len(props)+1)
-		for k, v := range props {
-			nprops[k] = v
-		}
-		nprops["whole"] = map[string]any{"type": "boolean",
-			"description": "All of the file, if it fits the context left. Not with offset/limit/at."}
-		np["properties"] = nprops
-		d.Function.Parameters = np
-		d.Function.Description += wholeDesc
+		d.Function.Description = desc
 		defs[i] = d
 	}
 	return defs
 }
 
-// wholeArgs are the read arguments a whole read looks at.
+// wholeArgs are the read arguments a whole read looks at. An old call's
+// `whole` is not among them: a range wins over it, and without one the read
+// is unranged anyway. agentkit ignores the extra field too (a plain
+// json.Unmarshal; files/files.go Dispatch).
 type wholeArgs struct {
-	Path   string          `json:"path"`
-	Whole  bool            `json:"whole"`
-	Grep   string          `json:"grep"`
-	Offset json.RawMessage `json:"offset"`
-	Limit  json.RawMessage `json:"limit"`
-	At     json.RawMessage `json:"at"`
+	Path    string          `json:"path"`
+	Grep    string          `json:"grep"`
+	Pattern string          `json:"pattern"` // agentkit's other name for grep
+	Offset  json.RawMessage `json:"offset"`
+	Limit   json.RawMessage `json:"limit"`
+	At      json.RawMessage `json:"at"`
 }
 
-// wantsWhole reports whether a read call asks for a whole read.
+// wantsWhole reports whether a read call is a whole read: no grep and no
+// range. As agentkit reads it, offset or limit 0 is no range, and any at is
+// one.
 func wantsWhole(args string) bool {
 	var a wholeArgs
-	return json.Unmarshal([]byte(args), &a) == nil && a.Whole && a.Grep == ""
+	return json.Unmarshal([]byte(args), &a) == nil && a.Grep == "" && a.Pattern == "" &&
+		a.At == nil && !nonZero(a.Offset) && !nonZero(a.Limit)
+}
+
+// nonZero reports whether a number argument (agentkit takes it quoted too)
+// is given and not 0.
+func nonZero(raw json.RawMessage) bool {
+	s := strings.Trim(strings.TrimSpace(string(raw)), `"`)
+	return s != "" && s != "null" && s != "0"
 }
 
 // wholeRoom is what a whole read is measured against.
@@ -124,18 +136,16 @@ func (h *Harness) wholeRoom() wholeRoom {
 	return r
 }
 
-// readWhole answers a file_read with whole:true on route, the toolset
-// withFiles chose for it. id is the call's id, for the recap cue.
+// readWhole answers an unranged file_read on route, the toolset withFiles
+// chose for it. id is the call's id, for the recap cue.
 func (h *Harness) readWhole(ctx context.Context, route *filetools.Toolset, name, args, id string) string {
 	var a wholeArgs
 	_ = json.Unmarshal([]byte(args), &a)
-	if a.Offset != nil || a.Limit != nil || a.At != nil {
-		return "ERROR: whole reads all of a file; give whole or a range (offset/limit/at), not both"
-	}
 	abs, err := filetools.Under(route.Root(), a.Path)
 	st, serr := os.Stat(abs)
-	if err != nil || serr != nil || !st.Mode().IsRegular() {
-		return route.Dispatch(ctx, name, args) // agentkit's refusal, or a directory's listing
+	if err != nil || serr != nil || !st.Mode().IsRegular() || isBinary(abs) {
+		// agentkit's refusal, a directory's listing, or its binary answer
+		return route.Dispatch(ctx, name, args)
 	}
 	n, room := h.bytesToTokens(int(st.Size())), h.wholeRoom()
 	if msg := wholeVerdict(a.Path, n, room); msg != "" {
@@ -200,8 +210,22 @@ func wholeVerdict(path string, n int, r wholeRoom) string {
 	return b.String()
 }
 
+// isBinary reports whether path has a zero byte where agentkit's binary
+// check looks (the first 8000 bytes, files/read.go binaryScan), so a binary
+// file too large for the room gets agentkit's answer, not a size refusal.
+func isBinary(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	head := make([]byte, 8000)
+	n, _ := io.ReadFull(f, head)
+	return bytes.IndexByte(head[:n], 0) >= 0
+}
+
 var (
-	pageAll   = regexp.MustCompile(`^(.*): (\d+) lines?$`)
+	pageAll  = regexp.MustCompile(`^(.*): (\d+) lines?$`)
 	pageRange = regexp.MustCompile(`^(.*): lines (\d+)-(\d+) of (\d+)$`)
 )
 

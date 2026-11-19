@@ -37,16 +37,43 @@ func wholeHarness(t *testing.T, window, prompt int) (*Harness, string) {
 func TestWholeRead_Small(t *testing.T) {
 	h, ws := wholeHarness(t, 200000, 0)
 	writeLines(t, filepath.Join(ws, "a.txt"), 400, 30) // ~16KB, ~4k tokens
-	out := callTool(t, h, "file_read", map[string]any{"path": "a.txt", "whole": true})
+	out := callTool(t, h, "file_read", map[string]any{"path": "a.txt"})
 	if !strings.HasPrefix(out, "a.txt: 400 lines\n") || !strings.Contains(out, "line 400 ") {
 		t.Fatalf("small whole read: %.200q", out)
 	}
 	if strings.Contains(out, "This read is") {
 		t.Error("a small read got the cue")
 	}
-	// Without whole the cap holds.
-	if out := callTool(t, h, "file_read", map[string]any{"path": "a.txt"}); strings.Contains(out, "line 400 ") {
-		t.Error("an unranged read is still capped")
+}
+
+// A 20KB file, unranged: all of it, over wholeSmallTokens, so with the cue.
+func TestWholeRead_Unranged20KB(t *testing.T) {
+	h, ws := wholeHarness(t, 200000, 0)
+	writeLines(t, filepath.Join(ws, "a.txt"), 300, 60) // ~20KB
+	if st, _ := os.Stat(filepath.Join(ws, "a.txt")); st.Size() < 20000 {
+		t.Fatalf("file is %d bytes", st.Size())
+	}
+	out := callTool(t, h, "file_read", map[string]any{"path": "a.txt"})
+	if !strings.HasPrefix(out, "a.txt: 300 lines\n") || !strings.Contains(out, "\n300\tline 300 ") || strings.Contains(out, "[cut at") {
+		t.Fatalf("not served whole: %.200q", out)
+	}
+	if strings.Count(out, "This read is") != 1 || !strings.Contains(out, "Take what you need from it, then recap it on your next turn.") {
+		t.Errorf("cue: %q", out[strings.LastIndex(out, "300\t"):])
+	}
+}
+
+// A ranged read is agentkit's: its header and its 64KB cap.
+func TestWholeRead_RangedUnchanged(t *testing.T) {
+	h, ws := wholeHarness(t, 400000, 0)
+	writeLines(t, filepath.Join(ws, "big.txt"), 3000, 50) // ~180KB
+	out := callTool(t, h, "file_read", map[string]any{"path": "big.txt", "offset": 1})
+	if !strings.HasPrefix(out, "big.txt: lines 1-") || !strings.Contains(out, "[cut at 64.0KB, the most one read returns.") ||
+		strings.Contains(out, "This read is") {
+		t.Errorf("ranged read: %.120q … %q", out, out[max(0, len(out)-200):])
+	}
+	out = callTool(t, h, "file_read", map[string]any{"path": "big.txt", "offset": 10, "limit": 5})
+	if !strings.HasPrefix(out, "big.txt: lines 10-14 of 3000\n") {
+		t.Errorf("offset/limit: %.120q", out)
 	}
 }
 
@@ -55,7 +82,7 @@ func TestWholeRead_Small(t *testing.T) {
 func TestWholeRead_LargeFits(t *testing.T) {
 	h, ws := wholeHarness(t, 400000, 0)
 	writeLines(t, filepath.Join(ws, "big.txt"), 3000, 50) // ~180KB: three pages
-	out := callTool(t, h, "file_read", map[string]any{"path": "big.txt", "whole": true})
+	out := callTool(t, h, "file_read", map[string]any{"path": "big.txt"})
 	if !strings.HasPrefix(out, "big.txt: 3000 lines\n") {
 		t.Fatalf("header: %.120q", out)
 	}
@@ -81,7 +108,7 @@ func TestWholeRead_LargeFits(t *testing.T) {
 func TestWholeRead_OverAQuarter(t *testing.T) {
 	h, ws := wholeHarness(t, 200000, 0)
 	writeLines(t, filepath.Join(ws, "big.txt"), 3000, 60) // ~213KB, ~53k tokens of ~165k free
-	out := callTool(t, h, "file_read", map[string]any{"path": "big.txt", "whole": true})
+	out := callTool(t, h, "file_read", map[string]any{"path": "big.txt"})
 	if !strings.HasPrefix(out, "big.txt: 3000 lines\n") || !strings.Contains(out, "\n3000\tline 3000 ") {
 		t.Fatalf("not served whole: %.200q", out)
 	}
@@ -96,7 +123,7 @@ func TestWholeRead_OverAQuarter(t *testing.T) {
 func TestWholeRead_BlowsContext(t *testing.T) {
 	h, ws := wholeHarness(t, 200000, 100000)
 	writeLines(t, filepath.Join(ws, "big.txt"), 4000, 65) // ~304KB, ~76k tokens of ~65k free
-	out := callTool(t, h, "file_read", map[string]any{"path": "big.txt", "whole": true})
+	out := callTool(t, h, "file_read", map[string]any{"path": "big.txt"})
 	for _, want := range []string{"ERROR: big.txt is ", " are free. Ways out:", "1. Recap what is settled to free at least ",
 		`2. Add a plan node "read big.txt and report …", then agent({node: "<id>"}): a child spends its own context`, "3. Grep it first, or read a range."} {
 		if !strings.Contains(out, want) {
@@ -144,37 +171,54 @@ func TestWholeRead_RefusalVariants(t *testing.T) {
 	}
 }
 
-// whole on an item path: the item, as without it.
+// An unranged read of an item path: the item.
 func TestWholeRead_ItemPath(t *testing.T) {
 	h, _ := wholeHarness(t, 200000, 0)
 	if _, err := h.MemoriesCommand("add strategy bisect-flaky Run the flaky test alone with -count=20."); err != nil {
 		t.Fatal(err)
 	}
 	callTool(t, h, "memory", map[string]any{"action": "add", "name": "cgo", "question": "how to build?", "content": "Builds need CGO off."})
-	if out := callTool(t, h, "file_read", map[string]any{"path": "strategy:bisect-flaky", "whole": true}); !strings.Contains(out, "-count=20") {
+	if out := callTool(t, h, "file_read", map[string]any{"path": "strategy:bisect-flaky"}); !strings.Contains(out, "-count=20") {
 		t.Errorf("strategy: %q", out)
 	}
-	if out := callTool(t, h, "file_read", map[string]any{"path": "memory:cgo", "whole": true}); !strings.Contains(out, "CGO off") {
+	if out := callTool(t, h, "file_read", map[string]any{"path": "memory:cgo"}); !strings.Contains(out, "CGO off") {
 		t.Errorf("memory: %q", out)
 	}
 }
 
-// whole with a range is refused; whole with grep is a grep.
-func TestWholeRead_ArgCombos(t *testing.T) {
+// An old call's whole (USER 2026-11-18 dropped it): with a range the range
+// wins, with no error; alone it is an unranged read; with grep, a grep.
+func TestWholeRead_OldWholeArg(t *testing.T) {
 	h, ws := wholeHarness(t, 200000, 0)
-	writeLines(t, filepath.Join(ws, "a.txt"), 10, 5)
-	if out := callTool(t, h, "file_read", map[string]any{"path": "a.txt", "whole": true, "offset": 3}); !strings.HasPrefix(out, "ERROR: whole reads all") {
-		t.Errorf("whole+offset: %q", out)
+	writeLines(t, filepath.Join(ws, "a.txt"), 400, 30) // ~16KB: past the 8KB head
+	out := callTool(t, h, "file_read", map[string]any{"path": "a.txt", "offset": 1, "limit": 80, "whole": true})
+	if !strings.HasPrefix(out, "a.txt: lines 1-80 of 400\n") || strings.Contains(out, "ERROR") {
+		t.Errorf("whole+range: %.200q", out)
+	}
+	if out := callTool(t, h, "file_read", map[string]any{"path": "a.txt", "whole": true}); !strings.HasPrefix(out, "a.txt: 400 lines\n") ||
+		!strings.Contains(out, "line 400 ") {
+		t.Errorf("whole alone: %.200q", out)
 	}
 	if out := callTool(t, h, "file_read", map[string]any{"path": "a.txt", "whole": true, "grep": "line 7 "}); !strings.Contains(out, ":7:") {
 		t.Errorf("whole+grep: %q", out)
 	}
-	if out := callTool(t, h, "file_read", map[string]any{"path": "nope.txt", "whole": true}); !strings.HasPrefix(out, "ERROR") {
+	if out := callTool(t, h, "file_read", map[string]any{"path": "nope.txt"}); !strings.HasPrefix(out, "ERROR") {
 		t.Errorf("missing file: %q", out)
 	}
 }
 
-// The schema gains whole and one description line.
+// A binary file too large for the room gets agentkit's binary answer.
+func TestWholeRead_Binary(t *testing.T) {
+	h, ws := wholeHarness(t, 200000, 100000)
+	if err := os.WriteFile(filepath.Join(ws, "b.bin"), make([]byte, 400000), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out := callTool(t, h, "file_read", map[string]any{"path": "b.bin"}); !strings.Contains(out, "is a binary file") {
+		t.Errorf("binary: %q", out)
+	}
+}
+
+// The schema has no whole; the description's unranged sentence is dun's.
 func TestWholeRead_Schema(t *testing.T) {
 	h, _ := wholeHarness(t, 200000, 0)
 	var def *llm.ToolDef
@@ -187,7 +231,12 @@ func TestWholeRead_Schema(t *testing.T) {
 		t.Fatal("no file_read")
 	}
 	props := def.Function.Parameters.(map[string]any)["properties"].(map[string]any)
-	if _, ok := props["whole"]; !ok || !strings.HasSuffix(def.Function.Description, wholeDesc) {
-		t.Errorf("whole not in the schema: %v / %q", props["whole"], def.Function.Description)
+	if _, ok := props["whole"]; ok {
+		t.Errorf("whole is in the schema: %v", props["whole"])
 	}
+	d := def.Function.Description
+	if !strings.Contains(d, wholeDesc+"; a ranged read returns up to 64.0KB.") || strings.Contains(d, "8.0KB") || strings.Contains(d, "whole:") {
+		t.Errorf("description: %q", d)
+	}
+	t.Logf("%d bytes: %s", len(d), d)
 }
