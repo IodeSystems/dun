@@ -1214,6 +1214,35 @@ in a plan node's text. `internal/harness/textcall.go`,
   output (mismatched tags), which no parser can repair; corrallm passes it
   through. The guard is the fix.
 
+## Thinking titles are bold (USER 2026-11-18)
+
+USER: "strip out the thinking meta language and use **what** — because we A)
+want to render markdown in thoughts, and B) the bold/title seems like a great
+way to track what the thinking is." `internal/harness/systemprompt.go`
+(`systemThinking`), `internal/tui/thinking.go`, `mobile/src/lib/thinking.ts`.
+
+- **The prompt asks for a bold title per step**, `**<what, in a few
+  words>**`, in place of `# Thinking: <what>` / `# Summary: <what>`: 245
+  bytes became 106. Claude writes bold titles unasked; the line stays for
+  models that do not (DeepSeek, Qwen).
+- **A title is a line that is only a bold span** (`**…**` or `__…__`, a colon
+  after or inside it allowed). Bold inside a sentence is not one; a span
+  counts once it is closed. The folded line and the open header show the
+  latest title (with time and words) where "thinking…" / "thought for" was;
+  no title falls back to the first line, as before. No side call names one.
+- **Old logs keep their titles.** `# Thinking:` / `# Summary:` still count,
+  and a Summary wins once the thought ends. `demoteStepHeads` still turns a
+  leaked heading in a reply into italics; a leaked bold title is plain bold.
+- **The body is Markdown** (TUI): bubbleteandmd, like a reply, Frame while
+  live, in the thought's colour (stSecondary) with no margin, a title in a
+  paragraph of its own. A side effect: lines of one paragraph join, as in a
+  reply. Cost, a 1,100-word live thought: render about 1ms a frame (a reply
+  0.7ms); the box's wrap went from 34ms (it stripped the whole body with a
+  regexp) to about 1.5ms by wrapping only rows too wide. The pager shows the
+  text plain.
+- **Mobile** has the same title rules; its body stays plain text, because
+  `Markdown.tsx` draws only in the reply's colour and size.
+
 ## dun manages its tools under DUN_HOME (USER 2026-11-18)
 
 dun took mcpshell, poly-lsp-mcp and raglit from the user's PATH first, then

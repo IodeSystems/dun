@@ -231,7 +231,7 @@ derive them from `turn`, tokens, tool calls or `done`.
   closes it at `reasoning_end`; it does not end a thought on a token, a
   tool call or the turn's end. A `reasoning` of another round than the
   live thought's opens a new one. Where a thought is shown (its own block,
-  or a step of the open tool run), its title (`# Thinking:` / `# Summary:`)
+  or a step of the open tool run), its title (a `**bold**` line; `# Thinking:` / `# Summary:` in older logs)
   and the run's wording stay presentation, client-side.
 - Owner: the engine (`proto.StepRound`, applied in `cmd/dun/emit.go` as each
   event is written), so the rule is one place, not one list per client.
