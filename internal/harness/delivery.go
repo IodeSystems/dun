@@ -1,8 +1,6 @@
 package harness
 
 import (
-	"time"
-
 	"github.com/google/uuid"
 	"github.com/iodesystems/agentkit/agent"
 )
@@ -17,11 +15,13 @@ import (
 func NewMessageID() string { return uuid.New().String() }
 
 // kindDelivered is a message the person typed while the agent worked, that
-// a tool result carried to the model (liftQueued). The model read it inside
-// that result, so it is not conversation for the model (filtered out of
-// Context like kindCommand); it is conversation for the person, so a resumed
-// client shows it where it landed — after the result that carried it
-// (HistoryItem kind "user", queued true). Its ID is the message's id.
+// a tool result carried to the model, in logs written before such a
+// message became a user entry of its own (midreply.go). The model read it
+// inside that result, so it is not conversation for the model (filtered out
+// of Context like kindCommand); it is conversation for the person, so a
+// resumed client shows it where it landed — after the result that carried
+// it (HistoryItem kind "user", queued true). Its ID is the message's id.
+// Nothing writes it now.
 const kindDelivered agent.EntryKind = "delivered"
 
 // QueuedMsg is a person's message buffered for the running turn.
@@ -50,9 +50,9 @@ func (h *Harness) stashLiftedLocked(items []queued) {
 	}
 }
 
-// deliverLifted records the messages the tool result e carried, after it,
-// and says so (OnDelivered). Dispatch is one call at a time, so the result
-// stored next is the one they rode.
+// deliverLifted sends the messages typed while the tool of result e ran,
+// after it (deliverMidTurn), and says so (OnDelivered). Dispatch is one call
+// at a time, so the result stored next is the one they waited for.
 func (h *Harness) deliverLifted(e agent.Entry) {
 	h.noteMu.Lock()
 	items := h.lifted
@@ -63,9 +63,7 @@ func (h *Harness) deliverLifted(e agent.Entry) {
 	}
 	ids := make([]string, 0, len(items))
 	for _, q := range items {
-		h.store.appendSilent(agent.Entry{
-			ID: q.id, Kind: kindDelivered, Content: q.text, CreatedAt: time.Now().UnixNano(),
-		})
+		h.deliverMidTurn(q)
 		ids = append(ids, q.id)
 	}
 	h.delivered(Delivery{IDs: ids, CallID: e.ToolCallID})

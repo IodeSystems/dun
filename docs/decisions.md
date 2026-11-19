@@ -1326,31 +1326,42 @@ and later "IT's weird that you don't stop and respond to me?". The model
 and the turn-end check pushed it back to its tools.
 `internal/harness/midreply.go`.
 
-- **Framing.** The person's lifted messages go last in the result, under one
-  header: `[the person wrote mid-turn; reply to them in text before your
-  next tool call, then go on if it still makes sense]: «<text>»` (114 bytes
-  of header, 5 a message); several are one header, then `«…»` a line each.
-  The words are verbatim. Other lifted items (board, background, peers) keep
-  their prefixes and come first.
-- **System prompt**, interactive main agent only: `Text in a tool result
-  headed "[the person wrote mid-turn" is the person, now: answer it first.`
-  (96 bytes with its blank line; fixed, so cached).
-- **Missed reply.** If the round after the lift writes no text and only
-  calls tools, `[dun] The person asked you something mid-turn; reply to them
-  now.` rides that round's results: once per lifted message (a new message
-  arms it again). Nothing when nobody typed.
-- **The plan force waits.** While a reply is due (the round after the lift,
-  and after the missed-reply aside the round after that) the forced plan
-  call is not sent; it stays armed for the next request.
-- **The turn-end check accepts the reply.** A text-only round right after a
-  lift ends the turn with no check (no "Open plan nodes… Finish each"). The
-  simpler of the two options: asking whether to continue would cost a round
-  and put the model back in charge of a turn the person is now in. No new
-  turn and no wake: the unrequested-turn and spend rules are unchanged.
-- **One seam.** `deliverMidTurn` appends the framed words to the tool
-  result; a role-user message after the round's results (an agentkit hook,
-  asked for: Gemini ignores even framed text in a tool result) replaces it
-  there.
+- **A user message, not text in a tool result.** A framed header in the
+  result was tried first; Gemini ignores even framed text inside a
+  functionResponse, while Qwen and others answer. Now a message typed while
+  a tool runs is saved, once that result is stored, as a pending user entry
+  (`deliverMidTurn`, tag `mid-turn`). agentkit (v0.36.0) claims it at the
+  next round and renders it after the round's last tool result
+  (assistant(tool_calls) → tool → user); the turn goes on. The words are
+  verbatim, with no tag: a user message needs no explanation, and no test
+  showed one is needed. No system-prompt line either. Other lifted news
+  (board, background, peers) still rides the result.
+- **Once.** The entry is the message's only copy: no `delivered` entry is
+  written for it (that kind is now only in older logs), the queue no longer
+  holds it, the intake (asks.go) records it once at `SayAs`, and
+  OnDelivered names the call whose result it followed. History shows it as
+  queued (typed mid-turn).
+- **Fallback.** `providers[].fold_user_into_tool_result: true` sets
+  agentkit's `ShaperPolicy.FoldUserIntoToolResult`: the words go at the
+  end of the last tool result as `[the user wrote, while this ran] <text>`.
+  Default off; for a chat template that rejects user-after-tool (some
+  llama.cpp ones).
+- **Missed reply.** If the round after the delivery writes no text and
+  only calls tools, `[dun] The person asked you something mid-turn; reply
+  to them now.` rides that round's results: once per delivered message (a
+  new message arms it again). Nothing when nobody typed.
+- **The plan force waits.** While a reply is due (the round after the
+  delivery, and after the missed-reply aside the round after that) the
+  forced plan call is not sent; it stays armed for the next request.
+- **The turn-end check accepts the reply.** A text-only round right after
+  a delivery ends the turn with no check (no "Open plan nodes… Finish
+  each"). The simpler of the two options: asking whether to continue would
+  cost a round and put the model back in charge of a turn the person is now
+  in. No new turn and no wake: the unrequested-turn and spend rules are
+  unchanged.
+- **Risk.** A mid-turn user entry is a `KindUser` like a turn's input, so
+  code that takes the newest user entry as the turn's start (recap's
+  `turnStart`, the fold's ask when asks are off) now sees it as one.
 
 ## Thinking titles are bold (USER 2026-11-18)
 

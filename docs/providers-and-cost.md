@@ -264,6 +264,15 @@ miss ours (we rewrote the prefix) or the server's (the slot was taken)?
   a test fails on a rename. `PinFirstUser` is set for sub-agents only: their
   first message is the brief, while a root session's may be "hi" or a pasted
   log, and a pinned entry rides every round.
+- `FoldUserIntoToolResult` comes from the provider:
+  `providers: [{…, "fold_user_into_tool_result": true}]`. Default off. A
+  message the person types while a tool runs is a user message after that
+  round's tool results (`midreply.go`). Some chat templates (some llama.cpp
+  ones) reject a user message right after tool results; for such a
+  provider, turn this on: the words then go at the end of the last tool
+  result, as `[the user wrote, while this ran] <text>`. Read when the
+  engine starts, for the endpoint it starts on (`foldUserIntoToolResult`,
+  `cmd/dun/config.go`).
 
 ## Re-heading (`internal/harness/rehead.go`)
 

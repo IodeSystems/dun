@@ -3,6 +3,9 @@ package harness
 import (
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/iodesystems/agentkit/agent"
 )
 
 // midreply.go — the person's words mid-turn are answered first (USER
@@ -10,64 +13,59 @@ import (
 // during a turn; the model (Gemini via OpenRouter) read it only as text
 // inside a tool result, under the plan board, and kept calling tools.
 //
-//   - Framing: a lifted person message is the last thing in the result,
-//     under one header that says the person wrote it now and asks for a
-//     reply in text (midTurnFrame).
-//   - The system prompt says the same once (systemMidTurn), where it is
-//     cached.
-//   - Missed reply: if the round after the lift writes no text and only
-//     calls tools, one keyed aside (midTurnNudge) rides that round's
-//     results. Once per lifted message.
+//   - Delivery: a message typed while a tool ran is a user message of its
+//     own, verbatim, after that round's tool results (deliverMidTurn).
+//     agentkit (v0.36.0) claims it at the next round and renders it after
+//     the round's last result; a template that refuses a user message after
+//     tool results folds it into the result instead
+//     (ProviderConfig.FoldUserIntoToolResult).
+//   - Missed reply: if the round after the delivery writes no text and only
+//     calls tools, one aside (midTurnNudge) rides that round's results.
+//     Once per delivered message.
 //   - Nothing pushes back: the forced plan call waits while a reply is due
-//     (planForceOpts), and a text-only reply right after the lift ends the
-//     turn with no turn-end check (onIdle).
+//     (planForceOpts), and a text-only reply right after the delivery ends
+//     the turn with no turn-end check (onIdle).
 //
-// All of it costs nothing when nobody typed: the state is set only by a lift.
+// All of it costs nothing when nobody typed: the state is set only by a
+// delivery.
 
-// midTurnHead heads the person's lifted messages. Model-facing.
-const midTurnHead = "[the person wrote mid-turn; reply to them in text before your next tool call, then go on if it still makes sense]:"
+// midTurnTag marks a person's message delivered mid-turn, so a resumed
+// client shows it where it landed, as typed while the agent worked.
+const midTurnTag = "mid-turn"
 
-// midTurnNudge is the aside when the round after a lift wrote no text.
+// midTurnNudge is the aside when the round after a delivery wrote no text.
 const midTurnNudge = "The person asked you something mid-turn; reply to them now."
 
-// midTurnKey keys the aside, so a second one replaces the first.
+// midTurnKey keys the aside.
 const midTurnKey = "mid-turn-reply"
 
-// midTurnFrame frames the person's messages, verbatim and in order: one
-// header, then each message in «».
-func midTurnFrame(texts []string) string {
-	var b strings.Builder
-	b.WriteString(midTurnHead)
-	sep := " "
-	if len(texts) > 1 {
-		sep = "\n"
+// deliverMidTurn sends q, a message typed while a tool ran, to the model:
+// a pending user entry, as a queued message is saved (flushQueued). The
+// turn's next round claims it, and the request carries it as a user message
+// after the round's tool results; the turn goes on. Called once the result
+// is stored (deliverLifted), so it sorts after it in the history too.
+func (h *Harness) deliverMidTurn(q queued) {
+	h.store.publish(agent.Entry{
+		ID: q.id, Kind: agent.KindUser, Tag: midTurnTag, Content: q.text, CreatedAt: time.Now().UnixNano(),
+	})
+	if PersonText(q.text) {
+		h.mid.mu.Lock()
+		h.mid.waiting, h.mid.nudged = true, false
+		h.mid.mu.Unlock()
 	}
-	for _, t := range texts {
-		b.WriteString(sep)
-		b.WriteString("«" + t + "»")
-	}
-	return b.String()
 }
 
-// deliverMidTurn puts the framed person's words in front of the model. Today
-// it appends them to the tool result, last; it is the one place a real
-// role-user message after the round's results would replace it.
-func (h *Harness) deliverMidTurn(result, text string) string {
-	if result == "" {
-		return text
-	}
-	return result + "\n\n" + text
-}
-
-// midReply is the reply a lifted person message is owed; prepareTurn resets it.
+// midReply is the reply a delivered person message is owed; prepareTurn
+// resets it.
 type midReply struct {
 	mu sync.Mutex
-	// waiting: a person's message was lifted; the next round is the reply's.
+	// waiting: a person's message was delivered; the next round is the
+	// reply's.
 	waiting bool
-	// nudged: the aside was given for the message lifted last.
+	// nudged: the aside was given for the message delivered last.
 	nudged bool
 	// answered: the round just done was a text-only reply right after a
-	// lift, for the turn-end check to accept.
+	// delivery, for the turn-end check to accept.
 	answered bool
 }
 
@@ -75,13 +73,6 @@ func (m *midReply) reset() {
 	m.mu.Lock()
 	m.waiting, m.nudged, m.answered = false, false, false
 	m.mu.Unlock()
-}
-
-// midLifted notes a person's message lifted into a tool result.
-func (h *Harness) midLifted() {
-	h.mid.mu.Lock()
-	h.mid.waiting, h.mid.nudged = true, false
-	h.mid.mu.Unlock()
 }
 
 // midWaiting reports whether the request about to be sent is the reply's.
@@ -123,7 +114,7 @@ func (h *Harness) midRound(calls int) {
 }
 
 // midAnswered reports, once, whether the round just done was a text-only
-// reply to a lifted person message: the turn ends on it.
+// reply to a delivered person message: the turn ends on it.
 func (h *Harness) midAnswered() bool {
 	h.mid.mu.Lock()
 	defer h.mid.mu.Unlock()

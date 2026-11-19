@@ -186,6 +186,11 @@ type Config struct {
 	// thinking titles, the Markdown note); cmd/dun gives it no Ask, so
 	// there is no ask_user. {OUTPUT} stays: the engine expands it.
 	NonInteractive bool
+	// FoldUserIntoToolResult renders a person's mid-turn message into the
+	// last tool result instead of as a user message after it, for a chat
+	// template that refuses a user message after tool results
+	// (dunconfig.ProviderConfig.FoldUserIntoToolResult, midreply.go).
+	FoldUserIntoToolResult bool
 	// NoAsks: the person's messages do not become ask nodes (asks.go). For
 	// an embedder with no person, and tests of other things.
 	NoAsks bool
@@ -886,7 +891,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		// that is 31% low, which puts the shape target above the whole window
 		// and makes every rung below unreachable. See internal/tokenmeter.
 		Estimate: &h.meter,
-		Policy:   shaperPolicy(h.windowTokens()),
+		Policy:   shaperPolicy(h.windowTokens(), cfg.FoldUserIntoToolResult),
 		// Compaction is bookkeeping, not model work: stop the turn's budget
 		// clock for the fold so a slow endpoint + a long compaction cannot run
 		// the turn past its budget mid-fold and cancel the worker with a bare

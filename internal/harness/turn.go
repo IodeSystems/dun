@@ -117,7 +117,8 @@ func historyItems(entries []agent.Entry) []HistoryItem {
 		}
 		switch e.Kind {
 		case agent.KindUser:
-			out = append(out, HistoryItem{Kind: "user", ID: e.ID, Content: e.Content})
+			// Queued: typed while the agent worked (midreply.go).
+			out = append(out, HistoryItem{Kind: "user", ID: e.ID, Queued: e.Tag == midTurnTag, Content: e.Content})
 		case kindDelivered:
 			out = append(out, HistoryItem{Kind: "user", ID: e.ID, Queued: true, Content: e.Content})
 		case agent.KindAssistant:

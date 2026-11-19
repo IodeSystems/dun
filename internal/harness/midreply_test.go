@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun/internal/mcpserver"
 )
@@ -80,16 +81,24 @@ func (r *midRunner) forcedAt() []int {
 
 func startMid(t *testing.T, r *midRunner, rounds int) *Harness {
 	t.Helper()
+	return startMidWith(t, r, func(c *Config) { c.PlanNudgeRounds = rounds })
+}
+
+// startMidWith is startMid with set applied to the config.
+func startMidWith(t *testing.T, r *midRunner, set func(*Config)) *Harness {
+	t.Helper()
 	t.Setenv("DUN_HOME", t.TempDir())
 	t.Setenv("DUN_PLAN_NUDGE_ROUNDS", "")
 	t.Setenv("DUN_PLAN_NUDGE_FAILS", "")
 	t.Setenv("DUN_PLAN_STALL_ROUNDS", "")
 	dir := t.TempDir()
-	h, err := Start(context.Background(), Config{
+	cfg := Config{
 		Workspace: dir, Servers: []mcpserver.Server{}, Client: r, Exec: &HostShell{Dir: dir},
 		SessionFile:     filepath.Join(dir, "s.jsonl"),
-		PlanNudgeRounds: rounds, PlanNudgeFails: -1, PlanStallRounds: -1, NoAsks: true,
-	})
+		PlanNudgeRounds: -1, PlanNudgeFails: -1, PlanStallRounds: -1, NoAsks: true,
+	}
+	set(&cfg)
+	h, err := Start(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,46 +111,141 @@ func midExec(i int) *llm.ToolCall {
 	return nudgeCall(fmt.Sprintf("c%d", i), "exec", fmt.Sprintf(`{"command":"true %d"}`, i))
 }
 
-// One message: the header, then the words verbatim in «». Several: one
-// header, then each on its own line, in order.
-func TestMidTurnFrame(t *testing.T) {
-	if got, want := midTurnFrame([]string{"what are you doing?"}),
-		"[the person wrote mid-turn; reply to them in text before your next tool call, then go on if it still makes sense]: «what are you doing?»"; got != want {
-		t.Errorf("one:\n%s\nwant:\n%s", got, want)
+// liftedTexts is the person's messages held to follow the result being
+// dispatched (deliverLifted).
+func liftedTexts(h *Harness) []string {
+	h.noteMu.Lock()
+	defer h.noteMu.Unlock()
+	var out []string
+	for _, q := range h.lifted {
+		out = append(out, q.text)
 	}
-	if got, want := midTurnFrame([]string{"one", "two"}), midTurnHead+"\n«one»\n«two»"; got != want {
-		t.Errorf("several:\n%s\nwant:\n%s", got, want)
+	return out
+}
+
+const midAsk = "What is your goal here? what are you doing?"
+
+// midSayOnce runs exec in round 0, the person typing while it runs, and
+// replies with text after.
+func midSayOnce(h **Harness) *midRunner {
+	return &midRunner{step: func(i int) (string, *llm.ToolCall) {
+		if i == 0 {
+			(*h).Say(midAsk)
+			return "", midExec(i)
+		}
+		return "Fixing the build: the test fails on a missing file.", nil
+	}}
+}
+
+func roles(msgs []llm.Message) string {
+	var rs []string
+	for _, m := range msgs {
+		rs = append(rs, m.Role)
 	}
-	// The cost: 114 bytes of header, then 5 bytes (" «»" in UTF-8) a message.
-	if n := len(midTurnHead); n != 114 {
-		t.Errorf("header is %d bytes, want 114", n)
+	return strings.Join(rs, ",")
+}
+
+// A message typed while a tool runs reaches the next request as a user
+// message of its own, verbatim, right after that round's tool result. The
+// result does not carry it, and the system prompt needs no line about it.
+func TestMidTurnUserAfterResults(t *testing.T) {
+	var h *Harness
+	r := midSayOnce(&h)
+	h = startMid(t, r, -1)
+	askOK(t, h)
+	msgs := r.sent[1]
+	n := len(msgs)
+	if got := roles(msgs[n-3:]); got != "assistant,tool,user" || len(msgs[n-3].ToolCalls) != 1 {
+		t.Fatalf("request 1 ends %s, want assistant(tool_calls),tool,user", got)
+	}
+	if msgs[n-1].Content != midAsk {
+		t.Errorf("the user message is %q, want the words verbatim", msgs[n-1].Content)
+	}
+	if strings.Contains(msgs[n-2].Content, midAsk) {
+		t.Errorf("the tool result carries the message too: %q", msgs[n-2].Content)
+	}
+	if strings.Contains(h.Session.System, "mid-turn") {
+		t.Error("the system prompt explains the message")
 	}
 }
 
-// The person's words are last, after the board and any other news.
-func TestMidTurnLiftIsLast(t *testing.T) {
-	h := newNoteHarness(t)
-	h.Say("stop")
-	h.Aside("[plan] the board")
-	out := h.liftQueued("ok")
-	if want := "ok\n\n[session] [plan] the board\n\n" + midTurnHead + " «stop»"; out != want {
-		t.Errorf("got:\n%s\nwant:\n%s", out, want)
+// fold_user_into_tool_result: the message goes inside the last tool result,
+// framed by agentkit, and no user message follows it.
+func TestMidTurnFoldIntoToolResult(t *testing.T) {
+	var h *Harness
+	r := midSayOnce(&h)
+	h = startMidWith(t, r, func(c *Config) { c.FoldUserIntoToolResult = true })
+	askOK(t, h)
+	msgs := r.sent[1]
+	last := msgs[len(msgs)-1]
+	if last.Role != "tool" || !strings.HasSuffix(last.Content, "\n\n[the user wrote, while this ran] "+midAsk) {
+		t.Fatalf("request 1 ends %s: %q", roles(msgs), last.Content)
 	}
 }
 
-// The system prompt says who the framed text is, once, where a person reads
-// along; about 90 bytes.
-func TestSystemMidTurn(t *testing.T) {
-	h := startStall(t, &nudgeRunner{}, -1, -1, -1)
-	if c := strings.Count(h.Session.System, systemMidTurn); c != 1 {
-		t.Errorf("the line is in the system prompt %d times, want 1", c)
+// Delivered once: one user entry with the message's id, once in the next
+// request and in every later one, once on the intake, nothing left pending
+// to start a turn, and no second copy (a delivered entry, the queue).
+func TestMidTurnNoDoubleDelivery(t *testing.T) {
+	var h *Harness
+	r := midSayOnce(&h)
+	var got []Delivery
+	h = startMidWith(t, r, func(c *Config) {
+		c.NoAsks = false
+		c.OnDelivered = func(d Delivery) { got = append(got, d) }
+	})
+	askOK(t, h)
+	if r.calls() != 2 {
+		t.Errorf("%d requests, want 2: the message started no turn of its own", r.calls())
 	}
-	if !strings.Contains(systemMidTurn, `"`+midTurnHead[:len("[the person wrote mid-turn")]+`"`) {
-		t.Error("the line does not name the header")
+	for i := 1; i < r.calls(); i++ {
+		if c := r.count(i, midAsk); c != 1 {
+			t.Errorf("request %d carries the message %d times, want 1", i, c)
+		}
 	}
-	if n := len(systemMidTurn); n > 100 {
-		t.Errorf("the line is %d bytes, want about 90", n)
+	n := 0
+	for _, e := range h.store.History() {
+		if strings.Contains(e.Content, midAsk) {
+			n++
+			if e.Kind != agent.KindUser || e.Tag != midTurnTag {
+				t.Errorf("entry %+v, want a mid-turn user entry", e)
+			}
+		}
 	}
+	if n != 1 {
+		t.Errorf("%d entries hold the message, want 1", n)
+	}
+	if len(got) != 1 || len(got[0].IDs) != 1 || got[0].CallID != "c0" {
+		t.Errorf("OnDelivered %+v, want once, for call c0", got)
+	}
+	// Not Pending(): the exec the message released became a job, and its
+	// finishing is news of its own.
+	if q := h.QueuedUser(); len(q) != 0 {
+		t.Errorf("still queued after the turn: %+v", q)
+	}
+	h.asks.mu.Lock()
+	intake := 0
+	for _, m := range h.asksLocked().Intake {
+		if m.Text == midAsk {
+			intake++
+		}
+	}
+	h.asks.mu.Unlock()
+	if intake != 1 {
+		t.Errorf("the intake holds the message %d times, want 1", intake)
+	}
+	if items := h.History(); !historyQueued(items, midAsk) {
+		t.Error("History does not show the message as typed mid-turn")
+	}
+}
+
+func historyQueued(items []HistoryItem, text string) bool {
+	for _, it := range items {
+		if it.Kind == "user" && it.Content == text {
+			return it.Queued
+		}
+	}
+	return false
 }
 
 // The round after the lift made only tool calls: one aside, in that round's
@@ -160,7 +264,7 @@ func TestMidTurnMissedReplyOnce(t *testing.T) {
 	}}
 	h = startMid(t, r, -1)
 	askOK(t, h)
-	if r.count(1, "«what are you doing?»") != 1 {
+	if r.count(1, "what are you doing?") != 1 {
 		t.Fatal("request 1 does not carry the message")
 	}
 	if r.count(1, midTurnNudge) != 0 {

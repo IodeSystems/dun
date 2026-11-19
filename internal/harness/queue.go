@@ -276,11 +276,10 @@ func (h *Harness) liftQueued(result string) string {
 	// Trailing newlines on the tool's own output would compound with the separator
 	// below into a run of blank lines.
 	b.WriteString(strings.TrimRight(result, "\n"))
-	// The person's words go last, framed as theirs (midreply.go).
-	var person []string
 	for _, q := range items {
-		if q.kind == queuedUser && PersonText(q.text) {
-			person = append(person, q.text)
+		// Not the person's words: once the result is stored they become a
+		// user message after it (deliverLifted, midreply.go).
+		if q.kind == queuedUser {
 			continue
 		}
 		if b.Len() > 0 {
@@ -289,11 +288,7 @@ func (h *Harness) liftQueued(result string) string {
 		b.WriteString(q.policy().prefix)
 		b.WriteString(q.text)
 	}
-	if len(person) == 0 {
-		return b.String()
-	}
-	h.midLifted()
-	return h.deliverMidTurn(b.String(), midTurnFrame(person))
+	return b.String()
 }
 
 // drain removes every buffered item matching pred and returns it, leaving the
