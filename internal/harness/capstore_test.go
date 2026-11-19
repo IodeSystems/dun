@@ -51,9 +51,10 @@ func TestCaps_LearnStoreSeed(t *testing.T) {
 		return c
 	}
 	c := newClient()
-	_, _, err := c.ChatWithOpts(context.Background(), []llm.Message{{Role: "user", Content: "hi"}}, nil, &llm.ChatOpts{ReasoningEffort: "none"})
-	if err == nil {
-		t.Fatal("the refusal did not come back as an error")
+	// agentkit sends the refused request once more, translated (v0.34.0:
+	// on by default), so the call answers.
+	if _, _, err := c.ChatWithOpts(context.Background(), []llm.Message{{Role: "user", Content: "hi"}}, nil, &llm.ChatOpts{ReasoningEffort: "none"}); err != nil {
+		t.Fatalf("the refusal was not resent: %v", err)
 	}
 	if only, ok := c.Capabilities().ThinkingOnly(); !ok || !only {
 		t.Fatalf("thinking-only not learned from the real GLM body: %+v", c.Capabilities().Facts)

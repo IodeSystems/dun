@@ -999,13 +999,32 @@ From the 2026-11-18 inventory of model calls nobody typed for.
   history and the summary instruction. Set at every build, so a server
   starting or `/rag on` reaches the next fold. Before, a fold read the whole
   history uncached under the compaction worker's prompt (the 85% of a
-  fold's overhead in `compaction.md`). `foldRunner` knows a prefix fold by
-  that system. Limits: a staged fold (history over the budget) keeps the
-  worker prompt and sends no key; pinned entries are left out of the fold
+  fold's overhead in `compaction.md`). Since agentkit v0.34.0 a fold too big
+  for one request is split: its first request carries the prefix over the
+  longest head of the history that fits beside the session's system and
+  tools, and the later stages keep the worker prompt and send no tools and
+  no key. `foldRunner` knows every fold request by `agent.IsFold(ctx)`, not
+  by its system (the first request's system is the session's). Limits:
+  only the first request of a split fold can match the cache; pinned
+  entries are left out of the fold
   request, so with `PinLatestUser` the cache matches up to the latest user
   entry; the fold sends thinking off, which some templates render
-  differently. Proof: `TestFold_SharesTheRoundsPrefix`; no live
-  measurement yet.
+  differently. Proof: `TestFold_SharesTheRoundsPrefix` (a whole fold and a
+  split one); no live measurement yet (side-call kind "fold" records the
+  cached tokens).
+- **A refused reasoning off is agentkit's to resend** (agentkit v0.34.0;
+  `internal/harness/reasoningoff.go`). A thinking-only model refuses off
+  (OpenRouter: "Reasoning is mandatory for this endpoint and cannot be
+  disabled"). agentkit learns `reasoning.thinking_only` from the 400, resends
+  once with every dialect's off form rewritten to the lowest effort, and
+  sends that effort from then on; dun keeps its default resend on
+  (`NoResendOnRefusal` unset), and stores the fact through `OnLearn`
+  (`capstore.go`), so a new client starts with it. dun's own resend
+  (`offGuard`) is gone: with both, a resend that failed again could cost a
+  third request. dun keeps the one `/effort off` note. Proof:
+  `TestReasoningOff_*` (fold, rescue fold, `/effort off`; llama.cpp named and
+  detected, OpenRouter) passed with the guard disabled before it was
+  removed.
 - **Heartbeat escalation is bounded** (`internal/harness/asidettl.go`,
   `heartbeatOpts`). A job's or child's "still running, quiet" heartbeat is
   an aside that escalates to a wake when no turn carried it in 5 s. Before,
