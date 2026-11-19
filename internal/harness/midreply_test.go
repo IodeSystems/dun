@@ -348,3 +348,65 @@ func TestMidTurnIdleAcceptsReply(t *testing.T) {
 		}
 	}
 }
+
+// A message delivered mid-turn stays inside its turn: the turn keeps one
+// start (the task), a recap covers the whole turn and keeps the person's
+// words, the fold's ask is still the task with the message as a later
+// word, and the turn's reply is found past it.
+func TestMidTurnKeepsOneTurnStart(t *testing.T) {
+	call := func(id, name string) agent.Entry {
+		return agent.Entry{ID: "e" + id, Kind: agent.KindToolCall, ToolCallID: id, ToolName: name, Content: `{}`}
+	}
+	result := func(id string) agent.Entry {
+		return agent.Entry{ID: "r" + id, Kind: agent.KindToolResult, ToolCallID: id, ToolName: "exec", Content: "ok"}
+	}
+	entries := []agent.Entry{
+		{ID: "u1", Kind: agent.KindUser, Content: "fix the build"},
+		{ID: "a1", Kind: agent.KindAssistant, Content: "Looking."},
+		call("c1", "exec"), result("c1"),
+		{ID: "m1", Kind: agent.KindUser, Tag: midTurnTag, Content: midAsk},
+		call("c2", "exec"), result("c2"),
+		call("c3", "recap"), // live: no result yet
+	}
+	for i := range entries {
+		entries[i].CreatedAt = int64(i + 1)
+	}
+	if got := turnStart(entries); got != 0 {
+		t.Fatalf("turnStart = %d, want 0 (the task)", got)
+	}
+	sp, err := planRecap(entries, "", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sp.Anchor == nil || sp.Anchor.ID != "u1" {
+		t.Errorf("recap anchored at %+v, want the task", sp.Anchor)
+	}
+	ids := map[string]bool{}
+	for _, e := range sp.Subsumes {
+		ids[e.ID] = true
+	}
+	for _, id := range []string{"a1", "ec1", "rc1", "m1", "ec2", "rc2"} {
+		if !ids[id] {
+			t.Errorf("recap does not cover %s", id)
+		}
+	}
+	if len(sp.Said) != 1 || sp.Said[0] != midAsk {
+		t.Errorf("Said = %q, want the person's words", sp.Said)
+	}
+
+	h := newNoteHarness(t)
+	h.cfg.NoAsks = true // the fold's own ask (no ledger)
+	for _, e := range entries[:7] {
+		h.store.appendSilent(e)
+	}
+	if got := h.store.lastReplyID(); got != "a1" {
+		t.Errorf("lastReplyID = %q, want the turn's reply a1", got)
+	}
+	a := h.noteAsk(context.Background())
+	if a.text != "fix the build" {
+		t.Errorf("the fold's ask is %q, want the task", a.text)
+	}
+	if len(a.later) != 1 || a.later[0].text != midAsk {
+		t.Errorf("later = %+v, want the mid-turn message", a.later)
+	}
+}

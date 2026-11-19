@@ -1359,9 +1359,14 @@ and the turn-end check pushed it back to its tools.
   cost a round and put the model back in charge of a turn the person is now
   in. No new turn and no wake: the unrequested-turn and spend rules are
   unchanged.
-- **Risk.** A mid-turn user entry is a `KindUser` like a turn's input, so
-  code that takes the newest user entry as the turn's start (recap's
-  `turnStart`, the fold's ask when asks are off) now sees it as one.
+- **It starts no turn.** A mid-turn user entry is a `KindUser` like a
+  turn's input, so what finds the turn's start by the newest user entry
+  reads it through `turnInput`, which skips the `mid-turn` tag: recap's
+  `turnStart` and its repeat cue, the fold's ask (asks off; the message is
+  a later word, as a `delivered` one was) and the turn's reply
+  (`lastReplyID`). A recap over it keeps the words verbatim (`Said`). It
+  still counts as the person's message where `SayAs` counts it: the intake,
+  settle, the automatic-turn budget, the missed reply.
 
 ## Thinking titles are bold (USER 2026-11-18)
 

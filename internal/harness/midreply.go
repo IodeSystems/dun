@@ -33,6 +33,19 @@ import (
 // client shows it where it landed, as typed while the agent worked.
 const midTurnTag = "mid-turn"
 
+// turnInput reports whether e is a user message that starts a turn: a user
+// entry that is not a message delivered mid-turn. Code that finds the turn's
+// start by the newest user entry reads it through this, so a mid-turn
+// message stays inside the turn it was typed in.
+func turnInput(e agent.Entry) bool {
+	return e.Kind == agent.KindUser && e.Tag != midTurnTag
+}
+
+// midTurnUser reports whether e is a person's message delivered mid-turn.
+func midTurnUser(e agent.Entry) bool {
+	return e.Kind == agent.KindUser && e.Tag == midTurnTag
+}
+
 // midTurnNudge is the aside when the round after a delivery wrote no text.
 const midTurnNudge = "The person asked you something mid-turn; reply to them now."
 
