@@ -25,6 +25,14 @@ import (
 // sends it (Config.EffortOff for a model that cannot stop thinking). A
 // summarizer that thinks spends its budget before it writes; on a server
 // whose default thinks, that was thousands of tokens per fold.
+//
+// Off stays off when the fold carries the session's prefix (SessionPrefix),
+// though the session's rounds may think: the summary's MaxTokens is sized
+// to the summary, and thinking spends from the same cap. On OpenRouter and
+// llama.cpp the reasoning field is not in the history's cached bytes, so the
+// prefix still matches; on Anthropic a changed thinking setting drops the
+// cached messages. Neither is measured yet. A model that refuses off
+// folds at the lowest effort (offGuard, reasoningoff.go).
 func (h *Harness) foldOpts() *llm.ChatOpts {
 	o := &llm.ChatOpts{}
 	h.applyEffort(o, EffortOff)
@@ -500,7 +508,8 @@ func sessionPrefix(s *agent.Session, system string) agent.SessionPrefix {
 // retry), and neither showed in /usage or any spend view before.
 func (r foldRunner) call(ctx context.Context, msgs []llm.Message, tools []llm.ToolDef, opts *llm.ChatOpts) (string, string, error) {
 	start := time.Now()
-	text, errMsg, usage, err := collectText(ctx, r.h.sideRunner("fold", r.inner), msgs, tools, opts)
+	// offGuard: a model that refuses off folds at the lowest effort.
+	text, errMsg, usage, err := collectText(ctx, offGuard{LLMRunner: r.h.sideRunner("fold", r.inner)}, msgs, tools, opts)
 	r.h.noteSideCall("fold", start, usage)
 	return text, errMsg, err
 }
