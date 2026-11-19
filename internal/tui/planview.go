@@ -48,6 +48,34 @@ type planRow struct {
 	needs, waiting []string
 	ready, repeat  bool
 	depth          int
+	// ask: the ask an ask node holds (the engine's, harness asktool.go).
+	ask *planAsk
+}
+
+// planAsk is an ask row's ask: its state (open, blocked, done, filed,
+// dropped), when the person wrote it, and whether the turn works it.
+type planAsk struct {
+	state   string
+	at      time.Time
+	working bool
+	filed   []string
+}
+
+// closed: done, filed or dropped. A closed ask folds, and the nodes under
+// it show as roots.
+func (a *planAsk) closed() bool {
+	return a != nil && (a.state == "done" || a.state == "filed" || a.state == "dropped")
+}
+
+// planIntake is the person's messages the model has not acknowledged.
+type planIntake struct {
+	msgs    []planMsg
+	working bool
+}
+
+type planMsg struct {
+	at   time.Time
+	text string
 }
 
 type planView struct {
@@ -70,6 +98,9 @@ type planView struct {
 	view int
 	// sum is the last /plan summary, or the one being made; nil before one.
 	sum *planSum
+	// intake: the messages not yet acknowledged; nil with none.
+	intake *planIntake
+	now    func() time.Time // tests
 }
 
 // planSum is the plan event's summary (dun/plansummary.go).
@@ -103,8 +134,11 @@ type planDisp struct {
 // layout lays the rows out in the current view and splits them into the work
 // that is left and the finished rows (folded away): a connected component with
 // every node done or dropped, the same in every view and as /plan clear has it.
-// units counts the finished trees.
-func (v *planView) layout() (live, done []planDisp, units int) {
+// units counts the finished trees. A closed ask (done, filed, dropped) is cut
+// from what needs it, so it folds and the nodes under it show as roots;
+// asks holds the finished trees with an ask in them, done the rest
+// (USER 2026-11-18: done and filed asks fold).
+func (v *planView) layout() (live, done, asks []planDisp, units int) {
 	first := map[string]int{} // id → its first row
 	var uniq []int
 	for i, r := range v.rows {
@@ -112,6 +146,15 @@ func (v *planView) layout() (live, done []planDisp, units int) {
 			first[r.id] = i
 			uniq = append(uniq, i)
 		}
+	}
+	needsOf := func(r planRow) []string {
+		var out []string
+		for _, n := range r.needs {
+			if j, ok := first[n]; !ok || !v.rows[j].ask.closed() {
+				out = append(out, n)
+			}
+		}
+		return out
 	}
 	// Components over needs, either way.
 	parent := map[string]string{}
@@ -125,7 +168,7 @@ func (v *planView) layout() (live, done []planDisp, units int) {
 		return parent[x]
 	}
 	for _, i := range uniq {
-		for _, n := range v.rows[i].needs {
+		for _, n := range needsOf(v.rows[i]) {
 			if _, ok := first[n]; ok {
 				parent[find(v.rows[i].id)] = find(n)
 			}
@@ -151,7 +194,7 @@ func (v *planView) layout() (live, done []planDisp, units int) {
 	default:
 		needed := map[string]bool{}
 		for _, i := range uniq {
-			for _, n := range v.rows[i].needs {
+			for _, n := range needsOf(v.rows[i]) {
 				needed[n] = true
 			}
 		}
@@ -165,7 +208,7 @@ func (v *planView) layout() (live, done []planDisp, units int) {
 			}
 			shown[id] = true
 			all = append(all, planDisp{i, depth, false})
-			for _, n := range v.rows[i].needs {
+			for _, n := range needsOf(v.rows[i]) {
 				if j, ok := first[n]; ok {
 					walk(j, depth+1)
 				}
@@ -177,17 +220,26 @@ func (v *planView) layout() (live, done []planDisp, units int) {
 			}
 		}
 	}
+	hasAsk := map[string]bool{} // component root → has an ask
+	for _, i := range uniq {
+		if v.rows[i].ask != nil {
+			hasAsk[find(v.rows[i].id)] = true
+		}
+	}
 	trees := map[string]bool{}
 	for _, d := range all {
 		r := v.rows[d.i]
-		if !open[find(r.id)] {
-			done = append(done, d)
-			trees[find(r.id)] = true
-		} else {
+		switch c := find(r.id); {
+		case open[c]:
 			live = append(live, d)
+		case hasAsk[c]:
+			asks = append(asks, d)
+		default:
+			done = append(done, d)
+			trees[c] = true
 		}
 	}
-	return live, done, len(trees)
+	return live, done, asks, len(trees)
 }
 
 // planLive is what /plan needs to know of the agents to colour and move it.
@@ -252,8 +304,8 @@ func (v *planView) page() pageDoc {
 	narrow := v.width > 0 && v.width < narrowW
 	v.order, v.keys, v.animating = v.order[:0], v.keys[:0], false
 	seen := map[string]int{}
-	live, done, units := v.layout()
-	nodes := make([]pageNode, 0, len(v.rows)+1)
+	live, done, asks, units := v.layout()
+	nodes := make([]pageNode, 0, len(v.rows)+3)
 	if s := v.sum; s != nil {
 		head := "summary"
 		switch {
@@ -272,6 +324,17 @@ func (v *planView) page() pageDoc {
 		nodes = append(nodes, pageNode{head: head, body: body, style: &stNote})
 		v.order = append(v.order, planSumRow)
 		v.keys = append(v.keys, planSumKey)
+	}
+	// The intake, above the asks: one row however many messages.
+	if in := v.intake; in != nil && len(in.msgs) > 0 {
+		head, style := v.intakeHead()
+		var body []string
+		for _, m := range in.msgs {
+			body = append(body, m.at.Local().Format("15:04")+"  "+m.text)
+		}
+		nodes = append(nodes, pageNode{head: head, body: strings.Join(body, "\n\n"), pre: true, style: style})
+		v.order = append(v.order, planIntakeRow)
+		v.keys = append(v.keys, planIntakeKey)
 	}
 	info := v.occurrences(live)
 	for _, d := range live {
@@ -354,6 +417,26 @@ func (v *planView) page() pageDoc {
 		nodes = append(nodes, pageNode{head: head, body: strings.Join(body, "\n"), pre: true, style: &StDim})
 		v.order = append(v.order, -1)
 		v.keys = append(v.keys, "≡")
+	}
+	// Closed asks with what they finished: one row, opened to list them.
+	if len(asks) > 0 {
+		var body []string
+		var counts askCounts
+		for _, d := range asks {
+			r := v.rows[d.i]
+			line := strings.Repeat("  ", d.depth) + r.id + " " + planMark(r.status) + " " + r.title
+			if a := r.ask; a != nil && !d.repeat {
+				counts.add(a.state)
+				line += "  · " + a.state
+				if len(a.filed) > 0 {
+					line += " → " + strings.Join(a.filed, ", ")
+				}
+			}
+			body = append(body, line)
+		}
+		nodes = append(nodes, pageNode{head: counts.head(), body: strings.Join(body, "\n"), pre: true, style: &StDim})
+		v.order = append(v.order, planAsksRow)
+		v.keys = append(v.keys, planAsksKey)
 	}
 	if len(nodes) == 0 || len(nodes) == 1 && v.sum != nil {
 		nodes = append(nodes, pageNode{body: "The plan is empty. The model makes nodes with its plan tools when a task has several steps."})
@@ -458,6 +541,11 @@ func (v *planView) motion(r planRow) (mark string, style *lipgloss.Style, tag st
 		}
 		return mark, &st, tag
 	}
+	// An ask moves only when it is the one the turn works (askfold.go).
+	if r.ask != nil && !r.ask.closed() && !(v.live.asking && r.ask.working) {
+		mark, tag = v.askMotion(r)
+		return mark, nil, tag
+	}
 	if r.status != "doing" {
 		return mark, nil, ""
 	}
@@ -517,6 +605,15 @@ func (m tuiModel) notePlan(ev evMsg) tuiModel {
 		v.sum = &planSum{text: str(o["text"]), made: str(o["made"]), err: str(o["error"])}
 		v.sum.running, _ = o["running"].(bool)
 	}
+	if o, ok := ev["intake"].(map[string]any); ok {
+		v.intake = &planIntake{}
+		v.intake.working, _ = o["working"].(bool)
+		ms, _ := o["messages"].([]any)
+		for _, x := range ms {
+			mo, _ := x.(map[string]any)
+			v.intake.msgs = append(v.intake.msgs, planMsg{at: time.Unix(int64(intOf(mo["at"])), 0), text: str(mo["text"])})
+		}
+	}
 	rows, _ := ev["rows"].([]any)
 	for _, x := range rows {
 		o, _ := x.(map[string]any)
@@ -525,6 +622,10 @@ func (m tuiModel) notePlan(ev evMsg) tuiModel {
 			needs: strList(o["needs"]), waiting: strList(o["waiting"]), depth: intOf(o["depth"])}
 		r.ready, _ = o["ready"].(bool)
 		r.repeat, _ = o["repeat"].(bool)
+		if a, ok := o["ask"].(map[string]any); ok {
+			r.ask = &planAsk{state: str(a["state"]), at: time.Unix(int64(intOf(a["at"])), 0), filed: strList(a["filed"])}
+			r.ask.working, _ = a["working"].(bool)
+		}
 		v.rows = append(v.rows, r)
 	}
 	if cur := m.planPaging(); cur != nil {
