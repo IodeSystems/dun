@@ -267,6 +267,7 @@ func TestThinkHeader_Title(t *testing.T) {
 		{"live", thinkBlock{text: "**Checking the exec path**\nbody", live: true, start: now}, "✻ Checking the exec path · <1s… · 5 words"},
 		{"done", thinkBlock{text: "**Checking the exec path**\nbody", start: now.Add(-12 * time.Second), end: now}, "✻ Checking the exec path · 12s · 5 words"},
 		{"cut", thinkBlock{text: "**Checking**", cut: true, start: now.Add(-3 * time.Second), end: now}, "✻ Checking · ⏹ 3s · 1 words"},
+		{"from history", thinkBlock{text: "**Checking**"}, "✻ Checking · 1 words"},
 		{"no title, live", thinkBlock{text: "just text", live: true, start: now}, "✻ thinking… <1s · 2 words"},
 		{"no title, done", thinkBlock{text: "just text", start: now.Add(-2 * time.Second), end: now}, "✻ thought for 2s · 2 words"},
 	} {

@@ -202,14 +202,17 @@ func (e *convoEntry) renderThink() {
 func thinkHeader(t *thinkBlock) string {
 	words := fmt.Sprintf(" · %d words", len(strings.Fields(t.text)))
 	if title := thinkTitle(t.text, t.live); title != "" {
-		d := thoughtTime(t)
-		switch {
-		case t.live:
-			d += "…"
-		case t.cut:
-			d = "⏹ " + d
+		s := "✻ " + title
+		if d := thoughtTime(t); d != "–" { // "–": from history, no times
+			switch {
+			case t.live:
+				d += "…"
+			case t.cut:
+				d = "⏹ " + d
+			}
+			s += " · " + d
 		}
-		return "✻ " + title + " · " + d + words
+		return s + words
 	}
 	switch {
 	case t.live:
