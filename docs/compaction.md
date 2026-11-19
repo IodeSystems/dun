@@ -44,10 +44,32 @@ without a fold) only the bounding rungs ever run.
   stubs, just before a fold, so the cache breaks once for both. Basis: 42%
   of 3,530 read calls re-read the exact target, 46% of read bytes
   (`tools/rereads.py`).
-- **Fold (agentkit `compactOldest`, `shaper.go:426-541`) [D].** Keeps the
-  pristine tail only: the last 6 user/assistant messages and 4 tool calls
-  (`internal/harness/shaping.go:276-277`), widened so no result loses its call. Everything
-  older becomes one summary of folded/8 tokens within [500, 8192], at most
+- **Fold (agentkit `compactOldest`, `shaper.go:426-541`) [D].** Keeps at
+  least the pristine tail: the last 6 user/assistant messages and 4 tool
+  calls (`internal/harness/shaping.go` `shaperPolicy`), widened so no result
+  loses its call.
+  **Fold to 55% (USER 2026-11-18; agentkit v0.37.0 `FoldKeepPct`).** dun
+  sets `FoldKeepPct = 55`: `foldKeep` keeps the newest entries verbatim, the
+  most for which the rebuilt prompt (the prefix beside the entries, a
+  summary reserved at `SummaryCap(8192)`, the pinned and kept entries, no
+  LOD) fits 55% of target, found by halving, then widened for calls. Only
+  the oldest entries are folded, so the window is half full after a fold,
+  not nearly empty, and the next fold is far off. agentkit's choices, which
+  differ from the first proposal: `fits()` is checked once more after the
+  widening, and when the widening passes the band the fold falls back to
+  the pristine tail; `tokensBefore <= 0` (a fold with no measured size)
+  also keeps the pristine tail, as does a fold with no target (`Compact`)
+  or a band that cannot hold more than the tail (little history). A huge
+  newest result over the band by itself falls back the same way.
+  `CompactionInfo` reports `KeptCount`/`KeptTokens`; `TokensAfter` stays
+  the LOD-rendered count and `TokensAfterFull` is the count without LOD.
+  The fold notice: `compacted 237 entries, kept 198 verbatim (129.7k):
+  294971 → 147755 tokens (saved …)`, the arrow at `TokensAfter`
+  (`internal/harness/compaction.go`). Measured in
+  `internal/harness/foldkeep_test.go`: 434 entries, target 190k, 221,463
+  tokens before, 264 folded, 171 kept (84.1k), the next round sends 97.8k
+  (51% of target); without the band the same fold kept 7 and sent 17.1k.
+  Everything older becomes one summary of folded/8 tokens within [500, 8192], at most
   60% of target (`shaper.go:794-801`). The summarizer is told the open plan
   and the work in flight (`internal/harness/fold.go:31-41`); after the fold an aside lists
   what is still running (`internal/harness/fold.go:79-125`); the folded span goes to the

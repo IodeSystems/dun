@@ -1094,6 +1094,20 @@ From the 2026-11-18 inventory of model calls nobody typed for.
   differently. Proof: `TestFold_SharesTheRoundsPrefix` (a whole fold and a
   split one); no live measurement yet (side-call kind "fold" records the
   cached tokens).
+- **A fold keeps the newest entries up to 55% of target (USER 2026-11-18:
+  fold only to ~55% of target)** (agentkit v0.37.0
+  `ShaperPolicy.FoldKeepPct`; `foldKeepPct` in
+  `internal/harness/shaping.go`). Before, a fold kept only the pristine tail
+  and left the window nearly empty, so the next fold came soon and each one
+  paid a summarizer call. Now the newest entries stay verbatim as long as the
+  rebuilt prompt (prefix, a summary at its cap, pinned and kept entries,
+  without LOD) fits 55% of target; only the oldest are folded. The pristine
+  tail is the minimum. The fold notice says what was kept: `compacted 237
+  entries, kept 198 verbatim (129.7k): 294971 → 147755 tokens …`; the arrow
+  ends at `TokensAfter` (LOD-rendered, what agentkit says the next build
+  sends), not `TokensAfterFull`. Proof: `internal/harness/foldkeep_test.go`
+  (the simulated 434-entry session sends 51% of target; little history and
+  a huge newest result fold as before).
 - **A refused reasoning off is agentkit's to resend** (agentkit v0.34.0;
   `internal/harness/reasoningoff.go`). A thinking-only model refuses off
   (OpenRouter: "Reasoning is mandatory for this endpoint and cannot be
