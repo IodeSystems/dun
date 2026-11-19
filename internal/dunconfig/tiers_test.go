@@ -140,3 +140,25 @@ func TestSideCallTiers(t *testing.T) {
 		t.Errorf("line %q", l)
 	}
 }
+
+// The effort values the config and the flags take: agentkit's levels,
+// default, off (the old name of none) and lowest; a tier's other value is
+// ignored with a warning.
+func TestValidEffort(t *testing.T) {
+	for _, ok := range []string{"default", "off", "none", "minimal", "low", "Medium", "high", "xhigh", "max", "lowest"} {
+		if !ValidEffort(ok) {
+			t.Errorf("%q refused", ok)
+		}
+	}
+	for _, bad := range []string{"", "huge", "on"} {
+		if ValidEffort(bad) {
+			t.Errorf("%q taken", bad)
+		}
+	}
+	c := tierCfg()
+	c.Tiers[TierThink] = Tier{Model: "big", Effort: "huge"}
+	set := c.ResolveTiers(TierFlags{}, nil, RepoTiers{})
+	if th, _ := set.Get(TierThink); th.Effort != "" || !strings.Contains(strings.Join(set.Warnings, "\n"), `tiers.think.effort "huge" is not a level`) {
+		t.Errorf("think %+v, warnings %q", th, set.Warnings)
+	}
+}

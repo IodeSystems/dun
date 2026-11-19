@@ -169,7 +169,7 @@ func TestSubAgent_OwnEffort(t *testing.T) {
 	if got := b.h.Effort(); got != EffortOff {
 		t.Errorf("default child effort %q", got)
 	}
-	if _, err := h.spawnAgent(context.Background(), "c", "", "", "huge", ""); err == nil || !strings.Contains(err.Error(), "want default, off") {
+	if _, err := h.spawnAgent(context.Background(), "c", "", "", "huge", ""); err == nil || !strings.Contains(err.Error(), "want default, none") {
 		t.Errorf("bad effort: %v", err)
 	}
 }
@@ -177,7 +177,7 @@ func TestSubAgent_OwnEffort(t *testing.T) {
 func TestAgentToolDef_Effort(t *testing.T) {
 	td := agentToolDef("", "", EffortLow, nil, nil, "")
 	p := td.Function.Parameters.(map[string]any)["properties"].(map[string]any)["effort"].(map[string]any)
-	if strings.Join(p["enum"].([]string), ",") != strings.Join(EffortLevels, ",") {
+	if strings.Join(p["enum"].([]string), ",") != "default,none,minimal,low,medium,high,xhigh,max,lowest" {
 		t.Errorf("effort enum %v", p["enum"])
 	}
 	if !strings.Contains(td.Function.Description, "Default effort: low.") {

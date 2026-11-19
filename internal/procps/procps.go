@@ -409,27 +409,41 @@ func agentOf(argv []string, s proto.ProcSession) string {
 	return ""
 }
 
-// agentTier is " (fast)" for a child a model tier picked the model of.
+// agentTier is " (fast)" for a child a model tier picked the model of, with
+// the level its requests send: " (fast, effort minimal)".
 func agentTier(ag proto.ProcAgent) string {
-	if ag.Tier == "" {
-		return ""
+	if w := agentWhat(ag); w != "" {
+		return " (" + w + ")"
 	}
-	return " (" + ag.Tier + ")"
+	return ""
 }
 
-// tieredAgents is the session label's note of its tiered children:
-// " (sub-agents: #1 fast, #3 think)", "" with none.
+// agentWhat is a child's tier and effective effort: "fast, effort low".
+func agentWhat(ag proto.ProcAgent) string {
+	var parts []string
+	if ag.Tier != "" {
+		parts = append(parts, ag.Tier)
+	}
+	if ag.Effort != "" {
+		parts = append(parts, "effort "+ag.Effort)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// tieredAgents is the session label's note of its children on a tier or
+// with an effort the engine said: " (sub-agents: #1 fast, effort minimal;
+// #3 think)", "" with none.
 func tieredAgents(s proto.ProcSession) string {
 	var parts []string
 	for _, ag := range s.Agents {
-		if ag.Tier != "" {
-			parts = append(parts, "#"+itoa(ag.ID)+" "+ag.Tier)
+		if w := agentWhat(ag); w != "" {
+			parts = append(parts, "#"+itoa(ag.ID)+" "+w)
 		}
 	}
 	if len(parts) == 0 {
 		return ""
 	}
-	return " (sub-agents: " + strings.Join(parts, ", ") + ")"
+	return " (sub-agents: " + strings.Join(parts, "; ") + ")"
 }
 
 // Roles from argv.

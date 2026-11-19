@@ -17,7 +17,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -179,7 +178,7 @@ func main() {
 	worktree := flag.Bool("worktree", false, "create a git worktree for isolation (default: work in place); in a session, /isolate worktree")
 	childModel := flag.String("child-model", "", "model for spawned sub-agents (default: facets.child, else same as --model)")
 	childProvider := flag.String("child-provider", "", "logged-in provider --child-model is on (default: facets.child's, else this session's)")
-	childEffort := flag.String("child-effort", "", "effort for spawned sub-agents: default, off, low, medium, high (default: facets.child's, else the saved /effort level)")
+	childEffort := flag.String("child-effort", "", "effort for spawned sub-agents, over a tier's: "+dunconfig.EffortWords+" (default: the tier's, facets.child's, else the saved /effort level)")
 	tierFast := flag.String("tier-fast", "", "[provider/]model of the fast tier (default: $DUN_TIER_FAST, else tiers.fast in config.json)")
 	tierWork := flag.String("tier-work", "", "[provider/]model of the work tier (default: $DUN_TIER_WORK, else tiers.work in config.json)")
 	tierThink := flag.String("tier-think", "", "[provider/]model of the think tier (default: $DUN_TIER_THINK, else tiers.think in config.json)")
@@ -434,9 +433,14 @@ func main() {
 		engineProvider = p.Name
 	}
 	// The session's effort: the saved /effort level, else facets.main's.
-	var mainEffort string
-	if _, saved := harness.SavedEffort(); !saved && slices.Contains(harness.EffortLevels, mainRole.Effort) {
-		mainEffort = mainRole.Effort
+	// The child default's effort, off read as none, and where it came from
+	// (the role table, harness/roles.go); a value that is no level is said
+	// now (dun/tiers.go).
+	el := resolveEfforts(mainRole, childRole, *childEffort, os.Stderr)
+	mainEffort, childEffortLevel, childEffortSrc := el.main, el.child, el.childSrc
+	if _, saved := harness.SavedEffort(); saved {
+		mainEffort = ""
+	} else if mainEffort != "" {
 		enginecmd.EffortLevel = mainEffort
 	}
 	// Dev self-update: if this is a source-stamped build and the tree changed,
@@ -715,30 +719,35 @@ func main() {
 		Spend:     spend,
 		// Each round's tokens, time and cost, for the turn's stats and what a
 		// tool server costs (dun/roundstats.go).
-		StatsLedger:     harness.NewStatsLedger(harness.DefaultStatsDir()),
-		ChildModel:      childRole.Model,
-		ChildProvider:   childRole.Provider,
-		ChildEffort:     childRole.Effort,
-		Tiers:           harnessTiers(tiers),
-		DefaultTier:     tiers.Default,
-		SideCallTiers:   sideTiers,
-		Effort:          mainEffort,
-		Exec:            backend,
-		Worktree:        wt,
-		CommitCfg:       mcpserver.LoadCommit(absWS),
-		Files:           filesConfig(absWS, *noDir),
-		NoDir:           *noDir,
-		NoTools:         *noTools,
-		NonInteractive:  *nonInteractive && *prog,
-		Worker:          *workerFlag && *prog,
-		TurnLimit:       *turnLimit,
-		AsideEscalate:   time.Duration(intFlagOff("aside-escalate-ms", *asideEscalateMS)) * time.Millisecond,
-		SettleDelay:     settleDelayFlag(*settleDelay),
-		PlanNudgeRounds: intFlagOff("plan-nudge-rounds", *planNudgeRounds),
-		PlanNudgeFails:  intFlagOff("plan-nudge-fails", *planNudgeFails),
-		PlanStallRounds: intFlagOff("plan-stall-rounds", *planStallRounds),
-		SessionFile:     sessionFile,
-		Persist:         *persistFlag,
+		StatsLedger:       harness.NewStatsLedger(harness.DefaultStatsDir()),
+		ChildModel:        childRole.Model,
+		ChildProvider:     childRole.Provider,
+		ChildEffort:       childEffortLevel,
+		ChildEffortSource: childEffortSrc,
+		ChildSource:       childRole.Source,
+		MainSource:        mainRole.Source,
+		Tiers:             harnessTiers(tiers),
+		DefaultTier:       tiers.Default,
+		SideCallTiers:     sideTiers,
+		SideCallSources:   sideCallSources(fc),
+		Effort:            mainEffort,
+		EffortSource:      "facets.main",
+		Exec:              backend,
+		Worktree:          wt,
+		CommitCfg:         mcpserver.LoadCommit(absWS),
+		Files:             filesConfig(absWS, *noDir),
+		NoDir:             *noDir,
+		NoTools:           *noTools,
+		NonInteractive:    *nonInteractive && *prog,
+		Worker:            *workerFlag && *prog,
+		TurnLimit:         *turnLimit,
+		AsideEscalate:     time.Duration(intFlagOff("aside-escalate-ms", *asideEscalateMS)) * time.Millisecond,
+		SettleDelay:       settleDelayFlag(*settleDelay),
+		PlanNudgeRounds:   intFlagOff("plan-nudge-rounds", *planNudgeRounds),
+		PlanNudgeFails:    intFlagOff("plan-nudge-fails", *planNudgeFails),
+		PlanStallRounds:   intFlagOff("plan-stall-rounds", *planStallRounds),
+		SessionFile:       sessionFile,
+		Persist:           *persistFlag,
 		// DUN_MEMORY_TRIGGERS=0: no memory fork unless asked (/remember, the
 		// memory tool). See memtrigger.go.
 		DisableMemoryTriggers: os.Getenv("DUN_MEMORY_TRIGGERS") == "0",
@@ -1048,6 +1057,11 @@ func main() {
 	}
 
 	dropKeyEnv(fc, effKey)
+	// A configured tier whose spawns now take the tier's built-in effort
+	// (fast lowest, think high) where they inherited /effort: said once, now.
+	for _, n := range (harness.RoleResolver{Cfg: cfg}).TierDefaultNotes() {
+		fmt.Fprintln(os.Stderr, "dun: "+n)
+	}
 	h, err := harness.Start(ctx, cfg)
 	if h != nil {
 		started.Store(h)
@@ -1125,6 +1139,12 @@ func main() {
 	// What /effort default does on this server, when its model list says
 	// (corrallm's thinking_* fields): the settings and the command list
 	// again once it is known.
+	// A fact learned, or an effort sent other than asked, mid-turn: the
+	// settings (the role table's effective levels) and the /effort picker
+	// again, when they changed (dun/tiers.go).
+	if *prog {
+		harness.OnCapsChanged(rolesResend(em.emit, func() any { return commandsEvent(h) }))
+	}
 	if *prog && dunconfig.ProviderMissing(*url, *model) == nil {
 		go func() {
 			if h.LearnServerThinking(ctx) {

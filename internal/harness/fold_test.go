@@ -48,7 +48,7 @@ func TestFoldHistory_SizedAndThinkingOff(t *testing.T) {
 		t.Fatal(err)
 	}
 	o := r.lastOpts
-	if o == nil || o.EnableThinking == nil || *o.EnableThinking {
+	if o == nil || o.Effort != llm.EffortNone {
 		t.Fatalf("the rescue fold must send thinking off: %+v", o)
 	}
 	if o.MaxTokens < agent.SummaryCap(agent.SummaryMinTokens) {
@@ -67,7 +67,7 @@ func TestFoldHistory_SizedAndThinkingOff(t *testing.T) {
 func TestFoldOpts_ThinkingOff(t *testing.T) {
 	h := &Harness{}
 	o := h.foldOpts()
-	if o.EnableThinking == nil || *o.EnableThinking || o.ReasoningEffort != "none" {
+	if o.Effort != llm.EffortNone || o.ReasoningBudgetTokens != nil {
 		t.Errorf("fold options %+v", o)
 	}
 }

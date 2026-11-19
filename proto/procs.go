@@ -99,12 +99,14 @@ type ProcSession struct {
 	Jobs         []ProcJob   `json:"jobs,omitempty"`
 }
 
-// ProcAgent is a live sub-agent that works in a tree of its own (Dir) or
-// runs on a model tier (Tier); either may be empty.
+// ProcAgent is a live sub-agent that works in a tree of its own (Dir), runs
+// on a model tier (Tier), or has an effective effort its engine said
+// (Effort); any may be empty.
 type ProcAgent struct {
-	ID   int    `json:"id"`
-	Dir  string `json:"dir"`
-	Tier string `json:"tier,omitempty"`
+	ID     int    `json:"id"`
+	Dir    string `json:"dir"`
+	Tier   string `json:"tier,omitempty"`
+	Effort string `json:"effort,omitempty"`
 }
 
 // ProcJob is a running background job.

@@ -285,12 +285,12 @@ func TestSizeAge(t *testing.T) {
 // included (it has no rows of its own). A child with no dir matches no argv.
 func TestAttribute_AgentTiers(t *testing.T) {
 	snap, list, cwd := machine()
-	list.Sessions[0].Agents = []proto.ProcAgent{{ID: 2, Dir: "/w/a/.dun/wt/2", Tier: "fast"}, {ID: 4, Tier: "think"}}
+	list.Sessions[0].Agents = []proto.ProcAgent{{ID: 2, Dir: "/w/a/.dun/wt/2", Tier: "fast"}, {ID: 4, Tier: "think", Effort: "high"}, {ID: 5, Effort: "minimal"}}
 	rows := byPID(Attribute(snap, list, cwd))
 	if got := rows[105].Job; got != "sub-agent #2 (fast) poly-lsp proxy" {
 		t.Errorf("job %q", got)
 	}
-	if got := rows[100].Session; !strings.Contains(got, "(sub-agents: #2 fast, #4 think)") {
+	if got := rows[100].Session; !strings.Contains(got, "(sub-agents: #2 fast; #4 think, effort high; #5 effort minimal)") {
 		t.Errorf("session label %q", got)
 	}
 	if got := rows[101].Job; got != "shell (mcpshell)" {

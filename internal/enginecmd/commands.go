@@ -209,11 +209,9 @@ func OwnCommands(iso string) []proto.CommandSpec {
 				"clear", "archive every finished tree: out of the view and the model's plan, kept in the file", "unarchive", "bring the archived trees back",
 				"summary", "the model says Done / Doing / Next from the plan and the recent session: one side call, beside the turn"),
 			Description: "the task plan the model keeps: alone, the graph as a tree to review, edit, drop and approve; the model is told what you change"},
-		{Name: "effort", Usage: "[default|off|low|medium|high]", Group: "session",
-			Choices: choices(harness.EffortDefault, EffortWords(harness.EffortDefault), harness.EffortOff, harness.EffortAbout[harness.EffortOff],
-				harness.EffortLow, harness.EffortAbout[harness.EffortLow], harness.EffortMedium, harness.EffortAbout[harness.EffortMedium],
-				harness.EffortHigh, harness.EffortAbout[harness.EffortHigh]),
-			State: EffortLevel, Description: "how much the model thinks before it answers: alone picks a level; saved for every session"},
+		{Name: "effort", Usage: "[" + strings.Join(harness.EffortLevels, "|") + "]", Group: "session",
+			Choices: effortChoices(),
+			State:   EffortLevel, Description: "how much the model thinks before it answers: alone picks a level; saved for every session (off is none)"},
 		{Name: "suggest", Usage: "[on|off|auto]", Group: "session", Choices: choices("on", "always", "off", "never", "auto", "when idle"),
 			State: SuggestMode, Description: "next-message suggestions: alone asks for some now, on/off/auto set the mode"},
 		{Name: "rephrase", Usage: "[on|off|status | prompt [text|default]]", Group: "session", Choices: choices("on", "rewrite prompts first", "off", "as typed", "status", "", "prompt", "show the rephrasing prompt; prompt <text> sets it, prompt default goes back to dun's"),
@@ -264,6 +262,30 @@ func EffortWords(level string) string {
 		return h.EffortWords(level)
 	}
 	return harness.EffortAbout[level]
+}
+
+// effortChoices are the /effort picker's rows: every level, and for the
+// session's model, which it does not take as asked and why (agentkit's
+// EffortSupport, harness.Harness.EffortPicker). Before the harness is up,
+// every level as described.
+func effortChoices() []proto.CommandChoice {
+	h, _ := EngineHarness.Load().(*harness.Harness)
+	if h == nil {
+		out := make([]proto.CommandChoice, 0, len(harness.EffortLevels))
+		for _, l := range harness.EffortLevels {
+			out = append(out, proto.CommandChoice{Value: l, Description: EffortWords(l)})
+		}
+		return out
+	}
+	var out []proto.CommandChoice
+	for _, p := range h.EffortPicker() {
+		d := p.About
+		if p.Unavailable != "" {
+			d = "unavailable on this model: sent as " + p.Unavailable
+		}
+		out = append(out, proto.CommandChoice{Value: p.Level, Description: d})
+	}
+	return out
 }
 
 // EngineHarness is this engine's harness, once started, for settingsEvent.

@@ -35,6 +35,11 @@ func TestAgentRow_ShowsTier(t *testing.T) {
 	if got := agentActRow(a, time.Now()).label; !strings.HasPrefix(got, "#3 idle") {
 		t.Errorf("untiered label %q", got)
 	}
+	// The level its requests send, as the engine said it.
+	a.tier, a.effort = "fast", "minimal"
+	if got := agentActRow(a, time.Now()).label; !strings.HasPrefix(got, "#3 fast idle · minimal") {
+		t.Errorf("effort label %q", got)
+	}
 }
 
 // A line wrapped while the pane was narrow is wrapped again when it widens,

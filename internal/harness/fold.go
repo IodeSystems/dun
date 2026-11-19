@@ -21,21 +21,26 @@ import (
 // fold (agent.DefaultSummaryTokens), cap the completion to match, send
 // thinking off, and are told what the session is for and what is in flight.
 
-// foldOpts are a fold call's request options: thinking off, as /effort off
-// sends it (Config.EffortOff for a model that cannot stop thinking). A
-// summarizer that thinks spends its budget before it writes; on a server
-// whose default thinks, that was thousands of tokens per fold.
+// foldOpts are a fold call's request options: the fold role's effort
+// (roles.go), lowest: none where the model can turn thinking off, else the
+// lowest level it takes (the profile's clamp; Config.EffortOff is pinned in
+// the record as what none sends). A summarizer that thinks spends its budget
+// before it writes; on a server whose default thinks, that was thousands of
+// tokens per fold.
 //
 // Off stays off when the fold carries the session's prefix (SessionPrefix),
 // though the session's rounds may think: the summary's MaxTokens is sized
 // to the summary, and thinking spends from the same cap. On OpenRouter and
 // llama.cpp the reasoning field is not in the history's cached bytes, so the
 // prefix still matches; on Anthropic a changed thinking setting drops the
-// cached messages. Neither is measured yet. A model that refuses off
-// folds at the lowest effort: agentkit resends it so (reasoningoff.go).
-func (h *Harness) foldOpts() *llm.ChatOpts {
+// cached messages. Neither is measured yet.
+func (h *Harness) foldOpts() *llm.ChatOpts { return h.roleOpts("fold") }
+
+// roleOpts are new request options with side call role's effort, clamped
+// to the session's model.
+func (h *Harness) roleOpts(role string) *llm.ChatOpts {
 	o := &llm.ChatOpts{}
-	h.applyEffort(o, EffortOff)
+	h.sessionOpts(o, role)
 	return o
 }
 

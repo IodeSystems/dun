@@ -723,7 +723,10 @@ type AgentInfo struct {
 	Model string `json:"model"`
 	// Tier is the model tier that picked Model (fast, work, think); "" when
 	// none did, and from an engine older than tiers.
-	Tier    string `json:"tier,omitempty"`
+	Tier string `json:"tier,omitempty"`
+	// Effort is the level its requests send (its effort, or the /effort
+	// level it inherits, clamped to its model); "" from an older engine.
+	Effort  string `json:"effort,omitempty"`
 	State   string `json:"state"`
 	Status  string `json:"status"`
 	Prompt  string `json:"prompt"`
@@ -914,13 +917,20 @@ type Settings struct {
 	// config.json change applies from the next start), fast, work, think in
 	// order; DefaultTier is the one a spawn that names none runs on. Absent
 	// from an engine older than tiers.
+	//
+	// After the tiers, the role table (rows with Role set; harness/roles.go):
+	// every role (main, child:fast|work|think, each side call) as it resolves
+	// now: model, wanted and effective effort, why they differ, and where
+	// each came from. Sent again when the session's effort or a capability
+	// changes (agentkit OnLearn, OnTranslate). Clients render it as sent.
 	Tiers       []TierInfo `json:"tiers,omitempty"`
 	DefaultTier string     `json:"defaultTier,omitempty"`
 }
 
-// TierInfo is one model tier as the engine serves it. No Model: its spawns
-// run on the child default. Off: why it cannot be served. Source: where
-// Model came from (flag, env, config).
+// TierInfo is one model tier as the engine serves it, or one row of the
+// role table (Role set). No Model: its spawns run on the child default (a
+// role row: the session's model). Off: why it cannot be served. Source:
+// where Model came from (flag, env, config; a role row: its layer).
 type TierInfo struct {
 	Name     string `json:"name"`
 	Provider string `json:"provider,omitempty"`
@@ -928,6 +938,15 @@ type TierInfo struct {
 	Effort   string `json:"effort,omitempty"`
 	Source   string `json:"source,omitempty"`
 	Off      string `json:"off,omitempty"`
+	// The role table's columns. Role is the role (main, child:fast, fold…);
+	// Wanted the level asked for ("" unset), Effective what its requests
+	// send, Reason why they differ (or why the model is not the one its
+	// layers name), EffortSource where Wanted came from.
+	Role         string `json:"role,omitempty"`
+	Wanted       string `json:"wanted,omitempty"`
+	Effective    string `json:"effective,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+	EffortSource string `json:"effortSource,omitempty"`
 }
 
 // ContextSettings is /context config's settings in force: the window (0

@@ -29,7 +29,7 @@ func TestStartTiers_Warnings(t *testing.T) {
 	if sides["rescue"] != "fast" || sides["fold"] != dunconfig.TierSession {
 		t.Errorf("sides %v", sides)
 	}
-	tp := tiersProto(set)
+	tp := tiersProto(set, nil)
 	if len(tp) != 3 || tp[0].Model != "small" || tp[0].Off == "" {
 		t.Errorf("settings tiers %+v", tp)
 	}
