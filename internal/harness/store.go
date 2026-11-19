@@ -430,7 +430,9 @@ func (s *sessionStore) lastReplyID() string {
 				return s.entries[i].ID
 			}
 		case agent.KindUser:
-			return ""
+			if turnInput(s.entries[i]) { // a mid-turn message is inside the turn (midreply.go)
+				return ""
+			}
 		}
 	}
 	return ""

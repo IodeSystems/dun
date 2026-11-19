@@ -746,8 +746,10 @@ func main() {
 		PlanNudgeRounds:   intFlagOff("plan-nudge-rounds", *planNudgeRounds),
 		PlanNudgeFails:    intFlagOff("plan-nudge-fails", *planNudgeFails),
 		PlanStallRounds:   intFlagOff("plan-stall-rounds", *planStallRounds),
-		SessionFile:       sessionFile,
-		Persist:           *persistFlag,
+		// A template that refuses a user message after tool results.
+		FoldUserIntoToolResult: foldUserIntoToolResult(fc, *url),
+		SessionFile:            sessionFile,
+		Persist:                *persistFlag,
 		// DUN_MEMORY_TRIGGERS=0: no memory fork unless asked (/remember, the
 		// memory tool). See memtrigger.go.
 		DisableMemoryTriggers: os.Getenv("DUN_MEMORY_TRIGGERS") == "0",

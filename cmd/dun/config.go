@@ -56,6 +56,19 @@ func effortOff(fc dunconfig.DunConfig, url string) string {
 	return ""
 }
 
+// foldUserIntoToolResult is the provider's fold_user_into_tool_result for
+// the endpoint at url: the active provider's when it is that endpoint, else
+// the saved provider's at url; false otherwise.
+func foldUserIntoToolResult(fc dunconfig.DunConfig, url string) bool {
+	if p, ok := fc.Active(); ok && strings.TrimRight(p.URL, "/") == strings.TrimRight(url, "/") {
+		return p.FoldUserIntoToolResult
+	}
+	if p, ok := fc.ProviderAt(url); ok {
+		return p.FoldUserIntoToolResult
+	}
+	return false
+}
+
 // noProvider stands in for the LLM when providerMissing says why: every call
 // fails with that, and nothing is contacted.
 type noProvider struct{ why error }

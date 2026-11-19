@@ -12,7 +12,7 @@ import (
 // turned into a test: a new agentkit knob fails here until dun decides on it.
 func TestShaperPolicy_CoversPolicyFor(t *testing.T) {
 	ref := reflect.ValueOf(agent.PolicyFor(200_000))
-	ours := reflect.ValueOf(shaperPolicy(200_000))
+	ours := reflect.ValueOf(shaperPolicy(200_000, false))
 	for i := 0; i < ref.NumField(); i++ {
 		f := ref.Type().Field(i)
 		if !f.IsExported() || ref.Field(i).IsZero() {
@@ -27,7 +27,7 @@ func TestShaperPolicy_CoversPolicyFor(t *testing.T) {
 // An unknown window keeps every non-budget rung: that is why dun does not
 // build from PolicyFor, which returns an empty policy for window 0.
 func TestShaperPolicy_UnknownWindowKeepsLOD(t *testing.T) {
-	p := shaperPolicy(0)
+	p := shaperPolicy(0, false)
 	if p.BudgetTokens != 0 {
 		t.Errorf("unknown window must be unbudgeted, got %d", p.BudgetTokens)
 	}

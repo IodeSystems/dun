@@ -292,8 +292,14 @@ func (h *Harness) nudgeRoundNow() bool {
 
 // planForceOpts is the turn runner's hook (reasoningTee): the options for
 // this request with a plan call forced, or nil to send it as it is. It
-// disarms the force: one request only.
+// disarms the force: one request only. While the person is owed a reply it
+// returns nil and keeps the force armed.
 func (h *Harness) planForceOpts(tools []llm.ToolDef, opts *llm.ChatOpts) *llm.ChatOpts {
+	// A reply to the person is due: the force waits, armed, for the request
+	// after it (midreply.go).
+	if h.midWaiting() {
+		return nil
+	}
 	h.nudge.mu.Lock()
 	force := h.nudge.force
 	h.nudge.force = false

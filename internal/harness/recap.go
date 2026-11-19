@@ -71,7 +71,8 @@ type recapSpan struct {
 	Anchor   *agent.Entry  // the entry the phrase matched; nil = start of session
 	Chars    int
 	// Said is what the user typed mid-turn inside the span (lifted into tool
-	// results), in order, word for word: it goes into the summary unparaphrased.
+	// results in older logs, mid-turn user entries now), in order, word for
+	// word: it goes into the summary unparaphrased.
 	Said []string
 	// Unmatched are keep terms that named nothing. Reported rather than
 	// ignored: a model that asked to keep a result and silently lost it has
@@ -178,6 +179,9 @@ func planRecap(entries []agent.Entry, from string, keep, drop []string) (recapSp
 			if e.Kind == agent.KindToolResult {
 				sp.Said = append(sp.Said, liftedUserWords(e.Content)...)
 			}
+			if midTurnUser(e) { // typed mid-turn, as its own entry (midreply.go)
+				sp.Said = append(sp.Said, e.Content)
+			}
 			// A recap call is no work to list.
 			if e.Kind == agent.KindToolCall && !dropping[e.ToolCallID] && e.ToolName != "recap" {
 				if r, ok := results[e.ToolCallID]; ok {
@@ -251,7 +255,7 @@ func matchCalls(entries []agent.Entry, start int, live string, terms []string) (
 // -1 when there is none, so the turn is the whole session.
 func turnStart(entries []agent.Entry) int {
 	for i := len(entries) - 1; i >= 0; i-- {
-		if entries[i].Kind == agent.KindUser {
+		if turnInput(entries[i]) { // a mid-turn message is inside the turn (midreply.go)
 			return i
 		}
 	}
@@ -714,7 +718,7 @@ func recapCueFor(entries []agent.Entry, tool string, size int) (recapCue, bool) 
 			cost += len(e.Content)
 			continue
 		}
-		if e.Kind == agent.KindUser {
+		if turnInput(e) {
 			break // recap cannot reach before it
 		}
 		if e.Kind != agent.KindToolCall {

@@ -1,12 +1,13 @@
 package harness
 
 // The mid-turn message path. A message typed while the agent is working must
-// reach it INSIDE the running turn — lifted into the next tool result, the same
-// way a background job's completion travels — and several must batch, without
-// limit.
+// reach it INSIDE the running turn — a user message right after the next tool
+// result (midreply.go), while a background job's completion is lifted into the
+// result itself — and several must batch, without limit.
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -75,8 +76,8 @@ func TestFlushesPartitionEveryKind(t *testing.T) {
 	}
 }
 
-// A message typed mid-turn rides back inside the running tool's result, labelled
-// so the model can tell the user from the machinery.
+// A message typed mid-turn is taken with the running tool's result, to follow
+// it as a user message of its own (midreply.go).
 func TestSayLiftsIntoToolResult(t *testing.T) {
 	h := newNoteHarness(t)
 	inner := func(ctx context.Context, tc llm.ToolCall) (string, error) {
@@ -90,8 +91,9 @@ func TestSayLiftsIntoToolResult(t *testing.T) {
 	if !strings.Contains(out, "wrote 3 lines") {
 		t.Errorf("tool result lost: %q", out)
 	}
-	if !strings.Contains(out, "[user] actually, skip the tests") {
-		t.Errorf("message was not lifted into the tool result: %q", out)
+	// Not in the result: held to follow it as a user message (midreply.go).
+	if strings.Contains(out, "skip the tests") || !slices.Contains(liftedTexts(h), "actually, skip the tests for now") {
+		t.Errorf("message not held for after the result: %q, held %q", out, liftedTexts(h))
 	}
 	if h.Pending() != 0 || h.Queued() != 0 {
 		t.Errorf("lifted message should leave nothing buffered (pending=%d queued=%d)", h.Pending(), h.Queued())
@@ -110,13 +112,12 @@ func TestQueueBatchesWithoutLimit(t *testing.T) {
 		t.Fatalf("Queued() = %d; want 3 buffered", h.Queued())
 	}
 	out := h.liftQueued("tool output")
-	for _, want := range []string{"tool output", "[user] one", "[background] background job #1", "[user] two"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("lifted result missing %q:\n%s", want, out)
-		}
+	// The person's messages follow the result, in order (midreply.go).
+	if want := "tool output\n\n[background] background job #1 finished"; out != want {
+		t.Errorf("lifted result:\n%s\nwant:\n%s", out, want)
 	}
-	if i, j := strings.Index(out, "[user] one"), strings.Index(out, "[user] two"); i > j {
-		t.Error("messages delivered out of order")
+	if got := liftedTexts(h); !slices.Equal(got, []string{"one", "two"}) {
+		t.Errorf("held %q, want [one two]", got)
 	}
 	// And the next round starts empty, so a third message rides the following
 	// result rather than being repeated.
@@ -160,6 +161,7 @@ func TestPrepareTurnHealsOrphanCallAndLiftsMessage(t *testing.T) {
 		ToolCallID: "call_1", ToolName: "exec",
 	})
 	h.Say("connection dropped — carry on")
+	h.store.onToolResult = h.deliverLifted // as Start installs it
 
 	h.prepareTurn(ctx)
 
@@ -167,7 +169,11 @@ func TestPrepareTurnHealsOrphanCallAndLiftsMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	last := entries[len(entries)-1]
+	// The message follows the healed result as a user message (midreply.go).
+	if u := entries[len(entries)-1]; u.Kind != agent.KindUser || u.Content != "connection dropped — carry on" {
+		t.Fatalf("last entry = %+v; want the message after the healed result", u)
+	}
+	last := entries[len(entries)-2]
 	if last.Kind != agent.KindToolResult {
 		t.Fatalf("last entry = %+v; want a tool result pairing off the orphan call", last)
 	}
@@ -177,8 +183,8 @@ func TestPrepareTurnHealsOrphanCallAndLiftsMessage(t *testing.T) {
 	if !strings.Contains(last.Content, "INTERRUPTED") {
 		t.Errorf("healed result does not say what happened: %q", last.Content)
 	}
-	if !strings.Contains(last.Content, "[user] connection dropped") {
-		t.Errorf("the queued message did not ride the healed result: %q", last.Content)
+	if strings.Contains(last.Content, "connection dropped") {
+		t.Errorf("the message is in the healed result too: %q", last.Content)
 	}
 	if h.store.pending() == 0 {
 		t.Error("healed result left nothing pending; the next turn would be a no-op")

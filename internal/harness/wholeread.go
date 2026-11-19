@@ -225,7 +225,7 @@ func isBinary(path string) bool {
 }
 
 var (
-	pageAll  = regexp.MustCompile(`^(.*): (\d+) lines?$`)
+	pageAll   = regexp.MustCompile(`^(.*): (\d+) lines?$`)
 	pageRange = regexp.MustCompile(`^(.*): lines (\d+)-(\d+) of (\d+)$`)
 )
 

@@ -219,8 +219,9 @@ func TestLoopGuard_RefusalStillCarriesQueuedMessages(t *testing.T) {
 			break // the FIRST refusal is the one the queue was waiting for
 		}
 	}
-	if !strings.Contains(out, "stop doing that") {
-		t.Errorf("the user's message was stranded behind the refusal:\n%s", out)
+	// Taken with the refusal, to follow it as a user message (midreply.go).
+	if got := liftedTexts(h); len(got) != 1 || got[0] != "stop doing that, try the other file" {
+		t.Errorf("the user's message was stranded behind the refusal: held %q", got)
 	}
 	if !strings.Contains(out, "NOT run") {
 		t.Errorf("the refusal itself was lost:\n%s", out)

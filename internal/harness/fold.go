@@ -233,7 +233,8 @@ func (h *Harness) askNow() foldAsk {
 // Remembered, not read each time: once a fold has subsumed the ask, the store
 // no longer holds it, and the next fold of the same turn would look for it in
 // vain. A user entry newer than the remembered one replaces it, and its
-// corrections with it. Only agent.KindUser and kindDelivered count: asides,
+// corrections with it. Only agent.KindUser and kindDelivered count (a
+// mid-turn user entry, midreply.go, is a correction like kindDelivered): asides,
 // notices and the settle prompts are notifications, so they never read as the
 // ask. A delivered message is never folded (Context leaves it out), so History
 // still has it.
@@ -251,7 +252,7 @@ func (h *Harness) noteAsk(ctx context.Context) foldAsk {
 	entries := h.store.History()
 	h.askMu.Lock()
 	for _, e := range entries {
-		if e.Kind != agent.KindUser || strings.TrimSpace(e.Content) == "" {
+		if !turnInput(e) || strings.TrimSpace(e.Content) == "" {
 			continue
 		}
 		if e.CreatedAt > h.ask.at || (e.CreatedAt == h.ask.at && e.ID > h.ask.id) {
@@ -263,7 +264,7 @@ func (h *Harness) noteAsk(ctx context.Context) foldAsk {
 	}
 	if h.ask.text != "" {
 		for _, e := range entries {
-			if e.Kind != kindDelivered || strings.TrimSpace(e.Content) == "" || e.CreatedAt < h.ask.at {
+			if (e.Kind != kindDelivered && !midTurnUser(e)) || strings.TrimSpace(e.Content) == "" || e.CreatedAt < h.ask.at {
 				continue
 			}
 			seen := false

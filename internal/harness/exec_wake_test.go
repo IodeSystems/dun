@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -28,10 +29,14 @@ func TestExec_SayDuringWaitHandsOverAtOnce(t *testing.T) {
 	if el := time.Since(start); el > 3*time.Second {
 		t.Fatalf("the message must end the wait, not the timeout: %s", el)
 	}
-	for _, want := range []string{"still running", "background job #1", "user wrote", "[user] how far along is it?"} {
+	for _, want := range []string{"still running", "background job #1", "user wrote"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("result missing %q:\n%s", want, out)
 		}
+	}
+	// The message follows the result as a user message (midreply.go).
+	if got := liftedTexts(h); len(got) != 1 || got[0] != "how far along is it?" {
+		t.Errorf("held for after the result: %q", got)
 	}
 	js := h.Jobs()
 	if len(js) != 1 || js[0].State != "running" {
@@ -54,7 +59,7 @@ func TestExec_MessageQueuedBeforeTheCallReleasesIt(t *testing.T) {
 	if el := time.Since(start); el > 3*time.Second {
 		t.Fatalf("a queued message must not wait out the grace: %s", el)
 	}
-	if !strings.Contains(out, "background job #1") || !strings.Contains(out, "[user] stop and look") {
+	if !strings.Contains(out, "background job #1") || !slices.Contains(liftedTexts(h), "stop and look") {
 		t.Fatalf("want the handoff and the message: %q", out)
 	}
 	if _, err := h.KillJob(1, "test"); err != nil {
@@ -125,21 +130,17 @@ func TestExec_SayReleasesEveryWait(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	h.Say("both of you")
 
-	lifted := 0
 	for range 2 {
 		select {
 		case out := <-outs:
 			if !strings.Contains(out, "still running") {
 				t.Errorf("want a handoff: %q", out)
 			}
-			if strings.Contains(out, "[user] both of you") {
-				lifted++
-			}
 		case <-time.After(3 * time.Second):
 			t.Fatal("a wait was not released")
 		}
 	}
-	if lifted != 1 {
+	if lifted := len(liftedTexts(h)); lifted != 1 {
 		t.Errorf("the message must be delivered exactly once, got %d", lifted)
 	}
 	for _, id := range []int{1, 2} {

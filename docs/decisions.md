@@ -1317,6 +1317,57 @@ in a plan node's text. `internal/harness/textcall.go`,
   output (mismatched tags), which no parser can repair; corrallm passes it
   through. The guard is the fix.
 
+## Mid-turn messages are answered first (USER 2026-11-18)
+
+A person typed "What is your goal here? what are you doing?" during a turn,
+and later "IT's weird that you don't stop and respond to me?". The model
+(Gemini via OpenRouter) never answered: it read the words only as
+`[user] …` inside a tool result, under the plan board, and the plan force
+and the turn-end check pushed it back to its tools.
+`internal/harness/midreply.go`.
+
+- **A user message, not text in a tool result.** A framed header in the
+  result was tried first; Gemini ignores even framed text inside a
+  functionResponse, while Qwen and others answer. Now a message typed while
+  a tool runs is saved, once that result is stored, as a pending user entry
+  (`deliverMidTurn`, tag `mid-turn`). agentkit (v0.36.0) claims it at the
+  next round and renders it after the round's last tool result
+  (assistant(tool_calls) → tool → user); the turn goes on. The words are
+  verbatim, with no tag: a user message needs no explanation, and no test
+  showed one is needed. No system-prompt line either. Other lifted news
+  (board, background, peers) still rides the result.
+- **Once.** The entry is the message's only copy: no `delivered` entry is
+  written for it (that kind is now only in older logs), the queue no longer
+  holds it, the intake (asks.go) records it once at `SayAs`, and
+  OnDelivered names the call whose result it followed. History shows it as
+  queued (typed mid-turn).
+- **Fallback.** `providers[].fold_user_into_tool_result: true` sets
+  agentkit's `ShaperPolicy.FoldUserIntoToolResult`: the words go at the
+  end of the last tool result as `[the user wrote, while this ran] <text>`.
+  Default off; for a chat template that rejects user-after-tool (some
+  llama.cpp ones).
+- **Missed reply.** If the round after the delivery writes no text and
+  only calls tools, `[dun] The person asked you something mid-turn; reply
+  to them now.` rides that round's results: once per delivered message (a
+  new message arms it again). Nothing when nobody typed.
+- **The plan force waits.** While a reply is due (the round after the
+  delivery, and after the missed-reply aside the round after that) the
+  forced plan call is not sent; it stays armed for the next request.
+- **The turn-end check accepts the reply.** A text-only round right after
+  a delivery ends the turn with no check (no "Open plan nodes… Finish
+  each"). The simpler of the two options: asking whether to continue would
+  cost a round and put the model back in charge of a turn the person is now
+  in. No new turn and no wake: the unrequested-turn and spend rules are
+  unchanged.
+- **It starts no turn.** A mid-turn user entry is a `KindUser` like a
+  turn's input, so what finds the turn's start by the newest user entry
+  reads it through `turnInput`, which skips the `mid-turn` tag: recap's
+  `turnStart` and its repeat cue, the fold's ask (asks off; the message is
+  a later word, as a `delivered` one was) and the turn's reply
+  (`lastReplyID`). A recap over it keeps the words verbatim (`Said`). It
+  still counts as the person's message where `SayAs` counts it: the intake,
+  settle, the automatic-turn budget, the missed reply.
+
 ## Thinking titles are bold (USER 2026-11-18)
 
 USER: "strip out the thinking meta language and use **what** — because we A)

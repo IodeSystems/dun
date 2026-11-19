@@ -234,6 +234,7 @@ func (h *Harness) ForceToolCall(tc llm.ToolCall) {
 // of them as if the model had generated them.
 func (h *Harness) mergeForcedToolCalls(tcs []llm.ToolCall) []llm.ToolCall {
 	h.settle.tools.Add(int64(len(tcs))) // the turn used tools (settle.go)
+	h.midRound(len(tcs))                // a reply owed to the person (midreply.go)
 	h.noteMu.Lock()
 	defer h.noteMu.Unlock()
 	if len(h.forcedToolCalls) == 0 {
@@ -276,6 +277,11 @@ func (h *Harness) liftQueued(result string) string {
 	// below into a run of blank lines.
 	b.WriteString(strings.TrimRight(result, "\n"))
 	for _, q := range items {
+		// Not the person's words: once the result is stored they become a
+		// user message after it (deliverLifted, midreply.go).
+		if q.kind == queuedUser {
+			continue
+		}
 		if b.Len() > 0 {
 			b.WriteString("\n\n")
 		}

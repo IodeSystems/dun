@@ -273,14 +273,17 @@ func toolLOD() map[string]agent.LODKeep {
 // the bug aw4 had twice in one day: a field nobody set. TestShaperPolicy_
 // CoversPolicyFor fails when agentkit's PolicyFor sets a field this leaves at
 // zero, so a new agentkit knob is noticed rather than missed.
-func shaperPolicy(window int) agent.ShaperPolicy {
+//
+// foldUser is the provider's fold_user_into_tool_result (midreply.go).
+func shaperPolicy(window int, foldUser bool) agent.ShaperPolicy {
 	return agent.ShaperPolicy{
-		BudgetTokens:          shapingBudget(window),
-		VerbatimToolResults:   verbatimToolResults(),
-		ToolFormat:            toolFormat(),
-		LODTruncateAboveChars: lodChars(), // /context config --tool-lod
-		PreserveLastMessages:  6,
-		PreserveLastToolCalls: 4,
+		BudgetTokens:           shapingBudget(window),
+		VerbatimToolResults:    verbatimToolResults(),
+		FoldUserIntoToolResult: foldUser,
+		ToolFormat:             toolFormat(),
+		LODTruncateAboveChars:  lodChars(), // /context config --tool-lod
+		PreserveLastMessages:   6,
+		PreserveLastToolCalls:  4,
 		// One result, wherever it sits: LOD skips the preserved tail, so a huge
 		// recent result is sent whole every round until it ages out. exec clips
 		// at 20k itself (execInlineMax); node_read and MCP results did not.

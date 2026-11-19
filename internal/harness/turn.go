@@ -117,7 +117,8 @@ func historyItems(entries []agent.Entry) []HistoryItem {
 		}
 		switch e.Kind {
 		case agent.KindUser:
-			out = append(out, HistoryItem{Kind: "user", ID: e.ID, Content: e.Content})
+			// Queued: typed while the agent worked (midreply.go).
+			out = append(out, HistoryItem{Kind: "user", ID: e.ID, Queued: e.Tag == midTurnTag, Content: e.Content})
 		case kindDelivered:
 			out = append(out, HistoryItem{Kind: "user", ID: e.ID, Queued: true, Content: e.Content})
 		case agent.KindAssistant:
@@ -214,6 +215,7 @@ func (h *Harness) prepareTurn(ctx context.Context) {
 	h.clearOverflowHints()
 	h.turnRounds.reset() // the turn limit counts this turn's rounds (turnlimit.go)
 	h.nudge.reset()      // one plan nudge per turn (plannudge.go)
+	h.mid.reset()        // no reply owed from a turn before (midreply.go)
 	// The end-of-turn checks are reset once per turn, not per attempt
 	// (turnBegin, autoturn.go): a retried turn keeps its caps.
 	h.dropTurnScoped()    // asides about the turn that ended (asidettl.go)

@@ -144,6 +144,13 @@ type ProviderConfig struct {
 	// Until agentkit keeps a capability record per model (aw4
 	// i_1m6v7hgpwcwrk5pbswp0w6), this is set by hand.
 	EffortOff string `json:"effort_off,omitempty"`
+	// FoldUserIntoToolResult: a message the person typed while a tool ran
+	// goes to the model inside that tool's result ("[the user wrote, while
+	// this ran] …", agentkit's ShaperPolicy.FoldUserIntoToolResult), not as
+	// a user message after it. Off by default; for a chat template that
+	// rejects a user message right after tool results (some llama.cpp
+	// templates).
+	FoldUserIntoToolResult bool `json:"fold_user_into_tool_result,omitempty"`
 }
 
 // ProviderList returns the logged-in providers. A config from before
