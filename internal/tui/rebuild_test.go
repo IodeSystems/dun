@@ -87,3 +87,22 @@ func TestReconnectSnapshot_KeepsScrollAndQuestion(t *testing.T) {
 		t.Error("missed reply not shown")
 	}
 }
+
+// A TUI opened (or re-exec'd) on a session dund adopted after a restart:
+// dund sends a snapshot (its log holds no history). The conversation shows,
+// as a fresh open shows it; the history the moved engine sends later (reason
+// restart) adds nothing (USER 2026-11-19).
+func TestFreshAttachSnapshot_ShowsTheConversationOnce(t *testing.T) {
+	m := newTUIModel(&dunProc{}, "/ws")
+	m = resized(m, 100, 30)
+	m = m.handleEvent(evMsg{"type": "notification", "text": "dund restarted: the shared MCP servers are stopped"})
+	conv := items("user", "what broke the build", "assistant", "the overlay is read first")
+	m = m.handleEvent(evMsg{"type": "snapshot", "items": conv})
+	m = m.handleEvent(evMsg{"type": "history", "reason": "restart", "items": conv})
+	text := stripANSI(convoText(m))
+	for _, want := range []string{"what broke the build", "the overlay is read first"} {
+		if c := strings.Count(text, want); c != 1 {
+			t.Errorf("%q shown %d times:\n%s", want, c, text)
+		}
+	}
+}

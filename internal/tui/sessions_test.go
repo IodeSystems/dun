@@ -90,12 +90,35 @@ func TestSwitchSession_ClearsTheScrollback(t *testing.T) {
 	}
 }
 
-// Resuming the session you are already in is a no-op, not a pointless restart.
-func TestSwitchSession_SameSessionIsANoop(t *testing.T) {
-	m := buildModel(1, 1)
+// Resuming the session you are already in reloads it: attached again from
+// its start, the screen cleared for its replay (USER 2026-11-19: the way back
+// when a reconnect left the screen without its conversation).
+func TestSwitchSession_SameSessionReloads(t *testing.T) {
+	m := buildModel(5, 2)
 	m.sessionID = "same"
-	if cmd := m.switchSession("same"); cmd != nil {
-		t.Error("switching to the current session should not restart the engine")
+	var got TuiOpts
+	var at resumeAt
+	old := attachFn
+	attachFn = func(o TuiOpts, after resumeAt) (*dunProc, error) {
+		got, at = o, after
+		return &dunProc{stdin: discardWC{}}, nil
+	}
+	t.Cleanup(func() { attachFn = old })
+	cmd := m.switchSession("same")
+	if cmd == nil {
+		t.Fatal("resuming the current session should attach to it again")
+	}
+	if txt := convoText(m); strings.Count(txt, "block ") > 0 || !strings.Contains(txt, "reloading session same") {
+		t.Errorf("screen not cleared for the replay:\n%s", txt)
+	}
+	if m.skipHistory || m.sessionID != "same" {
+		t.Errorf("skipHistory %v, session %q: the replay must show", m.skipHistory, m.sessionID)
+	}
+	if msg, ok := cmd().(engineUpMsg); !ok || msg.err != nil {
+		t.Fatalf("attach: %#v", msg)
+	}
+	if got.Resume != "same" || at != (resumeAt{}) {
+		t.Errorf("attached to %q after %+v; want same from its start", got.Resume, at)
 	}
 }
 

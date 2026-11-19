@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -424,5 +425,58 @@ func TestDockerEngineIsNotLinked(t *testing.T) {
 	}
 	if logs, _ := filepath.Glob(filepath.Join(sp.EnginesDir, "*.log")); len(logs) != 0 {
 		t.Fatalf("a linked spawn: %v", logs)
+	}
+}
+
+// A client that follows an adopted session from the start (a TUI re-exec'd
+// into the new build) gets the conversation: the new log holds no history,
+// so a snapshot brings it (USER 2026-11-19: an empty screen after an
+// upgrade). The shared-servers notice is in the log once: the engine shows
+// it, dund does not add a copy.
+func TestAdoptedSessionFromTheStartGetsTheConversation(t *testing.T) {
+	dir, sp, id, l := upgradeWorking(t)
+	l.mu.Lock()
+	l.shared = 1
+	l.mu.Unlock()
+	svc2, err := New(dir, sp.next())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(svc2.Close)
+	ses, _ := svc2.Get(alice, id)
+	f := harness.SessionFile(ses.workspace, id)
+	if err := os.MkdirAll(filepath.Dir(f), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f, []byte(`{"Kind":"user","Content":"what broke the build"}`+"\n"+
+		`{"Kind":"assistant","Content":"the overlay is read first"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	isNotice := func(ev proto.Event) bool {
+		n, ok := ev.Payload.(*proto.Notification)
+		return ok && strings.Contains(n.Text, "shared MCP servers")
+	}
+	waitFor(t, func() bool { return hasEvent(logEvents(t, ses), isNotice) > 0 })
+	time.Sleep(50 * time.Millisecond) // a second copy would be here by now
+	if n := hasEvent(logEvents(t, ses), isNotice); n != 1 {
+		t.Fatalf("shared-servers notice %d times in the log", n)
+	}
+	snap, replay, sub, err := ses.subscribe(0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub.Close()
+	if snap == nil {
+		t.Fatalf("no snapshot; replay of %d events", len(replay))
+	}
+	items := snap.Payload.(*proto.Snapshot).Items
+	if len(items) != 2 || items[0].Content != "what broke the build" {
+		t.Fatalf("snapshot items %+v", items)
+	}
+	// A client that is caught up still follows on from its seq.
+	if snap, _, sub, err := ses.subscribe(ses.log.Last(), ses.log.Epoch()); err != nil || snap != nil {
+		t.Fatalf("caught-up client got snapshot %v (%v)", snap != nil, err)
+	} else {
+		sub.Close()
 	}
 }

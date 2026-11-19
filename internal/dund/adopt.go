@@ -77,6 +77,9 @@ func (s *session) adopt(eng Engine, h proto.LinkHello, build string) {
 	defer s.mu.Unlock()
 	s.eng, s.engDone = eng, make(chan struct{})
 	s.running, s.stopping, s.gaveUp, s.shown = true, false, false, true
+	// This log starts mid-conversation: the engine sent its history to the
+	// dund before. A client from the start gets a snapshot (subscribe).
+	s.logPartial = true
 	s.log.Append(proto.NewEvent(&proto.EngineState{State: "started", Reason: "adopted"}))
 	go s.readEvents(eng, s.engDone, newScanner(eng.Stdout()), proto.HistoryRestart)
 }
@@ -257,8 +260,12 @@ func (s *Service) adoptAll(ad Adopter) map[string]bool {
 func (s *session) sharedGone() {
 	const text = "dund restarted: the shared MCP servers this session used through dund are stopped. " +
 		"A call to one fails until this session is next idle, when dun restarts its engine and they come back; retry then."
-	_ = s.sendLoaded(proto.NewCommand("", &proto.ServiceNotice{Quiet: true, Text: text}))
-	s.log.Append(proto.NewEvent(&proto.Notification{Kind: "service", Text: text}))
+	// The engine shows its clients every service notice it is sent (a
+	// notification event, cmd/dun/peers.go); a copy logged here too showed
+	// twice. Logged here only when the engine could not be told.
+	if err := s.sendLoaded(proto.NewCommand("", &proto.ServiceNotice{Quiet: true, Text: text})); err != nil {
+		s.log.Append(proto.NewEvent(&proto.Notification{Kind: "service", Text: text}))
+	}
 }
 
 // pidAliveFn is pidAlive (a variable: the tests' engines are no processes).

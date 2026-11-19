@@ -118,6 +118,14 @@ derive them from `turn`, tokens, tool calls or `done`.
   The TUI keeps the splash, the draft, the open question and its picker,
   and the scroll (at the bottom stays at the bottom); its own lines (notes,
   command output) are not in a snapshot and go (`internal/tui/rebuild.go`).
+- A subscribe from the start (`after` 0) to a session whose engine dund
+  adopted after a restart gets a snapshot too: the new log starts
+  mid-conversation (the engine sent its history to the dund before), so its
+  events alone would show no conversation. A TUI re-exec'd into the new
+  build after an upgrade attaches this way (USER 2026-11-19).
+- A service notice dund sends an engine (`service_notice`) reaches clients
+  as the engine's `notification` (kind `service`); dund logs no copy, except
+  when the engine could not be told.
 
 ## Questions
 

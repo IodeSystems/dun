@@ -264,14 +264,18 @@ func adoptAcrossRestart(t *testing.T, viaSystemd bool) {
 	if syscall.Kill(enginePid, 0) != nil {
 		t.Fatal("the engine died with the restart")
 	}
-	c2.send("s", id, &proto.Subscribe{})
+	// This client followed the old dund's log: it follows on in the new one
+	// after its first event (seq 1, the adoption's "started"). From the
+	// start (After 0) the log holds no history, so dund sends a snapshot
+	// instead (TestAdoptedSessionFromTheStartGetsTheConversation).
+	c2.send("s", id, &proto.Subscribe{After: 1})
 	var message string
 	done := false
 	for !done {
 		ev := c2.next("the turn's end")
 		switch p := ev.Payload.(type) {
 		case *proto.Snapshot:
-			t.Fatalf("a snapshot for a fresh log: %d events", len(p.State))
+			t.Fatalf("a snapshot for a client caught up: %d events", len(p.State))
 		case *proto.Token:
 			got = append(got, p.Text)
 		case *proto.Message:
