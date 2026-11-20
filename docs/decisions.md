@@ -241,6 +241,17 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   what it cannot, a stream that died mid-generation. A cancelled request
   arrives wrapped in `*url.Error`, which satisfies `net.Error` and looks
   transient, so cancellation is checked explicitly.
+- **Hints given once are forgotten when a fold or recap drops them
+  (USER 2026-11-20).** A session flag that remembers a model-facing hint was
+  said kept the model from seeing it again after a fold or recap summarized
+  its text away. `forgetters` (`internal/harness/forget.go`) is the one
+  registry of resets: the exec cd-nudge counter, and the recap cues (except
+  large-result ones, whose result and aside go or stay together). It runs
+  from two call sites, one per way the history shrinks: `noteCompactionCause`
+  (every fold) and `applyRecapText` (every recap). A reset means "allowed
+  again": each hint fires again only when its trigger recurs. Not reset:
+  what the person sees once per session (`setupSaid`, `indexAsked`), the
+  learn cost cap, and `rulesDocs` (a classifier, not a said-flag).
 
 ## exec and background jobs
 
