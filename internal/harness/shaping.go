@@ -351,6 +351,11 @@ func measuredBuild(shaper *agent.Shaper, h *Harness) agent.ContextBuilder {
 		shaper.Policy.LODTruncateAboveChars = lodChars() // /context config --tool-lod, live
 		// A fold in this build sends the round's own prefix (fold.go).
 		shaper.SessionPrefix = sessionPrefix(h.Session, system)
+		// Cold-cache boundary fold: if the gap since the last response exceeds
+		// the provider's cache TTL and the prompt is over 0.5 × the shape
+		// target, fold before building so the cold read is not paid for an
+		// unshrunken prompt.
+		h.tryColdCacheFold(ctx)
 		msgs, err := shaper.Build(ctx, sessionID, system)
 		if err != nil {
 			return msgs, err
@@ -416,4 +421,66 @@ func measuredBuild(shaper *agent.Shaper, h *Harness) agent.ContextBuilder {
 		}
 		return msgs, nil
 	}
+}
+
+// boundaryFold runs one fold with the foldByBoundary cause. It returns the
+// CompactionInfo and whether a fold happened. A nil shaper (a test harness
+// that did not call Start) is a no-op.
+func (h *Harness) boundaryFold(ctx context.Context) (agent.CompactionInfo, bool) {
+	if h.shaper == nil {
+		return agent.CompactionInfo{}, false
+	}
+	info, did, err := h.shaper.Compact(ctx, h.cacheSessionID())
+	if err != nil || !did {
+		return agent.CompactionInfo{}, false
+	}
+	h.noteCompactionCause(info, foldByBoundary)
+	return info, true
+}
+
+// turnEndBoundaryFold folds at turn end when the prompt exceeds 0.7 × the
+// shape target. Called from turnThenTriggers after the turn succeeds, so
+// nothing is in flight and the cached prefix is intact. The mid-turn budget
+// fold (the Shaper's own Compact in Build) remains as the safety rung.
+func (h *Harness) turnEndBoundaryFold(ctx context.Context) {
+	if h.shaper == nil {
+		return
+	}
+	target := shapingBudget(h.windowTokens())
+	if target <= 0 {
+		return
+	}
+	if h.meter.LastPromptTokens() <= target*7/10 {
+		return
+	}
+	log.Printf("dun: turn-end boundary fold: prompt %d tokens > 0.7 × %d target",
+		h.meter.LastPromptTokens(), target)
+	h.boundaryFold(ctx)
+}
+
+// tryColdCacheFold folds before a build when the gap since the last response
+// exceeds the provider's cache TTL and the prompt is over 0.5 × the shape
+// target. Called from measuredBuild, just before shaper.Build.
+func (h *Harness) tryColdCacheFold(ctx context.Context) {
+	if h.shaper == nil {
+		return
+	}
+	ttl := cacheTTLSeconds()
+	if ttl <= 0 {
+		return
+	}
+	gap, ok := h.cache.gapSinceLastResp(time.Now())
+	if !ok || gap < time.Duration(ttl)*time.Second {
+		return
+	}
+	target := shapingBudget(h.windowTokens())
+	if target <= 0 {
+		return
+	}
+	if h.meter.LastPromptTokens() <= target/2 {
+		return
+	}
+	log.Printf("dun: cold-cache boundary fold: gap %s > TTL %ds, prompt %d tokens > 0.5 × %d target",
+		gap, ttl, h.meter.LastPromptTokens(), target)
+	h.boundaryFold(ctx)
 }

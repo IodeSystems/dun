@@ -959,6 +959,7 @@ type ContextSettings struct {
 	ToolLOD       int    `json:"toolLod"`
 	RecapNudge    int    `json:"recapNudge"`
 	Ceiling       int    `json:"ceiling"`
+	CacheTTL      int    `json:"cacheTtl,omitempty"`
 }
 
 // Commands is the slash commands a session takes, as data, for every client:

@@ -80,9 +80,10 @@ type cacheStats struct {
 	prevChars    []int // per-message content length, aligned with prevSigs
 	prevTools    [32]byte
 	haveTools    bool
-	foldMarked   bool // a fold happened since the last build
-	reheadMarked bool // a re-heading changed the context since the last build
-	recapMarked  bool // the model's recap replaced a span since the last build
+	foldMarked     bool // a fold happened since the last build
+	reheadMarked   bool // a re-heading changed the context since the last build
+	recapMarked    bool // the model's recap replaced a span since the last build
+	boundaryMarked bool // a boundary fold (turn-end or cold-cache) since the last build
 
 	// Round pairing: the class of the last build, waiting for its usage.
 	pending     cacheClass
@@ -94,11 +95,12 @@ type cacheStats struct {
 
 	Builds         int
 	AppendOnly     int
-	RewritesFold   int
-	RewritesTools  int
-	RewritesRehead int
-	RewritesRecap  int
-	RewritesOther  int
+	RewritesFold      int
+	RewritesBoundary  int
+	RewritesTools     int
+	RewritesRehead    int
+	RewritesRecap     int
+	RewritesOther     int
 	ResentChars    int // chars of the build from the first changed message on, summed over rewrites
 	LastKeptChars  int
 	LastChars      int
@@ -136,6 +138,32 @@ func (s *cacheStats) noteRecap() {
 	s.mu.Lock()
 	s.recapMarked = true
 	s.mu.Unlock()
+}
+
+// noteBoundaryFold marks that a boundary fold (turn-end or cold-cache)
+// happened since the last build, so its rewrite is attributed to the
+// boundary trigger rather than to the shaper's budget.
+func (s *cacheStats) noteBoundaryFold() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.boundaryMarked = true
+	s.mu.Unlock()
+}
+
+// gapSinceLastResp returns the time since the last response, and whether
+// there has been a response. Used by the cold-cache boundary fold.
+func (s *cacheStats) gapSinceLastResp(now time.Time) (time.Duration, bool) {
+	if s == nil {
+		return 0, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lastResp.IsZero() {
+		return 0, false
+	}
+	return now.Sub(s.lastResp), true
 }
 
 // noteFold marks that the next build follows a fold, so its rewrite is
@@ -196,6 +224,8 @@ func (s *cacheStats) noteBuild(msgs []llm.Message, tools []llm.ToolDef, now time
 			switch {
 			case s.foldMarked:
 				s.RewritesFold++
+			case s.boundaryMarked:
+				s.RewritesBoundary++
 			case s.reheadMarked:
 				s.RewritesRehead++
 			case s.recapMarked:
@@ -211,7 +241,7 @@ func (s *cacheStats) noteBuild(msgs []llm.Message, tools []llm.ToolDef, now time
 	}
 	s.prevSigs, s.prevChars = sigs, chars
 	s.prevTools, s.haveTools = th, true
-	s.foldMarked, s.reheadMarked, s.recapMarked = false, false, false
+	s.foldMarked, s.boundaryMarked, s.reheadMarked, s.recapMarked = false, false, false, false
 	s.pending, s.havePending = class, true
 }
 

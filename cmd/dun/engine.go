@@ -832,8 +832,8 @@ func settingsEvent() *proto.Settings {
 	}
 	ev.Tiers, ev.DefaultTier = tiersProto(engineTiers, roles), engineTiers.Default
 	if h != nil {
-		max, from, buf, lod, nudge, ceil := h.ContextSettings()
-		ev.Context = &proto.ContextSettings{Max: max, MaxFrom: from, CompactBuffer: buf, ToolLOD: lod, RecapNudge: nudge, Ceiling: ceil}
+		max, from, buf, lod, nudge, ceil, ttl := h.ContextSettings()
+		ev.Context = &proto.ContextSettings{Max: max, MaxFrom: from, CompactBuffer: buf, ToolLOD: lod, RecapNudge: nudge, Ceiling: ceil, CacheTTL: ttl}
 	}
 	return ev
 }

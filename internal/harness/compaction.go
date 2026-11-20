@@ -114,13 +114,25 @@ const (
 	// compactionThrashTurns for the live case where conflating them printed
 	// advice that was wrong in every particular.
 	foldByOverflow
+	// foldByBoundary: a boundary trigger — turn end with the prompt over
+	// 0.7×ceiling, or a cold-cache gap over the provider's TTL. The prompt
+	// is not at the budget; the fold keeps the cached prefix intact and
+	// preempts the next round's re-read.
+	foldByBoundary
 )
 
 func (h *Harness) noteCompactionCause(ci agent.CompactionInfo, cause foldCause) {
-	h.cache.noteFold()
+	if cause == foldByBoundary {
+		h.cache.noteBoundaryFold()
+	} else {
+		h.cache.noteFold()
+	}
 	h.compactMu.Lock()
-	if cause == foldByOverflow {
+	switch cause {
+	case foldByOverflow:
 		h.compactOverflow++
+	case foldByBoundary:
+		h.compactBoundary++
 	}
 	h.compactTurn++
 	note := CompactionNote{
@@ -132,9 +144,12 @@ func (h *Harness) noteCompactionCause(ci agent.CompactionInfo, cause foldCause) 
 		Summary:      ci.Summary,
 		Turn:         h.compactTurn,
 	}
-	if cause == foldByOverflow {
+	switch cause {
+	case foldByOverflow:
 		note.Cause = "overflow"
-	} else {
+	case foldByBoundary:
+		note.Cause = "boundary"
+	default:
 		note.Cause = "shaper"
 	}
 	if !h.compactLast.IsZero() {
@@ -144,8 +159,11 @@ func (h *Harness) noteCompactionCause(ci agent.CompactionInfo, cause foldCause) 
 	thrash := h.compactTurn == compactionThrashTurns
 	// Only the SHAPER's folds indict the budget. If any fold this turn came from
 	// the overflow policy, the honest reading is "the endpoint keeps cutting
-	// replies", which no amount of DUN_CONTEXT_TOKENS fixes.
+	// replies", which no amount of DUN_CONTEXT_TOKENS fixes. Boundary folds
+	// are the same: the prompt was not at the budget, so a second one does not
+	// mean the budget is too small.
 	fromOverflow := h.compactOverflow > 0
+	fromBoundary := h.compactBoundary > 0
 	h.compactMu.Unlock()
 
 	log.Printf("dun: %s", note)
@@ -156,6 +174,9 @@ func (h *Harness) noteCompactionCause(ci agent.CompactionInfo, cause foldCause) 
 		log.Printf("dun: %d folds in one turn, driven by the endpoint cutting replies short — "+
 			"NOT by the context budget. Look at why generation is being cut (DUN_MAX_OUTPUT_TOKENS, "+
 			"or a prompt near the window) rather than at the budget.", h.compactTurn)
+	case thrash && fromBoundary:
+		log.Printf("dun: %d folds in one turn, driven by a boundary trigger (turn-end or "+
+			"cold cache) — NOT by the context budget.", h.compactTurn)
 	case thrash:
 		log.Printf("dun: compaction is THRASHING (%d folds in one turn) — the context budget "+
 			"cannot fit one turn's floor. Raise DUN_CONTEXT_TOKENS or unset it (unset = no compaction).",

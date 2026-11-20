@@ -665,6 +665,9 @@ type Harness struct {
 	// compactOverflow counts the folds THIS TURN that the overflow policy asked
 	// for, so the thrash warning does not blame the budget for them.
 	compactOverflow int
+	// compactBoundary counts the folds THIS TURN that a boundary trigger asked
+	// for (turn-end 0.7×ceiling, cold-cache TTL gap), for the same reason.
+	compactBoundary int
 	compactLast     time.Time
 	// ask is the latest user message a fold has seen (fold.go noteAsk).
 	askMu sync.Mutex
@@ -696,6 +699,9 @@ type Harness struct {
 	// windowRunner is the LLM, kept so the window can be re-asked. nil once
 	// there is nothing left to ask (a window is known, or asking was given up).
 	windowRunner any
+	// shaper is the Shaper for boundary folds (turn-end, cold-cache). Set in
+	// Start; nil in tests that do not call Start.
+	shaper *agent.Shaper
 	// Overflow counters for /context: rounds the endpoint ended for room, and
 	// how many of those were answered by folding history. Guarded by noteMu
 	// alongside the other session-level counters.
@@ -919,6 +925,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		Index: lateSessionIndex{h},
 	}
 	h.foldWire(shaper)
+	h.shaper = shaper
 	// A sub-agent's first user message IS its task (the parent's brief), so it
 	// must survive folds. Not for a root session: its first message may be
 	// "hi" or a pasted log, and a pinned entry rides every round for good.
@@ -1071,6 +1078,11 @@ func (h *Harness) turnThenTriggers(ctx context.Context) (agent.TurnResult, error
 	h.codeReindex()
 	if err == nil {
 		h.workReply(res.Reply) // the worklog's open task (worklog.go)
+		// Turn-end boundary fold: the prompt is over 0.7 × the shape target
+		// and nothing is in flight, so fold the earlier turns now, keeping
+		// the cached prefix intact. The mid-turn budget fold remains as the
+		// safety rung.
+		h.turnEndBoundaryFold(ctx)
 		// Not the turn's ctx: the caller cancels it once the turn returns,
 		// which is before the fork has started (live, every trigger failed
 		// "context canceled").

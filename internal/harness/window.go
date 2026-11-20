@@ -62,6 +62,11 @@ type ContextConfig struct {
 	// the window, and a prompt that long is past where the model's quality
 	// was tuned.
 	Ceiling int `json:"ceiling,omitempty"`
+	// CacheTTL is the provider's prompt-cache TTL, in seconds: the cold-cache
+	// boundary fold runs before a request whose gap since the last response
+	// exceeds it, so the cold read is not paid for an unshrunken prompt.
+	// 0 = not set; the cold-cache fold is then disabled.
+	CacheTTL int `json:"cache_ttl,omitempty"`
 }
 
 func contextFile() string { return filepath.Join(DunHome(), "context.json") }
@@ -106,15 +111,17 @@ func savedWindow(e Endpoint) int { return savedContext(e).Max }
 // The settings in force in this process (one session's harness per engine;
 // its children share them), read where each one decides.
 var ctxOverride struct {
-	compactBuffer, toolLOD, recapNudge, ceiling atomic.Int64
+	compactBuffer, toolLOD, recapNudge, ceiling, cacheTTL atomic.Int64
 }
 
-// applyContextConfig puts c's buffer, stub length, nudge and ceiling in force.
+// applyContextConfig puts c's buffer, stub length, nudge, ceiling and cache
+// TTL in force.
 func applyContextConfig(c ContextConfig) {
 	ctxOverride.compactBuffer.Store(int64(c.CompactBuffer))
 	ctxOverride.toolLOD.Store(int64(c.ToolLOD))
 	ctxOverride.recapNudge.Store(int64(c.RecapNudge))
 	ctxOverride.ceiling.Store(int64(c.Ceiling))
+	ctxOverride.cacheTTL.Store(int64(c.CacheTTL))
 }
 
 // defaultToolLOD is the stub length when none is set.
@@ -131,6 +138,15 @@ func lodChars() int {
 // ceilingTokens is the per-model quality ceiling Q in force, 0 = not set.
 func ceilingTokens() int {
 	if n := ctxOverride.ceiling.Load(); n > 0 {
+		return int(n)
+	}
+	return 0
+}
+
+// cacheTTLSeconds is the provider's prompt-cache TTL in force, 0 = not set
+// (the cold-cache boundary fold is disabled).
+func cacheTTLSeconds() int {
+	if n := ctxOverride.cacheTTL.Load(); n > 0 {
 		return int(n)
 	}
 	return 0
@@ -322,7 +338,7 @@ func ParseTokens(s string) (int, error) {
 }
 
 // ContextKeys are /context config's settings, as its flags name them.
-var ContextKeys = []string{"max", "compact-buffer", "tool-lod", "recap-nudge", "ceiling"}
+var ContextKeys = []string{"max", "compact-buffer", "tool-lod", "recap-nudge", "ceiling", "cache-ttl"}
 
 // ConfigureContext sets some of /context config's settings for this model
 // and saves them: changes maps a ContextKeys name to its value, 0 for the
@@ -352,6 +368,8 @@ func (h *Harness) ConfigureContext(ctx context.Context, changes map[string]int) 
 			c.RecapNudge = v
 		case "ceiling":
 			c.Ceiling = v
+		case "cache-ttl":
+			c.CacheTTL = v
 		default:
 			return "", fmt.Errorf("unknown setting --%s (%s)", k, strings.Join(ContextKeys, ", "))
 		}
@@ -383,14 +401,18 @@ func (h *Harness) ContextStatus() string {
 	if ceilingTokens() == 0 {
 		ceiling = "unset (window minus the response's reserve)"
 	}
-	return fmt.Sprintf("context: max %s · compact-buffer %s · tool-lod %s chars · recap-nudge %s · ceiling %s",
-		max, numfmt.Grouped(maxOutputTokens()), numfmt.Grouped(lodChars()), numfmt.Grouped(recapNudgeAt()), ceiling)
+	ttl := numfmt.Grouped(cacheTTLSeconds()) + "s"
+	if cacheTTLSeconds() == 0 {
+		ttl = "unset"
+	}
+	return fmt.Sprintf("context: max %s · compact-buffer %s · tool-lod %s chars · recap-nudge %s · ceiling %s · cache-ttl %s",
+		max, numfmt.Grouped(maxOutputTokens()), numfmt.Grouped(lodChars()), numfmt.Grouped(recapNudgeAt()), ceiling, ttl)
 }
 
 // ContextSettings is the settings in force, for a client.
-func (h *Harness) ContextSettings() (max int, maxFrom string, compactBuffer, toolLOD, recapNudge, ceiling int) {
+func (h *Harness) ContextSettings() (max int, maxFrom string, compactBuffer, toolLOD, recapNudge, ceiling, cacheTTL int) {
 	n, src := h.WindowStatus()
-	return n, src, maxOutputTokens(), lodChars(), recapNudgeAt(), ceilingTokens()
+	return n, src, maxOutputTokens(), lodChars(), recapNudgeAt(), ceilingTokens(), cacheTTLSeconds()
 }
 
 // NewTestHarness is a harness with only an endpoint, for a client's tests of
