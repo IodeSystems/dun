@@ -313,6 +313,13 @@ func shaperPolicy(window int, foldUser bool) agent.ShaperPolicy {
 		PreserveLastMessages:   6,
 		PreserveLastToolCalls:  4,
 		FoldKeepPct:            foldKeepPct,
+		// After the first fold, a build under target stubs old big tool
+		// results (agentkit v0.39.0), so the wide kept band does not fill the
+		// window again soon. The boundary moves LODStep entries at a time:
+		// the prompt cache breaks once per step. Pins, markers and the
+		// pristine tail stay verbatim. USER (Carl) 2026-11-20: on. Not checked
+		// live.
+		FoldMidLOD: true,
 		// One result, wherever it sits: LOD skips the preserved tail, so a huge
 		// recent result is sent whole every round until it ages out. exec clips
 		// at 20k itself (execInlineMax); node_read and MCP results did not.

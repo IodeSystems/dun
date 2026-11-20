@@ -205,6 +205,7 @@ func (h *Harness) foldHistory(ctx context.Context, cause foldCause) (int, error)
 		SubsumedCount: len(older),
 		TokensBefore:  before,
 		TokensAfter:   h.meter.Estimate(summary),
+		SummaryTokens: h.meter.Estimate(summary),
 	}, cause)
 	return len(older), nil
 }

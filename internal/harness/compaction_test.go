@@ -219,11 +219,11 @@ func TestCompactionNote_ReportsTheDamage(t *testing.T) {
 // The notice gives the cause in words, one row per cause.
 func TestCompactionNote_CauseInWords(t *testing.T) {
 	for _, c := range []struct{ cause, want string }{
-		{"shaper", "compacted: oldest 429 entries → summary, newest 131 kept as is · history 273.3k → 48.6k tokens · over budget · 25m since the last"},
-		{"overflow", "compacted: oldest 429 entries → summary, newest 131 kept as is · history 273.3k → 48.6k tokens · the endpoint cut a reply · 25m since the last"},
-		{"boundary", "compacted: oldest 429 entries → summary, newest 131 kept as is · history 273.3k → 48.6k tokens · turn end or cold cache · 25m since the last"},
+		{"shaper", "compacted: oldest 429 entries → summary (3.1k), newest 131 kept (45.5k) · history 273.3k → 48.6k tokens · over budget · 25m since the last"},
+		{"overflow", "compacted: oldest 429 entries → summary (3.1k), newest 131 kept (45.5k) · history 273.3k → 48.6k tokens · the endpoint cut a reply · 25m since the last"},
+		{"boundary", "compacted: oldest 429 entries → summary (3.1k), newest 131 kept (45.5k) · history 273.3k → 48.6k tokens · turn end or cold cache · 25m since the last"},
 	} {
-		n := CompactionNote{Subsumed: 429, Kept: 131, KeptTokens: 54_400, TokensBefore: 273275, TokensAfter: 48631, Cause: c.cause, SinceLastSecs: 1551}
+		n := CompactionNote{Subsumed: 429, SummaryTokens: 3_100, Kept: 131, KeptTokens: 45_500, TokensBefore: 273275, TokensAfter: 48631, Cause: c.cause, SinceLastSecs: 1551}
 		if s := n.String(); s != c.want {
 			t.Errorf("%s:\ngot  %s\nwant %s", c.cause, s, c.want)
 		}
