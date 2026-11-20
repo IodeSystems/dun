@@ -111,7 +111,7 @@ func TestTUI_InterruptedRowListsRunningJobs(t *testing.T) {
 func TestTUI_CClearsFinishedJobs(t *testing.T) {
 	v, rec := jobsVtui(t)
 	v.m.setFocus(focusActivity)
-	if !strings.Contains(v.view(), "c clear finished") {
+	if !strings.Contains(v.view(), "c clear done") {
 		t.Errorf("the pane's hints should name c:\n%s", v.view())
 	}
 	v.m = key(v.m, kC)

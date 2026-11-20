@@ -78,8 +78,8 @@ func jobsCmd(h *harness.Harness, action string) string {
 		return jobsListing(h.RunningJobs(), time.Now())
 	}
 	if len(f) == 1 && f[0] == "clear" {
-		n := h.ClearDoneJobs()
-		return fmt.Sprintf("cleared %d finished job(s); logs kept", n)
+		n, a := h.ClearDoneJobs(), h.ClearDoneAgents()
+		return fmt.Sprintf("cleared %d finished job(s) and %d stopped or dismissed agent(s); logs and transcripts kept", n, a)
 	}
 	if len(f) == 2 && f[0] == "kill" {
 		if f[1] == "all" {

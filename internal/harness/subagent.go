@@ -86,6 +86,10 @@ type subAgent struct {
 
 	mu sync.Mutex
 	h  *Harness // nil for a stopped child until it is resumed
+	// cleared: its row was cleared from the UI list (ClearDoneAgents). It is
+	// still in Harness.agents, so the agent tool reaches it by id and resume
+	// works; Agents() hides it only while it is stopped or dismissed.
+	cleared bool
 	// state/status/final are what the child says about itself. status
 	// OVERWRITES (it is a state, not a log); final is its answer.
 	state  agentState
@@ -1842,6 +1846,12 @@ func (h *Harness) Agents() []AgentInfo {
 	out := make([]AgentInfo, 0, len(list))
 	for _, sa := range list {
 		state, status, _, since := sa.snapshot()
+		sa.mu.Lock()
+		hide := sa.cleared && (state == agentStopped || state == agentDismissed)
+		sa.mu.Unlock()
+		if hide {
+			continue
+		}
 		out = append(out, AgentInfo{
 			ID: sa.num, Model: sa.where(), Tier: sa.tierName(), Effort: sa.effective, State: string(state), Status: status,
 			Prompt: sa.prompt, Tokens: sa.spent(), Seconds: int(since.Seconds()),
@@ -1849,6 +1859,28 @@ func (h *Harness) Agents() []AgentInfo {
 		})
 	}
 	return out
+}
+
+// ClearDoneAgents hides every stopped and dismissed child from the list the
+// UI shows and pushes the list. Idle and running children stay. Nothing is
+// deleted: the child stays in the registry (reachable by id for the agent
+// tool and resume) and its transcript stays on disk. A cleared child that is
+// resumed shows again. It returns how many rows it hid.
+func (h *Harness) ClearDoneAgents() int {
+	n := 0
+	for _, sa := range h.agentList() {
+		state, _, _, _ := sa.snapshot()
+		sa.mu.Lock()
+		if !sa.cleared && (state == agentStopped || state == agentDismissed) {
+			sa.cleared = true
+			n++
+		}
+		sa.mu.Unlock()
+	}
+	if n > 0 {
+		h.agentsChanged()
+	}
+	return n
 }
 
 // agentsChanged pushes the current child list to the UI. Called on every
