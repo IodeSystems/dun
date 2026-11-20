@@ -628,12 +628,13 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 	em.mu.Lock()
 	em.onReply = recordReplies(h) // the person's commands, kept in the session
 	em.mu.Unlock()
-	in.setAgentFn(func(id, action, content string) {
-		n, err := strconv.Atoi(id)
+	in.setAgentFn(func(a proto.AgentCmd) {
+		n, err := strconv.Atoi(a.ID)
 		if err != nil {
 			return
 		}
-		switch action {
+		content := a.Content
+		switch a.Action {
 		case "view":
 			// The history, then each new entry as an agent_entry until
 			// "leave": what makes the view live while the child works.
@@ -643,7 +644,16 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 		case "leave":
 			h.AgentUnwatch(n)
 		case "tell":
-			em.emit(&proto.AgentTold{Agent: n, Message: h.AgentTell(n, content)})
+			// Images as the session takes them (turn): refused up front when
+			// the child's model cannot take them, the message back in the
+			// composer. No done: the client opened no turn for it.
+			if len(a.Images) > 0 {
+				if why := h.AgentImagesRefused(n); why != "" {
+					em.emit(&proto.ImageRefused{Message: why, Content: content, Images: a.Images})
+					return
+				}
+			}
+			em.emit(&proto.AgentTold{Agent: n, Message: h.AgentTellImages(n, content, dunImages(a.Images))})
 		case "continue": // dund, after a restart that cut the child's run
 			em.emit(&proto.AgentTold{Agent: n, Message: h.AgentContinue(n, content)})
 		}
@@ -651,23 +661,22 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 	// A message that arrives while a turn is running does NOT wait for it. It is
 	// buffered and lifted into the next tool result, so the model reads it inside
 	// the turn it is already running — and several of them batch. Only when no turn
-	// is in flight does a message start one (the channel path below).
+	// is in flight does a message start one (the channel path below). The gate
+	// (harness/turngate.go) is the one a sub-agent's tell goes through too.
 	in.setMidTurn(func(msg userMsg) bool {
-		if !turnActive.Load() {
-			return false
-		}
-		if len(msg.images) > 0 {
-			in.hold(msg)
-			em.emit(&proto.Notification{Text: "a message with images waits for this turn to end: an image cannot ride a tool result"})
-			return true
-		}
-		text, mid := msg.content, harness.NewMessageID()
+		mid := harness.NewMessageID()
+		um := harness.UserInput{ID: mid, Text: msg.content, Images: dunImages(msg.images)}
 		// Echo BEFORE Say: Say can release an exec wait, and the delivered
 		// event that follows its result names this id.
-		em.emit(&proto.UserEcho{ID: mid, Content: text, Queued: true})
-		h.SayAs(mid, text)
-		em.emit(&proto.Queued{Text: text, Count: h.Queued()})
-		return true
+		switch h.Gate().Offer(h, um, func() { em.emit(&proto.UserEcho{ID: mid, Content: msg.content, Queued: true}) }) {
+		case harness.OfferHeld:
+			em.emit(&proto.Notification{Text: "a message with images waits for this turn to end: an image cannot ride a tool result"})
+			return true
+		case harness.OfferQueued:
+			em.emit(&proto.Queued{Text: msg.content, Count: h.Queued()})
+			return true
+		}
+		return false
 	})
 	if firstTask != "" {
 		// A task given on the command line is the whole run: it waits for
@@ -686,8 +695,8 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 	autoContinue := true
 	for {
 		// A message with images held during the last turn starts the next.
-		if msg, ok := in.takeHeld(); ok {
-			turn(ctx, h, em, msg.content, msg.images)
+		if msg, ok := h.Gate().TakeHeld(); ok {
+			turn(ctx, h, em, msg.Text, protoImages(msg.Images))
 			autoContinue = true
 			continue
 		}
@@ -710,7 +719,7 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 			continue
 		}
 		select {
-		case <-in.heldCh:
+		case <-h.Gate().Held():
 			// taken at the top of the loop
 		case msg, ok := <-users:
 			if !ok {
@@ -784,9 +793,9 @@ func continueTurn(ctx context.Context, h *harness.Harness, em *emitter) bool {
 	h.BeginTurnStats()
 	tctx, end := beginTurn(ctx)
 	defer end()
-	turnActive.Store(true)
+	h.Gate().Begin()
 	res, err := h.Continue(tctx)
-	turnActive.Store(false)
+	h.Gate().End()
 	if errors.Is(err, harness.ErrTurnHeld) {
 		// No ask open, the hour's automatic turns used: the news is a note
 		// (turn_state's notes_waiting), and no turn ran.
@@ -923,11 +932,6 @@ func holdWakes(h *harness.Harness, em *emitter) {
 	}
 }
 
-// turnActive is true while a turn is in flight, so the input reader knows to
-// BUFFER a user message (delivered inside the running turn, via the lift path)
-// instead of handing it to the loop as the start of a new one.
-var turnActive atomic.Bool
-
 // turn runs one user message to completion. It reports whether the turn
 // succeeded — NOT whether the engine should stop. A failed turn never ends the
 // session: the conversation is on disk and the next message picks up from it.
@@ -948,12 +952,14 @@ func turn(ctx context.Context, h *harness.Harness, em *emitter, task string, img
 	h.BeginTurnStats()
 	tctx, end := beginTurn(ctx)
 	defer end()
-	turnActive.Store(true)
+	// While the turn runs the input router queues a message for it
+	// (harness.TurnGate) instead of handing it to the loop as a new one.
+	h.Gate().Begin()
 	if len(imgs) > 0 {
 		// Not rephrased: a rewrite would move or drop the labels the images
 		// are placed by.
 		res, err := h.AskImages(tctx, task, dunImages(imgs))
-		turnActive.Store(false)
+		h.Gate().End()
 		var refused *harness.ImageRefusedError
 		if errors.As(err, &refused) {
 			refuseImages(em, refused.Msg, task, imgs)
@@ -971,7 +977,7 @@ func turn(ctx context.Context, h *harness.Harness, em *emitter, task string, img
 		}
 	}
 	res, err := h.AskAs(tctx, mid, task)
-	turnActive.Store(false)
+	h.Gate().End()
 	return endTurn(ctx, tctx, h, em, res, err)
 }
 

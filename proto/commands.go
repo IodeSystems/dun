@@ -68,6 +68,8 @@ type AgentCmd struct {
 	// is stopped, and tell it Content)
 	Action  string `json:"action"`
 	Content string `json:"content,omitempty"`
+	// Images are a tell's attached images, as User's.
+	Images []Image `json:"images,omitempty"`
 }
 
 // Reset clears the conversation.

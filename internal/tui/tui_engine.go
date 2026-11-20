@@ -370,6 +370,19 @@ func renderTick() tea.Cmd {
 	return tea.Tick(time.Second/renderHz, func(time.Time) tea.Msg { return renderTickMsg{} })
 }
 
+// agentTell steers a sub-agent: its message and the composer's images, as
+// send carries them for the session.
+func (p *dunProc) agentTell(id int, content string, imgs []proto.Image) bool {
+	if p == nil {
+		return false
+	}
+	ev := map[string]any{"type": "agent", "id": strconv.Itoa(id), "action": "tell", "content": content}
+	if len(imgs) > 0 {
+		ev["images"] = imgs
+	}
+	return json.NewEncoder(p.stdin).Encode(ev) == nil
+}
+
 // agentCmd asks the engine to view or steer a sub-agent (see agent scope).
 func (p *dunProc) agentCmd(id int, action, content string) bool {
 	if p == nil {

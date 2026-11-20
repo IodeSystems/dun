@@ -1323,15 +1323,9 @@ func (m tuiModel) sendUserImages(v string, imgs []proto.Image) tuiModel {
 	// In agent scope the input steers that CHILD instead of the session. Same
 	// gesture the parent's agent({id:N, tell:}) makes, same code path in the
 	// engine — there is one definition of what telling a child means.
-	if m.scopeAgent != 0 && len(imgs) > 0 {
-		// A child's tell is text: sent without its images, the message would
-		// claim images the child never got. The draft stays.
-		m.append(StErr.Render("images cannot be sent to a sub-agent — not sent"))
-		m.refresh()
-		return m
-	}
 	if m.scopeAgent != 0 {
-		// Working or not, the child takes it (subagent.go, tell): a working
+		// Working or not, the child takes it, images too, through the gate
+		// the session's input goes through (harness/turngate.go): a working
 		// one queues it for its next step, as the session does a message
 		// typed mid-turn, and agent_told says so.
 		m.history = append(m.history, v)
@@ -1339,7 +1333,7 @@ func (m tuiModel) sendUserImages(v string, imgs []proto.Image) tuiModel {
 		m.input.Reset()
 		// Not echoed here: the child's transcript takes it, and its
 		// agent_entry shows it, on every client watching.
-		if !m.proc.agentCmd(m.scopeAgent, "tell", v) {
+		if !m.proc.agentTell(m.scopeAgent, v, imgs) {
 			m.append(StErr.Render("no engine right now — not sent"))
 		}
 		m.scrollPinned = true

@@ -35,15 +35,16 @@ func TestProtoCoversTUICommands(t *testing.T) {
 	p.send("hi [image 1: a.png 2×1]", []proto.Image{{Path: "/tmp/a.png", Label: "[image 1: a.png 2×1]"}})
 	p.controlCmd("docker", "on")
 	p.answer("yes", "q1")
-	p.agentCmd(3, "tell", "go on")
+	p.agentCmd(3, "view", "")
+	p.agentTell(3, "go on [image 1: a.png 2×1]", []proto.Image{{Path: "/tmp/a.png", Label: "[image 1: a.png 2×1]"}})
 	cs := decodeStrict[proto.Command](t, buf.Bytes())
-	if len(cs) != 4 {
-		t.Fatalf("decoded %d of 4 commands", len(cs))
+	if len(cs) != 5 {
+		t.Fatalf("decoded %d of 5 commands", len(cs))
 	}
 	if u := cs[0].Payload.(*proto.User); len(u.Images) != 1 || u.Images[0].Path != "/tmp/a.png" {
 		t.Errorf("user: %+v", u)
 	}
-	if a := cs[3].Payload.(*proto.AgentCmd); a.ID != "3" || a.Content != "go on" {
+	if a := cs[4].Payload.(*proto.AgentCmd); a.ID != "3" || a.Action != "tell" || len(a.Images) != 1 {
 		t.Errorf("agent: %+v", a)
 	}
 }
