@@ -87,6 +87,13 @@ without a fold) only the bounding rungs ever run.
   folded, summary 6.0k, 154 kept (83.4k), the next round sends 97.2k with
   the system prompt (51% of target); without the band the same fold keeps
   7.
+  **One fold at a time (`Harness.foldMu`).** Every build (the Shaper may
+  fold inside it), the turn-end boundary fold, the rescue and overflow
+  folds and a recap take one mutex. Before, the idle suggestion call built
+  without `turnMu`, and the turn-end and rescue folds ran outside it, so
+  two folds could read the same store and commit over each other (two
+  markers; kept entries removed during the other's summary call). Proof:
+  `internal/harness/foldmu_test.go`.
   Everything older becomes one summary of folded/8 tokens within [500, 8192], at most
   60% of target (`shaper.go:794-801`). The summarizer is told the open plan
   and the work in flight (`internal/harness/fold.go:31-41`); after the fold an aside lists

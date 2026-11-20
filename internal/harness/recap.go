@@ -590,18 +590,24 @@ func (h *Harness) runRecap(ctx context.Context, from, summary string, keep, drop
 	if strings.TrimSpace(summary) == "" {
 		return "ERROR: recap needs a summary — the account that replaces what it removes."
 	}
+	// A tool call, so no build is on the stack; a fold elsewhere (the idle
+	// suggestion's build) waits, and the span read here is what is replaced.
+	h.foldMu.Lock()
 	entries, err := h.store.Context(ctx, "dun")
 	if err != nil {
+		h.foldMu.Unlock()
 		return "ERROR: could not read the conversation: " + err.Error()
 	}
 	sp, err := planRecap(entries, from, keep, drop)
 	if err != nil {
+		h.foldMu.Unlock()
 		return "ERROR: " + err.Error()
 	}
 
 	// No confirmation. Recap applies and then says what it did — see the rules
 	// at the top of this file.
 	note, text, err := h.applyRecapText(sp, summary)
+	h.foldMu.Unlock()
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}

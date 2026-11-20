@@ -663,6 +663,15 @@ type Harness struct {
 	// execVerdicts is how each exec call ended, by tool call id, for the
 	// stub a recap leaves (recapstub.go).
 	execVerdicts map[string]string
+	// foldMu serializes everything that folds or rewrites the history: a
+	// build (the Shaper may rehead and fold inside it, and the cold-cache
+	// fold runs before it), the turn-end boundary fold, the rescue and
+	// overflow folds, and a recap. Builds run outside a turn too (the idle
+	// suggestion call, without turnMu) and the turn-end and rescue folds run
+	// outside turnMu, so without it two folds could each read the store,
+	// wait on their summary calls, and commit over each other. Order:
+	// turnMu, then foldMu.
+	foldMu sync.Mutex
 	// Compaction counters. compactTurn resets each turn, so >1 is thrashing
 	// rather than a busy session.
 	compactMu   sync.Mutex
