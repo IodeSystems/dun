@@ -36,7 +36,7 @@ DUN_BIN := $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/dun/dun
 # Where `make web` installs the built client that dund serves (--web-root).
 WEB_ROOT := $(if $(XDG_DATA_HOME),$(XDG_DATA_HOME),$(HOME)/.local/share)/dun/web
 
-.PHONY: build install install-launcher run test test-changed test-pkg clean schema web ux webapp release site site-push
+.PHONY: build install install-launcher run test test-pinned test-changed test-pkg clean schema web ux webapp release site site-push
 
 build: ## build ./dun (version + source stamped)
 	go build -ldflags "$(LDFLAGS)" -o dun ./cmd/dun
@@ -64,6 +64,14 @@ run: ## build + launch the TUI
 test: ## build + vet (Linux and macOS, CLI-14) + test, and the recorder (its own module)
 	go build ./... && go vet ./... && GOOS=darwin go vet ./... && go test ./...
 	cd tools/ttyrec && go vet ./... && go test ./...
+
+# make test-pinned: make test against the tools release/deps.json pins, not the
+# ones on this box. tools/pinned-tools.sh downloads them for this os/arch into
+# $(XDG_CACHE_HOME or ~/.cache)/dun/pinned (sha256-checked, cached) and exports
+# DUN_MCPSHELL, DUN_POLY_LSP_MCP, DUN_RAGLIT and PATH. CI runs the same script.
+# Run it before a merge or release. Needs jq, curl, sha256sum, tar.
+test-pinned: ## make test against the tools release/deps.json pins (before a merge or release)
+	eval "$$(tools/pinned-tools.sh)" && $(MAKE) test
 
 # While working: test only what a change touches (tools/test-changed.sh).
 # Run the full `make test` once, before a merge.
