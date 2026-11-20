@@ -17,12 +17,16 @@ type Roles struct {
 	// probes record what they measured; dund reads the embed dimension
 	// from it. Empty: not read.
 	CapsDir string
+	// EmbedDefault: the embed role is the default model, not a facet's
+	// (ResolveServed); a refusal of it at runtime turns embed off.
+	EmbedDefault bool
 }
 
 // Resolve turns the config's retrieval roles into raglit's model roles, by
 // dunconfig's resolver (the one the session's models use): a facet names a
 // saved provider (its URL and key are used) or none (the active one). With
-// no embed facet, embed is DefaultEmbedModel on the active provider; with no
+// no embed facet, embed is DefaultEmbedModel on the active provider (Resolve
+// trusts that; ResolveServed drops it where the provider lacks it); with no
 // vision facet, vision is the old vision_model. A role that is absent, or
 // names a provider that is not saved, is off.
 func Resolve(cfg dunconfig.DunConfig) Roles {

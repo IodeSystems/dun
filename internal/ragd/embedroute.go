@@ -29,20 +29,31 @@ func forSearch(ctx context.Context) context.Context {
 type embedRoute struct {
 	ingest raglit.VectorClient // gated on Channels
 	query  raglit.VectorClient // not gated
+	guard  *embedGuard         // nil: an explicit embed facet, errors kept
 }
 
 func (r embedRoute) Embed(ctx context.Context, model string, input []string) ([][]float32, error) {
-	if ctx.Value(searchKey{}) != nil {
-		return r.query.Embed(ctx, model, input)
+	if r.guard.isOff() {
+		return nil, errEmbedOff
 	}
-	return r.ingest.Embed(ctx, model, input)
+	var v [][]float32
+	var err error
+	if ctx.Value(searchKey{}) != nil {
+		v, err = r.query.Embed(ctx, model, input)
+	} else {
+		v, err = r.ingest.Embed(ctx, model, input)
+	}
+	if r.guard != nil {
+		r.guard.see(err)
+	}
+	return v, err
 }
 
 // newEmbedder is the embedder of every index: ingest through raglit's
 // Models.Embedder (the ingest retry policy, the admission channel and its 429
 // hook), queries on a plain client. m.Embed.Model must be set and m.Channels
 // not nil.
-func newEmbedder(m raglit.Models) *raglit.Embedder {
+func newEmbedder(m raglit.Models, g *embedGuard) *raglit.Embedder {
 	q := llm.NewClient(m.Embed.BaseURL, m.Embed.APIKey, m.Embed.Model)
-	return raglit.NewEmbedder(embedRoute{ingest: m.Embedder().Client, query: q}, m.Embed.Model)
+	return raglit.NewEmbedder(embedRoute{ingest: m.Embedder().Client, query: q, guard: g}, m.Embed.Model)
 }

@@ -97,6 +97,7 @@ type Host struct {
 
 	mu      sync.Mutex
 	stores  map[string]*raglit.Store // by "<dir>/<index>"
+	guard   *embedGuard              // the default embed model's runtime guard; nil with an embed facet or none
 	stale   map[string]string        // index → why its vectors are not the embed role's
 	filling map[string]bool          // index → a backfill runs
 	trees   map[string]string        // canonical root → its main checkout; "" not a worktree (Worktree)
@@ -134,7 +135,10 @@ func Open(root string, r Roles, logf func(string, ...any)) (*Host, error) {
 		meters: map[string]*meter{}, meterOf: map[*raglit.Store]*meter{}, now: time.Now}
 	h.bg, h.stopBg = context.WithCancel(context.Background())
 	if m.Embed.Model != "" {
-		h.embed = newEmbedder(m)
+		if r.EmbedDefault {
+			h.guard = &embedGuard{role: m.Embed, capsDir: r.CapsDir, logf: logf}
+		}
+		h.embed = newEmbedder(m, h.guard)
 		h.dim = embedDimension(r.CapsDir, m.Embed)
 	}
 	h.ident = m.Identifier()
@@ -504,7 +508,7 @@ func (h *Host) Search(ctx context.Context, q proto.RagSearch) (*proto.RagHits, e
 	}
 	f := raglit.SearchFilter{PathPrefix: canonPrefix(q.Filter.PathPrefix), Tags: q.Filter.Tags, Fields: q.Filter.Fields}
 	var hits []raglit.Hit
-	if mode == "hybrid" && h.embed == nil {
+	if mode == "hybrid" && (h.embed == nil || h.guard.isOff()) {
 		mode, out.Note = "fts", "no embed model (facets.embed): searched by text only"
 	}
 	if why := h.staleWhy(name); mode == "hybrid" && why != "" {

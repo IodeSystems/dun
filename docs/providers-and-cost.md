@@ -75,7 +75,8 @@ effort" below).
   `--child-model`/`--child-effort` (child). Env: `DUN_URL`/`DUN_MODEL`/
   `DUN_LLM_KEY` (main only). Old fields: `model` (main), `vision_model`/
   `vision_provider` (vision). Defaults: embed is `local-nomic-embed-text` on
-  the active provider; child is main's model; the rest are off.
+  the active provider only if it lists that model (else off, search is
+  full-text only); child is main's model; the rest are off.
 - **Old configs keep working.** Loading reads the old fields as fallbacks
   and never rewrites the file. `/model use`, the picker, `dun --setup` and
   the web's provider `use` write `facets.main`; they also write the old
