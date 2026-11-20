@@ -78,7 +78,7 @@ func TestFoldHistory_ReportsWhatItActuallySaved(t *testing.T) {
 		t.Errorf("a fold that saves nothing is not worth its LLM call: %d → %d",
 			note.TokensBefore, note.TokensAfter)
 	}
-	if s := note.String(); strings.Contains(s, "saved 0)") {
-		t.Errorf("still reporting a zero saving: %s", s)
+	if s := note.String(); strings.Contains(s, "saved") {
+		t.Errorf("still reporting a saving figure: %s", s)
 	}
 }

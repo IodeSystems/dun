@@ -23,26 +23,76 @@ type CompactionNote struct {
 	Cause         string // WHY this fold ran: "shaper" (budget) or "overflow" (endpoint cut a reply)
 }
 
-// String renders the note as one reviewable line.
+// String renders the note as one plain line: what was summarized, what was
+// kept, the history size before and after, why, and when the last fold was.
+//
+// TODO: print the kept-token figure (KeptTokens) once the agentkit accounting
+// bug is fixed: KeptTokens can exceed TokensAfter, so side by side the two
+// read as if one contained the other. Reported to agentkit's owner; no issue
+// number yet.
 func (n CompactionNote) String() string {
-	s := fmt.Sprintf("compacted %d entries", n.Subsumed)
+	s := fmt.Sprintf("compacted: oldest %d entries → summary", n.Subsumed)
 	if n.Kept > 0 {
-		s += fmt.Sprintf(", kept %d verbatim (%s)", n.Kept, numfmt.TokN(n.KeptTokens))
+		s += fmt.Sprintf(", newest %d kept as is", n.Kept)
 	}
-	// The arrow ends at TokensAfter: what the next build sends. Since agentkit
-	// v0.38.0 that is the render without LOD (before it, TokensAfterFull);
-	// the LOD render it replaced only applied under pressure.
-	s += fmt.Sprintf(": %d → %d tokens (saved %d)", n.TokensBefore, n.TokensAfter, n.TokensBefore-n.TokensAfter)
-	if n.Cause != "" {
-		s += " · " + n.Cause
+	// The arrow ends at TokensAfter: what the next build sends, without the
+	// system prompt and without LOD (agentkit v0.38.0).
+	s += fmt.Sprintf(" · history %s → %s tokens", numfmt.TokN(n.TokensBefore), numfmt.TokN(n.TokensAfter))
+	if c := causeWords(n.Cause); c != "" {
+		s += " · " + c
 	}
 	if n.Turn > 1 {
-		s += fmt.Sprintf(" · %d× this turn", n.Turn)
+		s += " · " + ordinal(n.Turn) + " fold this turn"
 	}
 	if n.SinceLastSecs > 0 {
-		s += fmt.Sprintf(" · %ds since the last", n.SinceLastSecs)
+		s += " · " + foldAge(n.SinceLastSecs) + " since the last"
 	}
 	return s
+}
+
+// causeWords is a fold's Cause key in words. An unknown key prints as is.
+func causeWords(c string) string {
+	switch c {
+	case "shaper":
+		return "over budget"
+	case "overflow":
+		return "the endpoint cut a reply"
+	case "boundary":
+		return "turn end or cold cache"
+	}
+	return c
+}
+
+// ordinal is 2 → "2nd", 3 → "3rd", 11 → "11th".
+func ordinal(n int) string {
+	suf := "th"
+	if n%100 < 11 || n%100 > 13 {
+		switch n % 10 {
+		case 1:
+			suf = "st"
+		case 2:
+			suf = "nd"
+		case 3:
+			suf = "rd"
+		}
+	}
+	return fmt.Sprintf("%d%s", n, suf)
+}
+
+// foldAge is a gap as 45s, 26m or 1h3m.
+func foldAge(secs int) string {
+	d := time.Duration(secs) * time.Second
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", secs)
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	h, m := int(d.Hours()), int(d.Minutes())%60
+	if m == 0 {
+		return fmt.Sprintf("%dh", h)
+	}
+	return fmt.Sprintf("%dh%dm", h, m)
 }
 
 // compactionThrashTurns is how many folds in ONE turn count as thrashing. More

@@ -201,19 +201,49 @@ func TestContextBudget_BelowTheWindowHardLimit(t *testing.T) {
 func TestCompactionNote_ReportsTheDamage(t *testing.T) {
 	n := CompactionNote{Subsumed: 12, TokensBefore: 30000, TokensAfter: 8000}
 	s := n.String()
-	for _, want := range []string{"12 entries", "30000", "8000", "saved 22000"} {
-		if !strings.Contains(s, want) {
-			t.Errorf("note is missing %q: %s", want, s)
-		}
+	want := "compacted: oldest 12 entries → summary · history 30.0k → 8.0k tokens"
+	if s != want {
+		t.Errorf("got  %s\nwant %s", s, want)
 	}
-	if strings.Contains(s, "this turn") {
-		t.Errorf("a single fold is not thrashing: %s", s)
+	if strings.Contains(s, "fold this turn") || strings.Contains(s, "saved") {
+		t.Errorf("a single fold is not thrashing, and the arrow shows the saving: %s", s)
 	}
 	// The second fold in ONE turn is the signal that the budget is wrong.
 	n.Turn, n.SinceLastSecs = 2, 7
 	s = n.String()
-	if !strings.Contains(s, "2× this turn") || !strings.Contains(s, "7s since") {
+	if !strings.HasSuffix(s, " · 2nd fold this turn · 7s since the last") {
 		t.Errorf("thrash markers missing: %s", s)
+	}
+}
+
+// The notice gives the cause in words, one row per cause.
+func TestCompactionNote_CauseInWords(t *testing.T) {
+	for _, c := range []struct{ cause, want string }{
+		{"shaper", "compacted: oldest 429 entries → summary, newest 131 kept as is · history 273.3k → 48.6k tokens · over budget · 25m since the last"},
+		{"overflow", "compacted: oldest 429 entries → summary, newest 131 kept as is · history 273.3k → 48.6k tokens · the endpoint cut a reply · 25m since the last"},
+		{"boundary", "compacted: oldest 429 entries → summary, newest 131 kept as is · history 273.3k → 48.6k tokens · turn end or cold cache · 25m since the last"},
+	} {
+		n := CompactionNote{Subsumed: 429, Kept: 131, KeptTokens: 54_400, TokensBefore: 273275, TokensAfter: 48631, Cause: c.cause, SinceLastSecs: 1551}
+		if s := n.String(); s != c.want {
+			t.Errorf("%s:\ngot  %s\nwant %s", c.cause, s, c.want)
+		}
+	}
+}
+
+func TestCompactionNote_OrdinalAndAge(t *testing.T) {
+	for n, want := range map[int]string{2: "2nd", 3: "3rd", 4: "4th", 11: "11th", 12: "12th", 21: "21st", 112: "112th"} {
+		if got := ordinal(n); got != want {
+			t.Errorf("ordinal(%d)=%s want %s", n, got, want)
+		}
+	}
+	for secs, want := range map[int]string{45: "45s", 60: "1m", 1551: "25m", 3780: "1h3m", 7200: "2h"} {
+		if got := foldAge(secs); got != want {
+			t.Errorf("foldAge(%d)=%s want %s", secs, got, want)
+		}
+	}
+	n := CompactionNote{Subsumed: 5, TokensBefore: 100, TokensAfter: 40, Turn: 3}
+	if s := n.String(); !strings.HasSuffix(s, " · 3rd fold this turn") {
+		t.Errorf("Turn>1 wording: %s", s)
 	}
 }
 

@@ -64,8 +64,12 @@ without a fold) only the bounding rungs ever run.
   `CompactionInfo` reports `KeptCount`/`KeptTokens`; `TokensAfter` is the
   count without LOD, what the next build sends (agentkit v0.38.0; before
   it `TokensAfter` was the LOD render and `TokensAfterFull` this count).
-  The fold notice: `compacted 237 entries, kept 198 verbatim (129.7k):
-  294971 → 147755 tokens (saved …)`, the arrow at `TokensAfter`
+  The fold notice: `compacted: oldest 237 entries → summary, newest 198
+  kept as is · history 295.0k → 147.8k tokens · over budget`, the arrow
+  at `TokensAfter` (cause: over budget, the endpoint cut a reply, or turn
+  end or cold cache; `3rd fold this turn` and `26m since the last` when
+  they apply; the kept-token figure is not printed until agentkit's
+  KeptTokens accounting is fixed)
   (`internal/harness/compaction.go`). Measured in
   `internal/harness/foldkeep_test.go`: 434 entries, target 190k, 221,463
   tokens before, 264 folded, 171 kept (84.1k), the next round sends 97.8k
