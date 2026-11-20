@@ -271,7 +271,7 @@ func callTarget(it *runItem) string {
 		v, _ = it.args["command"].(string)
 	case len(it.args) == 1:
 		for _, a := range it.args {
-			v = fmt.Sprint(a)
+			v = argInline(a)
 		}
 	default:
 		return ""
@@ -386,14 +386,13 @@ func (r *toolRun) page() pageDoc {
 					}
 				}
 				n.rows = func(w int) []string { return execStepRows(args, output, w) }
+			} else {
+				// The call in its own form and the result as its renderer
+				// draws it (stepbody.go); a failure's result in red.
+				tool, args, result, output, failed := it.tool, it.args, it.result, it.output, it.failed
+				n.rows = func(w int) []string { return stepRows(tool, args, result, output, failed, w) }
 			}
-			// The renderer's full body (a table, laid-out values, a marked
-			// error) where it has one; the raw result otherwise.
-			res := strings.TrimRight(it.output, "\n")
-			if strings.TrimSpace(stripANSI(res)) == "" {
-				res = strings.TrimRight(it.result, "\n")
-			}
-			n.body = callFull(it.tool, it.args) + "\n\n" + res
+			n.body = stepText(it.tool, it.args, it.result, it.output, it.failed)
 			n.insp = &inspSource{name: it.tool, input: argFull(it.args), output: it.result}
 		}
 		doc.nodes = append(doc.nodes, n)

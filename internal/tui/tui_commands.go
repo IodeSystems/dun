@@ -55,7 +55,7 @@ func argPreview(args map[string]any, max int) string {
 	}
 	parts := make([]string, 0, len(args))
 	for _, k := range sortedKeys(args) {
-		parts = append(parts, k+"="+textfmt.Clip(textfmt.OneLine(fmt.Sprint(args[k])), 48))
+		parts = append(parts, k+"="+textfmt.Clip(textfmt.OneLine(argInline(args[k])), 48))
 	}
 	return textfmt.Clip(strings.Join(parts, ", "), max)
 }
@@ -138,17 +138,18 @@ func callFull(tool string, args map[string]any) string {
 	return full
 }
 
-// argFull renders the call's args in full (multi-line values kept intact), shown
-// when the tool block is expanded.
+// argFull renders the call's args in full, as key: value lines (stepbody.go's
+// argLines: nested values indented under their key, multi-line strings kept
+// as blocks), for the inspector and a copied run.
 func argFull(args map[string]any) string {
 	if len(args) == 0 {
 		return ""
 	}
-	var b strings.Builder
-	for _, k := range sortedKeys(args) {
-		b.WriteString(StDim.Render("  "+k+":") + " " + fmt.Sprint(args[k]) + "\n")
+	var lines []string
+	for _, l := range argLines(args, 2) {
+		lines = append(lines, l.render())
 	}
-	return strings.TrimRight(b.String(), "\n")
+	return strings.Join(lines, "\n")
 }
 
 // ── slash commands ─────────────────────────────────────────────────
