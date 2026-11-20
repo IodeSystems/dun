@@ -60,9 +60,11 @@ type actRow struct {
 	style  lipgloss.Style
 	label  string // "#1 running 2m 6.5kt" — identity and cost
 	detail string // what it is doing
-	// attn marks a row that will not resolve itself: a job that failed. It
-	// survives clipping (see actLine).
+	// attn marks a row that will not resolve itself: a job that failed, a
+	// child whose plan node is blocked. why says it in words ("job 3 failed
+	// (exit 2)"), so the strip never says it by colour alone (actLine).
 	attn bool
+	why  string
 	// stacked is how many agents a stack row holds; member marks a row
 	// listed under an open stack. See actRows.
 	stacked int
@@ -79,7 +81,8 @@ type actRow struct {
 // talked to, what is finished, what was dismissed. Agents and jobs share
 // them, so the two kinds interleave by state.
 const (
-	groupWorking = iota // running jobs, running agents
+	groupAttn    = iota // what needs the person: failed jobs, blocked agents
+	groupWorking        // running jobs, running agents
 	groupIdle           // idle agents
 	groupDone           // finished jobs, stopped agents
 	groupGone           // the dismissed stack
@@ -100,6 +103,8 @@ type agentRow struct {
 	effort  string // the level its requests send (the engine's, clamped to its model)
 	tokens  int
 	seconds int
+	// blocked is why its plan node is blocked, as dund says ("" it is not).
+	blocked string
 	// at is when the engine said seconds. It pushes agents on a change, not
 	// every second, so a running child's time is counted on from there, as a
 	// job's is (jobRow).
@@ -115,7 +120,7 @@ type agentRow struct {
 func keepChanged(old, cur []agentRow) []agentRow {
 	for i := range cur {
 		for _, o := range old {
-			if o.id == cur[i].id && o.state == cur[i].state && o.status == cur[i].status && o.tokens == cur[i].tokens && !o.changed.IsZero() {
+			if o.id == cur[i].id && o.state == cur[i].state && o.status == cur[i].status && o.tokens == cur[i].tokens && o.blocked == cur[i].blocked && !o.changed.IsZero() {
 				cur[i].changed = o.changed
 			}
 		}
@@ -159,7 +164,7 @@ func agentRowsFromEvent(ev evMsg) []agentRow {
 		out = append(out, agentRow{
 			id: num(m["id"]), state: str(m["state"]), status: str(m["status"]),
 			prompt: str(m["prompt"]), model: str(m["model"]), tier: str(m["tier"]), effort: str(m["effort"]),
-			tokens: num(m["tokens"]), seconds: num(m["seconds"]), at: at, changed: at,
+			tokens: num(m["tokens"]), seconds: num(m["seconds"]), blocked: str(m["blocked"]), at: at, changed: at,
 		})
 	}
 	return out
@@ -281,7 +286,25 @@ func (m *tuiModel) openActList() {
 	m.actOrder = m.takeActOrder()
 	if rows := m.actRows(); len(rows) > 0 {
 		m.actSel = rows[0].key
+		// The row the strip named (actLine), so the keys it gave act on it.
+		if lead := leadRow(m.baseRows()); lead != nil && lead.attn {
+			m.actSel = lead.key
+		}
 	}
+}
+
+// actHint is the open table's status line. A selected row that needs the
+// person says what happened and the keys that act on it.
+func (m tuiModel) actHint() string {
+	r := m.actSelected()
+	if r == nil || !r.attn {
+		return StDim.Render("activity  ·  ↑/↓ select · →/enter open · x kill job · c clear done · tab next zone · esc input")
+	}
+	keys := " · enter log · c clear done"
+	if r.key.agent {
+		keys = " · enter open its conversation"
+	}
+	return stAsk.Render(r.mark+" "+r.why) + StDim.Render(keys+" · ↑/↓ select · tab next zone · esc input")
 }
 
 // baseRows is actRows in id order.
@@ -359,10 +382,18 @@ func agentActRow(a agentRow, now time.Time) actRow {
 	case "idle":
 		group = groupIdle
 	}
-	return actRow{
+	row := actRow{
 		key: actKey{agent: true, id: a.id}, mark: mark, style: style,
 		label: label, detail: detail, recent: recent, group: group,
 	}
+	// A live child whose plan node is blocked will not get on by itself.
+	// A stopped or dismissed one's node goes back to the main agent.
+	if a.blocked != "" && (a.state == "running" || a.state == "idle") {
+		row.mark, row.style, row.attn, row.group = "⚠", stAsk, true, groupAttn
+		row.detail = "blocked: " + a.blocked
+		row.why = fmt.Sprintf("agent #%d blocked: %s", a.id, a.blocked)
+	}
+	return row
 }
 
 // stackRow is the dismissed agents as one row: how many, what they spent,
@@ -420,10 +451,22 @@ func jobActRow(j jobRow, now time.Time) actRow {
 	if j.state == "running" {
 		group = groupWorking
 	}
+	why := ""
+	switch j.state {
+	case "failed":
+		why = fmt.Sprintf("job %d failed (exit %d)", j.id, j.code)
+	case "timeout":
+		why = fmt.Sprintf("job %d timed out", j.id)
+	case "error":
+		why = fmt.Sprintf("job %d could not run", j.id)
+	}
+	if why != "" {
+		group = groupAttn
+	}
 	return actRow{
 		key: actKey{id: j.id}, mark: mark, style: style,
 		label: label, detail: j.command, recent: recent, group: group,
-		attn: j.state == "failed" || j.state == "timeout" || j.state == "error",
+		attn: why != "", why: why,
 	}
 }
 
@@ -457,8 +500,6 @@ func (m tuiModel) actLine(rows []actRow) string {
 	attn := lead != nil && lead.attn
 	glyph, gstyle := "▸ ", StDim
 	if attn {
-		// A row that needs answering must survive clipping — the detail that
-		// says so is the first thing to be cut off on a narrow terminal.
 		gstyle = stAsk
 	}
 	var b strings.Builder
@@ -468,18 +509,47 @@ func (m tuiModel) actLine(rows []actRow) string {
 
 	shown := rows[:0:0]
 	for _, r := range rows {
-		if !r.member {
+		if !r.member && (!attn || r.key != lead.key) {
 			shown = append(shown, r)
 		}
 	}
-	for i, r := range shown {
+	first := true
+	if attn {
+		// A row that needs the person goes first, in words, with the keys
+		// that act on it (USER 2026-11-20: "went red and triangle, but idk
+		// why or what I should do?"). A narrow terminal drops the other
+		// rows and the command, then the keys after the first ("shift+tab"),
+		// then all of them, before it cuts the words.
+		to, rest := m.attnKeys(*lead)
+		words := lead.mark + " " + lead.why
+		var text, keys string
+		var cut bool
+		for _, k := range []string{" · " + to + rest, " · " + to, ""} {
+			keys = k
+			if text, cut = fitPlain(words, budget-used-lipgloss.Width(k)); !cut {
+				break
+			}
+		}
+		b.WriteString(stAsk.Render(text))
+		used += lipgloss.Width(text)
+		if keys != "" {
+			b.WriteString(StDim.Render(keys))
+			used += lipgloss.Width(keys)
+		}
+		if cut {
+			return b.String()
+		}
+		first = false
+	}
+	for _, r := range shown {
 		seg := r.mark + r.label
 		if r.key == stackKey {
 			seg = "≡" + r.label // the strip never lists the stack open
 		}
-		if i > 0 {
+		if !first {
 			seg = " · " + seg
 		}
+		first = false
 		text, cut := fitPlain(seg, budget-used)
 		if text == "" {
 			return b.String()
@@ -495,6 +565,28 @@ func (m tuiModel) actLine(rows []actRow) string {
 		b.WriteString(StDim.Render(text))
 	}
 	return b.String()
+}
+
+// attnKeys names the keys that reach an attention row from where the focus
+// is: to, the key to the jobs table (it opens on that row, openActList);
+// then rest, enter, which opens a job's log or an agent's conversation.
+func (m tuiModel) attnKeys(r actRow) (to, rest string) {
+	rest = ", enter: log"
+	if r.key.agent {
+		rest = ", enter: open"
+	}
+	switch m.focus {
+	case focusActivity:
+		to = "→"
+	case focusConvo:
+		to = m.keys.label("focus.next")
+	default:
+		to = m.keys.label("focus.prev")
+	}
+	if to == "" {
+		to = "tab to jobs"
+	}
+	return to, rest
 }
 
 // leadRow is the one row the collapsed line describes in words: attention

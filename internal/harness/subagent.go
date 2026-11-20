@@ -1867,12 +1867,16 @@ type AgentInfo struct {
 	// Dir is the tree an isolated child works in, or the spawn's dir; ""
 	// is its parent's tree. dun ps matches processes against it.
 	Dir string `json:"dir,omitempty"`
+	// Blocked is why the child is stuck: the reason on a plan node it owns
+	// that it closed as blocked (plan_close outcome block). "" none is.
+	Blocked string `json:"blocked,omitempty"`
 }
 
 // Agents is every child of this session, oldest first.
 func (h *Harness) Agents() []AgentInfo {
 	list := h.agentList()
 	out := make([]AgentInfo, 0, len(list))
+	blocked := h.planBlockedByAgent(len(list))
 	for _, sa := range list {
 		state, status, _, since := sa.snapshot()
 		sa.mu.Lock()
@@ -1884,7 +1888,7 @@ func (h *Harness) Agents() []AgentInfo {
 		out = append(out, AgentInfo{
 			ID: sa.num, Model: sa.where(), Tier: sa.tierName(), Effort: sa.effective, State: string(state), Status: status,
 			Prompt: sa.prompt, Tokens: sa.spent(), Seconds: int(since.Seconds()),
-			Dir: sa.iso.workspace(),
+			Dir: sa.iso.workspace(), Blocked: blocked[sa.num],
 		})
 	}
 	return out

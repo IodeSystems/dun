@@ -2679,7 +2679,7 @@ func TestActivity_OnlyDeadJobsIsStillReachable(t *testing.T) {
 	m = nm.(tuiModel)
 	now := float64(time.Now().Unix())
 	m = m.feed(evMsg{"type": "jobs", "jobs": []any{
-		map[string]any{"id": 7.0, "command": "make", "state": "failed", "code": 2.0, "started": now - 9, "ended": now - 3},
+		map[string]any{"id": 7.0, "command": "make", "state": "killed", "started": now - 9, "ended": now - 3},
 		map[string]any{"id": 8.0, "command": "true", "state": "ok", "started": now - 2, "ended": now - 1},
 	}})
 	m = key(m, kTab)
