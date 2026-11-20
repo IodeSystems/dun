@@ -768,10 +768,17 @@ func drainStep(ctx context.Context, h *harness.Harness, em *emitter) bool {
 	// interactive loop there is nobody left to fix anything — stdin is closed —
 	// so the pending work would fail identically forever.
 	if h.BackgroundRunning() > 0 {
+		if h.AllJobsQuiet(bareQuietJobEnd) {
+			return false
+		}
 		select {
 		case <-h.Wake():
 		case <-ctx.Done():
 			return false
+		case <-time.After(h.QuietIn(bareQuietJobEnd)):
+			if h.AllJobsQuiet(bareQuietJobEnd) {
+				return false
+			}
 		}
 		return continueTurn(ctx, h, em)
 	}

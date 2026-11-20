@@ -118,6 +118,32 @@ func (h *Harness) KillAllJobs(by string) string {
 	return strings.Join(out, "\n")
 }
 
+// QuietIn is how long until every job still running has produced no output
+// for d: 0 when they already have (and when none run). A job that has not
+// printed anything counts from its start, so a build that has been silent
+// longer than the threshold is quiet — it is indistinguishable from a job
+// that will never print.
+func (h *Harness) QuietIn(d time.Duration) time.Duration {
+	var in time.Duration
+	for _, j := range h.liveJobs() {
+		j.mu.Lock()
+		last := j.outAt
+		if j.started.After(last) {
+			last = j.started
+		}
+		rest := d - time.Since(last)
+		j.mu.Unlock()
+		if rest > in {
+			in = rest
+		}
+	}
+	return in
+}
+
+// AllJobsQuiet reports whether every job still running is quiet (see QuietIn),
+// for a driver that ends the session when there is nothing left to wait for.
+func (h *Harness) AllJobsQuiet(d time.Duration) bool { return h.QuietIn(d) <= 0 }
+
 // liveJobs is every job not yet finished, numbered ones first in id order,
 // then the unnumbered ones oldest first.
 func (h *Harness) liveJobs() []*bgJob {

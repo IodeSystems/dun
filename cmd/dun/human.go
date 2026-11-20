@@ -9,11 +9,18 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/textfmt"
 )
+
+// bareQuietJobEnd is how long every remaining job must stay quiet before a
+// one-shot run ends: a job that has printed nothing for this long is treated
+// as one that will never print, and the run returns its answer instead of
+// blocking until the outer --timeout.
+var bareQuietJobEnd = 30 * time.Second
 
 // runHuman streams a single task, then drains any background jobs it started
 // (their completion notifications trigger follow-up turns).
@@ -60,11 +67,21 @@ func runHuman(ctx context.Context, h *harness.Harness, task, workspace string, i
 			default:
 				return
 			}
+		} else if h.AllJobsQuiet(bareQuietJobEnd) {
+			// Every job has been quiet for the threshold: nothing is going to
+			// wake us, so return the answer instead of blocking until --timeout.
+			fmt.Fprintf(os.Stderr, "\n--- all jobs quiet; ending one-shot run ---\n")
+			return
 		} else {
+			// Wait for a wake, a ctx cancel, or the quiet threshold to elapse
+			// (whichever comes first). The timer is re-evaluated each loop
+			// iteration; QuietIn shrinks as output stops, so the first tick
+			// that fires is the one that makes AllJobsQuiet true.
 			select {
 			case <-h.Wake():
 			case <-ctx.Done():
 				return
+			case <-time.After(h.QuietIn(bareQuietJobEnd)):
 			}
 		}
 		fmt.Fprintf(os.Stderr, "\n--- background job finished; continuing ---\n")
