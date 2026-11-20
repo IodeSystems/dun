@@ -167,7 +167,10 @@ type WindowBudget struct {
 	Reserved int
 	// Cap is the ceiling on one response on its own.
 	Cap int
-	// PromptBudget is what the Shaper shapes to: Window - Reserved - Overhead.
+	// PromptBudget is what the Shaper shapes to: shapingBudget(Window) -
+	// Overhead — the SAME call the Shaper's policy uses, so the two budget
+	// values cannot diverge, and (with Overhead >= 0) it stays below the
+	// window's hard limit.
 	PromptBudget int
 	// Prompt is the last built prompt in tokens, overhead included.
 	Prompt int

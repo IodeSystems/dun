@@ -227,6 +227,14 @@ func (h *Harness) contextWindow(ctx context.Context, runner any) int {
 // config --ceiling). Pure: it is recomputed on every build (the fitted
 // overhead moves), so it must not log.
 //
+// Invariant: shapingBudget(window) < window for every window > 0. Every
+// branch below keeps it — window - the reserve is under window, the small-
+// window fallback is half, and the ceiling is a cap on a value already under
+// the window. TestContextBudget_BelowTheWindowHardLimit pins it: the 65k
+// fold that failed outright was a prompt allowed to reach the window's hard
+// limit, and WindowBudget.PromptBudget is derived from THIS call, so the two
+// budget values cannot diverge.
+//
 // The ceiling is what shapes BIG-window models: on a 1M window nothing
 // triggers until the prompt is near the window, and by then it is past where
 // the model's quality was tuned. Q bounds the target the Shaper works to —

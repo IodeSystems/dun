@@ -163,6 +163,39 @@ func TestContextBudget_EnvironmentWinsOverTheServer(t *testing.T) {
 	_ = os.Unsetenv("DUN_CONTEXT_TOKENS")
 }
 
+// The working budget must stay strictly below the window's hard limit, and
+// WindowBudget.PromptBudget must be the same number the Shaper shapes to, so
+// the two budget values cannot diverge. The 65k fold that failed outright was
+// a prompt allowed to reach the window.
+func TestContextBudget_BelowTheWindowHardLimit(t *testing.T) {
+	t.Setenv("DUN_CONTEXT_TOKENS", "")
+	applyContextConfig(ContextConfig{Ceiling: 96000})
+	t.Cleanup(func() { applyContextConfig(ContextConfig{}) })
+
+	// Across every window size, including the small-window fallback branch
+	// (window < the response's reserve) where the budget is half the window.
+	for _, window := range []int{4096, 10000, 32768, 65536, 188160, 220160, 1_000_000} {
+		if got := shapingBudget(window); got >= window {
+			t.Errorf("window %d: shaping budget %d must stay below the window's hard limit", window, got)
+		}
+	}
+
+	// A real harness: the status view and the shaper's policy come from the
+	// same call, so what /context reports is what the Shaper shapes to, and
+	// it is below the window.
+	h := NewTestHarness(Endpoint{URL: "https://litellm.corp/v1", Model: "hard-limit"})
+	h.window.Store(220160)
+	wb := h.Window()
+	if wb.PromptBudget != shapingBudget(220160) {
+		t.Errorf("WindowBudget.PromptBudget %d is not shapingBudget(220160) = %d — the two diverged",
+			wb.PromptBudget, shapingBudget(220160))
+	}
+	if wb.PromptBudget >= wb.Window {
+		t.Errorf("PromptBudget %d is not below the %d window", wb.PromptBudget, wb.Window)
+	}
+	_ = os.Unsetenv("DUN_CONTEXT_TOKENS")
+}
+
 // A fold has to be reviewable after the fact: how much was destroyed, what it
 // cost, and whether it is happening more than once a turn.
 func TestCompactionNote_ReportsTheDamage(t *testing.T) {
