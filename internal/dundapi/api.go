@@ -71,6 +71,10 @@ type Server struct {
 	trust      TrustFunc // proxies whose X-Forwarded-* are believed (proxy.go)
 }
 
+// HasEmbeddedApp reports whether this build carries the web client (release
+// builds do, source builds do not).
+func HasEmbeddedApp() bool { _, ok := embeddedApp(); return ok }
+
 // Options are what the HTTP surface serves besides the API.
 type Options struct {
 	// Owner is the principal the local token stands for (unix:<uid>).
