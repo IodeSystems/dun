@@ -71,7 +71,19 @@ type actRow struct {
 	// last changed (an agent) or ended (a job). The open table is sorted by
 	// it (actRows).
 	recent time.Time
+	// group is the table's first sort key (actGroup), ahead of recent.
+	group int
 }
+
+// The open table's groups, in order: what is working, what can still be
+// talked to, what is finished, what was dismissed. Agents and jobs share
+// them, so the two kinds interleave by state.
+const (
+	groupWorking = iota // running jobs, running agents
+	groupIdle           // idle agents
+	groupDone           // finished jobs, stopped agents
+	groupGone           // the dismissed stack
+)
 
 // stackKey is the row the dismissed agents are stacked into — an agent key
 // no child has, since ids start at 1 and the parent row is 0.
@@ -239,7 +251,8 @@ func orderRows(rows []actRow, order []actKey) []actRow {
 	return out
 }
 
-// takeActOrder is the open table's order: the rows now, most recent first.
+// takeActOrder is the open table's order: the rows now, by group (actGroup
+// constants) and most recent first within one.
 func (m tuiModel) takeActOrder() []actKey {
 	rows := m.baseRows()
 	var tops []actRow
@@ -248,7 +261,12 @@ func (m tuiModel) takeActOrder() []actKey {
 			tops = append(tops, r)
 		}
 	}
-	sort.SliceStable(tops, func(i, j int) bool { return tops[i].recent.After(tops[j].recent) })
+	sort.SliceStable(tops, func(i, j int) bool {
+		if tops[i].group != tops[j].group {
+			return tops[i].group < tops[j].group
+		}
+		return tops[i].recent.After(tops[j].recent)
+	})
 	order := make([]actKey, len(tops))
 	for i, r := range tops {
 		order[i] = r.key
@@ -334,9 +352,16 @@ func agentActRow(a agentRow, now time.Time) actRow {
 	if a.state == "running" {
 		recent = now
 	}
+	group := groupDone
+	switch a.state {
+	case "running":
+		group = groupWorking
+	case "idle":
+		group = groupIdle
+	}
 	return actRow{
 		key: actKey{agent: true, id: a.id}, mark: mark, style: style,
-		label: label, detail: detail, recent: recent,
+		label: label, detail: detail, recent: recent, group: group,
 	}
 }
 
@@ -362,7 +387,7 @@ func stackRow(gone []agentRow, open bool) actRow {
 		mark = "▾"
 	}
 	return actRow{key: stackKey, mark: mark, style: StDim, label: label,
-		detail: strings.Join(ids, " "), stacked: len(gone), recent: recent}
+		detail: strings.Join(ids, " "), stacked: len(gone), recent: recent, group: groupGone}
 }
 
 func jobActRow(j jobRow, now time.Time) actRow {
@@ -391,9 +416,13 @@ func jobActRow(j jobRow, now time.Time) actRow {
 	if j.ended == 0 {
 		recent = now // running, or no end said: treat as active
 	}
+	group := groupDone
+	if j.state == "running" {
+		group = groupWorking
+	}
 	return actRow{
 		key: actKey{id: j.id}, mark: mark, style: style,
-		label: label, detail: j.command, recent: recent,
+		label: label, detail: j.command, recent: recent, group: group,
 		attn: j.state == "failed" || j.state == "timeout" || j.state == "error",
 	}
 }
@@ -769,6 +798,13 @@ func (m *tuiModel) actKeys(key string) (tea.Cmd, bool) {
 		// nothing is selected that you can see.
 		if m.actLevel == actList {
 			m.actKill()
+		}
+		return nil, true
+	case "c":
+		// Drop every finished job from the list (the engine does it, for
+		// every client). Running jobs and agents stay.
+		if m.actLevel == actList && m.scopeAgent == 0 {
+			m.killJobsCmd("jobs clear")
 		}
 		return nil, true
 	case "right", "enter":

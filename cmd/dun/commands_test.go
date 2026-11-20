@@ -211,6 +211,7 @@ func TestRouteSlash_Jobs(t *testing.T) {
 		"jobs kill 3":   {"control", "jobs", "kill 3"},
 		"jobs kill #3":  {"control", "jobs", "kill 3"},
 		"jobs KILL ALL": {"control", "jobs", "kill all"},
+		"jobs clear":    {"control", "jobs", "clear"},
 	} {
 		calls = nil
 		routeSlash(line, r)

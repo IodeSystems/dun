@@ -150,6 +150,29 @@ func (h *Harness) liveJobs() []*bgJob {
 	return out
 }
 
+// ClearDoneJobs drops every finished job from the list, running ones kept,
+// and pushes the list. Logs stay on disk. It returns how many it dropped.
+func (h *Harness) ClearDoneJobs() int {
+	h.bgMu.Lock()
+	var gone []int
+	for id, j := range h.bgJobs {
+		j.mu.Lock()
+		done := j.done
+		j.mu.Unlock()
+		if done {
+			gone = append(gone, id)
+		}
+	}
+	for _, id := range gone {
+		delete(h.bgJobs, id)
+	}
+	h.bgMu.Unlock()
+	if len(gone) > 0 {
+		h.jobsChanged()
+	}
+	return len(gone)
+}
+
 // RunningJobs is every numbered job still running, oldest first.
 func (h *Harness) RunningJobs() []JobInfo {
 	var out []JobInfo

@@ -620,7 +620,7 @@ func (m tuiModel) drawView() string {
 	case m.focus == focusActivity && m.actLevel == actCollapsed:
 		status = StDim.Render("activity  ·  → open · tab input · " + m.exitHint())
 	case m.focus == focusActivity:
-		status = StDim.Render("activity  ·  ↑/↓ select · →/enter open (agent = its view) · x kill job · tab next zone · esc input")
+		status = StDim.Render("activity  ·  ↑/↓ select · →/enter open · x kill job · c clear done · tab next zone · esc input")
 	case m.scopeAgent != 0:
 		status = StDim.Render(fmt.Sprintf("agent #%d  ·  type to tell it (its next message) · ←/esc back to the session", m.scopeAgent))
 	case m.focus == focusConvo:

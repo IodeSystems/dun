@@ -71,11 +71,15 @@ func isJobID(s string) bool {
 }
 
 // jobsCmd carries out /jobs for every client: action "" lists the running
-// jobs, "kill <n>" and "kill all" end them. The answer is the message shown.
+// jobs, "kill <n>" and "kill all" end them, "clear" drops the finished ones. The answer is the message shown.
 func jobsCmd(h *harness.Harness, action string) string {
 	f := strings.Fields(action)
 	if len(f) == 0 {
 		return jobsListing(h.RunningJobs(), time.Now())
+	}
+	if len(f) == 1 && f[0] == "clear" {
+		n, a := h.ClearDoneJobs(), h.ClearDoneAgents()
+		return fmt.Sprintf("cleared %d finished job(s) and %d stopped or dismissed agent(s); logs and transcripts kept", n, a)
 	}
 	if len(f) == 2 && f[0] == "kill" {
 		if f[1] == "all" {
@@ -89,7 +93,7 @@ func jobsCmd(h *harness.Harness, action string) string {
 			return msg
 		}
 	}
-	return "usage: /jobs [kill <n>|kill all]"
+	return "usage: /jobs [kill <n>|kill all|clear]"
 }
 
 // jobsListing is bare /jobs: one line per running job — id, command, age,
@@ -333,12 +337,14 @@ func routeSlash(line string, r slashRoutes) {
 		switch {
 		case len(args) == 0 || (arg(0) == "list" && len(args) == 1):
 			r.control(name, "")
+		case arg(0) == "clear" && len(args) == 1:
+			r.control(name, "clear")
 		case arg(0) == "kill" && len(args) == 2 && arg(1) == "all":
 			r.control(name, "kill all")
 		case arg(0) == "kill" && len(args) == 2 && isJobID(args[1]):
 			r.control(name, "kill "+strings.TrimPrefix(args[1], "#"))
 		default:
-			r.reply("usage: /jobs [kill <n>|kill all]")
+			r.reply("usage: /jobs [kill <n>|kill all|clear]")
 		}
 	case "rules":
 		switch {

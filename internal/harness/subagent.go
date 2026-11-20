@@ -86,6 +86,10 @@ type subAgent struct {
 
 	mu sync.Mutex
 	h  *Harness // nil for a stopped child until it is resumed
+	// cleared: its row was cleared from the UI list (ClearDoneAgents). It is
+	// still in Harness.agents, so the agent tool reaches it by id and resume
+	// works; Agents() hides it only while it is stopped or dismissed.
+	cleared bool
 	// state/status/final are what the child says about itself. status
 	// OVERWRITES (it is a state, not a log); final is its answer.
 	state  agentState
@@ -1092,7 +1096,7 @@ func (h *Harness) restoreAgents() (resumed []*subAgent, cut map[int]bool) {
 		sa := &subAgent{
 			num: num, parent: h, state: agentStopped, restore: path,
 			prompt: rec.Prompt, iso: loadIsolation(path), tier: rec.Tier, model: rec.Model, provider: rec.Provider, effort: loadedEffort(rec.Effort),
-			callID: rec.CallID,
+			callID: rec.CallID, cleared: rec.Cleared,
 		}
 		if sa.prompt == "" {
 			sa.prompt = firstUserEntry(path)
@@ -1137,6 +1141,9 @@ type agentRecord struct {
 	// CallID is the parent's agent tool call that spawned the child: what
 	// lets a replayed history name the child on that call (agentSpawns).
 	CallID string `json:"call_id,omitempty"`
+	// Cleared: its row was cleared from the UI list (ClearDoneAgents); a
+	// resume of the session keeps it hidden. Resuming the child resets it.
+	Cleared bool `json:"cleared,omitempty"`
 }
 
 func agentFile(sessionFile string) string {
@@ -1151,7 +1158,7 @@ func agentFile(sessionFile string) string {
 // a child that was running then must resume as one that was.
 func (s *subAgent) saveState() {
 	s.mu.Lock()
-	rec, closed := agentRecord{State: string(s.state), Model: s.model, Provider: s.provider, Tier: s.tier, Effort: s.effort, Prompt: s.prompt, CallID: s.callID}, s.closed
+	rec, closed := agentRecord{State: string(s.state), Model: s.model, Provider: s.provider, Tier: s.tier, Effort: s.effort, Prompt: s.prompt, CallID: s.callID, Cleared: s.cleared}, s.closed
 	path := s.restore
 	if s.h != nil {
 		path = s.h.cfg.SessionFile
@@ -1297,6 +1304,7 @@ func (h *Harness) resumeAgent(sa *subAgent) string {
 	// asked anything yet, and leaving `started` set made it show a growing age
 	// in the field that means "how long its last run took".
 	sa.state = agentIdle
+	sa.cleared = false
 	sa.started, sa.ended = time.Time{}, time.Time{}
 	sa.mu.Unlock()
 	sa.hook(child)
@@ -1842,6 +1850,12 @@ func (h *Harness) Agents() []AgentInfo {
 	out := make([]AgentInfo, 0, len(list))
 	for _, sa := range list {
 		state, status, _, since := sa.snapshot()
+		sa.mu.Lock()
+		hide := sa.cleared && (state == agentStopped || state == agentDismissed)
+		sa.mu.Unlock()
+		if hide {
+			continue
+		}
 		out = append(out, AgentInfo{
 			ID: sa.num, Model: sa.where(), Tier: sa.tierName(), Effort: sa.effective, State: string(state), Status: status,
 			Prompt: sa.prompt, Tokens: sa.spent(), Seconds: int(since.Seconds()),
@@ -1849,6 +1863,32 @@ func (h *Harness) Agents() []AgentInfo {
 		})
 	}
 	return out
+}
+
+// ClearDoneAgents hides every stopped and dismissed child from the list the
+// UI shows and pushes the list. Idle and running children stay. Nothing is
+// deleted: the child stays in the registry (reachable by id for the agent
+// tool and resume) and its transcript stays on disk. A cleared child that is
+// resumed shows again. It returns how many rows it hid.
+func (h *Harness) ClearDoneAgents() int {
+	n := 0
+	for _, sa := range h.agentList() {
+		state, _, _, _ := sa.snapshot()
+		sa.mu.Lock()
+		hide := !sa.cleared && (state == agentStopped || state == agentDismissed)
+		if hide {
+			sa.cleared = true
+			n++
+		}
+		sa.mu.Unlock()
+		if hide {
+			sa.saveState() // a session resume keeps it hidden
+		}
+	}
+	if n > 0 {
+		h.agentsChanged()
+	}
+	return n
 }
 
 // agentsChanged pushes the current child list to the UI. Called on every
