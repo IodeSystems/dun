@@ -123,7 +123,7 @@ func TestClipboardImage_InjectedRunner(t *testing.T) {
 		return nil, errors.New("No suitable type of content copied")
 	}
 	msg := pasteImageCmd()().(clipImageMsg)
-	if !msg.ok || msg.w != 20 || msg.h != 10 || strings.Join(tried, ",") != "wl-paste,xclip" {
+	if !msg.ok || msg.w != 20 || msg.h != 10 || strings.Join(tried, ",") != "wl-paste,xclip,wl-paste,xclip" {
 		t.Fatalf("msg %+v, tried %v", msg, tried)
 	}
 	if got, err := os.ReadFile(msg.path); err != nil || !bytes.Equal(got, data) {

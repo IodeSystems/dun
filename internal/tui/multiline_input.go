@@ -725,7 +725,8 @@ func (m *multilineInput) HandleKey(msg tea.KeyPressMsg) multilineInput {
 }
 
 // HandlePaste inserts a bracketed paste. A paste that names an image file is
-// that image; a big one becomes a paste token.
+// that image; one that names files is their paths (pastefiles.go); a big one
+// becomes a paste token.
 func (m *multilineInput) HandlePaste(text string) multilineInput {
 	if !m.focused {
 		return *m
@@ -735,6 +736,15 @@ func (m *multilineInput) HandlePaste(text string) multilineInput {
 	if tok, ok := m.pastedImage(r); ok {
 		m.insert([]rune{tok})
 		return *m
+	}
+	if paths, ok := pastedFilePaths(string(r)); ok {
+		if len(paths) == 1 {
+			if tok, ok := m.imageFileTok(paths[0]); ok {
+				m.insert([]rune{tok})
+				return *m
+			}
+		}
+		r = []rune(joinPaths(paths))
 	}
 	if bigPaste(r) {
 		r = []rune{m.addPaste(r)}

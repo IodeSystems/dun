@@ -203,6 +203,11 @@ type clipImageMsg struct {
 // pasteImageCmd reads the clipboard off the UI goroutine.
 func pasteImageCmd() tea.Cmd {
 	return func() tea.Msg {
+		// Files copied in a file manager are their paths, even when the
+		// clipboard also offers the image data.
+		if text, ok := clipboardFiles(); ok {
+			return clipTextMsg{text: text}
+		}
 		data, ok := clipboardImage()
 		if !ok {
 			return clipImageMsg{}
@@ -261,6 +266,18 @@ func (m *multilineInput) InsertImage(path, name string, w, h int) {
 func (m *multilineInput) pastedImage(text []rune) (rune, bool) {
 	path, ok := imagePathFromPaste(string(text))
 	if !ok {
+		return 0, false
+	}
+	return m.imageFileTok(path)
+}
+
+// imageFileTok is the image token for an absolute path that is an image
+// file that decodes, or false.
+func (m *multilineInput) imageFileTok(path string) (rune, bool) {
+	if !imageExts[strings.ToLower(filepath.Ext(path))] {
+		return 0, false
+	}
+	if st, err := os.Stat(path); err != nil || !st.Mode().IsRegular() {
 		return 0, false
 	}
 	w, h, err := imageSize(path)
