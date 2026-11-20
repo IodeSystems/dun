@@ -178,6 +178,11 @@ func (h *Harness) liveJobs() []*bgJob {
 
 // ClearDoneJobs drops every finished job from the list, running ones kept,
 // and pushes the list. Logs stay on disk. It returns how many it dropped.
+//
+// It pushes even when it dropped none. After an engine restart, the rows a
+// client shows are the previous engine's last jobs event (dund keeps the
+// latest one, proto.Log): this engine has none of those jobs, so only a push
+// of its own list replaces them, in dund and in every client.
 func (h *Harness) ClearDoneJobs() int {
 	h.bgMu.Lock()
 	var gone []int
@@ -193,9 +198,7 @@ func (h *Harness) ClearDoneJobs() int {
 		delete(h.bgJobs, id)
 	}
 	h.bgMu.Unlock()
-	if len(gone) > 0 {
-		h.jobsChanged()
-	}
+	h.jobsChanged()
 	return len(gone)
 }
 

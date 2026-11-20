@@ -25,3 +25,19 @@ func TestClearDoneJobs(t *testing.T) {
 		t.Errorf("second clear dropped %d", n)
 	}
 }
+
+// After an engine restart the new engine has no jobs, but clients still show
+// the previous engine's finished rows (dund keeps its last jobs event). A
+// clear must still push this engine's list, so those rows go.
+func TestClearDoneJobsAfterRestartPushes(t *testing.T) {
+	pushed := false
+	var got []JobInfo
+	h := &Harness{bgJobs: map[int]*bgJob{}}
+	h.cfg.OnJobs = func(js []JobInfo) { pushed, got = true, js }
+	if n := h.ClearDoneJobs(); n != 0 {
+		t.Fatalf("cleared %d, want 0", n)
+	}
+	if !pushed || len(got) != 0 {
+		t.Fatalf("pushed=%v %+v, want an empty list pushed", pushed, got)
+	}
+}
