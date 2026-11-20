@@ -105,6 +105,9 @@ func upgradeSlash(m *tuiModel, args []string) tea.Cmd {
 		m.append(StDim.Render("tools: installing what is behind its pinned version, then restarting dund…"))
 		return toolsCmd(true)
 	}
+	for _, l := range versionsReport(buildinfo.Version, dundVersion(), m.engineVersion) {
+		m.append(l)
+	}
 	if m.upgrade != nil {
 		m.append(stNote.Render(upgradeDetail(m.upgrade, m.sessionID)))
 	} else {
@@ -113,7 +116,7 @@ func upgradeSlash(m *tuiModel, args []string) tea.Cmd {
 			// A source build: nothing tells dund there is a newer build, so
 			// dund and its engines keep the one they started with (USER
 			// 2026-10-27: /upgrade on a source build was a dead end).
-			line += " · dund and its engines keep the build they started with; /upgrade now restarts them into this one (" + buildinfo.Version + ")"
+			line += " · dund and its engines keep the build they started with; /upgrade now restarts them into this one"
 		}
 		m.append(StDim.Render(line))
 	}

@@ -225,6 +225,9 @@ var attachNow atomic.Pointer[attachWait]
 // create: a dund too old to say hello is "an older build" with no number.
 func noteDundBuild(ev proto.Event, err error) {
 	w := &attachWait{session: true}
+	if r, ok := ev.Payload.(*proto.HelloReply); ok && err == nil {
+		dundSeen.Store(r.Version)
+	}
 	switch r, ok := ev.Payload.(*proto.HelloReply); {
 	case err != nil:
 		w.dundBuild, w.fix = "?", killLine()+", then dun again"
@@ -302,7 +305,25 @@ func checkDundBuild(ac *attachConn, sc *bufio.Scanner) (notes []string, reexec s
 		}
 		return nil, ""
 	}
-	// This binary is this build and dund is not.
+	// This binary is this build and dund is not. Only a newer TUI moves dund:
+	// an older one never downgrades it, and builds that cannot be ordered
+	// (the same distance from a tag on two commits, an unknown format) are
+	// said, not acted on.
+	if cmp, known := compareBuilds(buildinfo.Version, r.Version); cmp < 0 || !known {
+		if once("order " + pair) {
+			if known {
+				return []string{"dund runs build " + r.Version + ", newer than this TUI (" + buildinfo.Version + "): dund is not downgraded; run the newer dun"}, ""
+			}
+			return []string{"dund runs build " + r.Version + ", this TUI is " + buildinfo.Version + "; cannot tell which is newer, so dund is not changed: /upgrade now makes dund this build"}, ""
+		}
+		return nil, ""
+	}
+	if fi, err := os.Stat(exe); err != nil || fi.Mode()&0o111 == 0 {
+		if once("noexe " + pair) {
+			return []string{"dund runs build " + r.Version + ", this is " + buildinfo.Version + "; " + exe + " is not an executable file, so dund is not changed"}, ""
+		}
+		return nil, ""
+	}
 	if !r.Upgradable {
 		if once("service " + pair) {
 			why := ""
@@ -329,7 +350,9 @@ func checkDundBuild(ac *attachConn, sc *bufio.Scanner) (notes []string, reexec s
 	if _, err := ac.call(sc, "", &proto.Upgrade{Exe: exe, Version: buildinfo.Version}); err != nil {
 		return []string{"dund runs build " + r.Version + ", this is " + buildinfo.Version + "; it would not upgrade: " + err.Error()}, ""
 	}
-	return nil, "" // the broadcast that follows says what it waits for
+	// The broadcast that follows says what it waits for; the restart comes
+	// when nothing is busy, so no turn is cut.
+	return []string{"dund was " + r.Version + "; upgrading it into this build (" + buildinfo.Version + ")"}, ""
 }
 
 // upgradeNow asks dund to restart into the pending upgrade at once.

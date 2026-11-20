@@ -127,6 +127,7 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m.proc.uiGet() // this user's UI state in the session, kept by dund
 	case "ready":
 		m.starting = false
+		m.engineVersion = str(ev["version"])
 		if m.keysErr != nil { // said once, where the person is looking
 			m.append(warnLine("keys: " + m.keysErr.Error() + " — using the defaults (/keys)"))
 			m.keysErr = nil

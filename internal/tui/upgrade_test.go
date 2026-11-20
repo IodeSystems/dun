@@ -183,7 +183,7 @@ func TestCheckDundBuildOldDund(t *testing.T) {
 	// attach around it here, nothing clears it for the next test.
 	t.Cleanup(func() { attachNow.Store(nil) })
 	old := buildinfo.Version
-	buildinfo.Version = "new"
+	buildinfo.Version = "v0.9.0-5-gbbbbbbb"
 	defer func() { buildinfo.Version = old }()
 	upgradeAsked = map[string]bool{}
 	sock := filepath.Join(t.TempDir(), "d.sock")
@@ -204,7 +204,7 @@ func TestCheckDundBuildOldDund(t *testing.T) {
 				var cmd proto.Command
 				_ = json.Unmarshal(sc.Bytes(), &cmd)
 				cmds = append(cmds, cmd.Type)
-				ev := proto.NewEvent(&proto.HelloReply{Version: "old", Upgradable: true})
+				ev := proto.NewEvent(&proto.HelloReply{Version: "v0.9.0-2-gaaaaaaa", Upgradable: true})
 				ev.Re = cmd.CID
 				_ = json.NewEncoder(c).Encode(ev)
 			}
@@ -238,10 +238,10 @@ func TestCheckDundBuildOldDund(t *testing.T) {
 func TestCheckDundBuild(t *testing.T) {
 	t.Cleanup(func() { attachNow.Store(nil) }) // as TestCheckDundBuildOldDund
 	old, oldProbe := buildinfo.Version, probeSelf
-	buildinfo.Version = "new"
+	buildinfo.Version = "v0.9.0-5-gbbbbbbb"
 	defer func() { buildinfo.Version, probeSelf = old, oldProbe }()
 	upgradeAsked = map[string]bool{}
-	disk := "new"
+	disk := "v0.9.0-5-gbbbbbbb"
 	probeSelf = func(string) string { return disk }
 
 	svc, err := dund.New(t.TempDir(), dund.ExecSpawner{Bin: "true"})
@@ -257,7 +257,7 @@ func TestCheckDundBuild(t *testing.T) {
 	defer ln.Close()
 	srv := dund.NewServer(svc, func(net.Conn) (string, error) { return "unix:1", nil })
 	asked := 0
-	srv.SetBuild("old", "/old/dun", func(string, string) error { asked++; return nil })
+	srv.SetBuild("v0.9.0-2-gaaaaaaa", "/old/dun", func(string, string) error { asked++; return nil })
 	go srv.Serve(ln)
 
 	check := func() ([]string, string) {
@@ -268,17 +268,17 @@ func TestCheckDundBuild(t *testing.T) {
 		defer c.Close()
 		return checkDundBuild(&attachConn{c: c}, bufio.NewScanner(c))
 	}
-	if n, re := check(); asked != 1 || len(n) != 0 || re != "" {
+	if n, re := check(); asked != 1 || len(n) != 1 || !strings.Contains(n[0], "upgrading it into this build") || re != "" {
 		t.Fatalf("first: asked=%d %v %q", asked, n, re)
 	}
-	if n, _ := check(); asked != 1 || len(n) != 1 || !strings.Contains(n[0], "still runs build old") || strings.Contains(n[0], "stale copy") {
+	if n, _ := check(); asked != 1 || len(n) != 1 || !strings.Contains(n[0], "still runs build v0.9.0-2-gaaaaaaa") || strings.Contains(n[0], "stale copy") {
 		t.Fatalf("second: asked=%d %v", asked, n)
 	}
 	if n, _ := check(); asked != 1 || len(n) != 0 {
 		t.Fatalf("third: asked=%d %v (said twice)", asked, n)
 	}
-	disk = "old"
-	if n, re := check(); asked != 1 || re != "old" || len(n) != 1 {
+	disk = "v0.9.0-2-gaaaaaaa"
+	if n, re := check(); asked != 1 || re != "v0.9.0-2-gaaaaaaa" || len(n) != 1 {
 		t.Fatalf("file now dund's build: asked=%d %v %q", asked, n, re)
 	}
 }

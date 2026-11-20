@@ -175,13 +175,13 @@ func TestChannel_OtherCases(t *testing.T) {
 		}
 	}
 	cmd := upgradeSlash(&m, []string{"--channel=release"})
-	if _, ok := cmd().(toolsMsg); !ok || !strings.Contains(ansi.Strip(m.convo[len(m.convo)-2].view()), "already on the release channel (v0.4.1)") {
-		t.Errorf("release on release: %q", ansi.Strip(m.convo[len(m.convo)-2].view()))
+	if _, ok := cmd().(toolsMsg); !ok || !strings.Contains(ansi.Strip(m.convo[len(m.convo)-3].view()), "already on the release channel (v0.4.1)") {
+		t.Errorf("release on release: %q", ansi.Strip(m.convo[len(m.convo)-3].view()))
 	}
 	channelIsRelease = func() bool { return false }
 	cmd = upgradeSlash(&m, []string{"--channel=source"})
-	if _, ok := cmd().(toolsMsg); !ok || !strings.Contains(ansi.Strip(m.convo[len(m.convo)-2].view()), "already on the source channel") {
-		t.Errorf("source on source: %q", ansi.Strip(m.convo[len(m.convo)-2].view()))
+	if _, ok := cmd().(toolsMsg); !ok || !strings.Contains(ansi.Strip(m.convo[len(m.convo)-3].view()), "already on the source channel") {
+		t.Errorf("source on source: %q", ansi.Strip(m.convo[len(m.convo)-3].view()))
 	}
 	if b, _ := os.ReadFile(exe); string(b) != "release build" {
 		t.Fatalf("exe replaced: %q", b)
