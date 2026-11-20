@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -62,7 +64,119 @@ func (h *Harness) foldTask() string {
 	if f := h.inFlight(); f != "" {
 		parts = append(parts, "# In flight\n"+f)
 	}
+	if r := h.recordFacts(); r != "" {
+		parts = append(parts, "# Facts from records\n"+r)
+	}
 	return strings.Join(parts, "\n\n")
+}
+
+// testCmdRe matches a command that is a test run: "go test", "make test",
+// "npm test", "cargo test", "pytest", "pytest-quickstart", etc.
+var testCmdRe = regexp.MustCompile(`(?i)^\s*(go\s+test|make\s+(test|unit-test|integration-test)|npm\s+test|yarn\s+test|pnpm\s+test|cargo\s+test|pytest|python\s+-m\s+pytest|jest|vitest)`)
+
+// recordFacts returns the facts dun can compute from its own records: files
+// changed, commits, the last test verdict, and the folded span's sidecar
+// paths. These go in from records, not from the summarizer.
+func (h *Harness) recordFacts() string {
+	var facts LedgerFacts
+	// Accumulate from the open turn.
+	h.ledger.mu.Lock()
+	if h.ledger.open {
+		facts.add(h.ledger.facts)
+	}
+	h.ledger.mu.Unlock()
+	// Accumulate from the asks ledger (all asks' facts).
+	h.asks.mu.Lock()
+	d := h.asksLocked()
+	for _, a := range d.Asks {
+		facts.add(a.Facts)
+	}
+	h.asks.mu.Unlock()
+	facts.capLists()
+
+	var lines []string
+
+	// Files changed.
+	if len(facts.Files) > 0 {
+		var files []string
+		for _, f := range facts.Files {
+			s := f.Path
+			if f.Added > 0 || f.Removed > 0 {
+				s += fmt.Sprintf(" (+%d −%d)", f.Added, f.Removed)
+			}
+			if f.Created {
+				s += " [new]"
+			}
+			if f.Deleted {
+				s += " [deleted]"
+			}
+			if f.MovedTo != "" {
+				s += " → " + f.MovedTo
+			}
+			files = append(files, "- "+s)
+		}
+		sort.Strings(files)
+		lines = append(lines, "Files changed:\n"+strings.Join(files, "\n"))
+	}
+
+	// Commits.
+	if len(facts.Commits) > 0 {
+		var commits []string
+		for _, c := range facts.Commits {
+			commits = append(commits, "- "+c.Hash[:8]+" "+c.Subject)
+		}
+		lines = append(lines, "Commits:\n"+strings.Join(commits, "\n"))
+	}
+
+	// Last test verdict.
+	if v := lastTestVerdict(facts.Cmds); v != "" {
+		lines = append(lines, "Last test: "+v)
+	}
+
+	// Folded span's sidecar paths.
+	if paths := foldedSpanPaths(h.cfg.SessionFile); len(paths) > 0 {
+		lines = append(lines, "Folded spans:\n"+strings.Join(paths, "\n"))
+	}
+
+	return strings.Join(lines, "\n\n")
+}
+
+// lastTestVerdict finds the last command that looks like a test run and
+// returns its verdict ("pass", "fail (exit 1)", etc.).
+func lastTestVerdict(cmds []LedgerCmd) string {
+	for i := len(cmds) - 1; i >= 0; i-- {
+		c := cmds[i]
+		if !testCmdRe.MatchString(c.Command) {
+			continue
+		}
+		switch {
+		case c.Failed:
+			if c.Verdict != "" {
+				return fmt.Sprintf("fail (%s)", c.Verdict)
+			}
+			return fmt.Sprintf("fail (exit %d)", c.Exit)
+		case c.Job > 0:
+			return "test job #" + strconv.Itoa(c.Job)
+		default:
+			return "pass"
+		}
+	}
+	return ""
+}
+
+// foldedSpanPaths lists the sidecar .md files in the session's folds
+// directory, one per line.
+func foldedSpanPaths(sessionFile string) []string {
+	if sessionFile == "" {
+		return nil
+	}
+	paths, _ := filepath.Glob(filepath.Join(foldsDir(sessionFile), "*.md"))
+	sort.Strings(paths)
+	var out []string
+	for _, p := range paths {
+		out = append(out, "- "+p)
+	}
+	return out
 }
 
 // inFlight is the work still running, one line each: background jobs not

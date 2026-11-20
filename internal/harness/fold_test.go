@@ -2,9 +2,11 @@ package harness
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
@@ -608,4 +610,61 @@ func (h *Harness) expectRestoreAsk(t *testing.T) {
 		}
 	}
 	t.Error("no queued restore note carries the ask after resume")
+}
+
+// A fold is told what dun's records say: files changed, commits, the last
+// test verdict, and the folded span's sidecar paths. These come from records,
+// not from the summarizer.
+func TestFoldTask_RecordFacts(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	dir := ledgerRepo(t)
+	sf := filepath.Join(t.TempDir(), "s.jsonl")
+	h := startLedger(t, &nudgeRunner{}, dir, sf, nil)
+
+	// Open a turn and record: a file edit, a write, a test command, a commit.
+	// The turn stays open so the facts are in h.ledger.facts.
+	h.ledgerBegin()
+	h.ledgerNote(h, "file_edit", "edit", "core/x.go", "", nil, "edited core/x.go: +5 -2", false, &ledgerCall{}, time.Millisecond)
+	h.ledgerNote(h, "file_write", "write", "core/x_test.go", "", nil, "wrote core/x_test.go (30 lines, new)", false, &ledgerCall{}, time.Millisecond)
+	h.ledgerNote(h, "exec", "", "", "go test ./core/...", nil, "ok  core/x  0.2s", false, &ledgerCall{set: true, exit: 0}, time.Second)
+	// A commit: added directly to the ledger's facts (commitsSince does this
+	// at turn end; here we record it while the turn is open).
+	h.ledger.mu.Lock()
+	h.ledger.facts.Commits = append(h.ledger.facts.Commits, LedgerCommit{Hash: "abc1234deadbeef", Subject: "feat: add x"})
+	h.ledger.facts.NCommits = 1
+	h.ledger.mu.Unlock()
+
+	// Write a sidecar span file so foldedSpanPaths finds it.
+	fdir := foldsDir(sf)
+	if err := os.MkdirAll(fdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fdir, "fold-1.md"), []byte("# fold 1\nsummary text\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	task := h.foldTask()
+
+	// Files changed.
+	if !strings.Contains(task, "core/x.go") || !strings.Contains(task, "+5 −2") {
+		t.Errorf("fold task lacks file change core/x.go (+5 −2):\n%s", task)
+	}
+	if !strings.Contains(task, "core/x_test.go") || !strings.Contains(task, "[new]") {
+		t.Errorf("fold task lacks new file core/x_test.go:\n%s", task)
+	}
+
+	// Commits.
+	if !strings.Contains(task, "feat: add x") {
+		t.Errorf("fold task lacks commit 'feat: add x':\n%s", task)
+	}
+
+	// Last test verdict.
+	if !strings.Contains(task, "Last test: pass") {
+		t.Errorf("fold task lacks last test verdict 'pass':\n%s", task)
+	}
+
+	// Sidecar path.
+	if !strings.Contains(task, "fold-1.md") {
+		t.Errorf("fold task lacks sidecar path fold-1.md:\n%s", task)
+	}
 }
