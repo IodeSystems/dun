@@ -85,8 +85,16 @@ var Supported = []Tool{
 	// (~user is an error); Shell/sh/bash/exec/spawn/system as an undefined
 	// name says eval runs no shell commands and to use the host's exec tool.
 	// No breaking change; Min stays.
+	// Recommended v0.15.0 (2026-11-19), tarballs in deps.json: multi-root
+	// Files.* (--files-root) and client roots (--files-client-roots: roots/list
+	// after initialized and on each roots/list_changed; a root is read-only
+	// unless its _meta says {"mcpshell/access":"write"}). dun does not pass
+	// either flag yet: agentkit's MCP client has no roots capability.
+	// Changed: an absolute path outside every root (the workspace, the
+	// overflow dir) is Access denied; before, /etc/x resolved to
+	// <workspace>/etc/x. No flag dun passes changed; Min stays.
 	{Name: "mcpshell", Module: "github.com/iodesystems/mcpshell/cmd/mcpshell",
-		Min: "v0.2.0", Recommended: "v0.14.1"},
+		Min: "v0.2.0", Recommended: "v0.15.0"},
 	// Min 46caee4 (main, 2026-10-24): the first pushed commit with the index
 	// protocol (--exclude, --index-budget), doctor --json, and the pure-Go
 	// tree-sitter, so go install needs Go alone. v0.1.0 (6dab491), its first
