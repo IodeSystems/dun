@@ -246,3 +246,67 @@ func TestRulesAdd_GlobalUserOffDupBytesRealPath(t *testing.T) {
 		t.Errorf("same bytes as a root, in twice: %+v", set.Roots)
 	}
 }
+
+// /rules add ./path at global scope (USER 2026-11-20) is kept as typed and
+// names each project's own file; a missing one is a row with a note; a path
+// without ./ is still absolute; remove takes the ./ entry back.
+func TestRulesAdd_DotSlashNamesEachProjectsFile(t *testing.T) {
+	userHome(t)
+	wsA, wsB := t.TempDir(), t.TempDir()
+	writeRule(t, filepath.Join(wsA, "AGENTS.local.md"), "rule of A")
+	h := rulesHarness(t, wsA)
+	h.cfg.SessionFile = filepath.Join(t.TempDir(), "s.jsonl")
+	msg, err := h.AddRule("./AGENTS.local.md", mcpserver.ScopeGlobal)
+	if err != nil || !strings.Contains(msg, "each project's") {
+		t.Fatalf("add: %q %v", msg, err)
+	}
+	if g := loadSwitchFile(h.switchFile(rulesKind, mcpserver.ScopeGlobal)); len(g.Add) != 1 || g.Add[0] != "./AGENTS.local.md" {
+		t.Errorf("global file: %+v", g)
+	}
+	find := func() rulesDoc {
+		for _, d := range h.loadRules().Roots {
+			if d.Added == mcpserver.ScopeGlobal {
+				return d
+			}
+		}
+		t.Fatal("no global add in the block")
+		return rulesDoc{}
+	}
+	if d := find(); !strings.Contains(d.Text, "rule of A") || !d.PerWorkspace || d.Path != filepath.Join(wsA, "AGENTS.local.md") {
+		t.Errorf("A: %+v", d)
+	}
+	// Another workspace: its own file, or a note where it has none.
+	h.cfg.Workspace = wsB
+	if d := find(); d.Note != "not found" || d.Path != filepath.Join(wsB, "AGENTS.local.md") {
+		t.Errorf("B without the file: %+v", d)
+	}
+	writeRule(t, filepath.Join(wsB, "AGENTS.local.md"), "rule of B")
+	if d := find(); !strings.Contains(d.Text, "rule of B") || strings.Contains(d.Text, "rule of A") {
+		t.Errorf("B: %+v", d)
+	}
+	v, _ := h.SwitchView(rulesKind)
+	for _, it := range v.Items {
+		if it.Name == "AGENTS.local.md" && !strings.Contains(it.Source, "(each project's)") {
+			t.Errorf("row source: %q", it.Source)
+		}
+	}
+	// A ./ file that is a root file already is "already loaded", per workspace.
+	writeRule(t, filepath.Join(wsB, "AGENTS.md"), "root B")
+	if msg, err := h.AddRule("./AGENTS.md", mcpserver.ScopeProject); err != nil || !strings.Contains(msg, "already loaded") {
+		t.Errorf("dup: %q %v", msg, err)
+	}
+	// No ./: absolute, as before.
+	writeRule(t, filepath.Join(wsB, "plain.md"), "plain")
+	if _, err := h.AddRule("plain.md", mcpserver.ScopeGlobal); err != nil {
+		t.Fatal(err)
+	}
+	if g := loadSwitchFile(h.switchFile(rulesKind, mcpserver.ScopeGlobal)); len(g.Add) != 2 || g.Add[1] != filepath.Join(wsB, "plain.md") {
+		t.Errorf("plain relative path: %+v", g)
+	}
+	if _, err := h.RemoveRule("./AGENTS.local.md", mcpserver.ScopeGlobal); err != nil {
+		t.Fatal(err)
+	}
+	if g := loadSwitchFile(h.switchFile(rulesKind, mcpserver.ScopeGlobal)); len(g.Add) != 1 || g.Add[0] != filepath.Join(wsB, "plain.md") {
+		t.Errorf("after remove: %+v", g)
+	}
+}

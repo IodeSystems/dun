@@ -60,6 +60,9 @@ func (h *Harness) rulesSwitchKind() switchKind {
 				}
 				if d.Added != "" {
 					it.Source = "added · " + d.Added
+					if d.PerWorkspace {
+						it.Source += " (each project's)"
+					}
 				}
 				if d.Note != "" {
 					it.Detail = d.Note
@@ -93,6 +96,9 @@ func (h *Harness) rulesSwitchKind() switchKind {
 				}
 				if d.Added != "" {
 					desc = "a file /rules add made a root file for " + scopeWords(d.Added) + " (/rules remove " + d.Name + " --" + d.Added + " takes it back)"
+					if d.PerWorkspace {
+						desc = "./" + d.Name + " (each project's): " + desc
+					}
 				}
 				add(d, desc)
 				walk(d)
@@ -165,8 +171,11 @@ func (h *Harness) contextFileMode(saved string) string {
 // workspace when inside it, else absolute, at session scope; absolute at
 // project and global scope, whose file is read from other workspaces (a
 // project's worktrees and subdirectories, every project). A relative path is
-// the workspace's, ~/ is home. A file that is not there is a row with a
-// note. DUN_USER_RULES=0 leaves the global adds out, with the user files.
+// the workspace's, ~/ is home. Except ./path at project or global scope (USER
+// 2026-11-20): kept as typed, and resolved against the workspace open when
+// the rules load, so `/rules add ./AGENTS.local.md --global` names each
+// project's own file; its row says "(each project's)". A path without ./ is
+// still absolute there. A file that is not there is a row with a note. DUN_USER_RULES=0 leaves the global adds out, with the user files.
 
 // rulesAddPath is p as /rules add takes it: absolute, and as kept.
 func (h *Harness) rulesAddPath(p string) (abs, key string, err error) {
@@ -211,10 +220,15 @@ func (h *Harness) rulesAdds() []rulesAdd {
 				continue
 			}
 			seen[abs] = true
-			out = append(out, rulesAdd{Path: abs, Scope: sc})
+			out = append(out, rulesAdd{Path: abs, Scope: sc, PerWorkspace: perWorkspaceKey(sc, p)})
 		}
 	}
 	return out
+}
+
+// perWorkspaceKey says key, kept at scope, is ./path to resolve per workspace.
+func perWorkspaceKey(scope, key string) bool {
+	return scope != mcpserver.ScopeSession && strings.HasPrefix(key, "./")
 }
 
 // listsPath says keys (a scope's "add") name the file whose real path is
@@ -240,8 +254,13 @@ func (h *Harness) AddRule(p, scope string) (string, error) {
 		return "", fmt.Errorf("there is no %s scope here", scope)
 	}
 	if scope != mcpserver.ScopeSession {
-		// Read from other workspaces: relative would name a different file in each.
-		key = abs
+		// Read from other workspaces: relative would name a different file in
+		// each, so absolute; except ./path, which means that (perWorkspaceKey).
+		if k := filepath.ToSlash(strings.TrimSpace(p)); strings.HasPrefix(k, "./") && filepath.Clean(k) != "." {
+			key = "./" + strings.TrimPrefix(filepath.Clean(k), "./")
+		} else {
+			key = abs
+		}
 	}
 	set := h.loadRules()
 	real := project.RealPath(abs)
@@ -278,6 +297,9 @@ func (h *Harness) AddRule(p, scope string) (string, error) {
 		msg += " · not readable: " + err.Error()
 	default:
 		msg += " (" + numfmt.HumanBytes(st.Size()) + ")"
+	}
+	if perWorkspaceKey(scope, key) {
+		msg += " · " + key + " names each project's own file"
 	}
 	return msg + " · /rules remove " + key + " --" + scope + " takes it back", nil
 }

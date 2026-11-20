@@ -36,7 +36,8 @@ type SwitchFile struct {
 	Mode string          `json:"mode,omitempty"`
 	On   map[string]bool `json:"on,omitempty"`
 	// Add is the paths /rules add made root files at this scope (the rules
-	// kind only): relative to the workspace when inside it, else absolute.
+	// kind only): relative to the workspace when inside it, else absolute; at project and
+	// global scope absolute, except ./path, kept as typed (each workspace's own).
 	Add []string `json:"add,omitempty"`
 }
 

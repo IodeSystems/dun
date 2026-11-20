@@ -1957,3 +1957,11 @@ rescue), and agentkit's capability record on the wire. Code:
   clickable (one function draws them and returns their columns). Pushed
   screens name their panes the same way. This replaces the earlier half-line
   that leaned toward the focused pane (and its ▁/▄/▔/▀ glyphs).
+- **`/rules add ./path` at project or global scope names each project's file
+  (2026-11-20).** Kept as typed and resolved against the open workspace when
+  the rules load, so `/rules add ./AGENTS.local.md --global` reads each
+  project's own file; a workspace without it gets a "not found" row. Rows say
+  "(each project's)". Without `./`, `~/` and absolute paths stay absolute at
+  those scopes, as before; session scope is unchanged. At project scope the
+  `./` resolves per worktree or subdirectory that shares the project's
+  config, so each reads its own copy.

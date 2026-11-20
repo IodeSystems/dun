@@ -101,6 +101,9 @@ type rulesDoc struct {
 	// Added is the scope /rules add made it a root file at (contextfiles.go);
 	// "" for a file found by name or imported.
 	Added string
+	// PerWorkspace: added as ./path at project or global scope, so it names
+	// this workspace's file, another's in another workspace.
+	PerWorkspace bool
 	// Includes is the files it imports that were already in the block (a
 	// root, or an earlier import), so not copied again: its row says so.
 	Includes []string
@@ -112,6 +115,8 @@ type rulesDoc struct {
 type rulesAdd struct {
 	Path  string // absolute
 	Scope string
+	// PerWorkspace: kept as ./path, resolved against the workspace open now.
+	PerWorkspace bool
 }
 
 // rulesSet is the root files and, in reading order, what they import: the
@@ -242,7 +247,7 @@ func loadRulesAdded(workspace string, user bool, adds []rulesAdd) rulesSet {
 				addedData[string(data)] = true
 				d = l.doc(a.Path, "", data)
 			}
-			d.Added = a.Scope
+			d.Added, d.PerWorkspace = a.Scope, a.PerWorkspace
 			d.Includes = l.imports(d, 1)
 			set.Roots = append(set.Roots, d)
 		}
@@ -972,6 +977,9 @@ func (h *Harness) RulesStatus() string {
 		added := ""
 		if d.Added != "" {
 			added = "  added · " + d.Added
+			if d.PerWorkspace {
+				added += " (each project's)"
+			}
 		}
 		if d.missing() {
 			b.WriteString(d.Note + added)
