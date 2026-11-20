@@ -72,6 +72,82 @@ func stripLinks(s string) string {
 
 var urlRe = regexp.MustCompile(`https?://[^\s<>"'` + "`" + `\x00-\x1f\x7f]+`)
 
+// nbHyphen (U+2011, one cell like '-') stands in for each '-' of a URL while
+// a reply renders: glamour's wrap breaks a word at every '-', so a URL that
+// fits a row was cut at its first hyphen near the edge. Terminals without
+// OSC 8 (tmux by default, where dun strips the escapes) then matched each
+// row's piece as a URL of its own. Held, a URL that fits a row moves to the
+// next row whole; one wider than a row is still cut at the edge.
+const nbHyphen = "‑"
+
+// holdURLHyphens puts nbHyphen for '-' in the URLs of markdown src, fenced
+// code left as written. held is false when nothing changed or src has a
+// U+2011 of its own (the swap back would turn it into '-').
+func holdURLHyphens(src string) (out string, held bool) {
+	if !strings.Contains(src, "http") || !strings.Contains(src, "-") || strings.Contains(src, nbHyphen) {
+		return src, false
+	}
+	lines := strings.Split(src, "\n")
+	fence := ""
+	for i, ln := range lines {
+		t := strings.TrimSpace(ln)
+		if fence != "" {
+			if strings.HasPrefix(t, fence) {
+				fence = ""
+			}
+			continue
+		}
+		if strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") {
+			fence = t[:3]
+			continue
+		}
+		if !strings.Contains(ln, "http") {
+			continue
+		}
+		l := holdLineURLs(ln)
+		if l != ln {
+			lines[i], held = l, true
+		}
+	}
+	if !held {
+		return src, false
+	}
+	return strings.Join(lines, "\n"), true
+}
+
+// holdLineURLs is holdURLHyphens for one line outside fences. A bare URL
+// becomes an autolink, <url>: goldmark's linkify ends a URL at U+2011, an
+// autolink does not, and both render the same. A URL in a code span, an
+// autolink already, a link's text or destination, or an HTML attribute only
+// has its hyphens held.
+func holdLineURLs(ln string) string {
+	locs := urlRe.FindAllStringIndex(ln, -1)
+	if len(locs) == 0 {
+		return ln
+	}
+	hold := func(u string) string { return strings.ReplaceAll(u, "-", nbHyphen) }
+	var b strings.Builder
+	prev := 0
+	for _, loc := range locs {
+		m := ln[loc[0]:loc[1]]
+		b.WriteString(ln[prev:loc[0]])
+		prev = loc[1]
+		if !strings.Contains(m, "-") {
+			b.WriteString(m)
+			continue
+		}
+		before := ln[:loc[0]]
+		if strings.ContainsAny(before[max(0, len(before)-1):], `<([="'`) || strings.Count(before, "`")%2 == 1 {
+			b.WriteString(hold(m))
+			continue
+		}
+		u := trimURL(m)
+		b.WriteString("<" + hold(u) + ">" + m[len(u):])
+	}
+	b.WriteString(ln[prev:])
+	return b.String()
+}
+
 // trimURL takes the sentence's punctuation off the end of a match.
 func trimURL(u string) string {
 	for {

@@ -120,7 +120,7 @@ func answerOutLead(s *bubbleteandmd.Doc, src string, final bool) (string, int) {
 	}
 	// A tool call the model wrote as text shows raw, in a code block: the
 	// renderer would drop its tags as HTML and show bare arguments.
-	in := demoteStepHeads(textfmt.FenceToolMarkup(src))
+	in, held := holdURLHyphens(demoteStepHeads(textfmt.FenceToolMarkup(src)))
 	var out string
 	var err error
 	if final {
@@ -130,6 +130,9 @@ func answerOutLead(s *bubbleteandmd.Doc, src string, final bool) (string, int) {
 	}
 	if err != nil {
 		return bubbleteandmd.Sanitize(src), 0
+	}
+	if held {
+		out = strings.ReplaceAll(out, nbHyphen, "-")
 	}
 	top := strings.TrimLeft(out, "\n")
 	return linkifyStyled(strings.TrimRight(top, "\n")), len(out) - len(top)
