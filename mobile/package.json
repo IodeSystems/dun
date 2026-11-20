@@ -34,7 +34,7 @@
   "dependencies": {
     "@expo/dom-webview": "~58.0.2",
     "@expo/metro-runtime": "~58.0.17",
-    "@localix-ai/flowdown": "0.6.2",
+    "@localix-ai/flowdown": "0.7.1",
     "@tanstack/react-query": "^5.107.1",
     "expo": "~58.0.25",
     "expo-application": "~58.1.2",
