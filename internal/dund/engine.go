@@ -58,7 +58,10 @@ func (s ExecSpawner) Spawn(workspace string, args []string) (Engine, error) {
 	// DUN_DUND tells it dund is on the other end of its stdio, so it offers
 	// dun_list and dun_msg (proto/peer.go).
 	cmd.Env = append(append(os.Environ(), "DUN_CHILD=1", "DUN_DUND=1"), s.Env...)
-	cmd.Stderr = os.Stderr
+	// dund's own stderr (dund.log under launchd, the journal under
+	// systemd): each line says which engine and when, so a panic there
+	// is attributable.
+	cmd.Stderr = &prefixWriter{w: os.Stderr, prefix: "[engine " + flagOf(args, "--resume") + "] "}
 	ownGroup(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

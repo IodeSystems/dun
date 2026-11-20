@@ -533,6 +533,9 @@ func (s *session) exited(eng Engine, err error) {
 	reason := "engine exited"
 	if err != nil {
 		reason = "engine exited: " + err.Error()
+		if kept := keepEngineExit(eng, s.workspace, s.id); kept != "" {
+			reason += "; its last output: " + kept
+		}
 	}
 	if s.stopping || s.svc.isClosing() {
 		s.log.Append(proto.NewEvent(&proto.EngineState{State: "stopped"}))

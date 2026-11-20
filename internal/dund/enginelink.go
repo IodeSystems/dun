@@ -107,7 +107,13 @@ type linkEngine struct {
 	ackTimer  *time.Timer
 	detaching bool
 	readDone  chan struct{}
+	// logPath is the file the engine's stdout and stderr go to
+	// (<EnginesDir>/<pid>.log): a panic is at its end.
+	logPath string
 }
+
+// EngineLog is the file the engine's output goes to ("" when unknown).
+func (e *linkEngine) EngineLog() string { return e.logPath }
 
 // PID is the engine's process (dun ps).
 func (e *linkEngine) PID() int { return e.pid }
@@ -335,8 +341,10 @@ func connectNew(sock string, p *cmdProc, logPath string) (*linkEngine, error) {
 			if err != nil {
 				c.Close()
 				p.kill()
+				return nil, err
 			}
-			return e, err
+			e.logPath = logPath
+			return e, nil
 		}
 		if time.Now().After(deadline) {
 			p.kill()
@@ -455,6 +463,7 @@ func (a *Adoption) Accept() (Engine, error) {
 		e, err := newLinkEngine(a.conn, a.sc, a.Hello, adoptProc(a.Hello.Pid),
 			proto.LinkResume{After: a.Hello.Acked, State: true, Token: a.Info.Token})
 		if err == nil {
+			e.logPath = filepath.Join(a.dir, strconv.Itoa(a.Hello.Pid)+".log")
 			return e, nil
 		}
 		a.conn.Close()
