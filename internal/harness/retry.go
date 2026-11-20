@@ -83,6 +83,12 @@ func noteFromEvent(ev llm.RetryEvent) RetryNote {
 	if ev.Unbounded() {
 		n.Budget = 0 // "no ceiling" reads better as absent than as a century
 	}
+	// agentkit's transport give-up says "cannot reach the provider" for any
+	// error it will not retry, a canceled context included: that is dun
+	// ending the request (an interrupt, a stop, a move), not the provider.
+	if ev.Kind == llm.RetryGiveUp && errors.Is(ev.Err, context.Canceled) {
+		n.Reason = "the request was canceled (by dun, not the provider)"
+	}
 	if bp := ev.BP; bp != nil {
 		n.Capacity, n.InFlight, n.Waiting, n.Queue = bp.Capacity, bp.InFlight, bp.Waiting, bp.Reason
 		if line := spentBudgets(bp.Budgets); line != "" {
