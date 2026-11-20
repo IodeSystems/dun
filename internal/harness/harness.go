@@ -347,7 +347,8 @@ var CompactionPause func() (resume func())
 type Harness struct {
 	// recapsSince counts recaps applied since the last main round's stat.
 	recapsSince atomic.Int32
-	// cdNudges counts redundant leading cds seen (every 3rd carries the line) (execcd.go).
+	// cdNudges counts redundant leading cds seen (every 3rd carries the line) (execcd.go);
+	// a fold or recap resets it (forget.go).
 	cdNudges atomic.Int32
 	// procs samples background jobs' process groups (bgjob.go usage).
 	procs procstat.Sampler
@@ -530,12 +531,14 @@ type Harness struct {
 	indexSeen    map[string]bool
 	indexRetried map[string]bool
 	// indexAsked: servers whose not-a-project line was said this session.
+	// Not forgotten on a fold (forget.go): a question to the person, once per session.
 	indexAsked map[string]bool
 	// codeGuards are the poly-lsp servers under the root guard
 	// (codeguard.go), by id. Guarded by srvMu.
 	codeGuards map[string]*codeGuard
 	// setup is each server's install-hint report (setupstate.go); setupSaid
-	// the servers whose one line has been said. Guarded by srvMu.
+	// the servers whose one line has been said. Guarded by srvMu. setupSaid is
+	// not forgotten on a fold (forget.go): the person sees the line, once per session.
 	setup     map[string]*SetupReport
 	setupSaid map[string]bool
 	// exts are the loaded extensions and extErrs the manifests that did not
@@ -633,7 +636,8 @@ type Harness struct {
 
 	// The project's rules (rules.go): rulesMu guards the state file,
 	// rulesIdxMu orders index syncs, rulesDocsMu guards rulesDocs — the
-	// imported files in the rules index, for surfacing.
+	// imported files in the rules index, for surfacing. Not forgotten on a
+	// fold (forget.go): it classifies docs, it does not record one as sent.
 	rulesMu     sync.Mutex
 	rulesIdxMu  sync.Mutex
 	rulesDocsMu sync.Mutex
@@ -652,7 +656,7 @@ type Harness struct {
 	// line is not repeated on every chat round past the threshold.
 	recapMu     sync.Mutex
 	recapNudged int
-	recapSeen   map[string]bool // suggestions already made, so none repeats
+	recapSeen   map[string]bool // suggestions already made, so none repeats; a fold or recap forgets them (forget.go)
 	// capped memoizes the clip by content, so the model and the UI get the same
 	// text and one spill rather than two.
 	capped map[string]string

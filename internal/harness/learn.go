@@ -204,7 +204,7 @@ func clipMiddle(s string, n int) string {
 type learnState struct {
 	mu      sync.Mutex
 	pending []churnEpisode
-	calls   int        // lesson calls this session (learnCap)
+	calls   int        // lesson calls this session (learnCap); a cost cap, not reset on a fold (forget.go)
 	run     sync.Mutex // one flush at a time
 	wg      sync.WaitGroup
 }

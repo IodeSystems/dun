@@ -421,6 +421,9 @@ func (h *Harness) applyRecapText(sp recapSpan, summary string) (string, string, 
 		Content: fmt.Sprintf("recap: %d entries (~%d chars) → %s", len(sp.Subsumes), sp.Chars, sidecarName(sidecar)),
 	}
 	h.store.recap(sp.Subsumes, replacement, citation)
+	// The recap may have taken a once-said hint's text (forget.go). The other
+	// call site is noteCompactionCause (compaction.go).
+	h.forgetHints()
 	// Searchable after it leaves the context (sessionindex_dund.go); a recap is
 	// applied whether or not it is put.
 	_ = agent.PutSpan(context.Background(), lateSessionIndex{h}, agent.SessionDocRecap,

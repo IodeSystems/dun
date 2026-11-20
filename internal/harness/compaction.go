@@ -122,6 +122,9 @@ const (
 )
 
 func (h *Harness) noteCompactionCause(ci agent.CompactionInfo, cause foldCause) {
+	// The fold may have taken a once-said hint's text (forget.go). The other
+	// call site is applyRecapText (recap.go).
+	h.forgetHints()
 	if cause == foldByBoundary {
 		h.cache.noteBoundaryFold()
 	} else {
