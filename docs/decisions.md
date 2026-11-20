@@ -1299,6 +1299,25 @@ exec edits followed an "outside the root" refusal. `internal/harness/fileaccess.
   making several replacements and running `go build` in one python or sed
   call. `file_edit` already takes `edits: [{old, new}, …]`; the prompt line
   says to use it and to run builds and tests in an exec call of their own.
+- **mcpshell's Files roots follow file-access (USER).** mcpshell v0.15.0
+  refuses an absolute path outside its roots, so a grant the person gave
+  the file tools did not reach `Files.*` in eval. dun now declares the MCP
+  `roots` capability (`listChanged`) to an mcpshell whose build info says
+  v0.15.0 or newer, passes `--files-client-roots`, and answers `roots/list`
+  with each grant that is on and `sessionReadDirs` read only
+  (`internal/harness/shellroots.go`). A write grant carries `_meta
+  {"mcpshell/access":"write"}`; mcpshell reads any other root as read only.
+  Every edit of a paths file sends `notifications/roots/list_changed` when
+  the list differs from the one last answered. An older or unversioned
+  build (`(devel)`, `v0.0.0-…`) gets no flag and no capability. Limits:
+  the shell is a built-in, per session and never shared through dund, so
+  roots need no per-client split; a sub-agent's shell is its root
+  session's, so its roots are the root session's grants, not the child's.
+  A grant changed by another session at project or global scope reaches
+  this shell on its next `list_changed`, not at once. The workspace is not
+  listed: `--files-dir` already makes it a read-write root, and a second
+  entry showed twice in mcpshell's refusal. dun's read-only workspace mode
+  does not reach mcpshell (as before).
 
 ## Tool calls sent as text are retried (USER 2026-11-18)
 

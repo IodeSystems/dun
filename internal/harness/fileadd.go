@@ -174,6 +174,7 @@ func (h *Harness) editPathsFile(scope string, edit func(*pathsFile)) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
 	}
+	defer h.rootsChanged() // after dropAdded: the shell asks again (shellroots.go)
 	defer h.dropAdded()
 	return fsutil.WriteAtomic(p, append(b, '\n'), 0o600)
 }

@@ -88,8 +88,9 @@ var Supported = []Tool{
 	// Recommended v0.15.0 (2026-11-19), tarballs in deps.json: multi-root
 	// Files.* (--files-root) and client roots (--files-client-roots: roots/list
 	// after initialized and on each roots/list_changed; a root is read-only
-	// unless its _meta says {"mcpshell/access":"write"}). dun does not pass
-	// either flag yet: agentkit's MCP client has no roots capability.
+	// unless its _meta says {"mcpshell/access":"write"}). dun passes
+	// --files-client-roots to v0.15.0 or newer and serves its file-access
+	// grants as roots (internal/harness/shellroots.go); not --files-root.
 	// Changed: an absolute path outside every root (the workspace, the
 	// overflow dir) is Access denied; before, /etc/x resolved to
 	// <workspace>/etc/x. No flag dun passes changed; Min stays.
