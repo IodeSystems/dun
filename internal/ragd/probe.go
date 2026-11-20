@@ -331,10 +331,11 @@ func probeOCR(ctx context.Context, c *llm.Client) (map[string]llm.Fact, error) {
 		llm.TextPart("Transcribe all text in this image exactly. Output only the text, nothing else."),
 		llm.ImageData("image/png", ocrFixture()),
 	}}}
-	out, _, err := c.ChatWithOpts(ctx, msgs, nil, &llm.ChatOpts{MaxTokens: 200})
+	res, err := c.ChatWithOpts(ctx, msgs, nil, &llm.ChatOpts{MaxTokens: 200})
 	if err != nil {
 		return nil, fmt.Errorf("vision: %w", err)
 	}
+	out := res.Content
 	want := strings.Join(ocrFixtureText, " ")
 	got := strings.Join(strings.Fields(out), " ")
 	cer := float64(editDistance(want, got)) / float64(len([]rune(want)))

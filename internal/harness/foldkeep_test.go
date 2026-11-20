@@ -83,6 +83,11 @@ func (r foldKeepResult) sentTokens() int {
 	n := 0
 	for _, m := range r.sent {
 		n += r.h.meter.Estimate(m.Content) + r.h.meter.Estimate(m.Role) + r.h.meter.Estimate(m.Name)
+		// Native tool calls count too, as agentkit's messageTokens counts
+		// them (v0.39.0).
+		for _, tc := range m.ToolCalls {
+			n += r.h.meter.Estimate(tc.Function.Name) + r.h.meter.Estimate(tc.Function.Arguments)
+		}
 	}
 	return n
 }
@@ -107,8 +112,10 @@ func TestFoldKeep_ReportedCaseLandsInTheBand(t *testing.T) {
 	}
 	after := r.sentTokens()
 	t.Logf("target %d; %s; sent %d (%d%% of target)", r.target, r.note, after, after*100/r.target)
-	if r.note.TokensBefore <= r.target {
-		t.Fatalf("before %d is not over target %d", r.note.TokensBefore, r.target)
+	// The fold decision counts the system prompt; CompactionInfo.TokensBefore
+	// leaves it out (agentkit v0.39.0), so add it back to compare with target.
+	if before := r.note.TokensBefore + r.h.meter.Estimate(r.h.Session.System); before <= r.target {
+		t.Fatalf("before %d (history and system prompt) is not over target %d", before, r.target)
 	}
 	if after < r.target*50/100 || after > r.target*60/100 {
 		t.Errorf("sent %d tokens, %d%% of target %d; want 50-60%%", after, after*100/r.target, r.target)
