@@ -28,7 +28,7 @@ type versionLatestMsg struct{ line string }
 
 func versionSlash(m *tuiModel, _ []string) tea.Cmd {
 	m.append(StDim.Render(strings.Join(versionLines(time.Now()), "\n")))
-	for _, l := range versionsReport(buildinfo.Version, dundVersion(), m.engineVersion) {
+	for _, l := range versionsReport(buildinfo.Version, dundVersion(), m.engineBuild()) {
 		m.append(l)
 	}
 	m.refresh()

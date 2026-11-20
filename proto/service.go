@@ -18,6 +18,7 @@ func init() {
 	command[UIGet]("ui_get")
 	command[UIPut]("ui_put")
 	command[Restart]("restart")
+	command[MoveEngine]("move_engine")
 	command[Forget]("forget")
 	command[Persist]("persist")
 	command[Leave]("leave")
@@ -172,6 +173,12 @@ type Create struct {
 type Restart struct {
 	Args []string `json:"args"`
 }
+
+// MoveEngine restarts the envelope's session's engine, same flags, same
+// conversation, on the build dund starts engines on, now: /upgrade now on
+// a session whose adopted engine of an older build has not moved (a job or
+// sub-agent kept it busy). A turn, job or sub-agent of it ends.
+type MoveEngine struct{}
 
 // Forget removes the envelope's session from the service: its engine is
 // stopped and its registry entry and members' UI state are deleted. The

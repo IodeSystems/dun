@@ -425,6 +425,7 @@ type tuiModel struct {
 	keys           keyMap                // keymap.go: the key pressed → the key the handlers match
 	keysErr        error                 // keys.json would not load: said once, defaults in use
 	engineVersion  string                // this session's engine build (ready event); "" = an engine that does not say
+	engineReady    bool                  // a ready event came: engineVersion "" is an engine that does not say, not "not yet"
 	engineCmds     []engineCmd           // the engine's slash commands (commands event)
 	skills         []catalogSkill        // from the engine's catalog event
 	serverIDs      []string              // every MCP server's id (ready/servers events), for /mcp completion

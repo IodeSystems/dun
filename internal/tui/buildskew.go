@@ -47,8 +47,23 @@ func compareBuilds(a, b string) (cmp int, ok bool) {
 	return 0, false // same tag and distance, different commit or dirty
 }
 
+// engineUnreported is the engine's build when its ready said none: every
+// engine since Ready.Version (merged in 0681425) says it, and dund fills it
+// in from an engine link's hello, so one that does not is older than that.
+const engineUnreported = "not reported (built before 0681425, so older than this TUI)"
+
+// engineBuild is this session's engine build for versionsReport: "" before
+// its ready, engineUnreported when the ready said none.
+func (m *tuiModel) engineBuild() string {
+	if m.engineVersion == "" && m.engineReady {
+		return engineUnreported
+	}
+	return m.engineVersion
+}
+
 // versionsReport is /upgrade's first lines: this TUI, dund and this
-// session's engine; one warning line when they differ.
+// session's engine; one warning line when they differ. "(same)" only when
+// all three are known and equal: an unknown one is not the same.
 func versionsReport(tui, dund, engine string) []string {
 	show := func(label, v string) string {
 		if v == "" {
@@ -63,13 +78,17 @@ func versionsReport(tui, dund, engine string) []string {
 	if engine != "" && engine != tui {
 		differ = append(differ, "engine")
 	}
+	line := "versions: " + show("TUI", tui) + " · " + show("dund", dund) + " · " + show("engine", engine)
 	if len(differ) > 0 {
 		return []string{
-			StDim.Render("versions: " + show("TUI", tui) + " · " + show("dund", dund) + " · " + show("engine", engine)),
+			StDim.Render(line),
 			warnLine("this TUI is " + tui + " but " + strings.Join(differ, "/") + " is not: /upgrade now restarts them into this build"),
 		}
 	}
-	return []string{StDim.Render("versions: " + show("TUI", tui) + " · " + show("dund", dund) + " · " + show("engine", engine) + " (same)")}
+	if dund == tui && engine == tui {
+		line += " (same)"
+	}
+	return []string{StDim.Render(line)}
 }
 
 // newSubcommands are the engine commands' subcommands added after a first
@@ -109,11 +128,13 @@ func (m *tuiModel) engineLacks(name string, args []string) bool {
 	return false
 }
 
-// engineOldLine is the answer to a command this engine lacks.
+// engineOldLine is the answer to a command this engine lacks: its build
+// when known, else only what its commands show (it lacks one, so it is
+// older than this TUI).
 func (m *tuiModel) engineOldLine(name string, args []string) string {
-	v := "an older build"
+	cmd := "/" + name + " " + args[0]
 	if m.engineVersion != "" {
-		v = m.engineVersion
+		return "this session's engine is older (" + m.engineVersion + ") and has no " + cmd + ": /upgrade now (this TUI is " + buildinfo.Version + ")"
 	}
-	return "this session's engine is older (" + v + ") and has no /" + name + " " + args[0] + ": /upgrade now (this TUI is " + buildinfo.Version + ")"
+	return "this session's engine has no " + cmd + ", so it is older than this TUI (" + buildinfo.Version + "); it does not report its build: /upgrade now"
 }

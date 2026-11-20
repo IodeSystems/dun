@@ -430,6 +430,14 @@ func (s *session) readEvents(eng Engine, done chan struct{}, sc *bufio.Scanner, 
 			if h, ok := ev.Payload.(*proto.History); ok && h.Reason == "" {
 				h.Reason = reason
 			}
+			// An engine from before Ready.Version says its build only in its
+			// link hello: dund puts it in the ready, which every client gets
+			// (the log's state), so no client shows "unknown" for it.
+			if r, ok := ev.Payload.(*proto.Ready); ok && r.Version == "" {
+				if le, ok := eng.(*linkEngine); ok {
+					r.Version = le.hello.Version
+				}
+			}
 			if req, ok := ev.Payload.(*proto.PeerRequest); ok {
 				go s.svc.handlePeer(s, eng, *req)
 				continue

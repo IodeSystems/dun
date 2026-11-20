@@ -568,6 +568,25 @@ func (s *Service) Restart(principal, id string, args []string) error {
 	return ses.ensureRunning()
 }
 
+// MoveEngine restarts a session's engine on its flags and conversation,
+// now, so it runs the build dund starts engines on (proto.MoveEngine). A
+// move already under way is that move.
+func (s *Service) MoveEngine(principal, id string) error {
+	ses, err := s.Get(principal, id)
+	if err != nil {
+		return err
+	}
+	ses.actMu.Lock()
+	moving := ses.moving
+	ses.moving = true
+	ses.actMu.Unlock()
+	if moving {
+		return nil
+	}
+	ses.moveEngine("restarting it into dund's build (asked)")
+	return nil
+}
+
 // Forget stops a session's engine and removes the session: registry entry,
 // log, every member's UI state.
 func (s *Service) Forget(principal, id string) error {

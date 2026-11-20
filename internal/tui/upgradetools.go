@@ -105,7 +105,7 @@ func upgradeSlash(m *tuiModel, args []string) tea.Cmd {
 		m.append(StDim.Render("tools: installing what is behind its pinned version, then restarting dund…"))
 		return toolsCmd(true)
 	}
-	for _, l := range versionsReport(buildinfo.Version, dundVersion(), m.engineVersion) {
+	for _, l := range versionsReport(buildinfo.Version, dundVersion(), m.engineBuild()) {
 		m.append(l)
 	}
 	if m.upgrade != nil {
@@ -144,6 +144,17 @@ func (m *tuiModel) toolsDone(msg toolsMsg) tea.Cmd {
 			return nil
 		}
 		m.append(StDim.Render("asked dund to restart now — running turns are interrupted and resume after"))
+		return nil
+	case !updated && m.engineReady && dundVersion() == buildinfo.Version && m.engineVersion != buildinfo.Version:
+		// dund is this build but this session's engine is not: an engine
+		// adopted across dund's restart moves only when nothing occupies it
+		// (a running job or sub-agent holds it). A restart of dund again
+		// would adopt it again; restarting the engine moves it.
+		if !m.proc.moveEngine() {
+			m.append(StErr.Render("no session service right now — nothing restarted"))
+			return nil
+		}
+		m.append(StDim.Render("dund is this build; restarting this session's engine (" + m.engineBuild() + ") into it — its running turn, jobs and sub-agents end, the conversation is kept"))
 		return nil
 	case updated || !buildinfo.IsRelease():
 		// The engines run the tools: a restart is how they take the new
