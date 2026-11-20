@@ -27,7 +27,7 @@ func TestExecToolDef_NamesStartDir(t *testing.T) {
 		{nil, "the project root", true},
 	} {
 		d := execToolDef(true, tc.b).Function.Description
-		if !strings.Contains(d, "Each call starts in "+tc.dir+" and a `cd` does not carry over to the next call") {
+		if !strings.Contains(d, "Each call starts in "+tc.dir+", so no `cd` to it is needed: never begin a command with `cd "+tc.dir+" &&`. A `cd` does not carry over to the next call") {
 			t.Errorf("%T: no start dir %q: %s", tc.b, tc.dir, d)
 		}
 		if !strings.Contains(d, "`cd sub && …`") {
@@ -68,7 +68,16 @@ func TestRedundantCd(t *testing.T) {
 			t.Errorf("redundantCd(%q) = %v, want %v", cmd, got, want)
 		}
 	}
-	if redundantCd("cd /work && ls", "/work") != true {
+	home, _ := os.UserHomeDir()
+	for _, cmd := range []string{"cd ~ && ls", "cd $HOME/ && ls", "cd ${HOME} ; ls", "cd ~/\nls"} {
+		if !redundantCd(cmd, home) {
+			t.Errorf("redundantCd(%q, home) = false", cmd)
+		}
+	}
+	if redundantCd("cd ~ && ls", dir) {
+		t.Error("~ is not dir")
+	}
+	if redundantCd("cd x; ls", dir) || redundantCd("cd /work && ls", "/work") != true {
 		t.Error("a container dir must match without existing here")
 	}
 }
@@ -96,7 +105,7 @@ func TestWithCdNudge(t *testing.T) {
 		}
 		return out
 	}
-	line := "(exec already starts in " + dir + "; the cd was not needed)"
+	line := "ok\nnote: exec already starts in " + dir + "; the leading cd is not needed."
 
 	for _, cmd := range []string{"cd sub && ls", "cd /tmp && ls", "ls"} {
 		if out := call(cmd); out != "ok" {
@@ -104,13 +113,14 @@ func TestWithCdNudge(t *testing.T) {
 		}
 	}
 	redundant := "cd " + dir + " && ls"
-	for i := 0; i < cdNudgeMax; i++ {
-		if out := call(redundant); out != "ok\n"+line {
-			t.Errorf("redundant #%d: %q", i+1, out)
+	for i := 1; i <= 3*cdNudgeEvery+1; i++ {
+		want := "ok"
+		if (i-1)%cdNudgeEvery == 0 {
+			want = line // the 1st, then every cdNudgeEvery-th
 		}
-	}
-	if out := call(redundant); out != "ok" {
-		t.Errorf("past the cap: %q", out)
+		if out := call(redundant); out != want {
+			t.Errorf("redundant #%d: %q, want %q", i, out, want)
+		}
 	}
 	if ran[len(ran)-1] != redundant {
 		t.Errorf("command changed: %q", ran[len(ran)-1])

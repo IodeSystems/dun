@@ -39,13 +39,14 @@ func execStartDir(b ExecBackend) string {
 	return ""
 }
 
-// cdNudgeMax is how many results in a session carry the line: enough to be
-// read, few enough not to be noise.
-const cdNudgeMax = 3
+// cdNudgeEvery: the line rides the 1st redundant cd of a session and every
+// cdNudgeEvery-th after it. Models repeat the cd all session, so the line
+// repeats too (USER 2026-11-20), but not on every call.
+const cdNudgeEvery = 3
 
 // leadingCd matches a command that begins `cd <path> &&` or `cd <path>;`,
 // the path bare or in one pair of quotes.
-var leadingCd = regexp.MustCompile(`^\s*cd\s+("[^"]*"|'[^']*'|[^\s;&|'"]+)\s*(&&|;)`)
+var leadingCd = regexp.MustCompile(`^\s*cd\s+("[^"]*"|'[^']*'|[^\s;&|'"]+)\s*(&&|;|\n)`)
 
 // redundantCd says whether command begins with a cd to dir itself.
 func redundantCd(command, dir string) bool {
@@ -63,6 +64,16 @@ func redundantCd(command, dir string) bool {
 			return false
 		}
 		p = home + p[1:]
+	}
+	for _, v := range []string{"${HOME}", "$HOME"} {
+		if p == v || strings.HasPrefix(p, v+"/") {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return false
+			}
+			p = home + p[len(v):]
+			break
+		}
 	}
 	if strings.Contains(p, "$") {
 		return false // a variable: not ours to expand
@@ -82,20 +93,21 @@ func redundantCd(command, dir string) bool {
 }
 
 // withCdNudge adds a line to an exec result whose command began with a cd
-// to the dir it already starts in. The command ran unchanged. shown counts
-// the lines across the session; past cdNudgeMax none is added.
-func withCdNudge(inner agent.ToolDispatcher, dir string, shown *atomic.Int32) agent.ToolDispatcher {
+// to the dir it already starts in. The command ran unchanged. seen counts
+// the redundant cds across the session; the line rides the 1st and every
+// cdNudgeEvery-th.
+func withCdNudge(inner agent.ToolDispatcher, dir string, seen *atomic.Int32) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		out, err := inner(ctx, tc)
-		if tc.Function.Name != "exec" || err != nil || shown.Load() >= cdNudgeMax {
+		if tc.Function.Name != "exec" || err != nil {
 			return out, err
 		}
 		var args struct {
 			Command string `json:"command"`
 		}
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
-		if redundantCd(args.Command, dir) && shown.Add(1) <= cdNudgeMax {
-			out += "\n(exec already starts in " + dir + "; the cd was not needed)"
+		if redundantCd(args.Command, dir) && (seen.Add(1)-1)%cdNudgeEvery == 0 {
+			out += "\nnote: exec already starts in " + dir + "; the leading cd is not needed."
 		}
 		return out, err
 	}
