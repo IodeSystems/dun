@@ -2,44 +2,11 @@ package harness
 
 import (
 	"context"
-	"encoding/json"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/iodesystems/agentkit/agent"
-	"github.com/iodesystems/agentkit/llm"
 )
-
-// After a fold, the next redundant cd carries the line again; a fold alone
-// says nothing, and a cd that is not redundant still gets none.
-func TestForget_FoldResetsCdNudge(t *testing.T) {
-	h := newNoteHarness(t)
-	dir := t.TempDir()
-	inner := func(context.Context, llm.ToolCall) (string, error) { return "ok", nil }
-	d := withCdNudge(inner, dir, &h.cdNudges)
-	call := func(cmd string) bool {
-		args, _ := json.Marshal(map[string]string{"command": cmd})
-		var tc llm.ToolCall
-		tc.Function.Name, tc.Function.Arguments = "exec", string(args)
-		out, _ := d(context.Background(), tc)
-		return strings.Contains(out, "leading cd is not needed")
-	}
-	redundant := "cd " + dir + " && ls"
-	if !call(redundant) || call(redundant) {
-		t.Fatal("want the line on the 1st redundant cd only")
-	}
-	h.noteCompactionCause(agent.CompactionInfo{SubsumedCount: 4}, foldByShaper)
-	if call("cd sub && ls") {
-		t.Error("a cd that is not redundant must not carry the line after a fold")
-	}
-	if !call(redundant) {
-		t.Error("the 1st redundant cd after a fold must carry the line again")
-	}
-	if call(redundant) {
-		t.Error("the 2nd redundant cd after a fold must not")
-	}
-}
 
 // A recap cue can be raised again after a fold and after a recap. A
 // large-result cue stays claimed: its result and aside go or stay together.
