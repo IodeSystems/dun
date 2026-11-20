@@ -533,7 +533,10 @@ func (s *session) exited(eng Engine, err error) {
 	reason := "engine exited"
 	if err != nil {
 		reason = "engine exited: " + err.Error()
-		if kept := keepEngineExit(eng, s.workspace, s.id); kept != "" {
+		if kept, why := keepEngineExit(eng, s.workspace, s.id); kept != "" {
+			if why != "" {
+				reason += ": " + why
+			}
 			reason += "; its last output: " + kept
 		}
 	}
@@ -578,6 +581,12 @@ func (s *session) ensureRunning() error {
 	}
 	if err := s.blocked(); err != nil {
 		return err
+	}
+	// A workspace deleted since the session started: an engine there has
+	// no tree to work in, and its tools fail one by one (mcpshell's
+	// --files-dir panicked before v0.15.0). Say so once, plainly.
+	if st, err := os.Stat(s.workspace); err != nil || !st.IsDir() {
+		return fmt.Errorf("the workspace %s no longer exists: this session cannot start there", s.workspace)
 	}
 	eng, err := s.svc.spawner.Spawn(s.workspace, s.spawnArgs())
 	if err != nil {

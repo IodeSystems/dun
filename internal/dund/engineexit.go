@@ -20,38 +20,59 @@ const engineExitKeep = 64 << 10
 type engineLogger interface{ EngineLog() string }
 
 // keepEngineExit copies the end of an engine's output, after it exited with
-// an error, beside the session's transcript (<session>.engine-exit.log), and
-// returns that path; "" when the engine has no output file or nothing was
-// copied. The engine's own log (<EnginesDir>/<pid>.log) is pruned a week
-// after; this copy stays with the session, and the next crash replaces it.
-func keepEngineExit(eng Engine, workspace, id string) string {
+// an error, beside the session's transcript (<session>.engine-exit.log). It
+// returns that path and the line that says why (exitLine); "" when the
+// engine has no output file or nothing was copied. The engine's own log
+// (<EnginesDir>/<pid>.log) is pruned a week after; this copy stays with the
+// session, and the next exit replaces it. A startup error (a bad flag, a
+// missing provider) is in it too: the engine's stderr is that file from
+// its first byte.
+func keepEngineExit(eng Engine, workspace, id string) (path, why string) {
 	l, ok := eng.(engineLogger)
 	if !ok || l.EngineLog() == "" {
-		return ""
+		return "", ""
 	}
 	f, err := os.Open(l.EngineLog())
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	defer f.Close()
 	st, err := f.Stat()
 	if err != nil || st.Size() == 0 {
-		return ""
+		return "", ""
 	}
 	if st.Size() > engineExitKeep {
 		if _, err := f.Seek(st.Size()-engineExitKeep, io.SeekStart); err != nil {
-			return ""
+			return "", ""
 		}
 	}
 	b, err := io.ReadAll(io.LimitReader(f, engineExitKeep))
 	if err != nil || len(b) == 0 {
-		return ""
+		return "", ""
 	}
 	dest := strings.TrimSuffix(harness.SessionFile(workspace, id), ".jsonl") + ".engine-exit.log"
 	if err := os.WriteFile(dest, b, 0o600); err != nil {
-		return l.EngineLog() // at least name where it is
+		dest = l.EngineLog() // at least name where it is
 	}
-	return dest
+	return dest, exitLine(b)
+}
+
+// exitLine is the line of an exited engine's output that says why: a Go
+// panic's or fatal error's first line, else the last line (where a startup
+// error such as "dun: flag provided but not defined: -x" is), clipped.
+func exitLine(b []byte) string {
+	lines := strings.Split(string(b), "\n")
+	for _, l := range lines {
+		if strings.HasPrefix(l, "panic: ") || strings.HasPrefix(l, "fatal error: ") {
+			return clipLine(l, 200)
+		}
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		if l := strings.TrimSpace(lines[i]); l != "" {
+			return clipLine(l, 200)
+		}
+	}
+	return ""
 }
 
 // prefixWriter writes each line to w with a timestamp and prefix, for a
