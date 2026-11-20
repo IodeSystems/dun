@@ -175,10 +175,13 @@ type Restart struct {
 }
 
 // MoveEngine restarts the envelope's session's engine, same flags, same
-// conversation, on the build dund starts engines on, now: /upgrade now on
-// a session whose adopted engine of an older build has not moved (a job or
-// sub-agent kept it busy). A turn, job or sub-agent of it ends.
-type MoveEngine struct{}
+// conversation, on the build dund starts engines on: /upgrade now on a
+// session whose engine is of another build. An engine a turn, question,
+// job or sub-agent holds is not moved: the ack's error says what holds it,
+// and it moves when they finish. Force moves it now and ends them.
+type MoveEngine struct {
+	Force bool `json:"force,omitempty"`
+}
 
 // Forget removes the envelope's session from the service: its engine is
 // stopped and its registry entry and members' UI state are deleted. The

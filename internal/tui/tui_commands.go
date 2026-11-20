@@ -219,7 +219,7 @@ func init() {
 			m.reloadReq = true
 			return tea.Quit
 		}},
-		{"upgrade", "[now|off|on|--channel=release|source]", "dund's pending upgrade and each tool (mcpshell, poly-lsp-mcp, raglit) against the version this dun pins; now installs the tools that are behind and restarts dund (cut work resumes after); off|on: a release build's daily update check; --channel=release on a source build installs the newest release (it may be older than this build), --channel=source on a release build says to run make install in the checkout", upgradeSlash},
+		{"upgrade", "[now [--force]|off|on|--channel=release|source]", "dund's pending upgrade and each tool (mcpshell, poly-lsp-mcp, raglit) against the version this dun pins; now installs the tools that are behind and restarts dund (cut work resumes after), or, with dund already this build, restarts this session's older engine when nothing holds it (--force: now, ending its turn, jobs and sub-agents); off|on: a release build's daily update check; --channel=release on a source build installs the newest release (it may be older than this build), --channel=source on a release build says to run make install in the checkout", upgradeSlash},
 		{"version", "", "which dun this is, the newest release, and whether this build updates itself, and from where", versionSlash},
 		{"keys", "[reload|preset <name>]", "the key map: every rebindable action and its keys; yours go in ~/.dun/keys.json", keysSlash},
 		{"perf", "", "redraw timings for this session (and how to get a profile)", func(m *tuiModel, _ []string) tea.Cmd {

@@ -102,31 +102,45 @@ func TestUpgradeNow_MovesAnOldEngine(t *testing.T) {
 	dundSeen.Store("v0.9.1-33-g6996185")
 	defer dundSeen.Store("")
 
-	for _, engine := range []string{"", "v0.9.1-20-gaaaaaaa"} {
+	run := func(engine string, args ...string) (sent, said string) {
 		rec := &recWC{}
 		m := newTUIModel(&dunProc{stdin: rec}, "/ws")
 		m.engineVersion, m.engineReady = engine, true
-		cmd := upgradeSlash(&m, []string{"now"})
+		cmd := upgradeSlash(&m, args)
 		if follow := m.toolsDone(cmd().(toolsMsg)); follow != nil {
 			follow()
 		}
-		if !strings.Contains(rec.String(), `"type":"move_engine"`) || restarted {
-			t.Errorf("engine %q: sent %q, dund restarted %v", engine, rec.String(), restarted)
+		return rec.String(), ansi.Strip(m.convo[len(m.convo)-1].view())
+	}
+	for _, engine := range []string{"", "v0.9.1-20-gaaaaaaa"} {
+		sent, said := run(engine, "now")
+		if !strings.Contains(sent, `"type":"move_engine"`) || strings.Contains(sent, `"force":true`) || restarted {
+			t.Errorf("engine %q: sent %q, dund restarted %v", engine, sent, restarted)
 		}
-		if got := ansi.Strip(m.convo[len(m.convo)-1].view()); !strings.Contains(got, "restarting this session's engine") {
-			t.Errorf("engine %q: said %q", engine, got)
+		if !strings.Contains(said, "into it if nothing holds it (dund says what does)") {
+			t.Errorf("engine %q: said %q", engine, said)
+		}
+		sent, said = run(engine, "now", "--force")
+		if !strings.Contains(sent, `"type":"move_engine"`) || !strings.Contains(sent, `"force":true`) || restarted {
+			t.Errorf("engine %q --force: sent %q, dund restarted %v", engine, sent, restarted)
+		}
+		if !strings.Contains(said, "into it now — its running turn, jobs and sub-agents end") {
+			t.Errorf("engine %q --force: said %q", engine, said)
 		}
 	}
 
 	// An engine on this build: dund is restarted as before (a source build).
-	rec := &recWC{}
-	m := newTUIModel(&dunProc{stdin: rec}, "/ws")
-	m.engineVersion, m.engineReady = buildinfo.Version, true
-	cmd := upgradeSlash(&m, []string{"now"})
-	if follow := m.toolsDone(cmd().(toolsMsg)); follow != nil {
-		follow()
+	if sent, _ := run(buildinfo.Version, "now"); strings.Contains(sent, "move_engine") {
+		t.Errorf("moved a current engine: %q", sent)
 	}
-	if strings.Contains(rec.String(), "move_engine") {
-		t.Errorf("moved a current engine: %q", rec.String())
+}
+
+// dund's answer to a held engine's move (an ack error, which the attach
+// turns into a notification) is shown where the person looks.
+func TestUpgradeNow_BusyAnswerShown(t *testing.T) {
+	v := newVtui(100, 24)
+	v.event(map[string]any{"type": "notification", "text": "dund: this session's engine is busy (1 job running, agent #2 working): it moves when they finish; /upgrade now --force ends them and moves now"})
+	if got := v.convo(); !strings.Contains(got, "busy (1 job running, agent #2 working)") {
+		t.Errorf("not shown:\n%s", got)
 	}
 }

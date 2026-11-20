@@ -272,6 +272,28 @@ func (s *session) occupied() bool {
 	return s.inTurn || s.asking || len(s.jobs) > 0 || len(s.agents) > 0
 }
 
+// holders names what occupies the engine, for a person: "a turn running",
+// "1 job running", "agent #2 working". Called with actMu held.
+func (s *session) holders() []string {
+	var out []string
+	if s.inTurn {
+		out = append(out, "a turn running")
+	}
+	if s.asking {
+		out = append(out, "a question open")
+	}
+	switch n := len(s.jobs); {
+	case n == 1:
+		out = append(out, "1 job running")
+	case n > 1:
+		out = append(out, fmt.Sprintf("%d jobs running", n))
+	}
+	for _, a := range s.agents {
+		out = append(out, fmt.Sprintf("agent #%d working", a.ID))
+	}
+	return out
+}
+
 // idle reports whether the engine runs with no one following it and nothing
 // to do, for at least d.
 func (s *session) idle(d time.Duration) bool {
