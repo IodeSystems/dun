@@ -465,11 +465,16 @@ func (h *Harness) startServer(ctx context.Context, s mcpserver.Server) error {
 		env = append(env, hostHookEnv(ext, h.cfg.Workspace)...)
 	}
 	args := s.Args
+	roots := false // the shell asks dun for its file roots (shellroots.go)
 	if s.ID == mcpserver.ServerShell {
 		h.shareHosted(ctx, s.ID, phase) // before the login: a shared one is dund's to log in
 		h.loginHosted(ctx, s.ID, phase)
 		args = h.shellArgs(s) // + --mcp <file> when servers are placed in it
 		env = h.shellEnv(s, env)
+		if cmdErr == nil {
+			args, roots = withClientRoots(s, command, args)
+		}
+		h.restartOwner(s.ID).setShellRoots(roots)
 	}
 	err := authErr // a missing command, or a raglit login that failed
 	switch {
@@ -534,6 +539,9 @@ func (h *Harness) startServer(ctx context.Context, s mcpserver.Server) error {
 		Env: env, Timeout: int(timeout / time.Second),
 		URL: s.URL, Headers: s.Headers,
 		OnStderr: func(line string) { h.addServerLines(s.ID, []string{line}, true) },
+	}
+	if roots {
+		mcfg.ClientCapabilities = rootsCapabilities()
 	}
 	// A shared server is one connection in dund for every session
 	// (servers_share.go): the engine connects to dund's endpoint for it,

@@ -564,6 +564,11 @@ type Harness struct {
 	// shellShares are the grants the running shell's hosted servers use,
 	// by server id (servers_share.go shareHosted). Guarded by srvMu.
 	shellShares map[string]ShareGrant
+	// rootsOn is whether the running shell asks dun for its file roots
+	// (shellroots.go), and rootsSent the list it was last given.
+	rootsMu   sync.Mutex
+	rootsOn   bool
+	rootsSent string
 	// ownMgr is a child's own instances (servers_share.go childOwn): an
 	// agent instance, and for a child isolated in a tree of its own each
 	// server keyed on {{workspace}}. own names them; every other server is
@@ -809,6 +814,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// StartServer — handlers attach at spawn.
 	if ownsMgr {
 		mgr.SetNotificationHandler(h.noteServerNotification)
+		mgr.SetRequestHandler(h.answerServerRequest) // the shell's roots/list (shellroots.go)
 	}
 	if len(own) > 0 {
 		h.ownMgr, h.own = mcpmgr.NewManager(), own
