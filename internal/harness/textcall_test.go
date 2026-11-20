@@ -2,11 +2,13 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
@@ -61,7 +63,8 @@ func TestTextCall_RetriesThenStopsAtCap(t *testing.T) {
 }
 
 // A wake whose reply is empty reads no earlier turn's reply: the last
-// turn's DSML is not corrected again (review 2026-11-18).
+// turn's DSML is not corrected again (review 2026-11-18). Its two requests
+// are the empty round and agentkit's one empty-reply repair (v0.38.0).
 func TestTextCall_OldReplyNotReread(t *testing.T) {
 	h, r := textCallHarness(t, func(i int) string {
 		if i <= textCallsMax {
@@ -72,10 +75,10 @@ func TestTextCall_OldReplyNotReread(t *testing.T) {
 	if _, err := h.Ask(context.Background(), "build it"); err != nil {
 		t.Fatal(err)
 	}
-	if err := wakeTurn(h, "job 1 finished"); err != nil {
-		t.Fatal(err)
+	if err := wakeTurn(h, "job 1 finished"); !errors.Is(err, agent.ErrEmptyReply) {
+		t.Fatalf("wake: %v, want an empty reply", err)
 	}
-	if n, want := r.calls(), 1+textCallsMax+1; n != want {
+	if n, want := r.calls(), 1+textCallsMax+2; n != want {
 		t.Fatalf("%d requests, want %d: the wake was corrected for the last turn's reply", n, want)
 	}
 }

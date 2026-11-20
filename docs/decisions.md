@@ -1106,8 +1106,8 @@ From the 2026-11-18 inventory of model calls nobody typed for.
   without LOD) fits 55% of target; only the oldest are folded. The pristine
   tail is the minimum. The fold notice says what was kept: `compacted 237
   entries, kept 198 verbatim (129.7k): 294971 → 147755 tokens …`; the arrow
-  ends at `TokensAfter` (LOD-rendered, what agentkit says the next build
-  sends), not `TokensAfterFull`. Proof: `internal/harness/foldkeep_test.go`
+  ends at `TokensAfter`, what the next build sends (since agentkit v0.38.0
+  the count without LOD; v0.37.0's `TokensAfterFull` is gone). Proof: `internal/harness/foldkeep_test.go`
   (the simulated 434-entry session sends 51% of target; little history and
   a huge newest result fold as before).
 - **A refused reasoning off is agentkit's to resend** (agentkit v0.34.0;
@@ -1384,6 +1384,33 @@ and the turn-end check pushed it back to its tools.
   still counts as the person's message where `SayAs` counts it: the intake,
   settle, the automatic-turn budget, the missed reply.
 
+## agentkit owns the empty reply (2026-11-19)
+
+agentkit v0.38.0 detects a round with no text and no tool call, runs one
+repair round (a notification tagged `empty-reply`: "Your last reply was
+empty … Reply again."), and when that is empty too ends the turn with
+`*agent.EmptyReplyError{FinishReason, NativeFinishReason}`. Before, the
+turn ended with `Reply ""` and no error, and dun detected it
+(`noteEmptyReply`, the entry below).
+
+- **Detection and repair are agentkit's.** dun's `Reply ""` check is gone.
+  The error is not transient (`llm.TransientUpstream`), so the turn-scope
+  retry returns it at once: one repair, never two.
+- **The notice is dun's.** `describeTurnError` (`internal/harness/turnerrors.go`)
+  gives the error dun's text, `<model> returned an empty reply: the turn
+  ended with no text from the model (finish_reason stop, native
+  MALFORMED_FUNCTION_CALL)`; it unwraps to the agentkit error. The UI shows
+  it as the turn's error, for every turn (the `OnNotify` notice and its
+  person-only rule are gone: an error event already reaches every client).
+  `<session>.errors.jsonl` keeps it with `finish` and `native_finish`.
+- **The repair note is the model's**, like the turn-end check: no
+  `OnNotify` ping, not in the history shown, still in the transcript.
+- The same pass names a stall (`*llm.StallError`, agentkit's 10m first-byte
+  and 2m between-chunks watchdog): `stalled: no bytes for 2m
+  (between_chunks)` as the error and the turn-retry reason, `stall` in the
+  record. An SSE error event's code, type and metadata (`*llm.StreamError`)
+  are in the record too.
+
 ## The person's message ends the prompt (2026-11-19)
 
 A repro with Gemini 4: every round came back empty, agentkit wrote no
@@ -1409,8 +1436,8 @@ message. Each retried attempt added one more.
   text) gets a notice, `<model> returned an empty reply: …`, through
   `OnNotify`, and a record in `<session>.errors.jsonl`, so `dun errors`
   shows it (`noteEmptyReply`, `turnerrors.go`). An automatic turn may end
-  quietly: nobody waits on it. The finish reason is not in it: agentkit
-  v0.37.0's `TurnResult` does not carry it (TODO there).
+  quietly: nobody waits on it. Replaced by "agentkit owns the empty reply"
+  (agentkit v0.38.0).
 - **The turn-end check is the model's.** agentkit tags it `idle_check`; the
   store does not ping `OnNotify` for it (no 🔔 in the TUI or the plain CLI)
   and the history shown leaves it out. The model still reads it, and the

@@ -18,14 +18,12 @@ import (
 )
 
 // sseErrorEvent is the event llm.iodesystems.com sent (aw4
-// i_1m7rqbptp6z6f22q6jgff8), with the fields agentkit drops.
-const sseErrorEvent = `{"error":{"message":"JSON error injected into SSE stream","type":"server_error","code":"injected"}}`
+// i_1m7rqbptp6z6f22q6jgff8), with an OpenRouter-style metadata object.
+const sseErrorEvent = `{"error":{"message":"JSON error injected into SSE stream","type":"server_error","code":"injected","metadata":{"provider_name":"upstream-x"}}}`
 
 // A turn that dies on an SSE error event leaves a record in the session's
-// errors file: the time, provider, endpoint host, model and error text.
-// agentkit v0.37.0 keeps only the event's message, so that is the payload
-// there is; this test fails, and should be changed to expect the raw event,
-// once agentkit hands it on.
+// errors file: the time, provider, endpoint host, model and error text, and
+// the event's code, type and metadata (*llm.StreamError, agentkit v0.38.0).
 func TestTurnError_SSEErrorRecorded(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.ReadAll(r.Body)
@@ -60,7 +58,52 @@ func TestTurnError_SSEErrorRecorded(t *testing.T) {
 		t.Errorf("error %q lacks the server's message", r.Error)
 	}
 	if r.Status != 0 || r.Payload != "" {
-		t.Errorf("status %d payload %q: agentkit v0.37.0 keeps neither for an SSE error", r.Status, r.Payload)
+		t.Errorf("status %d payload %q: an SSE error has neither", r.Status, r.Payload)
+	}
+	if r.Code != "injected" || r.Type != "server_error" || !strings.Contains(r.Metadata, `"provider_name":"upstream-x"`) {
+		t.Errorf("code %q type %q metadata %q", r.Code, r.Type, r.Metadata)
+	}
+}
+
+// An empty reply and a stall are said in dun's words, and the record keeps
+// the finish reasons and the stall's phase; errors.As still reaches the
+// agentkit error through the text.
+func TestDescribeTurnError_EmptyAndStall(t *testing.T) {
+	h := newNoteHarness(t)
+	h.cfg.Endpoint = Endpoint{URL: "https://llm.example.com/v1", Model: "gemini-4"}
+	ep := h.cfg.Endpoint
+
+	err := h.describeTurnError(&agent.EmptyReplyError{FinishReason: "stop", NativeFinishReason: "MALFORMED_FUNCTION_CALL"})
+	want := "gemini-4 returned an empty reply: the turn ended with no text from the model (finish_reason stop, native MALFORMED_FUNCTION_CALL)"
+	if err.Error() != want || !errors.Is(err, agent.ErrEmptyReply) {
+		t.Errorf("empty: %q", err)
+	}
+	r := turnErrorRecord(err, "p", ep, time.Now())
+	if r.Error != want || r.Finish != "stop" || r.NativeFinish != "MALFORMED_FUNCTION_CALL" {
+		t.Errorf("empty record: %+v", r)
+	}
+	if got := h.describeTurnError(&agent.EmptyReplyError{}).Error(); !strings.HasSuffix(got, "(no finish_reason)") {
+		t.Errorf("no finish: %q", got)
+	}
+
+	err = h.describeTurnError(fmt.Errorf("agent: chat: %w", &llm.StallError{Phase: "between_chunks", After: 2 * time.Minute}))
+	var st *llm.StallError
+	if err.Error() != "stalled: no bytes for 2m (between_chunks)" || !errors.As(err, &st) {
+		t.Errorf("stall: %q", err)
+	}
+	if r := turnErrorRecord(err, "p", ep, time.Now()); r.Stall != "between_chunks" {
+		t.Errorf("stall record: %+v", r)
+	}
+	if got := transientReason(err); got != "stalled: no bytes for 2m (between_chunks)" {
+		t.Errorf("retry reason %q", got)
+	}
+	// Not transient: the turn-scope retry returns it at once.
+	if llm.TransientUpstream(&agent.EmptyReplyError{FinishReason: "error"}) {
+		t.Error("an empty reply is retried at turn scope")
+	}
+	plain := errors.New("x")
+	if h.describeTurnError(plain) != plain {
+		t.Error("another error changed")
 	}
 }
 

@@ -183,6 +183,12 @@ const tagDocs = "docs"
 // onNotify ping, and not in the history the UI shows.
 const tagIdleCheck = "idle_check"
 
+// modelsNote reports whether a notification is addressed to the model only:
+// agentkit's turn-end check, and its empty-reply repair note ("Your last
+// reply was empty … Reply again.", agent.EmptyReplyTag). No onNotify ping,
+// not in the history shown; the transcript and the model input keep them.
+func modelsNote(tag string) bool { return tag == tagIdleCheck || tag == agent.EmptyReplyTag }
+
 // blobMarker prefixes a ref where an entry's content was extracted to a blob.
 // It leads with NUL so it can't collide with real tool output or prose.
 const blobMarker = "\x00dun-blob:"
@@ -355,8 +361,8 @@ func (s *sessionStore) Append(_ context.Context, _ string, e agent.Entry) error 
 		onResult(e)
 	}
 	// Docs notifications drive a structured UI path (onDocs); skip the plain
-	// ping. The turn-end check is the model's, not the person's.
-	if e.Kind == agent.KindNotification && e.Tag != tagDocs && e.Tag != tagIdleCheck && cb != nil {
+	// ping. The turn-end check and the empty-reply repair are the model's.
+	if e.Kind == agent.KindNotification && e.Tag != tagDocs && !modelsNote(e.Tag) && cb != nil {
 		cb(e.Content)
 	}
 	return nil

@@ -43,6 +43,13 @@ type RoundStat struct {
 	Role     string    `json:"role,omitempty"` // spendmeter.Source.Role: main, model, vision
 	Provider string    `json:"provider,omitempty"`
 	Model    string    `json:"model,omitempty"`
+	// Served is the model the response body named (llm.Usage.Model), when it
+	// is not Model: an alias resolved, or a fallback.
+	Served string `json:"served,omitempty"`
+	// Finish and NativeFinish are the round's finish_reason and OpenRouter's
+	// native_finish_reason, verbatim.
+	Finish       string `json:"finish,omitempty"`
+	NativeFinish string `json:"native_finish,omitempty"`
 
 	Prompt     int     `json:"prompt"`                // the provider's prompt tokens
 	Cached     int     `json:"cached,omitempty"`      // of them, reused from its cache
@@ -125,7 +132,11 @@ const (
 func (h *Harness) noteRound(src spendmeter.Source, u llm.Usage) {
 	r := RoundStat{Time: time.Now(), Session: h.sessionName(), Role: src.Role, Provider: src.Provider, Model: src.Model,
 		Prompt: u.PromptTokens, Cached: u.CachedPromptTokens(), CacheWrite: u.CacheCreationInputTokens,
-		Completion: u.CompletionTokens, LatencyMS: u.LatencyMS}
+		Completion: u.CompletionTokens, LatencyMS: u.LatencyMS,
+		Finish: u.FinishReason, NativeFinish: u.NativeFinishReason}
+	if u.Model != "" && u.Model != src.Model {
+		r.Served = u.Model
+	}
 	if t := u.Timings; t != nil {
 		r.PromptN, r.PromptMS, r.GenN, r.GenMS = t.PromptN, t.PromptMS, t.PredictedN, t.PredictedMS
 	}

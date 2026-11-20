@@ -2,18 +2,21 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // emptyRunner answers every round with text (Gemini 4, 2026-11-19: "", every
-// round), after failing the first fails requests as a dropped stream. It
-// keeps what each request sent.
+// round, finish_reason stop, native MALFORMED_FUNCTION_CALL), after failing
+// the first fails requests as a dropped stream. It keeps what each request
+// sent.
 type emptyRunner struct {
 	mu    sync.Mutex
 	text  string
@@ -34,7 +37,7 @@ func (r *emptyRunner) ChatStream(_ context.Context, msgs []llm.Message, _ []llm.
 	}
 	out := make(chan llm.StreamChunk, 2)
 	out <- llm.StreamChunk{Content: r.text}
-	out <- llm.StreamChunk{Done: true, Usage: &llm.Usage{}}
+	out <- llm.StreamChunk{Done: true, Usage: &llm.Usage{}, FinishReason: "stop", NativeFinishReason: "MALFORMED_FUNCTION_CALL"}
 	close(out)
 	return out, nil
 }
@@ -68,9 +71,10 @@ func startEmpty(t *testing.T, r *emptyRunner, notes *[]string) *Harness {
 	return h
 }
 
-// A person's turn whose every round is empty ends with a notice to the
-// person naming the model, and a record in the turn errors. The turn-end
-// check that ran in it is the model's: no notice of it.
+// A turn whose every round is empty: agentkit runs one repair round, then
+// ends the turn with *agent.EmptyReplyError. dun says it once, naming the
+// model and the finish reasons, and keeps a record with them. The repair
+// note is the model's: no notice of it, not in the history shown.
 func TestEmptyReply_NoticeAndErrorsEntry(t *testing.T) {
 	r := &emptyRunner{}
 	var notes []string
@@ -78,33 +82,31 @@ func TestEmptyReply_NoticeAndErrorsEntry(t *testing.T) {
 	h.askOpen("fix the stubs dir")
 
 	res, err := h.Ask(context.Background(), "please fix it")
-	if err != nil || res.Reply != "" {
-		t.Fatalf("reply %q err %v", res.Reply, err)
+	if !errors.Is(err, agent.ErrEmptyReply) || res.FinishReason != "stop" {
+		t.Fatalf("reply %q finish %q err %v", res.Reply, res.FinishReason, err)
 	}
-	var empty int
+	want := "gemini-4 returned an empty reply: the turn ended with no text from the model (finish_reason stop, native MALFORMED_FUNCTION_CALL)"
+	if err.Error() != want {
+		t.Errorf("error %q, want %q", err, want)
+	}
 	for _, n := range notes {
-		if strings.Contains(n, "empty reply") && strings.Contains(n, "gemini-4") {
-			empty++
+		if strings.Contains(n, "Your last reply was empty") {
+			t.Errorf("the repair note reached the person: %q", n)
 		}
-		if strings.Contains(n, "Asks (the asks tool)") || strings.Contains(n, "Acknowledge the intake") {
-			t.Errorf("the turn-end check reached the person: %q", n)
-		}
-	}
-	if empty != 1 {
-		t.Errorf("empty-reply notices %d, want 1: %q", empty, notes)
 	}
 	recs, err := ReadTurnErrors(TurnErrorsFile(h.cfg.SessionFile))
-	if err != nil || len(recs) != 1 || !strings.Contains(recs[0].Error, "empty reply") || recs[0].Model != "gemini-4" {
+	if err != nil || len(recs) != 1 || recs[0].Error != want || recs[0].Model != "gemini-4" ||
+		recs[0].Finish != "stop" || recs[0].NativeFinish != "MALFORMED_FUNCTION_CALL" {
 		t.Fatalf("records %+v err %v", recs, err)
 	}
 	for _, it := range h.History() {
-		if it.Kind == "notification" && strings.Contains(it.Content, "Acknowledge the intake") {
-			t.Errorf("the turn-end check is in the history shown: %q", it.Content)
+		if it.Kind == "notification" && strings.Contains(it.Content, "Your last reply was empty") {
+			t.Errorf("the repair note is in the history shown: %q", it.Content)
 		}
 	}
-	// The model read the check: it is in the second request.
-	if rq := r.requests(); len(rq) < 2 || !strings.Contains(rq[1][len(rq[1])-1].Content, "[idle_check]") {
-		t.Errorf("the check did not reach the model: %d requests", len(rq))
+	// The model read the repair note: it is in the second request.
+	if rq := r.requests(); len(rq) != 2 || !strings.Contains(rq[1][len(rq[1])-1].Content, "Your last reply was empty") {
+		t.Errorf("the repair did not reach the model: %d requests", len(rq))
 	}
 }
 
