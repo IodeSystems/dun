@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync/atomic"
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
@@ -21,8 +20,8 @@ import (
 // prefix commands with `cd <that dir> &&` all the same. Measured on this box,
 // sessions of the 60 days to 2026-11-18: 751 exec calls, 497 began with
 // `cd <path> &&` or `;`, and 233 of those named the session's own root.
-// The exec description names the dir (execToolDef); a command that still
-// begins with it gets one line in its result, the first few times.
+// The exec description and the system prompt name the dir. A command that
+// still begins with it gets one line in its result, every time.
 
 // execStartDir is the directory a backend's commands start in, as the
 // command sees it: the host path, or the container path under --docker. ""
@@ -38,11 +37,6 @@ func execStartDir(b ExecBackend) string {
 	}
 	return ""
 }
-
-// cdNudgeEvery: the line rides the 1st redundant cd of a session and every
-// cdNudgeEvery-th after it. Models repeat the cd all session, so the line
-// repeats too (USER 2026-11-20), but not on every call.
-const cdNudgeEvery = 3
 
 // leadingCd matches a command that begins `cd <path> &&` or `cd <path>;`,
 // the path bare or in one pair of quotes.
@@ -93,10 +87,13 @@ func redundantCd(command, dir string) bool {
 }
 
 // withCdNudge adds a line to an exec result whose command began with a cd
-// to the dir it already starts in. The command ran unchanged. seen counts
-// the redundant cds across the session; the line rides the 1st and every
-// cdNudgeEvery-th.
-func withCdNudge(inner agent.ToolDispatcher, dir string, seen *atomic.Int32) agent.ToolDispatcher {
+// to the dir it already starts in. The command runs unchanged. The line
+// rides every redundant cd: one session had 41 of them, and a line on every
+// 3rd (10 lines) did not stop the cd (USER 2026-11-20).
+//
+// The model's view of its own earlier calls stays as it wrote them: a
+// history that differs from what the model wrote is worse than the cd.
+func withCdNudge(inner agent.ToolDispatcher, dir string) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		out, err := inner(ctx, tc)
 		if tc.Function.Name != "exec" || err != nil {
@@ -106,9 +103,15 @@ func withCdNudge(inner agent.ToolDispatcher, dir string, seen *atomic.Int32) age
 			Command string `json:"command"`
 		}
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
-		if redundantCd(args.Command, dir) && (seen.Add(1)-1)%cdNudgeEvery == 0 {
-			out += "\nnote: exec already starts in " + dir + "; the leading cd is not needed."
+		if redundantCd(args.Command, dir) {
+			out += "\n" + cdNudge(dir)
 		}
 		return out, err
 	}
+}
+
+// cdNudge is the line a redundant cd's result carries.
+func cdNudge(dir string) string {
+	return "Each exec starts in the project dir " + dir + "; cd'ing into " + dir +
+		" wastes tokens. Only cd if the directory you want is not the project dir."
 }

@@ -137,6 +137,17 @@ var systemExecCap = "\n\nA tool result over " + fmt.Sprintf("%d", execInlineMax)
 	"to its start and end; the gap names the file it was saved to, and file_read reads the rest. That is not a failure, and re-running " +
 	"only clips it again. Do not claim to have seen the clipped part."
 
+// systemExecDir is the rule against a leading `cd <start dir>` (execcd.go).
+// The exec description names the dir; the rule is said here only.
+func systemExecDir(exec ExecBackend) string {
+	dir := execStartDir(exec)
+	if dir == "" {
+		dir = "the project root"
+	}
+	return "\n\nEach exec starts in the project dir " + dir + "; never begin a command with `cd " + dir +
+		"`. Only cd if the directory you want is not the project dir."
+}
+
 // HostedLine is the system prompt's sentence naming the servers hosted in
 // the shell, "" for none: what scripting a server costs in every request
 // (/mcp info prices it).
@@ -210,6 +221,7 @@ func systemBuild(tools []mcpmgr.MCPTool, exec ExecBackend, wt *Worktree, files s
 	}
 	b.WriteString(files)
 	if exec != nil {
+		b.WriteString(systemExecDir(exec))
 		b.WriteString(systemExecCap)
 	}
 	if have[mcpserver.ServerDocs] {

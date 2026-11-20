@@ -22,8 +22,6 @@ import "strings"
 
 // forgetters is the registry: one reset per hint whose text a fold can drop.
 var forgetters = []func(*Harness){
-	// execcd.go: the next redundant cd carries the line again.
-	func(h *Harness) { h.cdNudges.Store(0) },
 	// recap.go: a recap cue can be raised again.
 	(*Harness).forgetRecapCues,
 }

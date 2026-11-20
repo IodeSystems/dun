@@ -942,8 +942,9 @@ func execWhere(b ExecBackend) string {
 	if dir == "" {
 		dir = "the project root"
 	}
-	s := "Each call starts in " + dir + ", so no `cd` to it is needed: never begin a command with `cd " + dir +
-		" &&`. A `cd` does not carry over to the next call; for a subdirectory, use `cd sub && …`."
+	// The rule against a leading `cd <dir>` is the system prompt's
+	// (systemExecDir), said once.
+	s := "Each call starts in " + dir + ". A `cd` does not carry over to the next call; for a subdirectory, use `cd sub && …`."
 	if _, ok := b.(DockerExec); ok {
 		return s
 	}

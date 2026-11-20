@@ -347,9 +347,6 @@ var CompactionPause func() (resume func())
 type Harness struct {
 	// recapsSince counts recaps applied since the last main round's stat.
 	recapsSince atomic.Int32
-	// cdNudges counts redundant leading cds seen (every 3rd carries the line) (execcd.go);
-	// a fold or recap resets it (forget.go).
-	cdNudges atomic.Int32
 	// procs samples background jobs' process groups (bgjob.go usage).
 	procs procstat.Sampler
 	// The last plain jobs read and its answer (jobs.go): a repeat that

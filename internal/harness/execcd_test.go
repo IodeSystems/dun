@@ -6,10 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/agentkit/mcpmgr"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // The description names the dir each backend starts in, says a cd does not
@@ -27,8 +28,11 @@ func TestExecToolDef_NamesStartDir(t *testing.T) {
 		{nil, "the project root", true},
 	} {
 		d := execToolDef(true, tc.b).Function.Description
-		if !strings.Contains(d, "Each call starts in "+tc.dir+", so no `cd` to it is needed: never begin a command with `cd "+tc.dir+" &&`. A `cd` does not carry over to the next call") {
+		if !strings.Contains(d, "Each call starts in "+tc.dir+". A `cd` does not carry over to the next call") {
 			t.Errorf("%T: no start dir %q: %s", tc.b, tc.dir, d)
+		}
+		if strings.Contains(d, "never begin") {
+			t.Errorf("%T: the cd rule is the system prompt's, not the description's: %s", tc.b, d)
 		}
 		if !strings.Contains(d, "`cd sub && …`") {
 			t.Errorf("%T: no subdirectory form: %s", tc.b, d)
@@ -82,8 +86,8 @@ func TestRedundantCd(t *testing.T) {
 	}
 }
 
-// The line rides a redundant cd's result, at most cdNudgeMax times; a subdir
-// or an outside path gets none, and the command runs as written.
+// The line rides every redundant cd's result; a subdir or an outside path
+// gets none, and the command runs as written.
 func TestWithCdNudge(t *testing.T) {
 	dir := t.TempDir()
 	var ran []string
@@ -93,8 +97,7 @@ func TestWithCdNudge(t *testing.T) {
 		ran = append(ran, a.Command)
 		return "ok", nil
 	}
-	var shown atomic.Int32
-	d := withCdNudge(inner, dir, &shown)
+	d := withCdNudge(inner, dir)
 	call := func(cmd string) string {
 		args, _ := json.Marshal(map[string]string{"command": cmd})
 		var tc llm.ToolCall
@@ -105,24 +108,37 @@ func TestWithCdNudge(t *testing.T) {
 		}
 		return out
 	}
-	line := "ok\nnote: exec already starts in " + dir + "; the leading cd is not needed."
+	line := "ok\nEach exec starts in the project dir " + dir + "; cd'ing into " + dir +
+		" wastes tokens. Only cd if the directory you want is not the project dir."
 
 	for _, cmd := range []string{"cd sub && ls", "cd /tmp && ls", "ls"} {
 		if out := call(cmd); out != "ok" {
 			t.Errorf("%q: %q, want no line", cmd, out)
 		}
 	}
-	redundant := "cd " + dir + " && ls"
-	for i := 1; i <= 3*cdNudgeEvery+1; i++ {
-		want := "ok"
-		if (i-1)%cdNudgeEvery == 0 {
-			want = line // the 1st, then every cdNudgeEvery-th
-		}
-		if out := call(redundant); out != want {
-			t.Errorf("redundant #%d: %q, want %q", i, out, want)
+	for _, redundant := range []string{"cd " + dir + " && ls", "cd " + dir + "; ls", "cd " + dir + "\nls"} {
+		for i := 1; i <= 3; i++ {
+			if out := call(redundant); out != line {
+				t.Errorf("%q #%d: %q, want %q", redundant, i, out, line)
+			}
+			if ran[len(ran)-1] != redundant {
+				t.Errorf("command changed: %q", ran[len(ran)-1])
+			}
 		}
 	}
-	if ran[len(ran)-1] != redundant {
-		t.Errorf("command changed: %q", ran[len(ran)-1])
+}
+
+// The system prompt says the rule once, with the start dir; without exec
+// it is absent.
+func TestSystemPrompt_ExecDirRule(t *testing.T) {
+	tools := []mcpmgr.MCPTool{{Name: "eval", ServerID: mcpserver.ServerShell}}
+	want := "Each exec starts in the project dir /src/proj; never begin a command with `cd /src/proj`. " +
+		"Only cd if the directory you want is not the project dir."
+	s := systemFor(tools, &HostShell{Dir: "/src/proj"}, nil, "", false)
+	if strings.Count(s, want) != 1 {
+		t.Errorf("want the rule once: %s", s)
+	}
+	if strings.Contains(systemFor(tools, nil, nil, "", false), "Each exec starts") {
+		t.Error("no exec: no rule")
 	}
 }
