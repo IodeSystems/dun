@@ -2,7 +2,7 @@ module github.com/iodesystems/dun
 
 go 1.26.7
 
-toolchain go1.26.11
+toolchain go1.27.4
 
 require (
 	charm.land/bubbles/v2 v2.2.1
