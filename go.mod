@@ -27,6 +27,7 @@ require (
 	github.com/iodesystems/openai-claude-api-shim v0.6.0
 	github.com/iodesystems/poly-lsp-mcp v0.5.4
 	github.com/iodesystems/raglit v0.10.0
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/spf13/cobra v1.10.2
 	go.starlark.net v0.0.0-20261021141710-4f4267fb140d
 	golang.org/x/crypto v0.59.0

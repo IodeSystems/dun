@@ -256,6 +256,10 @@ and named `__Host-dun_session`.
   (`localhost:20003`), `Host` is no longer what the browser used: the
   Origin checks then refuse `/tui`'s WebSocket and the sign-in form (the
   403 names both hosts). Set it to the public hostname, or unset it.
+  A quick tunnel (`cloudflared tunnel --url http://127.0.0.1:20003`) needs
+  no `--trust-proxy`. Pair a phone through it with `dun dund enable web
+  --url https://<name>.trycloudflare.com --token` (decisions.md, "Pair a
+  phone by QR").
 
 ## Sign-in (OIDC)
 

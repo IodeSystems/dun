@@ -2,6 +2,7 @@ package proto
 
 import (
 	"sort"
+	"time"
 
 	"github.com/iodesystems/dun/internal/procstat"
 )
@@ -76,11 +77,25 @@ type WakeHeld struct {
 // TrustProxies, when not nil, replaces the proxies (CIDRs or addresses)
 // whose X-Forwarded-Proto and -Host dund believes, besides loopback; an
 // empty list clears them.
+//
+// PublicURL, when set, is the scheme://host a phone reaches dund at (a
+// tunnel, a proxy); saved. Pair asks, after the change, for a one-time
+// pairing code (dund pair.go): answered in WebState.Pair, refused while
+// the listener is off or no public URL is saved.
 type WebSet struct {
 	Enable       *bool    `json:"enable,omitempty"`
 	Addr         string   `json:"addr,omitempty"`
 	TUI          *bool    `json:"tui,omitempty"`
 	TrustProxies []string `json:"trust_proxies"` // null: unchanged; []: none
+	PublicURL    string   `json:"public_url,omitempty"`
+	Pair         bool     `json:"pair,omitempty"`
+}
+
+// WebPair is a one-time pairing code's link (<public_url>/auth/pair#code=...)
+// and when it lapses.
+type WebPair struct {
+	URL     string    `json:"url"`
+	Expires time.Time `json:"expires"`
 }
 
 // WebState is dund's HTTP listener after a WebSet. Listening: it is serving
@@ -95,6 +110,8 @@ type WebState struct {
 	TrustProxies []string `json:"trust_proxies,omitempty"`
 	URL          string   `json:"url,omitempty"`
 	Warning      string   `json:"warning,omitempty"`
+	PublicURL    string   `json:"public_url,omitempty"`
+	Pair         *WebPair `json:"pair,omitempty"`
 }
 
 // ServiceNotice is dund's word to a session's engine about the service

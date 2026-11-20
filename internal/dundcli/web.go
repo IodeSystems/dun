@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,6 +42,23 @@ type webState struct {
 	// TrustedProxies are the peers besides loopback whose X-Forwarded-Proto
 	// and -Host are believed (dundapi proxy.go): CIDRs or addresses.
 	TrustedProxies []string `json:"trusted_proxies,omitempty"`
+	// PublicURL is scheme://host where a phone reaches this listener (a
+	// tunnel, a proxy): the base of a pairing link (`enable web --token`).
+	PublicURL string `json:"public_url,omitempty"`
+}
+
+// pairPath is the page a pairing link opens (dundapi pair.go).
+const pairPath = "/auth/pair"
+
+// parsePublicURL is u as scheme://host: http or https, a host, and no path,
+// query or fragment (dund serves at its root).
+func parsePublicURL(u string) (string, error) {
+	p, err := url.Parse(strings.TrimSpace(u))
+	if err != nil || (p.Scheme != "https" && p.Scheme != "http") || p.Host == "" || p.User != nil ||
+		strings.Trim(p.Path, "/") != "" || p.RawQuery != "" || p.Fragment != "" {
+		return "", fmt.Errorf("public URL %q: want https://host[:port], no path (e.g. https://name.trycloudflare.com)", u)
+	}
+	return p.Scheme + "://" + strings.ToLower(p.Host), nil
 }
 
 // parseTrust reads trusted proxies: a CIDR, or one address.
@@ -149,6 +167,7 @@ func tuiWarning(st webState) string {
 // http.Server each time the listener starts.
 type webCtl struct {
 	home  string
+	svc   *dund.Service // keeps the pairing codes
 	h     http.Handler
 	term  *webterm.Handler
 	tuiOn atomic.Bool
@@ -165,7 +184,7 @@ type webCtl struct {
 // dun engines run (`dun --tui` in $HOME: plain dun, attached to this dund
 // through DUN_HOME; /resume opens its session picker).
 func newWebCtl(home, bin string, svc *dund.Service, o dundapi.Options) (*webCtl, error) {
-	c := &webCtl{home: home}
+	c := &webCtl{home: home, svc: svc}
 	c.trust.Store(&[]netip.Prefix{})
 	trust := func() []netip.Prefix { return *c.trust.Load() }
 	userHome, _ := os.UserHomeDir()
@@ -244,6 +263,9 @@ func (c *webCtl) apply(st webState) error {
 	if !st.TUI {
 		c.term.KillAll()
 	}
+	if !st.Enabled {
+		c.svc.DropPairCodes() // a code works only while web is on
+	}
 	if same {
 		c.said(st)
 		return nil
@@ -302,7 +324,7 @@ func (c *webCtl) stop() {
 func (c *webCtl) set(ws proto.WebSet) (proto.WebState, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if ws.Enable == nil && ws.Addr == "" && ws.TUI == nil && ws.TrustProxies == nil { // a question: nothing changes, nothing is saved
+	if ws.Enable == nil && ws.Addr == "" && ws.TUI == nil && ws.TrustProxies == nil && ws.PublicURL == "" && !ws.Pair { // a question: nothing changes, nothing is saved
 		return c.state(), nil
 	}
 	if c.stopped { // a listener bound now would outlive the handover's exit
@@ -319,7 +341,21 @@ func (c *webCtl) set(ws proto.WebSet) (proto.WebState, error) {
 	if err := saveWebState(c.home, st); err != nil {
 		return proto.WebState{}, fmt.Errorf("applied, but not saved: %w", err)
 	}
-	return c.state(), nil
+	out := c.state()
+	if ws.Pair {
+		switch {
+		case !st.Enabled || c.hs == nil:
+			return proto.WebState{}, errors.New("a pairing code needs the web listener on: dun dund enable web")
+		case st.PublicURL == "":
+			return proto.WebState{}, errors.New("a pairing code needs the URL the phone opens: --url https://<public host>")
+		}
+		code, exp, err := c.svc.MintPairCode()
+		if err != nil {
+			return proto.WebState{}, err
+		}
+		out.Pair = &proto.WebPair{URL: st.PublicURL + pairPath + "#code=" + code, Expires: exp}
+	}
+	return out, nil
 }
 
 func (c *webCtl) state() proto.WebState {
@@ -328,7 +364,7 @@ func (c *webCtl) state() proto.WebState {
 
 func wireState(st webState, listening bool) proto.WebState {
 	out := proto.WebState{Enabled: st.Enabled, Addr: st.Addr, TUI: st.TUI, Listening: listening, Warning: tuiWarning(st),
-		TrustProxies: st.TrustedProxies}
+		TrustProxies: st.TrustedProxies, PublicURL: st.PublicURL}
 	if listening {
 		out.URL = webURL(st.Addr)
 	}
@@ -354,6 +390,13 @@ func applyWebSet(st webState, ws proto.WebSet) (webState, error) {
 			return st, err
 		}
 		st.TrustedProxies = append([]string{}, ws.TrustProxies...)
+	}
+	if ws.PublicURL != "" {
+		u, err := parsePublicURL(ws.PublicURL)
+		if err != nil {
+			return st, err
+		}
+		st.PublicURL = u
 	}
 	if st.Addr == "" {
 		st.Addr = defaultWebAddr

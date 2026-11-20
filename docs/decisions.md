@@ -1094,6 +1094,41 @@ spun. Then: asks are a ledger, pinned in the prompt, not plan roots.
   hijacked connections, and `/tui`'s are hijacked: stop, re-exec and the
   service handover call `webterm.Close` before the listener stops.
 
+## Pair a phone by QR (USER 2026-11-20)
+
+`dun dund enable web --url https://<public host> --token` prints a QR code;
+the phone scans it and is signed in. `internal/dund/pair.go`,
+`internal/dundapi/pair.go`, `internal/dundcli/qr.go`.
+
+- **`--url` is saved** in `web.json` as `public_url` (scheme://host, no
+  path); later `--token` calls omit it.
+- **The code**: 160 random bits, kept only as its SHA-256 in the running
+  dund's memory (a restart ends every code), 10 minutes, one use,
+  compared in constant time. Minted over dund's socket (`WebSet.Pair`),
+  refused while the listener is off; `disable web` ends every code. 20
+  wrong codes in a row end every live code. Used and expired codes get
+  their own error for an hour.
+- **The link** is `<public_url>/auth/pair#code=<code>`: a fragment, which
+  the browser never sends, so neither the tunnel nor dund logs the code.
+  The page's script moves it into a form, and the person taps Sign in:
+  a link previewer that runs scripts must not spend the code. `/auth/pair`
+  is a dund page, not the web app's: the web app signs in by dund's
+  cookie only (AuthProvider), so the exchange lands where `/auth/signin`'s
+  does.
+- **What it makes**: the session cookie `/auth/signin` sets (7 days,
+  bound to the host), minted from a new named API token
+  `paired-<date>-via-qr-<hex>` whose secret nobody keeps. That token is
+  the device's handle: `dun dund token list` shows it and `token revoke`
+  ends the session. Named tokens allow no spaces, so not "paired <date>
+  via QR". After 7 days the phone pairs again; the handle stays listed
+  until revoked.
+- **Threat model**: whoever opens the link first, within 10 minutes, is
+  signed in as the owner, with the TUI too when `/tui` is on. The QR is a
+  credential on screen: anyone who sees or photographs it in that time
+  gets in. A quick tunnel URL (`*.trycloudflare.com`) is public and
+  unauthenticated; dund's sign-in is the only gate on it. Plain-http
+  public URLs are allowed with a warning: the code crosses in clear.
+
 ## Automatic token spend: guards and measurement (USER 2026-11-18)
 
 From the 2026-11-18 inventory of model calls nobody typed for.

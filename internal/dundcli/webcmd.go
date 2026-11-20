@@ -19,17 +19,23 @@ import (
 
 func enableCmd(l *loader) *cobra.Command {
 	c := &cobra.Command{Use: "enable", Short: "turn on the web listener (web) or the TUI in the browser (tui)"}
-	var addr string
+	var addr, publicURL string
 	var trust []string
+	var pair bool
 	web := &cobra.Command{
 		Use:   "web",
 		Short: "serve the chooser, the web app (experimental) and the HTTP API",
 		Long: "Starts dund's HTTP listener now, and at every later start (saved in\n" +
 			"<home>/dund/web.json). Browsers sign in with a token (dund token) or the\n" +
-			"identity provider. Default address " + defaultWebAddr + ".",
+			"identity provider. Default address " + defaultWebAddr + ".\n\n" +
+			"--url names the public address a phone opens (a tunnel such as cloudflared,\n" +
+			"a proxy); it is saved. --token then prints a QR code of a one-time link to\n" +
+			"that address: scanned within 10 minutes, it signs that phone in, once. The\n" +
+			"phone shows in `dun dund token list` as paired-<date>-via-qr-<hex>; revoke it\n" +
+			"there.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ws := proto.WebSet{Enable: ptr(true), Addr: addr}
+			ws := proto.WebSet{Enable: ptr(true), Addr: addr, PublicURL: publicURL, Pair: pair}
 			if cmd.Flags().Changed("trust-proxy") {
 				ws.TrustProxies = []string{} // --trust-proxy= alone clears the list
 				for _, p := range trust {
@@ -42,6 +48,8 @@ func enableCmd(l *loader) *cobra.Command {
 		},
 	}
 	web.Flags().StringVar(&addr, "addr", "", "host:port to listen on (default: the saved one, else "+defaultWebAddr+")")
+	web.Flags().StringVar(&publicURL, "url", "", "the public base URL a phone opens, e.g. https://name.trycloudflare.com (saved)")
+	web.Flags().BoolVar(&pair, "token", false, "print a QR code of a one-time sign-in link to the public URL (10 minutes, one use)")
 	web.Flags().StringArrayVar(&trust, "trust-proxy", nil, "a reverse proxy (CIDR or address) whose X-Forwarded-Proto/-Host to believe, besides loopback (repeatable; replaces the saved list; --trust-proxy= clears it)")
 	tui := &cobra.Command{
 		Use:   "tui",
@@ -82,12 +90,32 @@ func webSet(l *loader, out io.Writer, ws proto.WebSet) error {
 	l.load()
 	st, err := webSetLive(l.socket(), ws)
 	if errors.Is(err, errNoDund) {
+		if ws.Pair { // the code lives in dund's memory
+			return errors.New("--token needs dund running (it keeps the code): dun dund serve, or dun dund service start")
+		}
 		return webSetOffline(l, out, ws)
 	}
 	if err != nil {
 		return err
 	}
 	printWeb(out, st)
+	if st.Pair != nil {
+		return printPair(out, *st.Pair)
+	}
+	return nil
+}
+
+// printPair is the pairing link: its QR code, the link, and its expiry.
+func printPair(out io.Writer, p proto.WebPair) error {
+	qr, err := qrText(p.URL)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "\nScan with the phone's camera (one use, until %s):\n\n%s\n  %s\n", p.Expires.Local().Format("15:04:05"), qr, p.URL)
+	if strings.HasPrefix(p.URL, "http://") {
+		fmt.Fprintln(os.Stderr, "warning: the link is plain http: anyone on the path sees the code")
+	}
+	fmt.Fprintln(out, "  Anyone who opens this link first gets in. Do not share it.")
 	return nil
 }
 
@@ -161,6 +189,9 @@ func printWeb(out io.Writer, st proto.WebState) {
 		fmt.Fprintf(out, "web: on at %s (tui %s)\n  open %s and sign in with a token (dun dund token)\n", st.Addr, tui, st.URL)
 	default:
 		fmt.Fprintf(out, "web: on at %s (tui %s)\n", st.Addr, tui)
+	}
+	if st.PublicURL != "" {
+		fmt.Fprintf(out, "  public URL: %s\n", st.PublicURL)
 	}
 	if len(st.TrustProxies) > 0 {
 		fmt.Fprintf(out, "  trusted proxies (besides loopback): %s\n", strings.Join(st.TrustProxies, ", "))

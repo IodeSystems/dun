@@ -75,6 +75,8 @@ type Service struct {
 	gwh gatewayHolder
 	// peerDone remembers the mutating peer requests done (peerdone.go).
 	peerDone *peerDone
+	// pair holds the one-time pairing codes (pair.go).
+	pair pairing
 }
 
 // New opens the registry in dir, loading the sessions it lists. Their engines
