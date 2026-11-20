@@ -20,8 +20,10 @@ import (
 // path outside every root. With --files-client-roots it asks its client
 // for roots (roots/list) after initialized and again on each
 // notifications/roots/list_changed. dun answers with what its own file
-// tools may reach: the workspace, each /file grant that is on, and the
-// session's read dirs (job logs, saved output) read only. A grant open
+// tools may reach beyond the workspace: each /file grant that is on, and
+// the session's read dirs (job logs, saved output) read only. The
+// workspace is not listed: --files-dir already makes it a root, and a
+// second entry would show twice in mcpshell's access-denied error. A grant open
 // for writing carries _meta {"mcpshell/access":"write"}; any other root is
 // read only to mcpshell.
 //
@@ -109,21 +111,18 @@ func newShellRoot(p string, write bool) shellRoot {
 	return r
 }
 
-// buildShellRoots is the roots list: the workspace (write as wsWrite), each
-// grant that is on (write as it is), then readDirs, read only. A path is
-// listed once.
-func buildShellRoots(workspace string, wsWrite bool, grants []AddedPath, readDirs []string) []shellRoot {
+// buildShellRoots is the roots list: each grant that is on (write as it
+// is), then readDirs, read only. A path is listed once; the workspace
+// (--files-dir's root already) is not listed.
+func buildShellRoots(workspace string, grants []AddedPath, readDirs []string) []shellRoot {
 	out := []shellRoot{}
-	seen := map[string]bool{}
+	seen := map[string]bool{filepath.Clean(workspace): workspace != ""}
 	add := func(p string, write bool) {
 		if p == "" || seen[p] {
 			return
 		}
 		seen[p] = true
 		out = append(out, newShellRoot(p, write))
-	}
-	if workspace != "" {
-		add(filepath.Clean(workspace), wsWrite)
 	}
 	for _, g := range grants {
 		if g.On {
@@ -138,8 +137,7 @@ func buildShellRoots(workspace string, wsWrite bool, grants []AddedPath, readDir
 
 // shellRoots is this session's roots list.
 func (h *Harness) shellRoots() []shellRoot {
-	write, _ := h.workspaceWrite()
-	return buildShellRoots(h.cfg.Workspace, write, h.AddedEntries(), h.sessionReadDirs())
+	return buildShellRoots(h.cfg.Workspace, h.AddedEntries(), h.sessionReadDirs())
 }
 
 // answerServerRequest answers a server's request to dun (the manager's

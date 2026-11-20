@@ -63,9 +63,8 @@ func TestBuildShellRoots(t *testing.T) {
 		{Path: "/c/off", On: false, Write: true, Dir: true},
 		{Path: "/d/one file.txt", On: true},
 	}
-	got := buildShellRoots("/ws/", false, grants, []string{"/tmp/dun-1", "/b/ref"})
+	got := buildShellRoots("/ws/", grants, []string{"/tmp/dun-1", "/b/ref", "/ws"})
 	want := []shellRoot{
-		{URI: "file:///ws", Name: "ws"},
 		{URI: "file:///a/notes", Name: "notes", Meta: map[string]any{"mcpshell/access": "write"}},
 		{URI: "file:///b/ref", Name: "ref"},
 		{URI: "file:///d/one%20file.txt", Name: "one file.txt"},
@@ -74,8 +73,8 @@ func TestBuildShellRoots(t *testing.T) {
 	if rootsKey(got) != rootsKey(want) {
 		t.Fatalf("roots\n got %s\nwant %s", rootsKey(got), rootsKey(want))
 	}
-	if w := buildShellRoots("/ws", true, nil, nil); len(w) != 1 || w[0].Meta["mcpshell/access"] != "write" {
-		t.Errorf("writable workspace: %+v", w)
+	if w := buildShellRoots("/ws", nil, nil); len(w) != 0 {
+		t.Errorf("the workspace is --files-dir's root, not a client root: %+v", w)
 	}
 }
 
@@ -97,13 +96,13 @@ func TestAnswerServerRequestRoots(t *testing.T) {
 	for _, r := range roots {
 		switch r.URI {
 		case fileURI(filepath.Clean(ws)):
-			sawWS = true
+			sawWS = true // --files-dir's root already
 		case fileURI(realDir):
 			sawDir = r.Meta[rootsAccessMeta] == "write"
 		}
 	}
-	if !sawWS || !sawDir {
-		t.Errorf("roots %s: want the workspace and %s with write", rootsKey(roots), realDir)
+	if sawWS || !sawDir {
+		t.Errorf("roots %s: want %s with write, and not the workspace", rootsKey(roots), realDir)
 	}
 	if _, err := h.answerServerRequest(context.Background(), mcpserver.ServerShell, "sampling/createMessage", nil); !errors.Is(err, mcpmgr.ErrMethodNotFound) {
 		t.Errorf("other method: %v", err)

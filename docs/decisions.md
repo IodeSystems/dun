@@ -1304,7 +1304,7 @@ exec edits followed an "outside the root" refusal. `internal/harness/fileaccess.
   the file tools did not reach `Files.*` in eval. dun now declares the MCP
   `roots` capability (`listChanged`) to an mcpshell whose build info says
   v0.15.0 or newer, passes `--files-client-roots`, and answers `roots/list`
-  with the workspace, each grant that is on, and `sessionReadDirs` read only
+  with each grant that is on and `sessionReadDirs` read only
   (`internal/harness/shellroots.go`). A write grant carries `_meta
   {"mcpshell/access":"write"}`; mcpshell reads any other root as read only.
   Every edit of a paths file sends `notifications/roots/list_changed` when
@@ -1314,10 +1314,10 @@ exec edits followed an "outside the root" refusal. `internal/harness/fileaccess.
   roots need no per-client split; a sub-agent's shell is its root
   session's, so its roots are the root session's grants, not the child's.
   A grant changed by another session at project or global scope reaches
-  this shell on its next `list_changed`, not at once. The workspace is
-  listed too, though `--files-dir` already makes it a read-write root, so
-  mcpshell's refusal lists it twice; dun's read-only workspace mode does
-  not reach mcpshell (as before).
+  this shell on its next `list_changed`, not at once. The workspace is not
+  listed: `--files-dir` already makes it a read-write root, and a second
+  entry showed twice in mcpshell's refusal. dun's read-only workspace mode
+  does not reach mcpshell (as before).
 
 ## Tool calls sent as text are retried (USER 2026-11-18)
 
