@@ -199,6 +199,26 @@ func TestJobs_ARepeatedPollWaits(t *testing.T) {
 	}
 }
 
+// The processes: line is a fresh /proc sample, not part of the answer: the
+// repeat detector must not read a structurally different sample (a cpu %
+// appearing, io rates, the verdict flipping — what load does to it) as "the
+// job changed", which is what let a second identical plain read return
+// without waiting under full-suite load.
+func TestJobs_RepeatIgnoresTheProcessesLine(t *testing.T) {
+	h := testHarness(t)
+	sig := "job:1"
+	base := "job #1 RUNNING for 0s (0 bytes out) — sleep 30"
+	for i, a := range []string{
+		base + "\nprocesses: sleep 30 (sleeping) — idle: every process sleeping, no CPU\noff\nwritten: 0 B, 0 lines\nOutput: /tmp/x (file_read)",
+		base + "\nprocesses: sleep 30 (sleeping), cpu 12%, io r 4.0 KiB/s w 0 B/s\noff\nwritten: 0 B, 0 lines\nOutput: /tmp/x (file_read)",
+	} {
+		if h.jobsRepeat(sig, a) != (i != 0) {
+			t.Fatalf("i=%d: jobsRepeat = %v, want %v", i, h.jobsRepeat(sig, a), i != 0)
+		}
+		h.jobsNote(sig, a)
+	}
+}
+
 // A wait a message broke ends the run of identical calls: the loop guard must
 // not refuse the wait that follows it as a call nothing happened between.
 func TestJobs_AMessageEndsTheRun(t *testing.T) {

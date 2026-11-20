@@ -132,20 +132,34 @@ const jobsMessageStop = "Stopped waiting because a message arrived (the user wro
 
 var pollDigits = regexp.MustCompile(`[0-9]+`)
 
+// pollStrip is the report's live sample: the processes: line, from processes:
+// to the end of the line, verdict included. It is a fresh /proc sample on
+// every read, not a change in the job: under load its non-digit parts drift
+// (cpu N% appears, io rates appear, the verdict flips), and a drift there
+// must not count as "the job changed" and end the wait a repeated poll is in.
+var pollStrip = regexp.MustCompile(`\nprocesses: [^\n]*`)
+
+// pollMask is the report as the repeat detector compares it: the live sample
+// gone, the numbers masked.
+func pollMask(out string) string {
+	return pollDigits.ReplaceAllString(pollStrip.ReplaceAllString(out, ""), "#")
+}
+
 // jobsRepeat reports whether sig is the question asked last and out is the
 // answer it got. Numbers are masked: "RUNNING for 12s" and "for 14s" are the
-// same answer.
+// same answer, and the processes: line is a fresh sample, not part of the
+// answer.
 func (h *Harness) jobsRepeat(sig, out string) bool {
 	h.jobsPollMu.Lock()
 	defer h.jobsPollMu.Unlock()
-	return h.jobsPollSig == sig && pollDigits.ReplaceAllString(out, "#") == h.jobsPollOut
+	return h.jobsPollSig == sig && pollMask(out) == h.jobsPollOut
 }
 
 // jobsNote records a plain read.
 func (h *Harness) jobsNote(sig, out string) {
 	h.jobsPollMu.Lock()
 	defer h.jobsPollMu.Unlock()
-	h.jobsPollSig, h.jobsPollOut = sig, pollDigits.ReplaceAllString(out, "#")
+	h.jobsPollSig, h.jobsPollOut = sig, pollMask(out)
 }
 
 // reported is the argument map the UI shows: what was sent, no zeros.
