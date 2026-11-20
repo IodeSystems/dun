@@ -204,7 +204,7 @@ func TestSideRunner_EffortClampedToTheTier(t *testing.T) {
 		SideCallTiers: map[string]string{"journal": TierFast},
 		ClientFor:     func(string, string) (ChildClient, error) { return ChildClient{Runner: tierR}, nil },
 	}}
-	r := h.sideRunner("journal", &scriptRunner{}).(tierRetry)
+	r := h.sideRunnerRaw("journal", &scriptRunner{}).(tierRetry)
 	r.effort = EffortLowest // as fold's role has it
 	opts := h.foldOpts()
 	if opts.Effort != llm.EffortNone {

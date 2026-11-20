@@ -159,7 +159,7 @@ func TestSideRunner(t *testing.T) {
 		"rules":   "session",     // think's client fails
 		"suggest": "session",     // no entry
 	} {
-		if got := name(h.sideRunner(kind, fallback)); got != want {
+		if got := name(h.sideRunnerRaw(kind, fallback)); got != want {
 			t.Errorf("%s: on %s, want %s", kind, got, want)
 		}
 	}
@@ -237,7 +237,7 @@ func TestSideRunner_RetriesOnTheSession(t *testing.T) {
 	}
 	// A tier whose provider is not logged in is the session's at once.
 	h.cfg.Tiers = []Tier{{Name: TierFast, Provider: "gone", Model: "small", Off: "no saved provider gone"}}
-	if got := h.sideRunner("journal", session); got != agent.LLMRunner(session) {
+	if got := h.sideRunnerRaw("journal", session); got != agent.LLMRunner(session) {
 		t.Errorf("an off tier got %T", got)
 	}
 }

@@ -460,6 +460,8 @@ type Harness struct {
 	// sideCalls accumulates the per-kind stats for the non-turn LLM calls
 	// (suggest, rephrase, commit, rescue) — see sidecall.go.
 	sideCalls *sideCallStats
+	// sideWarned holds the side-call failures already logged (sideguard.go).
+	sideWarned sync.Map
 	// personMsgs counts the person's messages (SayAs, AskAs): a job whose
 	// progress reports hit their hourly cap wakes the agent again after the
 	// next one (bgjob.go, sendReport).

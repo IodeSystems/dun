@@ -68,6 +68,11 @@ func isTierName(s string) bool {
 // be built is fallback: a side call is best-effort and never fails over its
 // tier.
 func (h *Harness) sideRunner(kind string, fallback agent.LLMRunner) agent.LLMRunner {
+	return sideGuard{inner: h.sideRunnerRaw(kind, fallback), kind: kind, h: h}
+}
+
+// sideRunnerRaw is sideRunner without the guard (sideguard.go).
+func (h *Harness) sideRunnerRaw(kind string, fallback agent.LLMRunner) agent.LLMRunner {
 	if h.cfg.ClientFor == nil {
 		return fallback
 	}

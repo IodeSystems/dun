@@ -270,6 +270,7 @@ func (h *Harness) learnVerified(ctx context.Context) {
 	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), learnTimeout*learnCap)
 	h.learn.wg.Add(1)
 	go func() {
+		defer RecoverSide("learn")
 		defer h.learn.wg.Done()
 		defer cancel()
 		for _, out := range h.learnFlush(fctx) {

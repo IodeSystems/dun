@@ -582,7 +582,7 @@ func (r foldRunner) ChatStream(ctx context.Context, msgs []llm.Message, tools []
 	// The Shaper sends a long fold in stages and the runner cannot tell the
 	// last from the others (the call carries no marker), so every stage is
 	// held to the full check; a stage that fails costs one more call.
-	if first := foldSummaryProblems(text, ask); len(first) > 0 {
+	if first := foldSummaryProblems(text, ask); len(first) > 0 && len(msgs) > 0 {
 		log.Printf("dun: fold summary rejected (%s); asking once more", strings.Join(first, "; "))
 		retry := append([]llm.Message(nil), msgs...)
 		last := &retry[len(retry)-1]

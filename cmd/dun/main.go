@@ -1154,6 +1154,7 @@ func main() {
 	}
 	if *prog && dunconfig.ProviderMissing(*url, *model) == nil {
 		go func() {
+			defer harness.RecoverSide("learn_thinking")
 			if h.LearnServerThinking(ctx) {
 				em.emit(settingsEvent())
 				em.emit(commandsEvent(h))
