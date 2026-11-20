@@ -499,7 +499,7 @@ func newTUIModel(proc *dunProc, workspace string) tuiModel {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGUSR1)
 	keys, keysErr := loadKeyMap()
-	return tuiModel{proc: proc, workspace: workspace, vpc: &viewportCache{}, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, scrollPinned: true, userJump: -1, suggestMode: "auto", mouseMode: "all", shown: &shownFrame{}, evlog: newEventRing(), keys: keys, keysErr: keysErr}
+	return tuiModel{proc: proc, workspace: workspace, vpc: &viewportCache{}, input: in, search: se, spin: sp, dumpSig: sig, starting: true, sel: -1, scrollPinned: true, userJump: -1, suggestMode: "off", mouseMode: "all", shown: &shownFrame{}, evlog: newEventRing(), keys: keys, keysErr: keysErr}
 }
 func (m tuiModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{m.spin.Tick, m.input.BlinkTick(), waitForDump(m.dumpSig)}

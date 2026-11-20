@@ -104,8 +104,10 @@ dun's decisions:
   about 0.3% of user messages. "I'll remember" appears 0 times in 18k assistant
   texts. So after each turn the new entries are scanned once; either signal
   with no memory call in the turn runs the fork in the background on a detached
-  context (2 min bound). Children do not trigger. `DUN_MEMORY_TRIGGERS=0`
-  turns it off. Corrections without the word ("don't push unless asked") are
+  context (2 min bound). Children do not trigger. Off by default: model calls
+  start only from allowed triggers (user message, dun message, MCP out-of-band).
+  `DUN_MEMORY_TRIGGERS=1` turns it on. Corrections without the word
+  ("don't push unless asked") are
   left to the model's own call.
 - Side calls must read to the end of the stream: they stopped at Done, before
   the `include_usage` chunk, so their stats were 0.

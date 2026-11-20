@@ -572,6 +572,7 @@ func TestTUI_Suggestions(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
+	m.suggestMode = "auto"
 	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
 	m = m.feed(evMsg{"type": "user", "content": "hi"})
 	m = m.feed(evMsg{"type": "suggestions", "items": []any{
@@ -611,6 +612,7 @@ func TestTUI_NoSuggestionsBeforeTheFirstMessage(t *testing.T) {
 	}
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 	m = resized(m, 80, 24)
+	m.suggestMode = "auto"
 	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
 	m = m.feed(sugs)
 	if len(m.suggestions) != 0 || shown(m) {
@@ -647,6 +649,7 @@ func TestTUI_SuggestionsAreDimmed(t *testing.T) {
 		mdStyle = style
 		m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
 		m = resized(m, 80, 24)
+		m.suggestMode = "auto"
 		m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
 		m = m.feed(evMsg{"type": "user", "content": "hi"})
 		m = m.feed(evMsg{"type": "suggestions", "items": []any{
@@ -687,6 +690,7 @@ func TestTUI_ArrowNav(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: &echoWC{}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = nm.(tuiModel)
+	m.suggestMode = "auto"
 	m = m.feed(evMsg{"type": "ready", "tools": []any{"eval"}})
 	m.appendUser("hi")  // suggestions need something asked
 	m.append("a reply") // a plain convo message to land on
@@ -2126,6 +2130,7 @@ func TestVtui_ArrowsScrollConvoFromComposer(t *testing.T) {
 // caret follows. Reading the options is exactly when you want to scroll back.
 func TestVtui_ArrowsCyclePickerThenScroll(t *testing.T) {
 	v := newVtui(80, 15)
+	v.m.suggestMode = "auto"
 	v.event(map[string]any{"type": "ready", "tools": []any{"eval"}})
 	for i := 0; i < 8; i++ {
 		v.send(fmt.Sprintf("msg %d", i))
@@ -2737,6 +2742,7 @@ func suggestReq(t *testing.T, setup func(*tuiModel)) (tuiModel, string) {
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = nm.(tuiModel)
 	m.starting = false                                              // a live session: servers are up
+	m.suggestMode = "auto"                                          // opt in: the default is off
 	m.convo = []convoEntry{{userText: "q"}, {collapsed: "a reply"}} // something to predict from
 	// The turn ends: the idle clock starts here.
 	m = m.feed(evMsg{"type": "done"})
@@ -2792,6 +2798,7 @@ func TestSuggest_KeystrokeRestartsTheWait(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = nm.(tuiModel)
+	m.suggestMode = "auto"
 	m.convo = []convoEntry{{userText: "q"}, {collapsed: "a reply"}}
 	m = m.feed(evMsg{"type": "done"})
 
@@ -2818,6 +2825,7 @@ func TestSuggest_KeystrokeRestartsTheWait(t *testing.T) {
 // UI ignores must stay ignored.
 func TestSuggest_NoTimerWhenItCouldNeverFire(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: discardWC{}}, "/ws")
+	m.suggestMode = "auto" // test the empty-convo gate, not the off gate
 	if _, cmd := m.Update(runesKey([]rune{'x'})); cmd != nil {
 		t.Error("an empty conversation has nothing to suggest from — no timer")
 	}
@@ -2825,6 +2833,24 @@ func TestSuggest_NoTimerWhenItCouldNeverFire(t *testing.T) {
 	m.suggestMode = "off"
 	if _, cmd := m.Update(runesKey([]rune{'x'})); cmd != nil {
 		t.Error("suggestions off — no timer")
+	}
+}
+
+// F13: an idle TUI session with default settings (no /suggest on) starts no
+// model call on its own. A turn finishes, the idle debounce elapses, and the
+// engine receives nothing.
+func TestSuggest_DefaultIsOff_NoIdleModelCall(t *testing.T) {
+	var buf bytes.Buffer
+	m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = nm.(tuiModel)
+	m.starting = false
+	m.convo = []convoEntry{{userText: "q"}, {collapsed: "a reply"}}
+	m = m.feed(evMsg{"type": "done"})
+	m.lastKeyAt = time.Now().Add(-2 * idleSuggestDelay)
+	_, _ = m.update(idleSuggestMsg{})
+	if strings.Contains(buf.String(), "suggest") {
+		t.Errorf("an idle session with the default (off) must not ask the engine for suggestions: %q", buf.String())
 	}
 }
 
@@ -4425,6 +4451,7 @@ func TestSuggest_NotOnAResumedSessionBeforeATurn(t *testing.T) {
 	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = nm.(tuiModel)
 	m.starting = false
+	m.suggestMode = "auto"
 	m.convo = []convoEntry{{userText: "q"}, {collapsed: "a reply"}} // resumed
 	m = key(m, kUp)
 	m.lastKeyAt = time.Now().Add(-2 * idleSuggestDelay)

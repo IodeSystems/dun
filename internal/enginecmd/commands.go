@@ -250,7 +250,7 @@ var RephraseOn bool
 // SuggestMode is when a client shows suggestions: on (always), off, auto
 // (idle with an empty input). One value per session, shared by every client;
 // /suggest on|off|auto sets it.
-var SuggestMode = "auto"
+var SuggestMode = "off"
 
 // EffortLevel is /effort's level, for the command list's state (dun/effort.go).
 var EffortLevel = harness.LoadEffort()

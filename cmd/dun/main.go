@@ -754,9 +754,10 @@ func main() {
 		FoldUserIntoToolResult: foldUserIntoToolResult(fc, *url),
 		SessionFile:            sessionFile,
 		Persist:                *persistFlag,
-		// DUN_MEMORY_TRIGGERS=0: no memory fork unless asked (/remember, the
-		// memory tool). See memtrigger.go.
-		DisableMemoryTriggers: os.Getenv("DUN_MEMORY_TRIGGERS") == "0",
+		// DUN_MEMORY_TRIGGERS=1: memory fork on its own when a turn's words
+		// call for it. Off by default: model calls start only from allowed
+		// triggers (user message, dun message, MCP out-of-band).
+		DisableMemoryTriggers: os.Getenv("DUN_MEMORY_TRIGGERS") != "1",
 		// The workspace's own checkout, not the worktree: /rag auto is a fact
 		// about this machine and this project, and must outlive the throwaway
 		// worktree this session works in.
