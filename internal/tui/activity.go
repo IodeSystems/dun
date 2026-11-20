@@ -800,6 +800,13 @@ func (m *tuiModel) actKeys(key string) (tea.Cmd, bool) {
 			m.actKill()
 		}
 		return nil, true
+	case "c":
+		// Drop every finished job from the list (the engine does it, for
+		// every client). Running jobs and agents stay.
+		if m.actLevel == actList && m.scopeAgent == 0 {
+			m.killJobsCmd("jobs clear")
+		}
+		return nil, true
 	case "right", "enter":
 		if m.actLevel == actCollapsed {
 			m.openActList()
