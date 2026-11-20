@@ -79,6 +79,7 @@ type fakeEngine struct {
 	once    sync.Once
 	sp      *fakeSpawner
 	resumed bool // started with --resume: it replays a history, as dun does
+	echoID  string // set by the toolpair/deliveredmsg cases
 }
 
 func (e *fakeEngine) emit(enc *json.Encoder, p any) {
@@ -130,10 +131,33 @@ func (e *fakeEngine) run(id string) {
 				slow = true
 				continue
 			case "slowtool": // slow, with a tool call in flight
-				e.emit(enc, &proto.UserEcho{Content: p.Content})
+				e.emit(enc, &proto.UserEcho{ID: "u-" + id, Content: p.Content})
 				e.emit(enc, &proto.Turn{Kind: "user"})
 				e.emit(enc, &proto.ToolCall{CallID: "c1", Tool: "exec", Args: map[string]any{"cmd": "make deploy"}})
 				slow = true
+				continue
+			case "toolpair": // one user message, one tool call and its result, one reply
+				e.emit(enc, &proto.UserEcho{ID: "u-" + id, Content: p.Content})
+				e.emit(enc, &proto.Turn{Kind: "user"})
+				e.emit(enc, &proto.ToolCall{CallID: "ct", Tool: "exec", Args: map[string]any{"cmd": "go test ./..."}})
+				e.emit(enc, &proto.ToolResult{CallID: "ct", Tool: "exec", Result: "ok", ElapsedMS: 42})
+				e.emit(enc, &proto.Message{Role: "assistant", Content: "done: " + p.Content, ID: "m-" + id})
+				e.emit(enc, &proto.Done{})
+				continue
+			case "deliveredmsg": // a turn running, a message queued, then lifted into a tool result
+				e.echoID = "u-" + id
+				e.emit(enc, &proto.UserEcho{ID: e.echoID, Content: p.Content, Queued: true})
+				e.emit(enc, &proto.Turn{Kind: "user"})
+				slow = true
+				continue
+			case "lift": // the turn reads the queued message: its tool result carries it
+				if slow {
+					e.emit(enc, &proto.ToolCall{CallID: "cl", Tool: "exec", Args: map[string]any{"cmd": "make"}})
+					e.emit(enc, &proto.ToolResult{CallID: "cl", Tool: "exec", Result: "ok", ElapsedMS: 1})
+					e.emit(enc, &proto.Delivered{IDs: []string{e.echoID}, CallID: "cl"})
+					slow = false
+					e.emit(enc, &proto.Done{})
+				}
 				continue
 			case "agent": // a sub-agent, running until "endagent"
 				e.emit(enc, &proto.Agents{Agents: []proto.AgentInfo{{ID: 2, State: "running", Prompt: "fix the build"}}})

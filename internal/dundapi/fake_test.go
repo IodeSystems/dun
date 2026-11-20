@@ -56,6 +56,8 @@ type fakeEngine struct {
 	stdoutW *io.PipeWriter
 	done    chan struct{}
 	once    sync.Once
+	slow    bool
+	echoID  string // set by the toolpair/deliveredmsg cases
 }
 
 func (e *fakeEngine) emit(enc *json.Encoder, p any) {
@@ -84,9 +86,34 @@ func (e *fakeEngine) run(id string) {
 				e.emit(enc, &proto.Jobs{Jobs: []proto.JobInfo{{ID: 1, Command: "make", Log: log, State: "exited"}}})
 				continue
 			}
-			e.emit(enc, &proto.UserEcho{Content: p.Content})
+			switch p.Content {
+			case "toolpair": // one user message, one tool call and its result, one reply
+				e.emit(enc, &proto.UserEcho{ID: "u1", Content: p.Content})
+				e.emit(enc, &proto.Turn{Kind: "user"})
+				e.emit(enc, &proto.ToolCall{CallID: "ct", Tool: "exec", Args: map[string]any{"cmd": "go test ./..."}})
+				e.emit(enc, &proto.ToolResult{CallID: "ct", Tool: "exec", Result: "ok", ElapsedMS: 42})
+				e.emit(enc, &proto.Message{Role: "assistant", Content: "done: " + p.Content, ID: "m1"})
+				e.emit(enc, &proto.Done{})
+				continue
+			case "deliveredmsg": // a turn running, a message queued, then lifted into a tool result
+				e.echoID = "uq1"
+				e.emit(enc, &proto.UserEcho{ID: e.echoID, Content: p.Content, Queued: true})
+				e.emit(enc, &proto.Turn{Kind: "user"})
+				e.slow = true
+				continue
+			case "lift": // the turn reads the queued message: its tool result carries it
+				if e.slow {
+					e.emit(enc, &proto.ToolCall{CallID: "cl", Tool: "exec", Args: map[string]any{"cmd": "make"}})
+					e.emit(enc, &proto.ToolResult{CallID: "cl", Tool: "exec", Result: "ok", ElapsedMS: 1})
+					e.emit(enc, &proto.Delivered{IDs: []string{e.echoID}, CallID: "cl"})
+					e.slow = false
+					e.emit(enc, &proto.Done{})
+				}
+				continue
+			}
+			e.emit(enc, &proto.UserEcho{ID: "u1", Content: p.Content})
 			e.emit(enc, &proto.Turn{Kind: "user"})
-			e.emit(enc, &proto.Message{Role: "assistant", Content: "re: " + p.Content})
+			e.emit(enc, &proto.Message{Role: "assistant", Content: "re: " + p.Content, ID: "m1"})
 			e.emit(enc, &proto.Done{})
 		case *proto.AgentCmd:
 			if p.Action == "view" {
