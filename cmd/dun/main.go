@@ -674,7 +674,7 @@ func main() {
 	var in *inputStream
 	client := llm.NewClient(*url, effKey, *model)
 	tuneClient(fc, client, *url) // its /effort dialect and retries; the env wins, below
-	harness.SessionTag(client, sessionID)
+	tagSession(fc, client, *url, sessionID)
 	capsClient = client // /model and /model probe (capscmd.go)
 	// Logged out, or no model chosen: a stand-in that refuses every call with
 	// what to do, so the engine still starts (a client can /login through it)
@@ -697,7 +697,7 @@ func main() {
 	}
 	client.OnUsage = usageFor(*url, effKey, *model, spendmeter.RoleMain)
 	var runner agent.LLMRunner = client
-	childClients := clientCache(fc, *url, effKey, func(c *llm.Client, u string) { tuneClient(fc, c, u); harness.SessionTag(c, sessionID) },
+	childClients := clientCache(fc, *url, effKey, func(c *llm.Client, u string) { tuneClient(fc, c, u); tagSession(fc, c, u, sessionID) },
 		func(u, k, model string) func(llm.Usage) { return usageFor(u, k, model, spendmeter.RoleModel) })
 	if why := dunconfig.ProviderMissing(*url, *model); why != nil {
 		runner = noProvider{why}

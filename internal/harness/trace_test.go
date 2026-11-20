@@ -178,3 +178,52 @@ func TestTrace_UnclaimedRoundWritten(t *testing.T) {
 		t.Error("parked with no stream open")
 	}
 }
+
+// The "user" field goes only to endpoints known to take it (OpenRouter by
+// host or dialect, api.openai.com); X-Session-Id and X-Trace-Id go to every
+// endpoint.
+func TestSessionTag_UserFieldOnlyWhereAccepted(t *testing.T) {
+	for _, tc := range []struct {
+		url, dialect string
+		user         bool
+	}{
+		{"https://openrouter.ai/api/v1", "", true},
+		{"https://api.openai.com/v1", "", true},
+		{"https://litellm.example/v1", llm.DialectOpenRouter, true},
+		{"http://127.0.0.1:8080/v1", "", false},
+		{"https://llm.example/v1", llm.DialectLlamaCpp, false},
+	} {
+		var mu sync.Mutex
+		var body map[string]any
+		var hdr http.Header
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			hdr = r.Header.Clone()
+			mu.Unlock()
+			w.Header().Set("Content-Type", "text/event-stream")
+			io.WriteString(w, okReply)
+		}))
+		// The client talks to the test server; the url SessionTag is told is
+		// the endpoint being judged.
+		c := llm.NewClient(srv.URL+"/v1", "", "m")
+		SessionTag(c, "20261120-150405", tc.url, tc.dialect)
+		tr := newTracer("20261120-150405")
+		ch, err := tracedRunner{inner: c, t: tr, role: "suggest"}.ChatStream(context.Background(), []llm.Message{{Role: "user", Content: "x"}}, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for range ch {
+		}
+		srv.Close()
+		mu.Lock()
+		user, sent := body["user"]
+		if sent != tc.user || (sent && user != "dun-20261120-150405") {
+			t.Errorf("%s %q: user %v (sent %v), want sent %v", tc.url, tc.dialect, user, sent, tc.user)
+		}
+		if hdr.Get("X-Session-Id") != "dun-20261120-150405" || !strings.HasPrefix(hdr.Get("X-Trace-Id"), "dun-20261120-150405-") {
+			t.Errorf("%s: X-Session-Id %q X-Trace-Id %q", tc.url, hdr.Get("X-Session-Id"), hdr.Get("X-Trace-Id"))
+		}
+		mu.Unlock()
+	}
+}

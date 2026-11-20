@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	neturl "net/url"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -369,18 +370,38 @@ func ParseTraceID(id string) (TraceID, bool) {
 	return TraceID{Session: m[1], Run: m[2], Role: m[3], Seq: m[4]}, true
 }
 
-// SessionTag marks every request c sends as session's: the OpenAI "user"
-// field and an X-Session-Id header, both "dun-<session>". OpenRouter keeps
-// them on the generation as external_user and session_id; a gateway log
-// shows the header. The per-request id is the trace id (X-Trace-Id).
-func SessionTag(c *llm.Client, session string) {
+// SessionTag marks every request c sends as session's: an X-Session-Id
+// header "dun-<session>" on every endpoint, and the OpenAI "user" field with
+// the same value only where the endpoint at url is known to accept it
+// (AcceptsUserField): a strict server may refuse a body field it does not
+// know, while an unknown header is ignored. OpenRouter keeps them on the
+// generation as session_id and external_user. The per-request id is the
+// trace id (X-Trace-Id).
+func SessionTag(c *llm.Client, session, url, dialect string) {
 	if c == nil || session == "" {
 		return
 	}
 	tag := "dun-" + session
-	c.User = tag
+	if AcceptsUserField(url, dialect) {
+		c.User = tag
+	}
 	if c.Header == nil {
 		c.Header = http.Header{}
 	}
 	c.Header.Set("X-Session-Id", tag)
+}
+
+// AcceptsUserField reports whether the endpoint at url, with its configured
+// reasoning dialect ("" unknown), takes the "user" body field: OpenRouter
+// (its host or its dialect) and api.openai.com.
+func AcceptsUserField(url, dialect string) bool {
+	if dialect == llm.DialectOpenRouter {
+		return true
+	}
+	u, err := neturl.Parse(url)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return host == "openrouter.ai" || strings.HasSuffix(host, ".openrouter.ai") || host == "api.openai.com"
 }

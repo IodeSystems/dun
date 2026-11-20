@@ -178,6 +178,14 @@ func tuneClient(fc dunconfig.DunConfig, c *llm.Client, url string) {
 	c.ClaudePrices = dunconfig.LoadPrices()
 }
 
+// tagSession names session on every request c sends to url
+// (harness.SessionTag); the "user" field only where url's host or its
+// configured dialect is known to take it.
+func tagSession(fc dunconfig.DunConfig, c *llm.Client, url, session string) {
+	d, _ := reasoningDialect(fc, url)
+	harness.SessionTag(c, session, url, d)
+}
+
 // dropKeyEnv takes dun's LLM keys out of this process's environment, so that
 // nothing it starts inherits them: exec, MCP servers, anything the model can make
 // print `env`. Run in the engine once its clients hold the keys. A variable whose

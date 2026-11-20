@@ -222,9 +222,11 @@ was "word word word…", and nothing said it was raglit's context probe.
   `dund-<facet>-probe:caps-<seq>`, its search embedder `dund-search-embed-<n>`.
   No name, path or prompt text: the id goes to external providers.
 - **Transport.** `ChatOpts.TraceID`, which agentkit v0.39.0 sends as the
-  `X-Trace-Id` header. The engine's clients also send the session as the
-  OpenAI `user` field and an `X-Session-Id` header (`dun-<session>`);
-  OpenRouter files these on the generation as `external_user` and
+  `X-Trace-Id` header. The engine's clients also send the session as an
+  `X-Session-Id` header (`dun-<session>`) everywhere, and as the OpenAI
+  `user` field only to OpenRouter (its host or the openrouter dialect) and
+  api.openai.com: a strict server may refuse a body field it does not know,
+  and ignores a header. OpenRouter files these on the generation as `external_user` and
   `session_id` (its generation API lists both; the activity page is not
   verified). OpenRouter does not read `X-Trace-Id`.
 - **Where it is logged.** One engine log line per request:
