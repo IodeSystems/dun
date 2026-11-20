@@ -178,6 +178,8 @@ func newRouter(svc *dund.Service, o Options, auth bool) (http.Handler, error) {
 		r.Get(signinPath, s.signinPage)
 		r.Post(signinPath, s.signin)
 		r.Post(signoutPath, s.signout)
+		r.Get(pairPath, s.pairPage)
+		r.Post(pairPath, s.pair)
 		r.Get("/tui", slash("/tui/"))
 		r.Handle("/tui/*", http.HandlerFunc(s.tui))
 		r.Get("/web", slash("/web/"))
