@@ -55,6 +55,13 @@ type ContextConfig struct {
 	// RecapNudge is the conversation size, in tokens, at which dun reminds
 	// the model it can recap (default 20,000).
 	RecapNudge int `json:"recap_nudge,omitempty"`
+	// Ceiling is the per-model quality ceiling Q, in tokens: the prompt is
+	// shaped to min(window - the response's reserve, Q). 0 = not set, which
+	// leaves the shape target at window - reserve. Big-window models
+	// otherwise run unshaped, because the bounding rungs only trigger near
+	// the window, and a prompt that long is past where the model's quality
+	// was tuned.
+	Ceiling int `json:"ceiling,omitempty"`
 }
 
 func contextFile() string { return filepath.Join(DunHome(), "context.json") }
@@ -99,14 +106,15 @@ func savedWindow(e Endpoint) int { return savedContext(e).Max }
 // The settings in force in this process (one session's harness per engine;
 // its children share them), read where each one decides.
 var ctxOverride struct {
-	compactBuffer, toolLOD, recapNudge atomic.Int64
+	compactBuffer, toolLOD, recapNudge, ceiling atomic.Int64
 }
 
-// applyContextConfig puts c's buffer, stub length and nudge in force.
+// applyContextConfig puts c's buffer, stub length, nudge and ceiling in force.
 func applyContextConfig(c ContextConfig) {
 	ctxOverride.compactBuffer.Store(int64(c.CompactBuffer))
 	ctxOverride.toolLOD.Store(int64(c.ToolLOD))
 	ctxOverride.recapNudge.Store(int64(c.RecapNudge))
+	ctxOverride.ceiling.Store(int64(c.Ceiling))
 }
 
 // defaultToolLOD is the stub length when none is set.
@@ -118,6 +126,14 @@ func lodChars() int {
 		return int(n)
 	}
 	return defaultToolLOD
+}
+
+// ceilingTokens is the per-model quality ceiling Q in force, 0 = not set.
+func ceilingTokens() int {
+	if n := ctxOverride.ceiling.Load(); n > 0 {
+		return int(n)
+	}
+	return 0
 }
 
 // recapNudgeAt is the recap reminder's size in force.
@@ -306,7 +322,7 @@ func ParseTokens(s string) (int, error) {
 }
 
 // ContextKeys are /context config's settings, as its flags name them.
-var ContextKeys = []string{"max", "compact-buffer", "tool-lod", "recap-nudge"}
+var ContextKeys = []string{"max", "compact-buffer", "tool-lod", "recap-nudge", "ceiling"}
 
 // ConfigureContext sets some of /context config's settings for this model
 // and saves them: changes maps a ContextKeys name to its value, 0 for the
@@ -334,6 +350,8 @@ func (h *Harness) ConfigureContext(ctx context.Context, changes map[string]int) 
 			c.ToolLOD = v
 		case "recap-nudge":
 			c.RecapNudge = v
+		case "ceiling":
+			c.Ceiling = v
 		default:
 			return "", fmt.Errorf("unknown setting --%s (%s)", k, strings.Join(ContextKeys, ", "))
 		}
@@ -361,14 +379,18 @@ func (h *Harness) ContextStatus() string {
 	if n > 0 {
 		max = numfmt.Grouped(n) + " tokens, from " + src
 	}
-	return fmt.Sprintf("context: max %s · compact-buffer %s · tool-lod %s chars · recap-nudge %s",
-		max, numfmt.Grouped(maxOutputTokens()), numfmt.Grouped(lodChars()), numfmt.Grouped(recapNudgeAt()))
+	ceiling := numfmt.Grouped(ceilingTokens())
+	if ceilingTokens() == 0 {
+		ceiling = "unset (window minus the response's reserve)"
+	}
+	return fmt.Sprintf("context: max %s · compact-buffer %s · tool-lod %s chars · recap-nudge %s · ceiling %s",
+		max, numfmt.Grouped(maxOutputTokens()), numfmt.Grouped(lodChars()), numfmt.Grouped(recapNudgeAt()), ceiling)
 }
 
 // ContextSettings is the settings in force, for a client.
-func (h *Harness) ContextSettings() (max int, maxFrom string, compactBuffer, toolLOD, recapNudge int) {
+func (h *Harness) ContextSettings() (max int, maxFrom string, compactBuffer, toolLOD, recapNudge, ceiling int) {
 	n, src := h.WindowStatus()
-	return n, src, maxOutputTokens(), lodChars(), recapNudgeAt()
+	return n, src, maxOutputTokens(), lodChars(), recapNudgeAt(), ceilingTokens()
 }
 
 // NewTestHarness is a harness with only an endpoint, for a client's tests of

@@ -319,8 +319,8 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 			return
 		}
 		// /context config [--max N] [--compact-buffer N] [--tool-lod N]
-		// [--recap-nudge N]: saved for this model (dun/window.go); bare, the
-		// settings in force.
+		// [--recap-nudge N] [--ceiling N]: saved for this model (dun/window.go);
+		// bare, the settings in force.
 		if id == "ctxconfig" {
 			go func() {
 				msg, _, err := contextConfigCmd(ctx, h, action)
@@ -832,8 +832,8 @@ func settingsEvent() *proto.Settings {
 	}
 	ev.Tiers, ev.DefaultTier = tiersProto(engineTiers, roles), engineTiers.Default
 	if h != nil {
-		max, from, buf, lod, nudge := h.ContextSettings()
-		ev.Context = &proto.ContextSettings{Max: max, MaxFrom: from, CompactBuffer: buf, ToolLOD: lod, RecapNudge: nudge}
+		max, from, buf, lod, nudge, ceil := h.ContextSettings()
+		ev.Context = &proto.ContextSettings{Max: max, MaxFrom: from, CompactBuffer: buf, ToolLOD: lod, RecapNudge: nudge, Ceiling: ceil}
 	}
 	return ev
 }

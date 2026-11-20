@@ -951,13 +951,14 @@ type TierInfo struct {
 
 // ContextSettings is /context config's settings in force: the window (0
 // unknown) and where it came from, the reply's buffer, the tool-result stub
-// length and the recap reminder's size.
+// length, the recap reminder's size and the quality ceiling (0 = not set).
 type ContextSettings struct {
 	Max           int    `json:"max"`
 	MaxFrom       string `json:"maxFrom,omitempty"`
 	CompactBuffer int    `json:"compactBuffer"`
 	ToolLOD       int    `json:"toolLod"`
 	RecapNudge    int    `json:"recapNudge"`
+	Ceiling       int    `json:"ceiling"`
 }
 
 // Commands is the slash commands a session takes, as data, for every client:

@@ -59,6 +59,7 @@ type ContextInfo struct {
 	CompactBuffer int    `json:"compact_buffer"`
 	ToolLOD       int    `json:"tool_lod"`
 	RecapNudge    int    `json:"recap_nudge"`
+	Ceiling       int    `json:"ceiling"`
 }
 
 // SessionID is this session's id: its log's name; "" in memory.
@@ -81,10 +82,10 @@ func (h *Harness) HarnessInfo() HarnessInfo {
 	if v == "" {
 		v = "dev"
 	}
-	max, from, buf, lod, nudge := h.ContextSettings()
+	max, from, buf, lod, nudge, ceil := h.ContextSettings()
 	in := HarnessInfo{Name: "dun", Icon: Icon, Version: v, Harness: "dun", Workspace: h.cfg.Workspace,
 		Model: h.cfg.Endpoint.Model, Provider: h.cfg.Provider, Effort: h.Effort(),
-		Context: &ContextInfo{Max: max, MaxFrom: from, CompactBuffer: buf, ToolLOD: lod, RecapNudge: nudge},
+		Context: &ContextInfo{Max: max, MaxFrom: from, CompactBuffer: buf, ToolLOD: lod, RecapNudge: nudge, Ceiling: ceil},
 		Updated: time.Now().UTC().Format(time.RFC3339)}
 	if h.cfg.SessionFile != "" {
 		in.SessionID = h.SessionID()

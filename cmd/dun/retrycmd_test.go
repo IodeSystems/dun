@@ -94,7 +94,7 @@ func TestContextConfigCmd(t *testing.T) {
 	t.Setenv("DUN_MAX_OUTPUT_TOKENS", "")
 	h := harness.NewTestHarness(harness.Endpoint{URL: "https://litellm.corp/v1", Model: "deepseek-1017"})
 	t.Cleanup(func() {
-		_, _, _ = contextConfigCmd(context.Background(), h, "--compact-buffer default --tool-lod default --recap-nudge default")
+		_, _, _ = contextConfigCmd(context.Background(), h, "--compact-buffer default --tool-lod default --recap-nudge default --ceiling default")
 	})
 	msg, changed, err := contextConfigCmd(context.Background(), h, "--max 256k --compact-buffer=24k --tool-lod 8k --recap-nudge 30k")
 	if err != nil || !changed {

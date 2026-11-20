@@ -520,6 +520,7 @@ func contextChoices(m *tuiModel, arg string) *argList {
 		{value: "--compact-buffer", label: "--compact-buffer", desc: "room kept for the reply; compaction starts past it · now " + num("compactBuffer")},
 		{value: "--tool-lod", label: "--tool-lod", desc: "an older tool result over this many characters is stubbed · now " + num("toolLod")},
 		{value: "--recap-nudge", label: "--recap-nudge", desc: "conversation tokens before the recap reminder · now " + num("recapNudge")},
+		{value: "--ceiling", label: "--ceiling", desc: "the prompt's quality ceiling; shaping targets min(window − reserve, ceiling) · now " + num("ceiling")},
 	}
 	done := f[1:]
 	if prefix != "" {

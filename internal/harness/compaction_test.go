@@ -92,6 +92,60 @@ func TestGenerationBudget_RefusesBelowTheFloor(t *testing.T) {
 	}
 }
 
+// A per-model quality ceiling bounds the shape target: the prompt is shaped
+// to min(window - the response's reserve, Q), so a big-window model is shaped
+// against Q rather than running unshaped until it is near the window. Elision
+// before fold is the Shaper's own ladder order (LOD/Rehead run before the
+// fold), so the ceiling is the budget number, not a reordering.
+func TestContextBudget_CeilingBoundsTheTarget(t *testing.T) {
+	t.Setenv("DUN_CONTEXT_TOKENS", "")
+	applyContextConfig(ContextConfig{Ceiling: 96000})
+	t.Cleanup(func() { applyContextConfig(ContextConfig{}) })
+	const window = 1_000_000
+	if got, want := shapingBudget(window), 96000; got != want {
+		t.Errorf("a 1M window with a 96k ceiling should shape to the ceiling: got %d, want %d", got, want)
+	}
+	// The ceiling only LOWERS the target: a window whose reserve already
+	// leaves less is shaped as before.
+	if got, want := shapingBudget(100000), 100000-outputReserve(); got != want {
+		t.Errorf("a small window keeps window minus reserve: got %d, want %d", got, want)
+	}
+	// The target is the MINIMUM, so the ceiling can never exceed the window's
+	// share.
+	applyContextConfig(ContextConfig{Ceiling: 200_000})
+	if got, want := shapingBudget(188160), 188160-outputReserve(); got != want {
+		t.Errorf("a ceiling above the window's share must not raise it: got %d, want %d", got, want)
+	}
+	_ = os.Unsetenv("DUN_CONTEXT_TOKENS")
+}
+
+// The ceiling set through /context config is the one shapingBudget reads:
+// configure, shape, and the budget moved to it.
+func TestContextBudget_CeilingFromConfig(t *testing.T) {
+	h := NewTestHarness(Endpoint{URL: "https://litellm.corp/v1", Model: "ceiling-test"})
+	t.Setenv("DUN_HOME", t.TempDir())
+	if _, err := h.ConfigureContext(context.Background(), map[string]int{"ceiling": 64 * 1000}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { applyContextConfig(ContextConfig{}) })
+	if got, want := ceilingTokens(), 64*1000; got != want {
+		t.Fatalf("the ceiling in force: got %d, want %d", got, want)
+	}
+	if got, want := shapingBudget(1_000_000), 64*1000; got != want {
+		t.Errorf("shaping against the configured ceiling: got %d, want %d", got, want)
+	}
+	// Status says what is in force, and "default" clears it.
+	if !strings.Contains(h.ContextStatus(), "ceiling 64,000") {
+		t.Errorf("status lacks the ceiling: %s", h.ContextStatus())
+	}
+	if _, err := h.ConfigureContext(context.Background(), map[string]int{"ceiling": 0}); err != nil {
+		t.Fatal(err)
+	}
+	if ceilingTokens() != 0 {
+		t.Errorf("default did not clear the ceiling")
+	}
+}
+
 // An explicit setting WINS over the server, including when it is smaller. The
 // server states what the model can hold; a person setting this is expressing an
 // intent about what to spend, and the second must not be overridden by the first.

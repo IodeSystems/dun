@@ -222,8 +222,16 @@ func (h *Harness) contextWindow(ctx context.Context, runner any) int {
 	return 0
 }
 
-// shapingBudget turns a window into the prompt's share of it. Pure: it is
-// recomputed on every build (the fitted overhead moves), so it must not log.
+// shapingBudget turns a window into the prompt's share of it: window - the
+// response's reserve, capped by the per-model quality ceiling Q (/context
+// config --ceiling). Pure: it is recomputed on every build (the fitted
+// overhead moves), so it must not log.
+//
+// The ceiling is what shapes BIG-window models: on a 1M window nothing
+// triggers until the prompt is near the window, and by then it is past where
+// the model's quality was tuned. Q bounds the target the Shaper works to —
+// LOD stubs and elision run against it first, and only if they do not get the
+// prompt down to it does the fold run (the Shaper's ladder order).
 func shapingBudget(window int) int {
 	if window <= 0 {
 		return 0
@@ -236,6 +244,9 @@ func shapingBudget(window int) int {
 		// the generation cap still bounds the other half. logWindow says so.
 		budget = window / 2
 	}
+	if q := ceilingTokens(); q > 0 && q < budget {
+		budget = q
+	}
 	return budget
 }
 
@@ -246,6 +257,10 @@ func logWindow(n int, source string) int {
 	log.Printf("dun: context window %d tokens (from %s); reserving %d for the response, "+
 		"shaping the prompt to %d (LOD stubs first, compaction last)",
 		n, source, outputReserve(), shapingBudget(n))
+	if q := ceilingTokens(); q > 0 && q < n-outputReserve() {
+		log.Printf("dun: ceiling in force: the shape target is %d (min of window minus the "+
+			"reserve and the --ceiling)", q)
+	}
 	if n-outputReserve() <= 0 {
 		log.Printf("dun: that window is smaller than one response's reservation (%d) — "+
 			"shaping the prompt to half of it instead; lower DUN_MAX_OUTPUT_TOKENS to give "+
