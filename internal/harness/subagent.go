@@ -77,6 +77,13 @@ type subAgent struct {
 	iso                  isolation // where it works, when not in its parent's tree (subisolation.go)
 	callID               string    // the parent's agent call that spawned it, "" for one from before (agentRecord); under mu
 
+	// tellMu orders a mid-run tell against the run's last look for news:
+	// a tell lands before that look (work takes it) or after the intake
+	// shut (tell waits for the settle and starts the next run). Taken
+	// before mu when both are held.
+	tellMu     sync.Mutex
+	intakeShut bool // under tellMu: this run has looked for news for the last time
+
 	mu sync.Mutex
 	h  *Harness // nil for a stopped child until it is resumed
 	// state/status/final are what the child says about itself. status
@@ -827,6 +834,10 @@ func (s *subAgent) run(ctx context.Context, prompt string) {
 // publish for. A run that still owes after the reminder ends anyway; its
 // report says what it owes, for the main agent.
 func (s *subAgent) work(ctx context.Context, h *Harness, msg string) (agent.TurnResult, error) {
+	s.tellMu.Lock()
+	s.intakeShut = false
+	s.tellMu.Unlock()
+	defer s.shutIntake()
 	res, err := h.Ask(ctx, msg)
 	reminded := false
 	for range 8 { // bounded: a run never loops on its own news
@@ -842,7 +853,10 @@ func (s *subAgent) work(ctx context.Context, h *Harness, msg string) (agent.Turn
 		}
 		owed := s.owed()
 		if len(owed) == 0 || reminded {
-			break
+			if s.lastLook(h) {
+				break
+			}
+			continue // told while the look above ran
 		}
 		reminded = true
 		var next agent.TurnResult
@@ -857,6 +871,26 @@ func (s *subAgent) work(ctx context.Context, h *Harness, msg string) (agent.Turn
 		res.Reply = strings.TrimSpace(res.Reply + "\n\n(Still owes a publish for plan node(s) " + strings.Join(owed, ", ") + ".)")
 	}
 	return res, err
+}
+
+// lastLook shuts the run's intake unless news arrived since work last
+// looked: under tellMu, so a mid-run tell never falls between the two.
+func (s *subAgent) lastLook(h *Harness) bool {
+	s.tellMu.Lock()
+	defer s.tellMu.Unlock()
+	if h.Pending() > 0 {
+		return false
+	}
+	s.intakeShut = true
+	return true
+}
+
+// shutIntake shuts a run's intake on every way out of work: a tell after it
+// waits for the settle and starts the next run.
+func (s *subAgent) shutIntake() {
+	s.tellMu.Lock()
+	s.intakeShut = true
+	s.tellMu.Unlock()
 }
 
 // owed is the ids and titles of the plan nodes this child has not published.
@@ -889,13 +923,33 @@ func (s *subAgent) finalIsEmpty() bool {
 // intact — so one argument covers both. Nothing blocks on either side: a
 // child never waits inside a tool for its parent (docs/decisions.md,
 // "Sub-agents ask by ending their turn").
+//
+// A child mid-run takes it the way the main session takes a message typed
+// mid-turn: queued on its harness (SayAs) and read at its next round
+// boundary — inside the next tool result, or in a turn of its own after its
+// last round (work). Its one report covers it (docs/decisions.md, "Telling
+// a working sub-agent").
 func (s *subAgent) tell(msg string) string {
+	s.tellMu.Lock()
 	s.mu.Lock()
 	if s.state == agentRunning {
+		h, shut := s.h, s.intakeShut
 		s.mu.Unlock()
-		return fmt.Sprintf("agent #%d is still running — its report comes to you when it ends its turn; "+
-			"tell it something new then.", s.num)
+		if h != nil && !shut {
+			h.SayAs(NewMessageID(), msg)
+			s.tellMu.Unlock()
+			return fmt.Sprintf("Queued for agent #%d: it reads it at its next step, and its report covers it.", s.num)
+		}
+		// Between its last look and its settle: the next run takes it.
+		s.tellMu.Unlock()
+		select {
+		case <-s.waitCh():
+		case <-time.After(10 * time.Second):
+			return fmt.Sprintf("agent #%d is ending its turn — tell it again in a moment.", s.num)
+		}
+		return s.tell(msg)
 	}
+	defer s.tellMu.Unlock()
 	if s.h == nil {
 		s.mu.Unlock()
 		return fmt.Sprintf("agent #%d is stopped. Restart it with agent({id:%d, resume:true}) first.", s.num, s.num)
@@ -903,6 +957,7 @@ func (s *subAgent) tell(msg string) string {
 	// A new task is a new RUN: the clock and the answer both reset, or the next
 	// report describes the previous task.
 	s.final, s.account = "", ""
+	s.intakeShut = false // a tell right behind this one joins the run it starts
 	s.startRunLocked()
 	h, ctx := s.h, context.Background()
 	if s.cancel != nil {
@@ -1904,7 +1959,7 @@ func (h *Harness) AgentTell(id int, text string) string {
 		return fmt.Sprintf("no agent #%d", id)
 	}
 	out := sa.tell(text)
-	if strings.HasPrefix(out, "Told agent") {
+	if strings.HasPrefix(out, "Told agent") || strings.HasPrefix(out, "Queued for agent") {
 		// The parent reads the child's next report, and without this it
 		// is an answer to something it never asked (live: "a leftover
 		// instruction from its pre-restart transcript"). An aside: news

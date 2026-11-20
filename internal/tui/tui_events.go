@@ -445,8 +445,10 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 	case "agent_told":
 		// The ack says nothing the child's view does not, and it came first:
 		// the told message reaches the transcript (agent_entry) only once the
-		// child takes it, so "↳ Told agent" sat above what was told. Only a
-		// refusal (the child is running, or stopped) is shown.
+		// child takes it, so "↳ Told agent" sat above what was told. Shown:
+		// a refusal (the child is stopped), and "Queued for agent" — a
+		// working child reads it at its next step, and until then this note
+		// is all that says it went anywhere.
 		if msg := str(ev["message"]); msg != "" && !strings.HasPrefix(msg, "Told agent") {
 			m.append(stNote.Render("↳ " + textfmt.OneLine(msg)))
 		}

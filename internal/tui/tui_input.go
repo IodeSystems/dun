@@ -1331,12 +1331,9 @@ func (m tuiModel) sendUserImages(v string, imgs []proto.Image) tuiModel {
 		return m
 	}
 	if m.scopeAgent != 0 {
-		// A child takes a tell between its turns only (subagent.go, tell):
-		// sent now, it would be refused and the words gone. The draft stays.
-		if a := m.agentByID(m.scopeAgent); a != nil && a.state == "running" {
-			m.flash(fmt.Sprintf("agent #%d is working — tell it when its turn ends (the draft is kept)", m.scopeAgent))
-			return m
-		}
+		// Working or not, the child takes it (subagent.go, tell): a working
+		// one queues it for its next step, as the session does a message
+		// typed mid-turn, and agent_told says so.
 		m.history = append(m.history, v)
 		m.histIdx = len(m.history)
 		m.input.Reset()
