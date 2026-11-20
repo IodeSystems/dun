@@ -50,6 +50,11 @@ type RoundStat struct {
 	// native_finish_reason, verbatim.
 	Finish       string `json:"finish,omitempty"`
 	NativeFinish string `json:"native_finish,omitempty"`
+	// Trace is the id dun sent with the request (trace.go); ProviderID is
+	// the response's request id header (llm.Usage.RequestID). Either is
+	// empty when unknown.
+	Trace      string `json:"trace,omitempty"`
+	ProviderID string `json:"provider_id,omitempty"`
 
 	Prompt     int     `json:"prompt"`                // the provider's prompt tokens
 	Cached     int     `json:"cached,omitempty"`      // of them, reused from its cache
@@ -133,7 +138,7 @@ func (h *Harness) noteRound(src spendmeter.Source, u llm.Usage) {
 	r := RoundStat{Time: time.Now(), Session: h.sessionName(), Role: src.Role, Provider: src.Provider, Model: src.Model,
 		Prompt: u.PromptTokens, Cached: u.CachedPromptTokens(), CacheWrite: u.CacheCreationInputTokens,
 		Completion: u.CompletionTokens, LatencyMS: u.LatencyMS,
-		Finish: u.FinishReason, NativeFinish: u.NativeFinishReason}
+		Finish: u.FinishReason, NativeFinish: u.NativeFinishReason, ProviderID: u.RequestID}
 	if u.Model != "" && u.Model != src.Model {
 		r.Served = u.Model
 	}
@@ -162,7 +167,15 @@ func (h *Harness) noteRound(src spendmeter.Source, u llm.Usage) {
 	rs.add(r)
 	l := rs.ledger
 	rs.mu.Unlock()
-	if l != nil {
+	if l == nil {
+		return
+	}
+	// Written when the traced stream that carried it names it (trace.go).
+	var hub *traceHub
+	if h.trace != nil {
+		hub = h.trace.hub
+	}
+	if !hub.park(roundKeyOf(u), r, func(r RoundStat) { _ = l.Append(r) }) {
 		_ = l.Append(r)
 	}
 }

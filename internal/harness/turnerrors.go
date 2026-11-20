@@ -66,6 +66,9 @@ type TurnError struct {
 	NativeFinish string `json:"native_finish,omitempty"`
 	// Stall is a stalled request's phase: first_byte or between_chunks.
 	Stall string `json:"stall,omitempty"`
+	// Trace is the id of the session's last request before the error
+	// (trace.go), as sent in its X-Trace-Id header.
+	Trace string `json:"trace,omitempty"`
 }
 
 const (
@@ -88,6 +91,7 @@ func (h *Harness) noteTurnError(ctx context.Context, err error) {
 	}
 	rec := turnErrorRecord(err, h.cfg.Provider, h.cfg.Endpoint, time.Now())
 	rec.Session = strings.TrimSuffix(filepath.Base(h.cfg.SessionFile), ".jsonl")
+	rec.Trace = h.trace.Last()
 	if e := appendTurnError(TurnErrorsFile(h.cfg.SessionFile), rec); e != nil {
 		log.Printf("dun: keep turn error: %v", e)
 	}

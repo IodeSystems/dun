@@ -338,7 +338,7 @@ func (h *Harness) describeImages(ctx context.Context, task string, imgs []ImageI
 func (h *Harness) describeOne(ctx context.Context, task string, img llm.ContentPart) (string, error) {
 	start := time.Now()
 	msgs := []llm.Message{{Role: "user", Parts: []llm.ContentPart{llm.TextPart(describeInstruction + task), img}}}
-	ch, err := h.cfg.Vision.Describer.ChatStream(ctx, msgs, nil, nil)
+	ch, err := h.traced("vision", h.cfg.Vision.Describer).ChatStream(ctx, msgs, nil, nil)
 	if err != nil {
 		h.noteSideCall("vision", start, nil)
 		return "", err

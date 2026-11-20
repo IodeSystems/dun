@@ -207,6 +207,49 @@ Code: `internal/harness/spend.go`, `ledger.go`. Source: agentkit reads what a ga
   spend" is the budget period's when a reset is stated, else all time
   (agentkit's `KeyBudget.Spend`).
 
+## Tracing a request
+
+Code: `internal/harness/trace.go`, `cmd/dun/tracecmd.go`. The question
+behind it (Carl, 2026-11-20): a provider log showed a request whose input
+was "word word word…", and nothing said it was raglit's context probe.
+
+- **The id.** `dun-<session>-<run>-<role>-<seq>`, e.g.
+  `dun-20261120-150405-7f3a-main-12`. `<session>` is the session file's id
+  (its start time), `<run>` four random hex digits per engine start, `<role>`
+  `main`, a side call's kind (`fold`, `rescue`, `suggest`, `vision`, …) or
+  `child#N` for a sub-agent's rounds (`child#N.<kind>` for its side calls),
+  `<seq>` the session tree's request count. dund's own probes send
+  `dund-<facet>-probe:caps-<seq>`, its search embedder `dund-search-embed-<n>`.
+  No name, path or prompt text: the id goes to external providers.
+- **Transport.** `ChatOpts.TraceID`, which agentkit v0.39.0 sends as the
+  `X-Trace-Id` header. The engine's clients also send the session as the
+  OpenAI `user` field and an `X-Session-Id` header (`dun-<session>`);
+  OpenRouter files these on the generation as `external_user` and
+  `session_id` (its generation API lists both; the activity page is not
+  verified). OpenRouter does not read `X-Trace-Id`.
+- **Where it is logged.** One engine log line per request:
+  `dun: trace <id> <role>: finish=… prompt=… completion=… <ms> provider_id=…`,
+  where `provider_id` is the response's request id header
+  (`llm.Usage.RequestID`: X-Corrallm-Request-Id, X-Request-Id, Request-Id,
+  X-Litellm-Call-Id). The round's line in `$DUN_HOME/stats/rounds-*.jsonl`
+  has `trace` and `provider_id`; a turn error in `<session>.errors.jsonl` has
+  the trace of the session's last request; the token meter's
+  "prompt N chars → M tokens" line ends with `[trace <id>]`.
+- **Finding it.** `dun trace <id>` prints the session and role the id names
+  and every line under `$DUN_HOME` that has it (round stats, turn errors,
+  engine logs, `dund.log`). Under systemd, dund logs to the journal.
+- **Rounds meet ids by their usage.** Round stats arrive through the spend
+  meter, which has no context. agentkit calls `OnUsage` before it closes the
+  stream, so while a traced stream is open a round is parked and the stream
+  claims it at close by its usage (latency, tokens, finish, provider id); a
+  round nobody claims is written without an id after 2 s.
+- **Not covered yet.** raglit's own clients (OCR, segment, embed for
+  ingest, the chat-input-limit probe that sent "word word word…") take no
+  header: they need a raglit hook. agentkit sends no trace on
+  `DiscoverContext`, `Embed` or `Transcribe` except through `Client.Header`,
+  and does not expose the response body's `id` (OpenRouter's `gen-…`).
+  Requests for both owners: 2026-11-20.
+
 ## Cache statistics
 
 Code: `internal/harness/cachestats.go`. The question behind it (USER 2026-10-20): was a cache

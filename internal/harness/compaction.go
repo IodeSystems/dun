@@ -131,7 +131,8 @@ func (h *Harness) noteUsage(u agent.TokenUsage) {
 	// Calibrate first: this is the only place the provider's own count of the
 	// prompt meets our count of the chars that produced it, and every number
 	// below (including Active) is denominated in the ratio it sets.
-	tokenmeter.LogObservation(h.meter.NoteUsage(u))
+	obs, ok := h.meter.NoteUsage(u)
+	tokenmeter.LogObservation(obs.WithTrace(h.trace.Last()), ok)
 	h.cache.noteRound(u, time.Now())
 	h.noteSurfacingRound()
 	// A large window earns a reminder that recap exists, naming what is filling

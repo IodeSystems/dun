@@ -414,6 +414,9 @@ type Harness struct {
 	agMu  sync.Mutex
 	agSeq int
 
+	// trace names each model request (trace.go). nil in a bare test harness.
+	trace *tracer
+
 	// rounds is what each model round cost, the open turn's totals and the
 	// endpoint's prefill speed (roundstats.go). The root session's only.
 	rounds     roundStats
@@ -800,6 +803,12 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		ownsMgr: ownsMgr, parent: cfg.Parent, agentID: cfg.AgentID,
 		sideCalls: &sideCallStats{}, surfacing: &surfacingStats{}, cache: &cacheStats{}}
 	store.onToolResult = h.deliverLifted
+	// Every request's trace id (trace.go): a child's are its parent's ids.
+	if cfg.Parent != nil {
+		h.trace = cfg.Parent.trace.child(cfg.AgentID)
+	} else {
+		h.trace = newTracer(sessionOfFile(cfg.SessionFile))
+	}
 	// /effort's saved level (effort.go), unless this harness was given its
 	// own: a child spawned with an effort keeps it, and does not save it.
 	if cfg.Effort != "" {
@@ -939,6 +948,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		Index: lateSessionIndex{h},
 	}
 	h.foldWire(shaper)
+	shaper.Runner = h.traced("fold", shaper.Runner)
 	h.shaper = shaper
 	// A sub-agent's first user message IS its task (the parent's brief), so it
 	// must survive folds. Not for a root session: its first message may be

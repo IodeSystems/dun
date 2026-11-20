@@ -2,6 +2,8 @@ package ragd
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/raglit"
@@ -55,5 +57,8 @@ func (r embedRoute) Embed(ctx context.Context, model string, input []string) ([]
 // not nil.
 func newEmbedder(m raglit.Models, g *embedGuard) *raglit.Embedder {
 	q := llm.NewClient(m.Embed.BaseURL, m.Embed.APIKey, m.Embed.Model)
+	// The query side's requests are named; ingest's are raglit's clients,
+	// which take no header yet (raglit-trace request, 2026-11-20).
+	q.Header = http.Header{"X-Trace-Id": {fmt.Sprintf("dund-search-embed-%d", probeSeq.Add(1))}}
 	return raglit.NewEmbedder(embedRoute{ingest: m.Embedder().Client, query: q, guard: g}, m.Embed.Model)
 }

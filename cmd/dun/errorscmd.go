@@ -130,7 +130,7 @@ func errorsHead(r harness.TurnError) string {
 		parts = append(parts, "status "+strconv.Itoa(r.Status))
 	}
 	for _, kv := range [][2]string{{"code", r.Code}, {"type", r.Type}, {"finish", r.Finish},
-		{"native", r.NativeFinish}, {"stall", r.Stall}} {
+		{"native", r.NativeFinish}, {"stall", r.Stall}, {"trace", r.Trace}} {
 		if kv[1] != "" {
 			parts = append(parts, kv[0]+" "+kv[1])
 		}

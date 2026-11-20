@@ -9,10 +9,13 @@ import (
 	"image/color"
 	"image/draw"
 	"image/png"
+	"log"
 	"math"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
@@ -162,10 +165,27 @@ func probeClient(role raglit.ModelRole) *llm.Client {
 	return c
 }
 
+// probeSeq numbers dund's probe clients for their trace ids.
+var probeSeq atomic.Int64
+
+// traceProbe gives every request of probe client c one trace id,
+// dund-<facet>-probe:caps-<seq>, in its X-Trace-Id header, and says it in
+// dund's log: a provider's log line for a probe leads back here.
+func traceProbe(c *llm.Client, facet string) string {
+	id := fmt.Sprintf("dund-%s-probe:caps-%d", facet, probeSeq.Add(1))
+	if c.Header == nil {
+		c.Header = http.Header{}
+	}
+	c.Header.Set("X-Trace-Id", id)
+	log.Printf("ragd: probing %s (%s) for its capabilities; trace %s", facet, c.Capabilities().Model, id)
+	return id
+}
+
 // probeRole runs one role's probe and stores what it learned, also when it
 // stopped part way.
 func probeRole(ctx context.Context, capsDir, name string, role raglit.ModelRole) (llm.Capabilities, error) {
 	c := probeClient(role)
+	traceProbe(c, name)
 	snap := c.Capabilities()
 	rec := harness.LoadCapsIn(capsDir, snap.Endpoint, snap.Model)
 	if name == dunconfig.FacetIdentity {

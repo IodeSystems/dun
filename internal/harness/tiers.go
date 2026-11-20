@@ -68,6 +68,11 @@ func isTierName(s string) bool {
 // be built is fallback: a side call is best-effort and never fails over its
 // tier.
 func (h *Harness) sideRunner(kind string, fallback agent.LLMRunner) agent.LLMRunner {
+	return h.traced(kind, h.sideTier(kind, fallback))
+}
+
+// sideTier is sideRunner's runner before its trace.
+func (h *Harness) sideTier(kind string, fallback agent.LLMRunner) agent.LLMRunner {
 	if h.cfg.ClientFor == nil {
 		return fallback
 	}
