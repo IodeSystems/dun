@@ -345,7 +345,7 @@ func (h *Harness) runTurn(ctx context.Context, turn func(context.Context) (agent
 		}
 		h.retry(RetryNote{Scope: "turn", Kind: "interrupted", Attempt: attempt,
 			Delay: backoff, Elapsed: time.Since(start), Budget: budget,
-			Reason: fmt.Sprintf("the turn was interrupted — %s", llm.TransientUpstreamReason(err)),
+			Reason: fmt.Sprintf("the turn was interrupted — %s", transientReason(err)),
 			Detail: err.Error()})
 		if !turnRetrySleep(ctx, backoff) {
 			return res, ctx.Err()
@@ -355,6 +355,20 @@ func (h *Harness) runTurn(ctx context.Context, turn func(context.Context) (agent
 			backoff = maxBackoff
 		}
 	}
+}
+
+// transientReason is llm.TransientUpstreamReason, with a stall named: the
+// library calls it "upstream transport fault". A stall reaches here only
+// after output was forwarded (before that the client retries it within
+// RetryBudget), so this is the one retry of it at turn scope, not a second.
+// An *agent.EmptyReplyError is not transient: agentkit already ran its one
+// repair round, and runTurn returns it at once.
+func transientReason(err error) string {
+	var stall *llm.StallError
+	if errors.As(err, &stall) {
+		return stallText(stall)
+	}
+	return llm.TransientUpstreamReason(err)
 }
 
 // retry delivers a note to the UI hook (nil-safe).

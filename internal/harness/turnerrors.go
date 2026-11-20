@@ -34,13 +34,14 @@ import (
 // turnThenTriggers), bounded. removeSidecars deletes it with its session.
 // `dun errors` reads it on any machine (cmd/dun/errorscmd.go).
 //
-// What agentkit v0.37.0 hands dun: an SSE error event's error.message only,
-// as a plain string (llm/client.go parses {"error":{"message":...}} and
-// agent/session.go turns the chunk into fmt.Errorf("%s")). Its type, code,
-// param and the event's raw data are dropped before dun sees them. A refused
-// HTTP request keeps its status and body only on the typed errors
-// (InputTooLargeError, BudgetSpentError, TruncatedToolCallError); the others
-// carry the status in their text, "llm: status 502: …", which is parsed.
+// What agentkit v0.38.0 hands dun: an SSE error event as *llm.StreamError
+// (code, type, param, metadata, the raw object); a silent link as
+// *llm.StallError (phase, limit); a round with no text and no tool call,
+// after agentkit's one repair round, as *agent.EmptyReplyError (the
+// provider's finish_reason and native_finish_reason). A refused HTTP request
+// keeps its status and body only on the typed errors (InputTooLargeError,
+// BudgetSpentError, TruncatedToolCallError); the others carry the status in
+// their text, "llm: status 502: …", which is parsed.
 
 // TurnError is one turn that ended in an error.
 type TurnError struct {
@@ -52,8 +53,19 @@ type TurnError struct {
 	Error    string    `json:"error"`
 	Status   int       `json:"status,omitempty"` // HTTP status, when there was one
 	// Payload is the server's own body as agentkit kept it, or empty when
-	// agentkit kept none beyond the error text (an SSE error event).
+	// agentkit kept none beyond the error text.
 	Payload string `json:"payload,omitempty"`
+	// Code, Type and Metadata are an SSE error event's error.code, error.type
+	// and error.metadata (OpenRouter: provider_name, the upstream's raw body).
+	Code     string `json:"code,omitempty"`
+	Type     string `json:"type,omitempty"`
+	Metadata string `json:"metadata,omitempty"`
+	// Finish and NativeFinish are an empty reply's finish_reason and
+	// native_finish_reason, verbatim.
+	Finish       string `json:"finish,omitempty"`
+	NativeFinish string `json:"native_finish,omitempty"`
+	// Stall is a stalled request's phase: first_byte or between_chunks.
+	Stall string `json:"stall,omitempty"`
 }
 
 const (
@@ -81,35 +93,75 @@ func (h *Harness) noteTurnError(ctx context.Context, err error) {
 	}
 }
 
-// noteEmptyReply tells the person when their turn ended with no text from
-// the model in any round (agentkit sets Reply only from a round with text),
-// and keeps it with the turn errors. Gemini 4, 2026-11-19: every round came
-// back empty and the turn ended with Reply "" and no error, so the person
-// saw nothing at all. An automatic turn may end quietly: nobody waits on it.
+// shownError is a turn error with dun's own text for the person: the text
+// the UI shows and errors.jsonl keeps. Unwrap keeps errors.As working.
+type shownError struct {
+	msg string
+	err error
+}
+
+func (e *shownError) Error() string { return e.msg }
+func (e *shownError) Unwrap() error { return e.err }
+
+// describeTurnError gives the errors a person cannot read from agentkit's
+// text dun's own: an empty reply names the model and the finish reasons, a
+// stall says how long the link was silent. Others are err unchanged.
 //
-// TODO(agentkit): name the last round's finish_reason here once agentkit's
-// TurnResult hands it on (v0.37.0 keeps it inside llm/client.go).
-func (h *Harness) noteEmptyReply(ctx context.Context, res agent.TurnResult, err error) {
-	if err != nil || ctx.Err() != nil || strings.TrimSpace(res.Reply) != "" {
-		return
+// The empty reply was dun's to detect before agentkit v0.38.0 (Reply ""
+// and no error; Gemini 4, 2026-11-19). agentkit now detects it, runs one
+// repair round, and returns *agent.EmptyReplyError; this is the notice
+// (docs/decisions.md "agentkit owns the empty reply").
+func (h *Harness) describeTurnError(err error) error {
+	var empty *agent.EmptyReplyError
+	var stall *llm.StallError
+	switch {
+	case errors.As(err, &empty):
+		model := h.cfg.Endpoint.Model
+		if model == "" {
+			model = "the model"
+		}
+		return &shownError{emptyReplyText(model, empty), err}
+	case errors.As(err, &stall):
+		return &shownError{stallText(stall), err}
 	}
-	if o, _ := h.turnOriginNow(); o != originPerson {
-		return
-	}
-	model := h.cfg.Endpoint.Model
-	if model == "" {
-		model = "the model"
-	}
-	msg := emptyReplyText(model)
-	if h.cfg.OnNotify != nil {
-		h.cfg.OnNotify(msg)
-	}
-	h.noteTurnError(ctx, errors.New(msg))
+	return err
 }
 
 // emptyReplyText is the notice for a turn that ended with no reply.
-func emptyReplyText(model string) string {
-	return model + " returned an empty reply: the turn ended with no text from the model"
+func emptyReplyText(model string, e *agent.EmptyReplyError) string {
+	s := model + " returned an empty reply: the turn ended with no text from the model"
+	if e.FinishReason == "" && e.NativeFinishReason == "" {
+		return s + " (no finish_reason)"
+	}
+	s += " (finish_reason " + orNone(e.FinishReason)
+	if e.NativeFinishReason != "" {
+		s += ", native " + e.NativeFinishReason
+	}
+	return s + ")"
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "none"
+	}
+	return s
+}
+
+// stallText is "stalled: no bytes for 2m (between_chunks)".
+func stallText(e *llm.StallError) string {
+	return fmt.Sprintf("stalled: no bytes for %s (%s)", shortDur(e.After), e.Phase)
+}
+
+// shortDur is d without zero tails: 2m, 10m, 1m30s.
+func shortDur(d time.Duration) string {
+	s := d.String()
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
 }
 
 var statusInText = regexp.MustCompile(`\bstatus (\d{3})\b`)
@@ -124,6 +176,9 @@ func turnErrorRecord(err error, provider string, ep Endpoint, at time.Time) Turn
 	var tooLarge *llm.InputTooLargeError
 	var spent *llm.BudgetSpentError
 	var cut *llm.TruncatedToolCallError
+	var se *llm.StreamError
+	var empty *agent.EmptyReplyError
+	var stall *llm.StallError
 	switch {
 	case errors.As(err, &tooLarge):
 		rec.Status, rec.Payload = tooLarge.Status, tooLarge.Body
@@ -131,6 +186,13 @@ func turnErrorRecord(err error, provider string, ep Endpoint, at time.Time) Turn
 		rec.Status, rec.Payload = spent.Status, spent.Body
 	case errors.As(err, &cut):
 		rec.Status, rec.Payload = cut.Status, cut.Body
+	case errors.As(err, &se):
+		rec.Code, rec.Type = se.Code, se.Type
+		rec.Metadata = capBytes(scrubSecrets(string(se.Metadata), ep.Key), turnErrorPayloadMax)
+	case errors.As(err, &empty):
+		rec.Finish, rec.NativeFinish = empty.FinishReason, empty.NativeFinishReason
+	case errors.As(err, &stall):
+		rec.Stall = stall.Phase
 	}
 	if rec.Status == 0 {
 		if m := statusInText.FindStringSubmatch(rec.Error); m != nil {

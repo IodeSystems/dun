@@ -111,6 +111,9 @@ func errorsCmd(args []string, out, errw io.Writer) int {
 		if r.Payload != "" {
 			fmt.Fprintln(out, "  payload: "+indentRest(r.Payload))
 		}
+		if r.Metadata != "" {
+			fmt.Fprintln(out, "  metadata: "+indentRest(r.Metadata))
+		}
 	}
 	return 0
 }
@@ -125,6 +128,12 @@ func errorsHead(r harness.TurnError) string {
 	}
 	if r.Status != 0 {
 		parts = append(parts, "status "+strconv.Itoa(r.Status))
+	}
+	for _, kv := range [][2]string{{"code", r.Code}, {"type", r.Type}, {"finish", r.Finish},
+		{"native", r.NativeFinish}, {"stall", r.Stall}} {
+		if kv[1] != "" {
+			parts = append(parts, kv[0]+" "+kv[1])
+		}
 	}
 	return strings.Join(parts, " · ")
 }

@@ -138,10 +138,10 @@ func historyItems(entries []agent.Entry) []HistoryItem {
 			out = append(out, HistoryItem{Kind: "tool_result", Tool: e.ToolName, CallID: e.ToolCallID, Content: e.Content,
 				IsError: ToolFailed(e.ToolName, e.Content), Agent: byCall[e.ToolCallID]})
 		case agent.KindNotification:
-			// The model's own turn-end check, not news for the person; the
-			// model still reads it (docs/decisions.md "The person's message
-			// ends the prompt").
-			if e.Tag == tagIdleCheck {
+			// The model's own turn-end check and empty-reply repair, not
+			// news for the person; the model still reads them
+			// (docs/decisions.md "The person's message ends the prompt").
+			if modelsNote(e.Tag) {
 				continue
 			}
 			content := e.Content
