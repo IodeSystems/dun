@@ -111,7 +111,7 @@ func TestActivity_DismissedStack(t *testing.T) {
 	}
 }
 
-// The open table is most recent activity first, as of when it opened: what
+// The open table is grouped by state (working, idle agents, finished), recent first within a group, as of when it opened: what
 // runs, then what changed or ended last; it does not reorder while open, and
 // a row that arrives meanwhile goes at the end. The strip stays in id order.
 func TestActivity_RecentFirst(t *testing.T) {
@@ -137,7 +137,7 @@ func TestActivity_RecentFirst(t *testing.T) {
 		t.Errorf("collapsed: %v, want id order", got)
 	}
 	m.setFocus(focusActivity)
-	want := []actKey{{id: 2}, {agent: true, id: 2}, {id: 1}, {agent: true, id: 1}}
+	want := []actKey{{id: 2}, {agent: true, id: 2}, {agent: true, id: 1}, {id: 1}}
 	if got := keys(); !slices.Equal(got, want) {
 		t.Fatalf("open: %v, want %v", got, want)
 	}
@@ -193,5 +193,35 @@ func TestActivity_MultiLineDetailIsOneRow(t *testing.T) {
 	}
 	if !strings.Contains(ansi.Strip(m.activityView()), "a line of the task a line") {
 		t.Errorf("the task's lines are not joined:\n%s", m.activityView())
+	}
+}
+
+// The open table groups by state, agents and jobs interleaved: working,
+// idle agents, finished, the dismissed stack; recent first within a group.
+func TestActivityTableGroupsByState(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: &recWC{}}, "/ws")
+	now := time.Now()
+	ago := func(d time.Duration) time.Time { return now.Add(-d) }
+	m.agents = []agentRow{
+		{id: 1, state: "dismissed", changed: ago(time.Second)},
+		{id: 2, state: "idle", changed: ago(time.Hour)},
+		{id: 3, state: "running", changed: ago(time.Hour)},
+		{id: 4, state: "idle", changed: ago(time.Minute)},
+		{id: 5, state: "stopped", changed: ago(time.Second)},
+	}
+	m.jobs = []jobRow{
+		{id: 1, state: "ok", ended: ago(time.Minute).Unix()},
+		{id: 2, state: "running"},
+		{id: 3, state: "failed", ended: ago(5 * time.Second).Unix()},
+	}
+	order := m.takeActOrder()
+	want := []actKey{
+		{agent: true, id: 3}, {id: 2}, // tie on recent: agents first
+		{agent: true, id: 4}, {agent: true, id: 2},
+		{agent: true, id: 5}, {id: 3}, {id: 1},
+		stackKey,
+	}
+	if !slices.Equal(order, want) {
+		t.Fatalf("order %+v, want %+v", order, want)
 	}
 }
