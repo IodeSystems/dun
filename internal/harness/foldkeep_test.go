@@ -120,7 +120,7 @@ func TestFoldKeep_ReportedCaseLandsInTheBand(t *testing.T) {
 	if r.note.Kept <= base.note.Kept {
 		t.Errorf("kept %d entries, the pristine tail alone keeps %d", r.note.Kept, base.note.Kept)
 	}
-	if s := r.note.String(); !strings.Contains(s, fmt.Sprintf("kept %d verbatim", r.note.Kept)) {
+	if s := r.note.String(); !strings.Contains(s, fmt.Sprintf("newest %d kept as is", r.note.Kept)) {
 		t.Errorf("the note does not say what it kept: %s", s)
 	}
 }
@@ -159,10 +159,10 @@ func TestFoldKeep_HugeNewestResultFallsBack(t *testing.T) {
 	}
 }
 
-// The notice names what was kept, and the arrow ends at what is sent.
+// The notice names what was summarized and kept, and the arrow ends at what is sent.
 func TestCompactionNote_SaysWhatItKept(t *testing.T) {
 	n := CompactionNote{Subsumed: 237, Kept: 198, KeptTokens: 129_700, TokensBefore: 294971, TokensAfter: 147755, Cause: "shaper"}
-	want := "compacted 237 entries, kept 198 verbatim (129.7k): 294971 → 147755 tokens (saved 147216) · shaper"
+	want := "compacted: oldest 237 entries → summary, newest 198 kept as is · history 295.0k → 147.8k tokens · over budget"
 	if s := n.String(); s != want {
 		t.Errorf("got  %s\nwant %s", s, want)
 	}
