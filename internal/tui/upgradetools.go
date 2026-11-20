@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -50,6 +51,7 @@ func (r toolState) dep() depver.Tool {
 type toolsMsg struct {
 	rows    []toolState
 	upgrade bool
+	force   bool // /upgrade now --force: an engine to move is moved though busy
 	err     error
 }
 
@@ -80,10 +82,10 @@ var runTools = func(upgrade bool) ([]toolState, error) {
 	return rows, nil // a failed update is in its row
 }
 
-func toolsCmd(upgrade bool) tea.Cmd {
+func toolsCmd(upgrade, force bool) tea.Cmd {
 	return func() tea.Msg {
 		rows, err := runTools(upgrade)
-		return toolsMsg{rows: rows, upgrade: upgrade, err: err}
+		return toolsMsg{rows: rows, upgrade: upgrade, force: force, err: err}
 	}
 }
 
@@ -103,9 +105,9 @@ func upgradeSlash(m *tuiModel, args []string) tea.Cmd {
 	}
 	if len(args) > 0 && args[0] == "now" {
 		m.append(StDim.Render("tools: installing what is behind its pinned version, then restarting dund…"))
-		return toolsCmd(true)
+		return toolsCmd(true, slices.Contains(args[1:], "--force"))
 	}
-	for _, l := range versionsReport(buildinfo.Version, dundVersion(), m.engineVersion) {
+	for _, l := range versionsReport(buildinfo.Version, dundVersion(), m.engineBuild()) {
 		m.append(l)
 	}
 	if m.upgrade != nil {
@@ -120,7 +122,7 @@ func upgradeSlash(m *tuiModel, args []string) tea.Cmd {
 		}
 		m.append(StDim.Render(line))
 	}
-	return toolsCmd(false)
+	return toolsCmd(false, false)
 }
 
 // toolsDone shows the tools' rows; after /upgrade now it restarts dund.
@@ -144,6 +146,21 @@ func (m *tuiModel) toolsDone(msg toolsMsg) tea.Cmd {
 			return nil
 		}
 		m.append(StDim.Render("asked dund to restart now — running turns are interrupted and resume after"))
+		return nil
+	case !updated && m.engineReady && dundVersion() == buildinfo.Version && m.engineVersion != buildinfo.Version:
+		// dund is this build but this session's engine is not: an engine
+		// adopted across dund's restart moves only when nothing occupies it.
+		// A restart of dund again would adopt it again; dund moves the
+		// engine, or says what holds it (--force ends that).
+		if !m.proc.moveEngine(msg.force) {
+			m.append(StErr.Render("no session service right now — nothing restarted"))
+			return nil
+		}
+		if msg.force {
+			m.append(StDim.Render("dund is this build; restarting this session's engine (" + m.engineBuild() + ") into it now — its running turn, jobs and sub-agents end, the conversation is kept"))
+		} else {
+			m.append(StDim.Render("dund is this build; restarting this session's engine (" + m.engineBuild() + ") into it if nothing holds it (dund says what does)"))
+		}
 		return nil
 	case updated || !buildinfo.IsRelease():
 		// The engines run the tools: a restart is how they take the new

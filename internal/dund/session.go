@@ -272,6 +272,28 @@ func (s *session) occupied() bool {
 	return s.inTurn || s.asking || len(s.jobs) > 0 || len(s.agents) > 0
 }
 
+// holders names what occupies the engine, for a person: "a turn running",
+// "1 job running", "agent #2 working". Called with actMu held.
+func (s *session) holders() []string {
+	var out []string
+	if s.inTurn {
+		out = append(out, "a turn running")
+	}
+	if s.asking {
+		out = append(out, "a question open")
+	}
+	switch n := len(s.jobs); {
+	case n == 1:
+		out = append(out, "1 job running")
+	case n > 1:
+		out = append(out, fmt.Sprintf("%d jobs running", n))
+	}
+	for _, a := range s.agents {
+		out = append(out, fmt.Sprintf("agent #%d working", a.ID))
+	}
+	return out
+}
+
 // idle reports whether the engine runs with no one following it and nothing
 // to do, for at least d.
 func (s *session) idle(d time.Duration) bool {
@@ -429,6 +451,14 @@ func (s *session) readEvents(eng Engine, done chan struct{}, sc *bufio.Scanner, 
 			// engine does not (docs/session-events.md, "History reason").
 			if h, ok := ev.Payload.(*proto.History); ok && h.Reason == "" {
 				h.Reason = reason
+			}
+			// An engine from before Ready.Version says its build only in its
+			// link hello: dund puts it in the ready, which every client gets
+			// (the log's state), so no client shows "unknown" for it.
+			if r, ok := ev.Payload.(*proto.Ready); ok && r.Version == "" {
+				if le, ok := eng.(*linkEngine); ok {
+					r.Version = le.hello.Version
+				}
 			}
 			if req, ok := ev.Payload.(*proto.PeerRequest); ok {
 				go s.svc.handlePeer(s, eng, *req)

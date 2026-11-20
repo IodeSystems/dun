@@ -26,12 +26,15 @@ type fakeSpawner struct {
 	// slowAuto: a message starting "[automatic] " runs as a slow turn, as
 	// a resumed agent's continue would.
 	slowAuto atomic.Bool
+	// ready is the build its engines' ready event says ("": an engine from
+	// before Ready.Version).
+	ready string
 }
 
 func (f *fakeSpawner) Spawn(workspace string, args []string) (Engine, error) {
 	f.mu.Lock()
 	f.spawns = append(f.spawns, slices.Clone(args))
-	err := f.fail
+	err, ready := f.fail, f.ready
 	f.mu.Unlock()
 	if err != nil {
 		return nil, err
@@ -41,7 +44,7 @@ func (f *fakeSpawner) Spawn(workspace string, args []string) (Engine, error) {
 	if i := slices.Index(args, "--resume"); i >= 0 {
 		id, resumed = args[i+1], true
 	}
-	e := &fakeEngine{done: make(chan struct{}), sp: f, resumed: resumed}
+	e := &fakeEngine{done: make(chan struct{}), sp: f, resumed: resumed, ready: ready}
 	var inW io.WriteCloser
 	e.in, inW = io.Pipe()
 	e.stdin = inW
@@ -78,8 +81,9 @@ type fakeEngine struct {
 	done    chan struct{}
 	once    sync.Once
 	sp      *fakeSpawner
-	resumed bool // started with --resume: it replays a history, as dun does
+	resumed bool   // started with --resume: it replays a history, as dun does
 	echoID  string // set by the toolpair/deliveredmsg cases
+	ready   string // its ready event's Version
 }
 
 func (e *fakeEngine) emit(enc *json.Encoder, p any) {
@@ -95,7 +99,7 @@ func (e *fakeEngine) run(id string) {
 	if e.resumed {
 		e.emit(enc, &proto.History{Items: []proto.HistoryItem{{Kind: "user", Content: "earlier"}}})
 	}
-	e.emit(enc, &proto.Ready{Tools: []string{"exec"}})
+	e.emit(enc, &proto.Ready{Tools: []string{"exec"}, Version: e.ready})
 	sc := bufio.NewScanner(e.in)
 	slow, asking := false, false
 	for sc.Scan() {

@@ -568,6 +568,38 @@ func (s *Service) Restart(principal, id string, args []string) error {
 	return ses.ensureRunning()
 }
 
+// MoveEngine restarts a session's engine on its flags and conversation so
+// it runs the build dund starts engines on (proto.MoveEngine). An engine
+// something holds is not moved unless force: the error names what holds it,
+// and the move at idle (checkStale) takes it when that ends. A move already
+// under way is that move.
+func (s *Service) MoveEngine(principal, id string, force bool) error {
+	ses, err := s.Get(principal, id)
+	if err != nil {
+		return err
+	}
+	const why = "restarting it into dund's build (asked)"
+	ses.actMu.Lock()
+	if ses.moving {
+		ses.actMu.Unlock()
+		return nil
+	}
+	if held := ses.holders(); len(held) > 0 && !force {
+		if ses.stale == "" {
+			// Not adopted: no replay of an older dund's state to wait for
+			// (live), only what holds it.
+			ses.stale, ses.live = why, true
+		}
+		ses.actMu.Unlock()
+		return fmt.Errorf("this session's engine is busy (%s): it moves when they finish; /upgrade now --force ends them and moves now",
+			strings.Join(held, ", "))
+	}
+	ses.moving = true
+	ses.actMu.Unlock()
+	ses.moveEngine(why)
+	return nil
+}
+
 // Forget stops a session's engine and removes the session: registry entry,
 // log, every member's UI state.
 func (s *Service) Forget(principal, id string) error {

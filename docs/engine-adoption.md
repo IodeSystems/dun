@@ -50,7 +50,11 @@ Adoption makes the restart cost nothing a person sees: turns and jobs run on.
    engine that holds shared MCP servers through dund's gateway
    (`hello.shared`): the gateway died with the old dund. Its agent gets a
    quiet notice and its clients a notification that those servers are gone
-   until then.
+   until then. `/upgrade now` with dund already on the TUI's build asks
+   dund to move that session's engine (`move_engine`): at once when idle;
+   else dund says what holds it (a turn, a question, jobs, sub-agents) and
+   moves it when they finish. `/upgrade now --force` moves it now, ending
+   them.
 6. During the gap turns and self-wakes run on. The engine keeps its events
    in a bounded ring (16 MB) with sequence numbers and replays them after the
    next dund's `link_resume{after}`. A ring that overflowed while no dund was

@@ -18,6 +18,7 @@ func init() {
 	command[UIGet]("ui_get")
 	command[UIPut]("ui_put")
 	command[Restart]("restart")
+	command[MoveEngine]("move_engine")
 	command[Forget]("forget")
 	command[Persist]("persist")
 	command[Leave]("leave")
@@ -171,6 +172,15 @@ type Create struct {
 // allowlist as create) on the same conversation: a model switch.
 type Restart struct {
 	Args []string `json:"args"`
+}
+
+// MoveEngine restarts the envelope's session's engine, same flags, same
+// conversation, on the build dund starts engines on: /upgrade now on a
+// session whose engine is of another build. An engine a turn, question,
+// job or sub-agent holds is not moved: the ack's error says what holds it,
+// and it moves when they finish. Force moves it now and ends them.
+type MoveEngine struct {
+	Force bool `json:"force,omitempty"`
 }
 
 // Forget removes the envelope's session from the service: its engine is

@@ -370,6 +370,16 @@ func (p *dunProc) restartWith(o TuiOpts) bool {
 	return json.NewEncoder(p.stdin).Encode(map[string]any{"type": "restart", "args": engineArgs(o)}) == nil
 }
 
+// moveEngine asks the service to restart this session's engine, same
+// flags, on dund's build (proto.MoveEngine): when nothing holds it, or with
+// force, now. A held engine's ack names what holds it (a notification).
+func (p *dunProc) moveEngine(force bool) bool {
+	if p == nil {
+		return false
+	}
+	return json.NewEncoder(p.stdin).Encode(map[string]any{"type": "move_engine", "force": force}) == nil
+}
+
 // leave tells the service this client is exiting (/exit): it stops the
 // engine unless the session persists or another client is attached.
 func (p *dunProc) leave() bool {
