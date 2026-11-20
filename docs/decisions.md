@@ -565,6 +565,18 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   an old transcript or a model's habit gets the same out-of-band exchange
   and never blocks. Old transcripts still render `ask_parent` and a BLOCKED
   report.
+- **Telling a working sub-agent (USER 2026-11-20).** A tell to a running
+  child is taken as the main session takes a message typed mid-turn: queued
+  on the child's harness (`SayAs`), lifted after its next tool result, or,
+  after its last round, read in a turn of its own that `work` runs before
+  the run settles. Its one report covers it. Before, the TUI refused it
+  ("tell it when its turn ends") and `tell` refused the parent's. Children
+  are in-process harnesses, so the injection point is the child's own
+  queue; no second mechanism. `tellMu` orders a tell against the run's last
+  look for news (`lastLook`): a tell after it waits for the settle and
+  starts the next run. The ack is `Queued for agent #N…`; the TUI shows it
+  until the child's transcript takes the message. The parent's aside ("The
+  user told agent #N directly") covers both cases. Images are still refused.
 - **Persist carries the sub-agents (2026-10-27).** A child has no persist
   setting of its own: it follows its root's. dund passes `--persist` at
   every engine start of a persisted session (`spawnArgs`), as it passes

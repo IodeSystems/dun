@@ -180,7 +180,8 @@ func TestAgentScope_EscRestoresTheRootScroll(t *testing.T) {
 }
 
 // Typing while descended is the child's next message (a jobs tell), shown
-// when its transcript takes it. A running child takes none: the draft stays.
+// when its transcript takes it. A running child takes it too, queued for its
+// next step, as the session takes a message typed mid-turn.
 func TestAgentScope_TypingTellsTheChild(t *testing.T) {
 	m, buf := scopeModel(t, 100)
 	m.enterAgentScope(2) // idle
@@ -210,11 +211,15 @@ func TestAgentScope_TypingTellsTheChild(t *testing.T) {
 	buf.Reset()
 	m = typeStr(m, "stop that")
 	m = key(m, kEnter)
-	if got := sentAgentCmds(buf); len(got) != 0 {
-		t.Errorf("a running child takes no tell: %q", got)
+	if got := sentAgentCmds(buf); len(got) != 1 || got[0] != "tell 1 stop that" {
+		t.Errorf("a running child is told like the session mid-turn: %q", got)
 	}
-	if m.input.Value() != "stop that" || !strings.Contains(m.flashText, "is working") {
-		t.Errorf("the draft must stay, with why: %q / %q", m.input.Value(), m.flashText)
+	if m.input.Value() != "" {
+		t.Errorf("sent, the draft clears: %q", m.input.Value())
+	}
+	m = m.feed(evMsg{"type": "agent_told", "agent": 1.0, "message": "Queued for agent #1: it reads it at its next step, and its report covers it."})
+	if !strings.Contains(convoText(m), "Queued for agent #1") {
+		t.Errorf("the queued ack must show until the child takes it: %s", convoText(m))
 	}
 }
 
