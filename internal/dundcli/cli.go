@@ -142,6 +142,7 @@ func serveCmd(l *loader) *cobra.Command {
 			if bin == "" {
 				bin = defaultDun()
 			}
+			webRoot = resolveWebRoot(webRoot, dundapi.HasEmbeddedApp())
 			if checkOnly {
 				return check(l, bin, httpAddr, webRoot, handoverFrom)
 			}
@@ -157,7 +158,7 @@ func serveCmd(l *loader) *cobra.Command {
 	cmd.Flags().StringArrayVar(&oidcCfg.Allow, "oidc-allow", nil, "sign-in: an email that may sign in (repeatable); each sees the owner's sessions")
 	cmd.Flags().StringVar(&oidcCfg.Redirect, "oidc-redirect", "", "sign-in: the callback URL (default: /auth/callback on the address the browser used)")
 	cmd.Flags().StringVar(&releases, "releases", "", "serve Android releases from here (tools/release-android): /releases, /dun.apk, announced in /api/v1/hello")
-	cmd.Flags().StringVar(&webRoot, "web-root", "", "serve this built web client at /web (mobile: pnpm export:web); default: the copy a release build embeds")
+	cmd.Flags().StringVar(&webRoot, "web-root", "", "serve this built web client at /web (mobile: pnpm export:web); default: the copy a release build embeds, else $XDG_DATA_HOME/dun/web (~/.local/share/dun/web, where `make web` installs it) when it has index.html")
 	cmd.Flags().BoolVar(&checkOnly, "check", false, "prove these settings can run, then exit (the unit's ExecStartPre)")
 	// The web app and its HTTP API are not tested yet (USER 2026-10-28: "it's
 	// not ready, it's not tested"), so the flag says so. --http was its name:

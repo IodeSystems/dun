@@ -1,7 +1,10 @@
 # dun — build/install with a version + source stamp.
 #
 # `make install` builds the stamped binary into ~/.local/bin/dun (override with
-# BINDIR=…). It self-updates from this tree (cmd/dun/selfupdate.go).
+# BINDIR=…). It self-updates from this tree (cmd/dun/selfupdate.go). It also
+# runs `make web` when the installed web client is stale (missing, or a file
+# under mobile/ is newer than $(WEB_ROOT)/index.html) so dund finds it
+# without --web-root; with no pnpm on PATH it prints a note and skips that.
 #
 # `make install-launcher` puts a LAUNCHER SCRIPT on your PATH instead
 # (tools/dun.sh): it rebuilds from this tree when anything changed and execs
@@ -44,6 +47,9 @@ install: ## build the stamped binary into ~/.local/bin/dun (BINDIR=… to change
 	@mv -f $(BINDIR)/dun.tmp $(BINDIR)/dun
 	@echo "installed $(BINDIR)/dun @ $(VERSION)"
 	@case ":$$PATH:" in *":$(BINDIR):"*) ;; *) echo "note: $(BINDIR) is not on PATH";; esac
+	@if [ ! -f $(WEB_ROOT)/index.html ] || [ -n "$$(find mobile \( -path mobile/node_modules -o -path mobile/dist -o -path mobile/.expo \) -prune -o -type f -newer $(WEB_ROOT)/index.html -print -quit)" ]; then \
+	  if command -v pnpm >/dev/null 2>&1; then $(MAKE) web; else echo "note: web client is stale but pnpm is not on PATH; skipped (make web)"; fi; \
+	fi
 
 install-launcher: ## put the self-rebuilding launcher on PATH (dun is always the latest)
 	@mkdir -p $(dir $(DUN_BIN)) $(GOBIN)

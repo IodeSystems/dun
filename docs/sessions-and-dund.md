@@ -205,6 +205,8 @@ releases on its own.
   listener serves the chooser at `/`, the web app at `/web`, the TUI at
   `/tui` and the API at root; pages need the session cookie from
   `/auth/signin` (decisions.md, "dund's HTTP listener").
+  Without `--web-root`, a source build serves the client `make web` (and
+  `make install`, when stale) put in `$XDG_DATA_HOME/dun/web`.
 
 ## Reaching the web listener: LAN, VPN, hz, cloudflared
 
