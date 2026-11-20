@@ -228,6 +228,7 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 		// same reason as suggest. The action is the user's text, not a keyword.
 		if id == "remember" {
 			go func() {
+				defer harness.RecoverSide("remember")
 				msg, err := h.Remember(ctx, action)
 				if err != nil {
 					msg = "nothing saved: " + err.Error()
@@ -340,6 +341,7 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 			if strings.EqualFold(verb, "write") {
 				em.emit(&proto.ControlEvent{ID: id, Action: action, Message: "worklog: writing the account…"})
 				go func() {
+					defer harness.RecoverSide("worklog")
 					msg := ""
 					path, err := h.WriteWorklog(ctx, rest)
 					if err != nil {
@@ -370,6 +372,7 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 			case "now":
 				em.emit(&proto.ControlEvent{ID: id, Action: action, Message: "journal: writing an entry…"})
 				go func() {
+					defer harness.RecoverSide("journal")
 					e, n, err := h.JournalNow(ctx)
 					msg := ""
 					if err != nil {
@@ -527,6 +530,7 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 		// the tool set, which waits for a running turn.
 		if id == "rules" {
 			go func() {
+				defer harness.RecoverSide("rules")
 				msg, err := rulesCmd(ctx, h, action)
 				if err != nil {
 					msg = "rules: " + err.Error()
@@ -541,6 +545,7 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 		// the error, never the capture.
 		if id == "repaint" {
 			go func() {
+				defer harness.RecoverSide("repaint")
 				if err := h.RepaintReport(ctx, action); err != nil {
 					em.emit(&proto.ControlEvent{ID: id, Action: "error", Message: "repaint report: " + err.Error()})
 					return
@@ -1070,6 +1075,7 @@ func emitTurnError(sessionCtx context.Context, h *harness.Harness, em *emitter, 
 // decides when to ask, because the trigger depends on facts the engine cannot
 // see: whether the input box is empty, and how long the person has sat still.
 func emitSuggestions(ctx context.Context, h *harness.Harness, em *emitter) {
+	defer harness.RecoverSide("suggest") // a goroutine root (the suggest control command)
 	if !suggestEnabled {
 		return
 	}
