@@ -1,0 +1,35 @@
+# Tests on every push to main and every pull request to main, against the
+# tools release/deps.json pins (the same script `make test-pinned` runs).
+# It signs and publishes nothing: release.yml does that, by hand.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - name: the tools
+        run: tools/pinned-tools.sh --github "$RUNNER_TEMP/pinned"
+      # make test is go build, go vet, GOOS=darwin go vet and go test, plus the
+      # recorder module.
+      - name: test
+        run: make test

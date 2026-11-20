@@ -20,6 +20,7 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-24.04
+    timeout-minutes: 45 # tests (20) + web build + signing + publish
     env:
       VERSION: ${{ inputs.version }} # used as "$VERSION": never pasted into a script
     steps:
@@ -32,6 +33,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
       - name: the signing key
         env:
           MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
@@ -41,22 +44,10 @@ jobs:
           sudo apt-get update && sudo apt-get install -y minisign
           umask 077 && printf '%s\n' "$MINISIGN_SECRET_KEY" > "$RUNNER_TEMP/minisign.key"
       # The tests start the tools (mcpshell above all), so they run against
-      # the versions this release ships: deps.json's linux_amd64 tarballs,
-      # checked against its sha256.
+      # the versions this release ships: deps.json's tarballs
+      # (tools/pinned-tools.sh), checked against its sha256.
       - name: the tools
-        run: |
-          mkdir -p "$RUNNER_TEMP/bin"
-          for t in mcpshell poly-lsp-mcp raglit; do
-            url=$(jq -r --arg t "$t" '.artifacts[$t].files.linux_amd64.url' release/deps.json)
-            sum=$(jq -r --arg t "$t" '.artifacts[$t].files.linux_amd64.sha256' release/deps.json)
-            curl -fsSL -o "$RUNNER_TEMP/$t.tar.gz" "$url"
-            echo "$sum  $RUNNER_TEMP/$t.tar.gz" | sha256sum -c -
-            mkdir -p "$RUNNER_TEMP/$t" && tar -xzf "$RUNNER_TEMP/$t.tar.gz" -C "$RUNNER_TEMP/$t"
-            install -m 0755 "$RUNNER_TEMP/$t/$t" "$RUNNER_TEMP/bin/$t"
-            # dun does not look on PATH for its own tools: DUN_<TOOL> points at them.
-            echo "DUN_$(echo "$t" | tr a-z- A-Z_)=$RUNNER_TEMP/bin/$t" >> "$GITHUB_ENV"
-          done
-          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+        run: tools/pinned-tools.sh --github "$RUNNER_TEMP/pinned"
       - name: test
         run: make test
       # The web app is embedded in the release builds (make release runs make
