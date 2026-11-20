@@ -80,8 +80,13 @@ var Supported = []Tool{
 	// description's Toolkits line is "Toolkits (Ns.help() describes one): …".
 	// Min stays: dun's text names no toolkit command, and the model learns
 	// the syntax from the running binary's own description.
+	// Recommended v0.14.1 (2026-11-19), tarballs in deps.json: a leading ~ or
+	// ~/ in Files.*, Db.loadCsv and load(path) resolves to the home dir
+	// (~user is an error); Shell/sh/bash/exec/spawn/system as an undefined
+	// name says eval runs no shell commands and to use the host's exec tool.
+	// No breaking change; Min stays.
 	{Name: "mcpshell", Module: "github.com/iodesystems/mcpshell/cmd/mcpshell",
-		Min: "v0.2.0", Recommended: "v0.14.0"},
+		Min: "v0.2.0", Recommended: "v0.14.1"},
 	// Min 46caee4 (main, 2026-10-24): the first pushed commit with the index
 	// protocol (--exclude, --index-budget), doctor --json, and the pure-Go
 	// tree-sitter, so go install needs Go alone. v0.1.0 (6dab491), its first
