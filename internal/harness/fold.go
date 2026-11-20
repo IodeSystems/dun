@@ -123,7 +123,13 @@ func (h *Harness) recordFacts() string {
 	if len(facts.Commits) > 0 {
 		var commits []string
 		for _, c := range facts.Commits {
-			commits = append(commits, "- "+c.Hash[:8]+" "+c.Subject)
+			// A hash can be shorter than 8 (git's abbreviation is 7 by
+			// default): cutting it blindly panicked the engine on every fold.
+			h := c.Hash
+			if len(h) > 8 {
+				h = h[:8]
+			}
+			commits = append(commits, "- "+h+" "+c.Subject)
 		}
 		lines = append(lines, "Commits:\n"+strings.Join(commits, "\n"))
 	}
