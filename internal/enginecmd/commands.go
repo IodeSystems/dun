@@ -173,7 +173,7 @@ func OwnCommands(iso string) []proto.CommandSpec {
 				"index", "the imports in raglit's index, surfaced by relevance (needs /rag on)",
 				"on", "a file (or glob) back in every request", "off", "a file (or glob) out of every request, still found through raglit's index (/rag on)",
 				"unset", "a file's switch at a scope, back to the one below",
-				"add", "make a file a root rules file at a scope (session when none is given)",
+				"add", "make a file a root rules file at a scope (session when none is given); ./path with --project or --global names each project's own file",
 				"remove", "take back a file /rules add added at a scope"),
 			Description: "project rules (AGENTS.md, CLAUDE.md, their @imports): alone, each file's cost, its switch at each scope and the mode; a mode word sets the project's mode"},
 		{Name: "spend", Usage: "[reconcile <usd> | budget <usd>|off]", Group: "session",
