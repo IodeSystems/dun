@@ -158,6 +158,10 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "errors" {
 		os.Exit(errorsCmd(os.Args[2:], os.Stdout, os.Stderr))
 	}
+	// `dun trace <id>`: where a request's trace id was logged (tracecmd.go).
+	if len(os.Args) > 1 && os.Args[1] == "trace" {
+		os.Exit(traceCmd(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	// `dun tmux`: the tmux.conf lines that show dun's window mark (tmux.go).
 	if len(os.Args) > 1 && os.Args[1] == "tmux" {
 		os.Exit(tmuxCmd(os.Stdout, os.Getenv("TMUX") != "", os.Getenv("LC_TERMINAL") == "iTerm2", execTmuxQuery))
@@ -670,7 +674,8 @@ func main() {
 	var in *inputStream
 	client := llm.NewClient(*url, effKey, *model)
 	tuneClient(fc, client, *url) // its /effort dialect and retries; the env wins, below
-	capsClient = client          // /model and /model probe (capscmd.go)
+	tagSession(fc, client, *url, sessionID)
+	capsClient = client // /model and /model probe (capscmd.go)
 	// Logged out, or no model chosen: a stand-in that refuses every call with
 	// what to do, so the engine still starts (a client can /login through it)
 	// and nothing is contacted.
@@ -692,7 +697,7 @@ func main() {
 	}
 	client.OnUsage = usageFor(*url, effKey, *model, spendmeter.RoleMain)
 	var runner agent.LLMRunner = client
-	childClients := clientCache(fc, *url, effKey, func(c *llm.Client, u string) { tuneClient(fc, c, u) },
+	childClients := clientCache(fc, *url, effKey, func(c *llm.Client, u string) { tuneClient(fc, c, u); tagSession(fc, c, u, sessionID) },
 		func(u, k, model string) func(llm.Usage) { return usageFor(u, k, model, spendmeter.RoleModel) })
 	if why := dunconfig.ProviderMissing(*url, *model); why != nil {
 		runner = noProvider{why}

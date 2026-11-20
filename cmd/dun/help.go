@@ -45,6 +45,7 @@ var helpStart = [][2]string{
 	{"dun watch <session>", "a line each time a session ends a turn or asks (dun watch --help)"},
 	{"dun msg", "message dun sessions and listen for messages from a shell (dun msg --help)"},
 	{"dun errors [--json]", "the turn errors dun kept, newest last, with the endpoint and the server's body; to paste in a report (dun errors --help)"},
+	{"dun trace <id>", "find a request by the trace id in a provider's or gateway's log: its session, role and every line logged for it"},
 	{"dun ps [--watch]", "every process dun runs, by session: CPU, memory, IO; SESSION (none) is a leak (dun ps --help)"},
 	{"dun --engine", "engine mode: line-delimited JSON events on stdin/stdout (what dund runs)"},
 	{"dun dund …", "the session service (dun dund --help)"},

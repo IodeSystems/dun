@@ -261,7 +261,13 @@ type observation struct {
 	Slope        float64 // the fit's tokens-per-char, 0 while it is not trusted
 	Overhead     float64 // the fit's per-request constant, in tokens
 	First        bool    // the calibration round: nothing measured before it
+	// Trace is the round's request id (harness trace.go), "" when unknown;
+	// set by the caller, logged at the end of the line.
+	Trace string
 }
+
+// WithTrace is o naming its request's trace id in the log line.
+func (o observation) WithTrace(id string) observation { o.Trace = id; return o }
 
 // Fitted reports whether the affine fit is in force rather than the one-point
 // ratio.
@@ -358,23 +364,30 @@ func (m *Meter) LastBuiltChars() int {
 // generation that dies at the wall twenty minutes later. The only way that shows
 // up in a log is if the log prints both numbers side by side.
 func LogObservation(o observation, ok bool) {
+	logf := func(format string, a ...any) {
+		if o.Trace != "" {
+			format += " [trace %s]"
+			a = append(a, o.Trace)
+		}
+		log.Printf(format, a...)
+	}
 	switch {
 	case !ok && o.PromptTokens == 0:
 		return // nothing reported; not worth a line every round
 	case !ok:
-		log.Printf("dun: prompt %d chars → provider counted %d tokens (%.2f chars/token) — "+
+		logf("dun: prompt %d chars → provider counted %d tokens (%.2f chars/token) — "+
 			"OUTSIDE [%.1f, %.1f], keeping the previous ratio; the two sides are not measuring "+
 			"the same request", o.Chars, o.PromptTokens, o.Ratio, ratioFloor, ratioCeil)
 	case o.First:
-		log.Printf("dun: calibrated: prompt %d chars → %d tokens (%.2f chars/token); the %.0f "+
+		logf("dun: calibrated: prompt %d chars → %d tokens (%.2f chars/token); the %.0f "+
 			"chars/token default had estimated %d (%+.0f%%). Shaping now uses the measured ratio.",
 			o.Chars, o.PromptTokens, o.Ratio, FallbackCharsPerToken, o.Estimated, o.Drift()*100)
 	case o.Fitted():
-		log.Printf("dun: prompt %d chars → %d tokens; estimate %d (%+.0f%%); fit: %.2f chars/token "+
+		logf("dun: prompt %d chars → %d tokens; estimate %d (%+.0f%%); fit: %.2f chars/token "+
 			"marginal + %.0f tokens per request",
 			o.Chars, o.PromptTokens, o.Estimated, o.Drift()*100, 1/o.Slope, o.Overhead)
 	default:
-		log.Printf("dun: prompt %d chars → %d tokens (%.2f chars/token); estimate %d (%+.0f%%)",
+		logf("dun: prompt %d chars → %d tokens (%.2f chars/token); estimate %d (%+.0f%%)",
 			o.Chars, o.PromptTokens, o.Ratio, o.Estimated, o.Drift()*100)
 	}
 }

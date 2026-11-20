@@ -37,6 +37,8 @@ type reasoningTee struct {
 	// that cannot stop reasoning: agentkit sent it at the lowest effort
 	// instead (reasoningoff.go).
 	offRefused func()
+	// trace names each round's request (trace.go); nil sends none.
+	trace *tracer
 }
 
 // teeTurn is the turn's runner: teed for live reasoning (when on is set) and
@@ -46,7 +48,7 @@ func (h *Harness) teeTurn(r agent.LLMRunner, on func(string)) agent.LLMRunner {
 		return r
 	}
 	h.req = h.newReqMeter()
-	return &reasoningTee{LLMRunner: r, on: on, round: &h.round, req: h.req, force: h.planForceOpts, offRefused: h.noteOffRefused}
+	return &reasoningTee{LLMRunner: r, on: on, round: &h.round, req: h.req, force: h.planForceOpts, offRefused: h.noteOffRefused, trace: h.trace}
 }
 
 // untee is the runner under a tee, for a call that is not the turn's.
@@ -67,6 +69,13 @@ func (t *reasoningTee) ChatStream(ctx context.Context, msgs []llm.Message, tools
 	var in <-chan llm.StreamChunk
 	var err error
 	r := t.LLMRunner
+	// The round's trace id (trace.go), watched in this tee's own loop: a
+	// second goroutine between the client and the tee would hold chunks an
+	// interrupt's partial capture must see.
+	var call *traceCall
+	if t.trace != nil {
+		opts, call = t.trace.open(t.trace.mainRole(), opts)
+	}
 	if forced := t.forced(tools, opts); forced != nil {
 		in, err = planForcedStream(ctx, r, msgs, tools, opts, forced)
 	} else {
@@ -74,6 +83,7 @@ func (t *reasoningTee) ChatStream(ctx context.Context, msgs []llm.Message, tools
 	}
 	if err != nil || in == nil {
 		t.req.end()
+		call.failed(err)
 		return in, err
 	}
 	// A model that refuses /effort off got the round at the lowest effort.
@@ -87,9 +97,11 @@ func (t *reasoningTee) ChatStream(ctx context.Context, msgs []llm.Message, tools
 	go func() {
 		defer close(out)
 		defer t.req.end()
+		defer call.close()
 		sawDone := false
 		var held []llm.StreamChunk
 		for c := range in {
+			call.see(c)
 			if t.round != nil {
 				t.round.add(c)
 			}
@@ -123,7 +135,8 @@ func (t *reasoningTee) ChatStream(ctx context.Context, msgs []llm.Message, tools
 				return
 			}
 		}
-		t.req.end() // after the usage hook, before the reader sees Done
+		t.req.end()  // after the usage hook, before the reader sees Done
+		call.close() // so the round's stats are written before the turn ends
 		if len(held) > 0 {
 			for _, c := range held {
 				select {
