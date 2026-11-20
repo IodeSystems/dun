@@ -73,6 +73,30 @@ const (
 	systemFinish   = "Finish the whole task: a missing tool or package is yours to install. Treat data you were given as the only copy: back it up before anything that could change or delete it. Before a brute-force search, measure its rate and estimate the total time; if that exceeds what a direct method needs or the time you have, use the direct method. Before your final message, check each requirement the task states (paths, names, formats, values) against what you produced, running it where it can run, and fix what does not match; then say briefly what you changed and what remains. Be concise."
 	systemWorkCode = "\n\nWork step by step: find with node_query, read what you need, and make minimal precise edits; the diagnostics come back with each edit. Prefer node_edit over rewriting files. " + systemFinish
 	systemWork     = "\n\nWork step by step: read what you need before changing it, and make minimal precise edits. " + systemFinish
+
+	// systemFinishCandidate is the arm-B candidate in the done-after-checks
+	// A/B (sp_1m7j2ax52fmp3r6wc6n1cv): a stronger work line drafted from the
+	// four premature-done failure modes measured on TB2.1
+	// (jobs/full-20261106-232928, GLM-5.3-Flash low effort) — a test claimed
+	// to have passed that did not (break-filter-js-from-html), a missing
+	// interpreter given up on instead of installed (torch-tensor-parallelism),
+	// done claimed with the work unfinished (fix-git: files not merged), and a
+	// report missing a required key (multi-source-data-merger). Each clause
+	// below targets one of them in order. It is a candidate, not a
+	// replacement: arm A (systemFinish) is untouched, and the sweep decides
+	// what lands.
+	//
+	// Wording that is AVOIDED, measured on TB2.1 winning-avg-corewars:
+	// "check, then give your final message" — it read as a last instruction
+	// and the model stopped while admitting a failing requirement. The line
+	// therefore commands CONTINUATION on failure ("keep working, and end only
+	// once …") and makes an unmet requirement an exception you name, not a
+	// step past which the turn is over.
+	//
+	// It is a candidate, not a replacement: no prompt is built from it yet.
+	// TestSystemFinishCandidate_BesideSystemFinish pins that. The sweep
+	// (examples/harbor/run.sh, arm B) decides what lands.
+	systemFinishCandidate = "Finish the whole task: a missing tool or package is yours to install — a missing interpreter, library, or dependency is not a reason to stop. Work the task states is yours to finish: do not report done with a step left undone. Treat data you were given as the only copy: back it up before anything that could change or delete it. Before a brute-force search, measure its rate and estimate the total time; if that exceeds what a direct method needs or the time you have, use the direct method. Before you finish, check each requirement the task states (paths, names, formats, keys, values) against what you produced, and run the task's own checks — a check you only read is not a check you passed. If a requirement fails or a check is red, keep working: end only once every stated requirement is met and its check passes, or you say which one you cannot meet and why. Be concise."
 	// systemAlone is --non-interactive's: no one is there during the run.
 	systemAlone = "\n\nThis run is non-interactive: no one reads your messages until you finish, and no one answers questions. You are on your own to reach the goal."
 
