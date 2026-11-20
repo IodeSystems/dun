@@ -393,16 +393,20 @@ func readingCapFrom(v string) int {
 // userRowAt is userRow wrapped to width (0: unwrapped), its band filled to
 // width or bandCap, whichever is less — every wrapped row to the same edge.
 func userRowAt(text string, width int) string {
-	width = min(width, readingCap)
 	st, row := stUser, "› "+text
 	if rest, ok := strings.CutPrefix(text, autoResumePrefix); ok {
 		st, row = StDim, "↻ resumed after the restart — "+rest
 	}
 	// Sent by dund's scheduler, not typed now (internal/dund scheduledText):
 	// the bracket says when it was set, so the mark is all the row adds.
-	if strings.HasPrefix(text, "[scheduled ") || strings.HasPrefix(text, "[loop ") {
+	scheduled := strings.HasPrefix(text, "[scheduled ") || strings.HasPrefix(text, "[loop ")
+	if scheduled {
 		row = "⏲ " + text
 	}
+	if width > 0 && !scheduled && !strings.HasPrefix(text, autoResumePrefix) {
+		return typedRowAt(text, width)
+	}
+	width = min(width, readingCap)
 	row = linkifyStyled(row)
 	if width > 0 {
 		row = wrapProse(row, width)

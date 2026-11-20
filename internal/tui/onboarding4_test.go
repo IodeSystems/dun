@@ -165,6 +165,12 @@ func TestQuestionBand_AnswerColourAndCappedFill(t *testing.T) {
 		for _, text := range []string{"hi", long} {
 			rows := strings.Split(userRowAt(text, w), "\n")
 			want := min(w, bandCap)
+			if text == long { // typed text is not capped: the band reaches its widest row
+				want = ansi.StringWidth(rows[0])
+				if want < min(w, bandCap) || want > w {
+					t.Errorf("width %d: band %d, want between %d and %d", w, want, min(w, bandCap), w)
+				}
+			}
 			for i, r := range rows {
 				if got := ansi.StringWidth(r); got != want {
 					t.Errorf("width %d, %d-char question, row %d: fill %d, want %d", w, len(text), i, got, want)
