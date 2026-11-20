@@ -61,8 +61,9 @@ without a fold) only the bounding rungs ever run.
   also keeps the pristine tail, as does a fold with no target (`Compact`)
   or a band that cannot hold more than the tail (little history). A huge
   newest result over the band by itself falls back the same way.
-  `CompactionInfo` reports `KeptCount`/`KeptTokens`; `TokensAfter` stays
-  the LOD-rendered count and `TokensAfterFull` is the count without LOD.
+  `CompactionInfo` reports `KeptCount`/`KeptTokens`; `TokensAfter` is the
+  count without LOD, what the next build sends (agentkit v0.38.0; before
+  it `TokensAfter` was the LOD render and `TokensAfterFull` this count).
   The fold notice: `compacted 237 entries, kept 198 verbatim (129.7k):
   294971 → 147755 tokens (saved …)`, the arrow at `TokensAfter`
   (`internal/harness/compaction.go`). Measured in

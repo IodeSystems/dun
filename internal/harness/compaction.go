@@ -14,7 +14,7 @@ import (
 type CompactionNote struct {
 	Subsumed      int    // entries folded into the summary
 	TokensBefore  int    // estimated active-window tokens before
-	TokensAfter   int    // and after: what the next build sends (LOD-rendered)
+	TokensAfter   int    // and after: what the next build sends (without LOD: a fold lands under target)
 	Kept          int    // the newest entries kept verbatim
 	KeptTokens    int    // and their tokens, without LOD
 	Summary       string // the summary that replaced them
@@ -29,8 +29,9 @@ func (n CompactionNote) String() string {
 	if n.Kept > 0 {
 		s += fmt.Sprintf(", kept %d verbatim (%s)", n.Kept, numfmt.TokN(n.KeptTokens))
 	}
-	// The arrow ends at TokensAfter, not agentkit's TokensAfterFull (the
-	// window without LOD): TokensAfter is what the next build sends.
+	// The arrow ends at TokensAfter: what the next build sends. Since agentkit
+	// v0.38.0 that is the render without LOD (before it, TokensAfterFull);
+	// the LOD render it replaced only applied under pressure.
 	s += fmt.Sprintf(": %d → %d tokens (saved %d)", n.TokensBefore, n.TokensAfter, n.TokensBefore-n.TokensAfter)
 	if n.Cause != "" {
 		s += " · " + n.Cause

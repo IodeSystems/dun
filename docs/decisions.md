@@ -1106,8 +1106,8 @@ From the 2026-11-18 inventory of model calls nobody typed for.
   without LOD) fits 55% of target; only the oldest are folded. The pristine
   tail is the minimum. The fold notice says what was kept: `compacted 237
   entries, kept 198 verbatim (129.7k): 294971 → 147755 tokens …`; the arrow
-  ends at `TokensAfter` (LOD-rendered, what agentkit says the next build
-  sends), not `TokensAfterFull`. Proof: `internal/harness/foldkeep_test.go`
+  ends at `TokensAfter`, what the next build sends (since agentkit v0.38.0
+  the count without LOD; v0.37.0's `TokensAfterFull` is gone). Proof: `internal/harness/foldkeep_test.go`
   (the simulated 434-entry session sends 51% of target; little history and
   a huge newest result fold as before).
 - **A refused reasoning off is agentkit's to resend** (agentkit v0.34.0;
