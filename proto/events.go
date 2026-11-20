@@ -734,6 +734,9 @@ type AgentInfo struct {
 	Seconds int    `json:"seconds"`
 	// Dir is the tree an isolated child works in ("" its parent's).
 	Dir string `json:"dir,omitempty"`
+	// Blocked is why the child is stuck: the reason on a plan node it owns
+	// that it closed as blocked. "" none is, and from an older engine.
+	Blocked string `json:"blocked,omitempty"`
 }
 
 // Jobs is every background job, the whole list each time. Times are unix

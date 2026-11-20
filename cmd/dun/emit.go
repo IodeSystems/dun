@@ -291,7 +291,7 @@ func agentsProto(as []harness.AgentInfo) []proto.AgentInfo {
 	out := make([]proto.AgentInfo, 0, len(as))
 	for _, a := range as {
 		out = append(out, proto.AgentInfo{ID: a.ID, Model: a.Model, Tier: a.Tier, Effort: a.Effort, State: a.State, Status: a.Status,
-			Prompt: a.Prompt, Tokens: a.Tokens, Seconds: a.Seconds, Dir: a.Dir})
+			Prompt: a.Prompt, Tokens: a.Tokens, Seconds: a.Seconds, Dir: a.Dir, Blocked: a.Blocked})
 	}
 	return out
 }

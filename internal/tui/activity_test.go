@@ -196,8 +196,9 @@ func TestActivity_MultiLineDetailIsOneRow(t *testing.T) {
 	}
 }
 
-// The open table groups by state, agents and jobs interleaved: working,
-// idle agents, finished, the dismissed stack; recent first within a group.
+// The open table groups by state, agents and jobs interleaved: what needs
+// the person (a failed job), working, idle agents, finished, the dismissed
+// stack; recent first within a group.
 func TestActivityTableGroupsByState(t *testing.T) {
 	m := newTUIModel(&dunProc{stdin: &recWC{}}, "/ws")
 	now := time.Now()
@@ -216,12 +217,101 @@ func TestActivityTableGroupsByState(t *testing.T) {
 	}
 	order := m.takeActOrder()
 	want := []actKey{
+		{id: 3},
 		{agent: true, id: 3}, {id: 2}, // tie on recent: agents first
 		{agent: true, id: 4}, {agent: true, id: 2},
-		{agent: true, id: 5}, {id: 3}, {id: 1},
+		{agent: true, id: 5}, {id: 1},
 		stackKey,
 	}
 	if !slices.Equal(order, want) {
 		t.Fatalf("order %+v, want %+v", order, want)
+	}
+}
+
+// A failed job's strip says what happened in words and the keys that reach
+// its log; a narrow strip cuts the command, never the state or the keys.
+func TestActivityStripFailedJobSaysWhy(t *testing.T) {
+	m := newTUIModel(&dunProc{stdin: &recWC{}}, "/ws")
+	m.w = 100
+	now := time.Now().Unix()
+	m.agents = []agentRow{{id: 1, state: "idle"}}
+	m.jobs = []jobRow{
+		{id: 2, state: "ok", command: "echo hi", started: now - 9, ended: now - 8},
+		{id: 3, state: "failed", code: 2, command: "make test-pkg P=./internal/tui/...", started: now - 4, ended: now},
+	}
+	got := ansi.Strip(m.activityView())
+	want := "▸ ✗ job 3 failed (exit 2) · shift+tab, enter: log · "
+	if !strings.HasPrefix(got, want) {
+		t.Fatalf("strip %q, want it to start %q", got, want)
+	}
+	if !strings.Contains(got, "⟩ make test") {
+		t.Errorf("the command is the detail: %q", got)
+	}
+	m.focus = focusConvo
+	if got := ansi.Strip(m.activityView()); !strings.Contains(got, "· tab, enter: log") {
+		t.Errorf("from the conversation the key is tab: %q", got)
+	}
+	m.focus = focusInput
+	m.w = 40
+	got = ansi.Strip(m.activityView())
+	if !strings.HasPrefix(got, "▸ ✗ job 3 failed (exit 2) · shift+tab") || lipgloss.Width(got) > m.w-1 {
+		t.Errorf("narrow strip %q (%d cols): the state and keys must stay, within %d", got, lipgloss.Width(got), m.w-1)
+	}
+}
+
+// Focusing the strip opens the table on the failed job, and the status line
+// says what happened and the keys that act on it.
+func TestActivityHintFailedJobKeys(t *testing.T) {
+	v := newVtui(120, 24)
+	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
+	now := float64(time.Now().Unix())
+	v.event(map[string]any{"type": "jobs", "jobs": []any{
+		map[string]any{"id": 3.0, "command": "go test ./...", "state": "running", "started": now - 120},
+		map[string]any{"id": 4.0, "command": "make lint", "state": "failed", "code": 1.0, "started": now - 5, "ended": now - 4},
+	}})
+	v.m.setFocus(focusActivity)
+	if r := v.m.actSelected(); r == nil || r.key != (actKey{id: 4}) {
+		t.Fatalf("the table should open on the failed job, selected %+v", r)
+	}
+	if !strings.Contains(v.view(), "✗ job 4 failed (exit 1) · enter log · c clear done") {
+		t.Errorf("the hint should name the failure and its keys:\n%s", v.view())
+	}
+	v.m.actMove(1) // the running job: the general keys again
+	if !strings.Contains(v.view(), "x kill job") {
+		t.Errorf("a running job's hint names x:\n%s", v.view())
+	}
+}
+
+// A child whose plan node is blocked says so and why, in the attention
+// colour, and sorts above the working rows; dund sends the why (blocked).
+func TestActivityBlockedAgentShown(t *testing.T) {
+	v := newVtui(120, 24)
+	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
+	v.event(map[string]any{"type": "agents", "agents": []any{
+		map[string]any{"id": 1.0, "state": "running", "prompt": "build it"},
+		map[string]any{"id": 2.0, "state": "idle", "prompt": "deploy", "blocked": "needs the deploy token"},
+	}})
+	strip := ansi.Strip(v.m.activityView())
+	if !strings.HasPrefix(strip, "▸ ⚠ agent #2 blocked: needs the deploy token · shift+tab, enter: open") {
+		t.Errorf("strip %q", strip)
+	}
+	v.m.setFocus(focusActivity)
+	rows := v.m.actRows()
+	if rows[0].key != (actKey{agent: true, id: 2}) || v.m.actSel != rows[0].key {
+		t.Fatalf("the blocked agent sorts first and is selected: %+v sel %+v", rows[0].key, v.m.actSel)
+	}
+	view := v.view()
+	if !strings.Contains(view, "⚠ #2 idle  blocked: needs the deploy token") {
+		t.Errorf("the table row says blocked and why:\n%s", view)
+	}
+	if !strings.Contains(view, "⚠ agent #2 blocked: needs the deploy token · enter open its conversation") {
+		t.Errorf("the hint says why and the key:\n%s", view)
+	}
+	// A dismissed child's node is the main agent's: no attention.
+	v.event(map[string]any{"type": "agents", "agents": []any{
+		map[string]any{"id": 2.0, "state": "dismissed", "blocked": "needs the deploy token"},
+	}})
+	if strings.Contains(ansi.Strip(v.m.activityView()), "blocked") {
+		t.Errorf("a dismissed agent is not blocked: %q", ansi.Strip(v.m.activityView()))
 	}
 }

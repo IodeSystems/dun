@@ -255,6 +255,37 @@ func (h *Harness) planChanged() {
 	if h.cfg.OnPlan != nil {
 		h.cfg.OnPlan()
 	}
+	// A child's row says when a node it owns is blocked (AgentInfo.Blocked),
+	// so the list goes out again with the plan.
+	if h.cfg.OnAgents != nil && len(h.agentList()) > 0 {
+		h.agentsChanged()
+	}
+}
+
+// planBlockedByAgent is the why of each child's blocked plan node, by agent
+// number: the first one in plan order when a child has several. n is how
+// many children there are; with none the plan is not read.
+func (h *Harness) planBlockedByAgent(n int) map[int]string {
+	if n == 0 {
+		return nil
+	}
+	g, err := planStore{h}.View(context.Background())
+	if err != nil {
+		return nil
+	}
+	out := map[int]string{}
+	for _, nd := range g.Nodes {
+		k, ok := planAgentNum(nd.Owner)
+		if !ok || nd.Status != taskgraph.Blocked || out[k] != "" {
+			continue
+		}
+		why := strings.TrimSpace(nd.Why)
+		if why == "" {
+			why = "node " + nd.ID + " (no reason given)"
+		}
+		out[k] = why
+	}
+	return out
 }
 
 // planDesc is the root's plan_add description, in place of taskgraph's own:
