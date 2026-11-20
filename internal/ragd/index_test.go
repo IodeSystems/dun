@@ -170,8 +170,8 @@ func TestIndexFreshOnNewSegmenter(t *testing.T) {
 // test binary's build info lists modules) and the pure-Go parser.
 func TestCodeSegRuntime(t *testing.T) {
 	rt := codeSeg{}.Runtime()
-	if !strings.HasPrefix(rt, "poly-lsp-mcp/segment@v0.5.3 gotreesitter") {
-		t.Fatalf("Runtime() = %q, want poly-lsp-mcp/segment@v0.5.3 gotreesitter…", rt)
+	if !strings.HasPrefix(rt, "poly-lsp-mcp/segment@v0.5.4 gotreesitter") {
+		t.Fatalf("Runtime() = %q, want poly-lsp-mcp/segment@v0.5.4 gotreesitter…", rt)
 	}
 }
 
