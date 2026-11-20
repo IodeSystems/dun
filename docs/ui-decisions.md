@@ -83,9 +83,10 @@ are in `decisions.md`.
   step below the answer: previews and expanded bodies. `stDim` (240, 2.5:1) is
   for chrome only (arrows, rules, hints, labels). Orange means attention
   (a failed job, not-logged-in; an old transcript's blocked agent); neutral facts are not
-  orange. Answer and user prose wrap at `bandCap` (100) columns, a reading
+  orange. Answer prose wraps at `bandCap` (100) columns, a reading
   width (long lines are hard to follow back); `DUN_READING_WIDTH=<cols>|off`
-  changes it. Prose wraps at spaces only, so a URL moves whole to the next row.
+  changes it. A message the user typed is not capped: it keeps every line
+  break and wraps at the composer's width (`typedRowAt`), as typed. Prose wraps at spaces only, so a URL moves whole to the next row.
   Collapsed one-row kinds (notice, tool call, thought) use the whole pane and
   are cut once, at its edge.
 - **URLs are OSC 8 links** (`hyperlink.go`): every row of a wrapped URL carries

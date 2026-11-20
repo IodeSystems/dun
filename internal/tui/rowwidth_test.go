@@ -71,8 +71,10 @@ func TestRowWidth_ReadingCapDefault(t *testing.T) {
 	}
 	text := strings.Repeat("alpha bravo charlie delta ", 20)
 	rows := rwScreen(t, 200, func(m tuiModel) tuiModel { m.appendUser(text); return m })
-	if got := rwMax(rows, "alpha"); got > bandCap {
-		t.Errorf("user row %d wide at 200 columns, cap %d", got, bandCap)
+	// The cap is for assistant prose; a typed message wraps at the composer's
+	// width (typedrow_test.go), so its rows pass the cap.
+	if got := rwMax(rows, "alpha"); got <= bandCap {
+		t.Errorf("user row %d wide at 200 columns, want past the cap %d", got, bandCap)
 	}
 }
 
