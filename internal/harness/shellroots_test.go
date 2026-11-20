@@ -43,6 +43,11 @@ func TestWithClientRoots(t *testing.T) {
 	if got, ok := withClientRoots(shell, "/bin/mcpshell", got); !ok || len(got) != len(base)+1 {
 		t.Errorf("flag given twice: %v %v", got, ok)
 	}
+	// An empty --files-dir (no workspace) is no root: mcpshell v0.15.0
+	// exits on --files-client-roots without one (the v0.9.0 CI failure).
+	if got, ok := withClientRoots(shell, "/bin/mcpshell", []string{"mcp", "--files-dir", ""}); ok || len(got) != 3 {
+		t.Fatalf("empty --files-dir: got %v ok=%v, want no flag", got, ok)
+	}
 	if got, ok := withClientRoots(shell, "/bin/mcpshell", []string{"mcp"}); ok || len(got) != 1 {
 		t.Errorf("no --files-dir: %v %v", got, ok)
 	}

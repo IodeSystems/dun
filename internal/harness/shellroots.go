@@ -71,7 +71,7 @@ var clientRootsBinary = func(path string) bool {
 // needs one); ok reports whether the shell will ask for roots. A shell
 // that is not mcpshell is left alone.
 func withClientRoots(s mcpserver.Server, command string, args []string) ([]string, bool) {
-	if filepath.Base(s.Command) != "mcpshell" || !hasFlag(args, "--files-dir") || !clientRootsBinary(command) {
+	if filepath.Base(s.Command) != "mcpshell" || flagValue(args, "--files-dir") == "" || !clientRootsBinary(command) {
 		return args, false
 	}
 	if hasFlag(args, clientRootsFlag) {
@@ -89,6 +89,25 @@ func hasFlag(args []string, flag string) bool {
 		}
 	}
 	return false
+}
+
+// flagValue is the value args give flag (--flag v, --flag=v, one dash too),
+// "" when they give none. An empty --files-dir (a session with no
+// workspace) is no workspace root to mcpshell, which then refuses
+// --files-client-roots and exits.
+func flagValue(args []string, flag string) string {
+	bare := strings.TrimLeft(flag, "-")
+	for i, a := range args {
+		for _, p := range []string{"--" + bare, "-" + bare} {
+			if a == p && i+1 < len(args) {
+				return args[i+1]
+			}
+			if v, ok := strings.CutPrefix(a, p+"="); ok {
+				return v
+			}
+		}
+	}
+	return ""
 }
 
 // shellRoot is one entry of a roots/list result.
