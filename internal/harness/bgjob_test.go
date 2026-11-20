@@ -126,7 +126,12 @@ func TestStartBackground_LogsAndReportsTheExitCode(t *testing.T) {
 	if !strings.Contains(string(b), "hello-bg") {
 		t.Errorf("the log should hold the output: %q", b)
 	}
-	notes := h.notes()
+	// The status turns FAILED a moment before the notice is posted: wait for
+	// it. notes() drains, so collect what each call returns.
+	var notes []string
+	waitFor(t, 10*time.Second, func() bool { notes = append(notes, h.notes()...); return len(notes) > 0 })
+	time.Sleep(50 * time.Millisecond) // a second notice, if one were sent, lands here
+	notes = append(notes, h.notes()...)
 	if len(notes) != 1 {
 		t.Fatalf("want one completion notice, got %q", notes)
 	}
