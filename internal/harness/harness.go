@@ -429,6 +429,7 @@ type Harness struct {
 	settle     settleState  // the delayed end-of-turn report (settle.go)
 	auto       autoState    // turn origins and the automatic-turn budget (autoturn.go)
 	netWait    netWaitState // waiting for the network after a turn gave up (netwait.go)
+	gate       TurnGate     // how a message enters while a turn runs (turngate.go)
 	noteMu     sync.Mutex
 	queue      []queued // messages not yet delivered to the model
 	// lifted are the person's messages the next stored tool result carries

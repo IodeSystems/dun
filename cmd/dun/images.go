@@ -35,6 +35,16 @@ func dunImages(imgs []proto.Image) []harness.ImageInput {
 	return out
 }
 
+// protoImages is dunImages back: a held message's images, for the turn and
+// a refusal.
+func protoImages(imgs []harness.ImageInput) []proto.Image {
+	out := make([]proto.Image, len(imgs))
+	for i, im := range imgs {
+		out[i] = proto.Image{Path: im.Path, Label: im.Label}
+	}
+	return out
+}
+
 // refuseImages hands a message with images back to the user: why it was
 // not sent, and the message itself so the client puts it back in the
 // composer. done closes the turn the client opened when it sent.

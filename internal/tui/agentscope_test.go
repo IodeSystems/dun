@@ -11,6 +11,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/iodesystems/dun/proto"
 )
 
 // Descending into a sub-agent from the activity strip: its conversation,
@@ -220,6 +222,33 @@ func TestAgentScope_TypingTellsTheChild(t *testing.T) {
 	m = m.feed(evMsg{"type": "agent_told", "agent": 1.0, "message": "Queued for agent #1: it reads it at its next step, and its report covers it."})
 	if !strings.Contains(convoText(m), "Queued for agent #1") {
 		t.Errorf("the queued ack must show until the child takes it: %s", convoText(m))
+	}
+}
+
+// A message with images to a child goes with its images, working or idle:
+// the child takes them through the session's own input gate
+// (harness/turngate.go), not refused here.
+func TestAgentScope_ImagesGoToTheChild(t *testing.T) {
+	for _, id := range []int{1, 2} { // running, idle
+		m, buf := scopeModel(t, 100)
+		m.enterAgentScope(id)
+		buf.Reset()
+		img := proto.Image{Path: "/tmp/a.png", Label: "[image 1: a.png]"}
+		m = m.sendUserImages("what is this "+img.Label, []proto.Image{img})
+		var sent struct {
+			Type, ID, Action, Content string
+			Images                    []proto.Image
+		}
+		if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &sent); err != nil {
+			t.Fatalf("agent #%d: %v: %q", id, err, buf.String())
+		}
+		if sent.Type != "agent" || sent.Action != "tell" || sent.ID != fmt.Sprint(id) ||
+			len(sent.Images) != 1 || sent.Images[0] != img {
+			t.Errorf("agent #%d: the tell must carry the image: %+v", id, sent)
+		}
+		if strings.Contains(convoText(m), "cannot") {
+			t.Errorf("agent #%d: refused: %s", id, convoText(m))
+		}
 	}
 }
 

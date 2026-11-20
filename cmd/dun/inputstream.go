@@ -31,10 +31,6 @@ type inputStream struct {
 	// because it is set after the harness exists, while the scanner already runs.
 	mu  sync.Mutex
 	mid func(userMsg) bool
-	// held is the messages with images that arrived during a turn (see
-	// hold); heldCh says one is waiting.
-	held   []userMsg
-	heldCh chan struct{}
 	// srv handles a `server` event (/rag, /lsp) inline, for the same reason as
 	// mid: it must work while a turn is running.
 	srv func(alias, action string)
@@ -54,8 +50,8 @@ type inputStream struct {
 	// agentFn handles an `agent` event: the human viewing a child's transcript
 	// or telling it something. Same install-after-the-harness-exists problem as
 	// srv and ctrl, so it queues the same way.
-	agentFn      func(id, action, content string)
-	agentPending [][3]string
+	agentFn      func(proto.AgentCmd)
+	agentPending []proto.AgentCmd
 	// peerFn handles dund's peer frames (peers.go): a reply to this engine's
 	// dun_list/dun_msg, or another session's message. Inline: a reply is
 	// what a running tool call waits on. Queued until installed, like the
@@ -141,27 +137,27 @@ func (s *inputStream) setResetCb(f func()) {
 }
 
 // agentCmd runs the installed agent handler, queueing until one exists.
-func (s *inputStream) agentCmd(id, action, content string) {
+func (s *inputStream) agentCmd(a proto.AgentCmd) {
 	s.mu.Lock()
 	fn := s.agentFn
 	if fn == nil {
-		s.agentPending = append(s.agentPending, [3]string{id, action, content})
+		s.agentPending = append(s.agentPending, a)
 	}
 	s.mu.Unlock()
 	if fn != nil {
-		fn(id, action, content)
+		fn(a)
 	}
 }
 
 // setAgentFn installs the handler and drains whatever arrived first.
-func (s *inputStream) setAgentFn(fn func(id, action, content string)) {
+func (s *inputStream) setAgentFn(fn func(proto.AgentCmd)) {
 	s.mu.Lock()
 	s.agentFn = fn
 	pending := s.agentPending
 	s.agentPending = nil
 	s.mu.Unlock()
 	for _, p := range pending {
-		fn(p[0], p[1], p[2])
+		fn(p)
 	}
 }
 
@@ -205,32 +201,6 @@ type userMsg struct {
 	images  []proto.Image
 }
 
-// hold keeps a message for the turn after the running one. A message with
-// images cannot be lifted into a tool result, and the scanner cannot wait
-// for the loop to take it (the running turn's answers and interrupts come
-// through the scanner).
-func (s *inputStream) hold(msg userMsg) {
-	s.mu.Lock()
-	s.held = append(s.held, msg)
-	s.mu.Unlock()
-	select {
-	case s.heldCh <- struct{}{}:
-	default:
-	}
-}
-
-// takeHeld returns the oldest held message.
-func (s *inputStream) takeHeld() (userMsg, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if len(s.held) == 0 {
-		return userMsg{}, false
-	}
-	m := s.held[0]
-	s.held = s.held[1:]
-	return m, true
-}
-
 // stopped reports whether users closed because of an explicit stop/quit event
 // rather than EOF. Safe to call only after users is closed: the scanner closes
 // quit first, so the happens-before is via that close.
@@ -247,8 +217,7 @@ func newInputStream() *inputStream { return newInputStreamFrom(os.Stdin) }
 // newInputStreamFrom is newInputStream over an arbitrary reader, so a test can
 // drive the event parsing and the EOF-vs-stop distinction without a real stdin.
 func newInputStreamFrom(r io.Reader) *inputStream {
-	s := &inputStream{users: make(chan userMsg), answers: make(chan proto.Answer), quit: make(chan struct{}),
-		heldCh: make(chan struct{}, 1)}
+	s := &inputStream{users: make(chan userMsg), answers: make(chan proto.Answer), quit: make(chan struct{})}
 	go func() {
 		sc := bufio.NewScanner(r)
 		sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
@@ -284,7 +253,7 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 				// The human looking at, or steering, a sub-agent. Inline for the
 				// same reason as the others: a turn may be running, and this
 				// loop is the only reader of `answer` events.
-				s.agentCmd(ev.ID, ev.Action, ev.Content)
+				s.agentCmd(proto.AgentCmd{ID: ev.ID, Action: ev.Action, Content: ev.Content, Images: ev.Images})
 			case "user":
 				msg := userMsg{content: ev.Content, images: ev.Images}
 				if s.midTurn(msg) {

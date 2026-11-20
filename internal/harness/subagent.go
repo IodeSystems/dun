@@ -77,13 +77,6 @@ type subAgent struct {
 	iso                  isolation // where it works, when not in its parent's tree (subisolation.go)
 	callID               string    // the parent's agent call that spawned it, "" for one from before (agentRecord); under mu
 
-	// tellMu orders a mid-run tell against the run's last look for news:
-	// a tell lands before that look (work takes it) or after the intake
-	// shut (tell waits for the settle and starts the next run). Taken
-	// before mu when both are held.
-	tellMu     sync.Mutex
-	intakeShut bool // under tellMu: this run has looked for news for the last time
-
 	mu sync.Mutex
 	h  *Harness // nil for a stopped child until it is resumed
 	// state/status/final are what the child says about itself. status
@@ -219,6 +212,11 @@ func (s *subAgent) stop() {
 // gave the duration of the child's FIRST task. Measured live: three polls
 // minutes apart all answered "RUNNING after 2m1s".
 func (s *subAgent) startRunLocked() {
+	if s.h != nil {
+		// From now a tell is queued for the run (turngate.go), as a message
+		// is for the session's running turn.
+		s.h.Gate().Begin()
+	}
 	s.state = agentRunning
 	s.started, s.ended = time.Now(), time.Time{}
 	s.lastActivity = time.Now()
@@ -810,7 +808,7 @@ func (s *subAgent) run(ctx context.Context, prompt string) {
 		return
 	}
 
-	res, err := s.work(ctx, h, prompt)
+	res, err := s.work(ctx, h, UserInput{Text: prompt})
 	switch {
 	case ctx.Err() != nil:
 		s.settle(agentDismissed)
@@ -828,43 +826,71 @@ func (s *subAgent) run(ctx context.Context, prompt string) {
 	s.settleReporting(agentIdle)
 }
 
-// work is one run of the child: msg's turn, then a turn for what arrived
-// too late for it (a message during its last round, which no tool result
-// carried), then — once a run — a reminder of the plan nodes it still owes a
-// publish for. A run that still owes after the reminder ends anyway; its
-// report says what it owes, for the main agent.
-func (s *subAgent) work(ctx context.Context, h *Harness, msg string) (agent.TurnResult, error) {
-	s.tellMu.Lock()
-	s.intakeShut = false
-	s.tellMu.Unlock()
-	defer s.shutIntake()
-	res, err := h.Ask(ctx, msg)
-	reminded := false
-	for range 8 { // bounded: a run never loops on its own news
-		if err != nil || ctx.Err() != nil {
-			break
+// autoContinues bounds the turns one run takes for news nobody typed (a
+// job's finish, a plan change told to it): a run never loops on its own
+// news (2df72e1). A child has no automatic-turn budget (autoturn.go: asks
+// are off for it), so this is its guard. A message from the person or the
+// parent is never counted: it always gets its turn.
+const autoContinues = 8
+
+// work is one run of the child, driven as the engine's loop drives the
+// main session (cmd/dun/engine.go): first's turn, then a turn for each
+// message with images held meanwhile, then a turn for what is queued (a
+// message from its last round, which no tool result carried), then — once
+// a run — a reminder of the plan nodes it still owes a publish for. After a
+// failed turn, a message that came in since that turn began is delivered
+// and starts a turn, as the session's queued message does after an error.
+// The run ends only through the gate (TurnGate.Settle), so a message is
+// never left between its last look and its settle: it is either taken here
+// or starts the next run (tell).
+func (s *subAgent) work(ctx context.Context, h *Harness, first UserInput) (agent.TurnResult, error) {
+	g := h.Gate()
+	defer g.End() // on every way out: a tell after it starts the next run
+	mark := g.News()
+	res, err := s.ask(ctx, h, first)
+	autos, reminded := 0, false
+	// queued says whether what is queued gets a turn now.
+	queued := func(news uint64) bool {
+		if h.Pending() == 0 {
+			return false
 		}
-		if h.Pending() > 0 {
+		if err != nil { // only what came in since the failed turn began
+			return news != mark
+		}
+		return len(h.QueuedUser()) > 0 || autos < autoContinues
+	}
+	keep := func(next agent.TurnResult, nerr error) {
+		if err = nerr; err == nil && strings.TrimSpace(next.Reply) != "" {
+			res = next
+		}
+	}
+	for ctx.Err() == nil {
+		if m, ok := g.TakeHeld(); ok {
+			mark = g.News()
+			keep(s.ask(ctx, h, m))
+			continue
+		}
+		if queued(g.News()) {
+			if len(h.QueuedUser()) == 0 {
+				autos++
+			}
+			mark = g.News()
+			keep(h.Continue(ctx))
+			continue
+		}
+		if owed := s.owed(); err == nil && len(owed) > 0 && !reminded {
+			reminded = true
 			var next agent.TurnResult
-			if next, err = h.Continue(ctx); err == nil && strings.TrimSpace(next.Reply) != "" {
-				res = next
+			if next, err = h.Ask(ctx, "[control/plan] Before you stop: you have not published plan node(s) "+
+				strings.Join(owed, ", ")+". For each, plan_close it done with an account of what you found or made, "+
+				"or drop it with why. If one cannot be finished, drop it with why, "+
+				"or leave it and say why in your reply."); err == nil && strings.TrimSpace(next.Reply) != "" {
+				res.Reply = strings.TrimSpace(res.Reply + "\n\n" + next.Reply) // the answer stays; this adds to it
 			}
 			continue
 		}
-		owed := s.owed()
-		if len(owed) == 0 || reminded {
-			if s.lastLook(h) {
-				break
-			}
-			continue // told while the look above ran
-		}
-		reminded = true
-		var next agent.TurnResult
-		if next, err = h.Ask(ctx, "[control/plan] Before you stop: you have not published plan node(s) "+
-			strings.Join(owed, ", ")+". For each, plan_close it done with an account of what you found or made, "+
-			"or drop it with why. If one cannot be finished, drop it with why, "+
-			"or leave it and say why in your reply."); err == nil && strings.TrimSpace(next.Reply) != "" {
-			res.Reply = strings.TrimSpace(res.Reply + "\n\n" + next.Reply) // the answer stays; this adds to it
+		if g.Settle(queued) {
+			break
 		}
 	}
 	if owed := s.owed(); len(owed) > 0 && err == nil && ctx.Err() == nil {
@@ -873,24 +899,13 @@ func (s *subAgent) work(ctx context.Context, h *Harness, msg string) (agent.Turn
 	return res, err
 }
 
-// lastLook shuts the run's intake unless news arrived since work last
-// looked: under tellMu, so a mid-run tell never falls between the two.
-func (s *subAgent) lastLook(h *Harness) bool {
-	s.tellMu.Lock()
-	defer s.tellMu.Unlock()
-	if h.Pending() > 0 {
-		return false
+// ask is one message's turn, with its images as the session takes them
+// (AskImages; images.go).
+func (s *subAgent) ask(ctx context.Context, h *Harness, m UserInput) (agent.TurnResult, error) {
+	if len(m.Images) > 0 {
+		return h.AskImages(ctx, m.Text, m.Images)
 	}
-	s.intakeShut = true
-	return true
-}
-
-// shutIntake shuts a run's intake on every way out of work: a tell after it
-// waits for the settle and starts the next run.
-func (s *subAgent) shutIntake() {
-	s.tellMu.Lock()
-	s.intakeShut = true
-	s.tellMu.Unlock()
+	return h.Ask(ctx, m.Text)
 }
 
 // owed is the ids and titles of the plan nodes this child has not published.
@@ -925,31 +940,42 @@ func (s *subAgent) finalIsEmpty() bool {
 // "Sub-agents ask by ending their turn").
 //
 // A child mid-run takes it the way the main session takes a message typed
-// mid-turn: queued on its harness (SayAs) and read at its next round
-// boundary — inside the next tool result, or in a turn of its own after its
-// last round (work). Its one report covers it (docs/decisions.md, "Telling
-// a working sub-agent").
-func (s *subAgent) tell(msg string) string {
-	s.tellMu.Lock()
+// mid-turn, through the same gate (turngate.go): text is queued on its
+// harness and read at its next round boundary — inside the next tool
+// result, or in a turn of its own after its last round (work); a message
+// with images is held and starts the turn after the running one. Its one
+// report covers it (docs/decisions.md, "Telling a working sub-agent").
+func (s *subAgent) tell(msg string) string { return s.tellInput(UserInput{Text: msg}) }
+
+// tellInput is tell for a message with images.
+func (s *subAgent) tellInput(in UserInput) string {
+	s.mu.Lock()
+	h := s.h
+	s.mu.Unlock()
+	if h != nil {
+		switch h.Gate().Offer(h, in, nil) {
+		case OfferQueued:
+			return fmt.Sprintf("Queued for agent #%d: it reads it at its next step, and its report covers it.", s.num)
+		case OfferHeld:
+			return fmt.Sprintf("Queued for agent #%d: its images wait for its current turn to end, and its report covers it.", s.num)
+		}
+	}
 	s.mu.Lock()
 	if s.state == agentRunning {
-		h, shut := s.h, s.intakeShut
+		h, done := s.h, s.done
 		s.mu.Unlock()
-		if h != nil && !shut {
-			h.SayAs(NewMessageID(), msg)
-			s.tellMu.Unlock()
-			return fmt.Sprintf("Queued for agent #%d: it reads it at its next step, and its report covers it.", s.num)
+		if h != nil && h.Gate().Active() {
+			return s.tellInput(in) // a run started since the offer: it takes it
 		}
-		// Between its last look and its settle: the next run takes it.
-		s.tellMu.Unlock()
+		// Between the run's settle at the gate and its settle here: the next
+		// run takes it.
 		select {
-		case <-s.waitCh():
+		case <-done:
 		case <-time.After(10 * time.Second):
 			return fmt.Sprintf("agent #%d is ending its turn — tell it again in a moment.", s.num)
 		}
-		return s.tell(msg)
+		return s.tellInput(in)
 	}
-	defer s.tellMu.Unlock()
 	if s.h == nil {
 		s.mu.Unlock()
 		return fmt.Sprintf("agent #%d is stopped. Restart it with agent({id:%d, resume:true}) first.", s.num, s.num)
@@ -957,8 +983,7 @@ func (s *subAgent) tell(msg string) string {
 	// A new task is a new RUN: the clock and the answer both reset, or the next
 	// report describes the previous task.
 	s.final, s.account = "", ""
-	s.intakeShut = false // a tell right behind this one joins the run it starts
-	s.startRunLocked()
+	s.startRunLocked() // a tell right behind this one joins the run it starts
 	h, ctx := s.h, context.Background()
 	if s.cancel != nil {
 		var cancel context.CancelFunc
@@ -970,7 +995,7 @@ func (s *subAgent) tell(msg string) string {
 	s.parent.agentsChanged()
 
 	go func() {
-		res, err := s.work(ctx, h, msg)
+		res, err := s.work(ctx, h, in)
 		if err != nil {
 			s.setFinal("FAILED: " + err.Error())
 		} else if reply := strings.TrimSpace(res.Reply); reply != "" && s.finalIsEmpty() {
@@ -1953,12 +1978,16 @@ func (h *Harness) AgentUnwatch(id int) {
 // AgentTell is the human steering a child directly, which is the same gesture
 // the parent's agent({id:N, tell:}) makes — deliberately the same code path, so
 // there is one definition of what telling a child means.
-func (h *Harness) AgentTell(id int, text string) string {
+func (h *Harness) AgentTell(id int, text string) string { return h.AgentTellImages(id, text, nil) }
+
+// AgentTellImages is AgentTell for a message with images: the child takes
+// them as the session does (tell).
+func (h *Harness) AgentTellImages(id int, text string, imgs []ImageInput) string {
 	sa := h.agentByID(id)
 	if sa == nil {
 		return fmt.Sprintf("no agent #%d", id)
 	}
-	out := sa.tell(text)
+	out := sa.tellInput(UserInput{Text: text, Images: imgs})
 	if strings.HasPrefix(out, "Told agent") || strings.HasPrefix(out, "Queued for agent") {
 		// The parent reads the child's next report, and without this it
 		// is an answer to something it never asked (live: "a leftover
@@ -1967,6 +1996,17 @@ func (h *Harness) AgentTell(id int, text string) string {
 		h.Aside(fmt.Sprintf("The user told agent #%d directly: %q. Its next report answers that.", id, oneLine(text, 300)))
 	}
 	return out
+}
+
+// AgentImagesRefused is the child's ImagesRefused: "" when a message with
+// images may go to it, or there is no such child (AgentTell says so).
+func (h *Harness) AgentImagesRefused(id int) string {
+	if sa := h.agentByID(id); sa != nil {
+		if ch := sa.harness(); ch != nil {
+			return ch.ImagesRefused()
+		}
+	}
+	return ""
 }
 
 // AgentContinue is dund's resume of a child that a restart cut mid-run
