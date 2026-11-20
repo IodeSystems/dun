@@ -28,6 +28,9 @@ type versionLatestMsg struct{ line string }
 
 func versionSlash(m *tuiModel, _ []string) tea.Cmd {
 	m.append(StDim.Render(strings.Join(versionLines(time.Now()), "\n")))
+	for _, l := range versionsReport(buildinfo.Version, dundVersion(), m.engineVersion) {
+		m.append(l)
+	}
 	m.refresh()
 	// The tools are `dun tools --json`'s rows (cmd/dun/toolscmd.go), as
 	// /upgrade reads them: their build info, never running them.

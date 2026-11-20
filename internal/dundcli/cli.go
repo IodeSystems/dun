@@ -480,7 +480,9 @@ const selfCheck = 2 * time.Second
 // exe is the unit's binary, so a new build put there (the launcher's rebuild,
 // a copy) hands over the same way; `make install` writes ~/.local/bin/dun
 // instead, and reaches the service through the next TUI of that build, which
-// asks it to upgrade.
+// asks it to upgrade (tui.checkDundBuild, on every connect, including the one
+// after a source build's self-rebuild; only when that TUI is the newer build,
+// never a downgrade, and the restart waits for an idle dund).
 func watchSelf(ctx context.Context, svc *dund.Service, exe string) {
 	last, err := os.Stat(exe)
 	if err != nil {
