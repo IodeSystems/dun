@@ -53,7 +53,7 @@ func TestCaps_LearnStoreSeed(t *testing.T) {
 	c := newClient()
 	// agentkit sends the refused request once more, translated (v0.34.0:
 	// on by default), so the call answers.
-	if _, _, err := c.ChatWithOpts(context.Background(), []llm.Message{{Role: "user", Content: "hi"}}, nil, &llm.ChatOpts{Effort: llm.EffortNone}); err != nil {
+	if _, err := c.ChatWithOpts(context.Background(), []llm.Message{{Role: "user", Content: "hi"}}, nil, &llm.ChatOpts{Effort: llm.EffortNone}); err != nil {
 		t.Fatalf("the refusal was not resent: %v", err)
 	}
 	if only, ok := c.Capabilities().ThinkingOnly(); !ok || !only {
@@ -105,7 +105,7 @@ func TestCaps_PinTranslatesOff(t *testing.T) {
 	c.SetReasoningDialect(llm.DialectOpenAI)
 	TrackCaps(c, "low")
 	h := &Harness{}
-	if _, _, err := c.ChatWithOpts(context.Background(), []llm.Message{{Role: "user", Content: "fold"}}, nil, h.foldOpts()); err != nil {
+	if _, err := c.ChatWithOpts(context.Background(), []llm.Message{{Role: "user", Content: "fold"}}, nil, h.foldOpts()); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(sent, `"reasoning_effort":"low"`) {

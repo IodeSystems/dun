@@ -61,19 +61,39 @@ without a fold) only the bounding rungs ever run.
   also keeps the pristine tail, as does a fold with no target (`Compact`)
   or a band that cannot hold more than the tail (little history). A huge
   newest result over the band by itself falls back the same way.
-  `CompactionInfo` reports `KeptCount`/`KeptTokens`; `TokensAfter` is the
-  count without LOD, what the next build sends (agentkit v0.38.0; before
-  it `TokensAfter` was the LOD render and `TokensAfterFull` this count).
-  The fold notice: `compacted: oldest 237 entries → summary, newest 198
-  kept as is · history 295.0k → 147.8k tokens · over budget`, the arrow
-  at `TokensAfter` (cause: over budget, the endpoint cut a reply, or turn
-  end or cold cache; `3rd fold this turn` and `26m since the last` when
-  they apply; the kept-token figure is not printed until agentkit's
-  KeptTokens accounting is fixed)
-  (`internal/harness/compaction.go`). Measured in
-  `internal/harness/foldkeep_test.go`: 434 entries, target 190k, 221,463
-  tokens before, 264 folded, 171 kept (84.1k), the next round sends 97.8k
-  (51% of target); without the band the same fold kept 7 and sent 17.1k.
+  `CompactionInfo` reports `SummaryTokens`, `PinnedTokens` and
+  `KeptCount`/`KeptTokens`, all measured on the store after the fold, so
+  summary + pinned + kept = `TokensAfter` (agentkit v0.39.0; before it the
+  kept figure was taken before the summary call and could exceed
+  `TokensAfter`). `TokensAfter` is what the next build sends, and both
+  `TokensBefore` and `TokensAfter` leave out the system prompt and the
+  tools (`CompactionStart.TokensBefore` still holds them).
+  The fold notice: `compacted: oldest 429 entries → summary (3.1k), newest
+  131 kept (45.5k) · history 273.3k → 48.6k tokens · over budget · 25m
+  since the last`, the arrow at `TokensAfter`; `, pinned (1.2k)` follows
+  the summary only when pinned entries are left beside it (cause: over
+  budget, the endpoint cut a reply, or turn end or cold cache; `3rd fold
+  this turn` and `26m since the last` when they apply)
+  (`internal/harness/compaction.go`).
+  **Stubs after a fold (USER 2026-11-20; agentkit v0.39.0
+  `FoldMidLOD`).** dun sets `FoldMidLOD = true`: once a compaction marker
+  exists, a build under target stubs old big tool results as the LOD rung
+  does, so the kept band does not fill the window again soon. The boundary
+  moves in `LODStep` steps, so the cache breaks once per step; pins,
+  markers and the pristine tail stay verbatim. `foldKeep` measures with the
+  stubs, so a fold keeps more entries. Not checked live. Measured in
+  `internal/harness/foldkeep_test.go` (agentkit v0.39.0, `FoldMidLOD`
+  on): 434 entries, target 190k, 235.8k history tokens before, 281
+  folded, summary 6.0k, 154 kept (83.4k), the next round sends 97.2k with
+  the system prompt (51% of target); without the band the same fold keeps
+  7.
+  **One fold at a time (`Harness.foldMu`).** Every build (the Shaper may
+  fold inside it), the turn-end boundary fold, the rescue and overflow
+  folds and a recap take one mutex. Before, the idle suggestion call built
+  without `turnMu`, and the turn-end and rescue folds ran outside it, so
+  two folds could read the same store and commit over each other (two
+  markers; kept entries removed during the other's summary call). Proof:
+  `internal/harness/foldmu_test.go`.
   Everything older becomes one summary of folded/8 tokens within [500, 8192], at most
   60% of target (`shaper.go:794-801`). The summarizer is told the open plan
   and the work in flight (`internal/harness/fold.go:31-41`); after the fold an aside lists

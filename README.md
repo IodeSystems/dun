@@ -350,7 +350,7 @@ history folded into a summary). **Unset means no shaping at all** — nothing ca
 tell a 32k window from a 180k one without minutes of multi-megabyte probing, and
 guessing low compacts a large window for nothing.
 
-Every fold is reported — `🗜 compacted: oldest 12 entries → summary, newest 5 kept as is ·
+Every fold is reported — `🗜 compacted: oldest 12 entries → summary (1.5k), newest 5 kept (6.5k) ·
 history 30.0k → 8.0k tokens · over budget` — in the TUI, on stderr, and as a `compaction` event on `--engine`. More than
 one fold in a single turn is called out as thrashing, because that means the
 budget cannot fit one turn's floor (system prompt + tool schemas + the pristine

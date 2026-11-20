@@ -15,8 +15,10 @@ type CompactionNote struct {
 	Subsumed      int    // entries folded into the summary
 	TokensBefore  int    // estimated active-window tokens before
 	TokensAfter   int    // and after: what the next build sends (without LOD: a fold lands under target)
+	SummaryTokens int    // the summary marker's tokens, in TokensAfter
+	PinnedTokens  int    // pinned entries older than the kept part, in TokensAfter
 	Kept          int    // the newest entries kept verbatim
-	KeptTokens    int    // and their tokens, without LOD
+	KeptTokens    int    // and their tokens: TokensAfter − SummaryTokens − PinnedTokens
 	Summary       string // the summary that replaced them
 	Turn          int    // how many folds this turn — >1 is thrashing
 	SinceLastSecs int    // seconds since the previous fold (0 = first)
@@ -25,18 +27,21 @@ type CompactionNote struct {
 
 // String renders the note as one plain line: what was summarized, what was
 // kept, the history size before and after, why, and when the last fold was.
-//
-// TODO: print the kept-token figure (KeptTokens) once the agentkit accounting
-// bug is fixed: KeptTokens can exceed TokensAfter, so side by side the two
-// read as if one contained the other. Reported to agentkit's owner; no issue
-// number yet.
+// The summary, pinned and kept sizes add up to the after figure (agentkit
+// v0.39.0 measures all three on the store after the fold).
 func (n CompactionNote) String() string {
 	s := fmt.Sprintf("compacted: oldest %d entries → summary", n.Subsumed)
-	if n.Kept > 0 {
-		s += fmt.Sprintf(", newest %d kept as is", n.Kept)
+	if n.SummaryTokens > 0 {
+		s += " (" + numfmt.TokN(n.SummaryTokens) + ")"
 	}
-	// The arrow ends at TokensAfter: what the next build sends, without the
-	// system prompt and without LOD (agentkit v0.38.0).
+	if n.PinnedTokens > 0 {
+		s += ", pinned (" + numfmt.TokN(n.PinnedTokens) + ")"
+	}
+	if n.Kept > 0 {
+		s += fmt.Sprintf(", newest %d kept (%s)", n.Kept, numfmt.TokN(n.KeptTokens))
+	}
+	// Both ends leave out the system prompt and the tools; the arrow ends at
+	// what the next build sends, without LOD (agentkit v0.39.0).
 	s += fmt.Sprintf(" · history %s → %s tokens", numfmt.TokN(n.TokensBefore), numfmt.TokN(n.TokensAfter))
 	if c := causeWords(n.Cause); c != "" {
 		s += " · " + c
@@ -189,13 +194,15 @@ func (h *Harness) noteCompactionCause(ci agent.CompactionInfo, cause foldCause) 
 	}
 	h.compactTurn++
 	note := CompactionNote{
-		Subsumed:     ci.SubsumedCount,
-		TokensBefore: ci.TokensBefore,
-		TokensAfter:  ci.TokensAfter,
-		Kept:         ci.KeptCount,
-		KeptTokens:   ci.KeptTokens,
-		Summary:      ci.Summary,
-		Turn:         h.compactTurn,
+		Subsumed:      ci.SubsumedCount,
+		TokensBefore:  ci.TokensBefore,
+		TokensAfter:   ci.TokensAfter,
+		SummaryTokens: ci.SummaryTokens,
+		PinnedTokens:  ci.PinnedTokens,
+		Kept:          ci.KeptCount,
+		KeptTokens:    ci.KeptTokens,
+		Summary:       ci.Summary,
+		Turn:          h.compactTurn,
 	}
 	switch cause {
 	case foldByOverflow:

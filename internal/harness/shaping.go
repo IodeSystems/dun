@@ -313,6 +313,13 @@ func shaperPolicy(window int, foldUser bool) agent.ShaperPolicy {
 		PreserveLastMessages:   6,
 		PreserveLastToolCalls:  4,
 		FoldKeepPct:            foldKeepPct,
+		// After the first fold, a build under target stubs old big tool
+		// results (agentkit v0.39.0), so the wide kept band does not fill the
+		// window again soon. The boundary moves LODStep entries at a time:
+		// the prompt cache breaks once per step. Pins, markers and the
+		// pristine tail stay verbatim. USER (Carl) 2026-11-20: on. Not checked
+		// live.
+		FoldMidLOD: true,
 		// One result, wherever it sits: LOD skips the preserved tail, so a huge
 		// recent result is sent whole every round until it ages out. exec clips
 		// at 20k itself (execInlineMax); node_read and MCP results did not.
@@ -337,6 +344,10 @@ func measuredBuild(shaper *agent.Shaper, h *Harness) agent.ContextBuilder {
 		// rather than at startup only, because this runs before every request
 		// and an endpoint that could not answer at 16:49 answers at 16:52.
 		h.ensureWindow(ctx)
+		// One build or fold at a time (Harness.foldMu): the budget below is
+		// set on the shared Shaper, and the Build may fold.
+		h.foldMu.Lock()
+		defer h.foldMu.Unlock()
 		// Re-budget before every build. The prompt's share of the window is
 		// fixed, but what the Shaper is allowed to fill it with is that share
 		// MINUS the per-request overhead the provider charges and our character
@@ -425,7 +436,7 @@ func measuredBuild(shaper *agent.Shaper, h *Harness) agent.ContextBuilder {
 
 // boundaryFold runs one fold with the foldByBoundary cause. It returns the
 // CompactionInfo and whether a fold happened. A nil shaper (a test harness
-// that did not call Start) is a no-op.
+// that did not call Start) is a no-op. The caller holds foldMu.
 func (h *Harness) boundaryFold(ctx context.Context) (agent.CompactionInfo, bool) {
 	if h.shaper == nil {
 		return agent.CompactionInfo{}, false
@@ -455,12 +466,16 @@ func (h *Harness) turnEndBoundaryFold(ctx context.Context) {
 	}
 	log.Printf("dun: turn-end boundary fold: prompt %d tokens > 0.7 × %d target",
 		h.meter.LastPromptTokens(), target)
+	// After the turn, outside turnMu: a fork or the idle suggestion call can
+	// build (and fold) meanwhile, so the fold takes foldMu.
+	h.foldMu.Lock()
+	defer h.foldMu.Unlock()
 	h.boundaryFold(ctx)
 }
 
 // tryColdCacheFold folds before a build when the gap since the last response
 // exceeds the provider's cache TTL and the prompt is over 0.5 × the shape
-// target. Called from measuredBuild, just before shaper.Build.
+// target. Called from measuredBuild, just before shaper.Build, under foldMu.
 func (h *Harness) tryColdCacheFold(ctx context.Context) {
 	if h.shaper == nil {
 		return

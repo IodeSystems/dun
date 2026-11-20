@@ -123,6 +123,10 @@ func (h *Harness) rescueFold(ctx context.Context) (int, error) {
 // its last few exchanges are what it needs to continue — while the OLDER half,
 // which has already been acted on, is what can become a paragraph.
 func (h *Harness) foldHistory(ctx context.Context, cause foldCause) (int, error) {
+	// Never inside a build (the rescue runs between turn attempts, the
+	// overflow policy after a cut reply), so foldMu is free here.
+	h.foldMu.Lock()
+	defer h.foldMu.Unlock()
 	h.noteAsk(ctx) // before the fold takes it: the restore note quotes it
 	entries, err := h.store.Context(ctx, "dun")
 	if err != nil {
@@ -205,6 +209,7 @@ func (h *Harness) foldHistory(ctx context.Context, cause foldCause) (int, error)
 		SubsumedCount: len(older),
 		TokensBefore:  before,
 		TokensAfter:   h.meter.Estimate(summary),
+		SummaryTokens: h.meter.Estimate(summary),
 	}, cause)
 	return len(older), nil
 }

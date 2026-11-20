@@ -83,6 +83,11 @@ func (r foldKeepResult) sentTokens() int {
 	n := 0
 	for _, m := range r.sent {
 		n += r.h.meter.Estimate(m.Content) + r.h.meter.Estimate(m.Role) + r.h.meter.Estimate(m.Name)
+		// Native tool calls count too, as agentkit's messageTokens counts
+		// them (v0.39.0).
+		for _, tc := range m.ToolCalls {
+			n += r.h.meter.Estimate(tc.Function.Name) + r.h.meter.Estimate(tc.Function.Arguments)
+		}
 	}
 	return n
 }
@@ -107,8 +112,13 @@ func TestFoldKeep_ReportedCaseLandsInTheBand(t *testing.T) {
 	}
 	after := r.sentTokens()
 	t.Logf("target %d; %s; sent %d (%d%% of target)", r.target, r.note, after, after*100/r.target)
-	if r.note.TokensBefore <= r.target {
-		t.Fatalf("before %d is not over target %d", r.note.TokensBefore, r.target)
+	// The fold decision counts the system prompt; CompactionInfo.TokensBefore
+	// leaves it out (agentkit v0.39.0), so add it back to compare with target.
+	if before := r.note.TokensBefore + r.h.meter.Estimate(r.h.Session.System); before <= r.target {
+		t.Fatalf("before %d (history and system prompt) is not over target %d", before, r.target)
+	}
+	if got := r.note.SummaryTokens + r.note.PinnedTokens + r.note.KeptTokens; got != r.note.TokensAfter {
+		t.Errorf("summary+pinned+kept = %d, after = %d: the parts do not add up", got, r.note.TokensAfter)
 	}
 	if after < r.target*50/100 || after > r.target*60/100 {
 		t.Errorf("sent %d tokens, %d%% of target %d; want 50-60%%", after, after*100/r.target, r.target)
@@ -120,7 +130,7 @@ func TestFoldKeep_ReportedCaseLandsInTheBand(t *testing.T) {
 	if r.note.Kept <= base.note.Kept {
 		t.Errorf("kept %d entries, the pristine tail alone keeps %d", r.note.Kept, base.note.Kept)
 	}
-	if s := r.note.String(); !strings.Contains(s, fmt.Sprintf("newest %d kept as is", r.note.Kept)) {
+	if s := r.note.String(); !strings.Contains(s, fmt.Sprintf("newest %d kept (", r.note.Kept)) {
 		t.Errorf("the note does not say what it kept: %s", s)
 	}
 }
@@ -159,10 +169,16 @@ func TestFoldKeep_HugeNewestResultFallsBack(t *testing.T) {
 	}
 }
 
-// The notice names what was summarized and kept, and the arrow ends at what is sent.
+// The notice names what was summarized, pinned and kept, with sizes that add
+// up to the after figure; pinned is left out when there is none.
 func TestCompactionNote_SaysWhatItKept(t *testing.T) {
-	n := CompactionNote{Subsumed: 237, Kept: 198, KeptTokens: 129_700, TokensBefore: 294971, TokensAfter: 147755, Cause: "shaper"}
-	want := "compacted: oldest 237 entries → summary, newest 198 kept as is · history 295.0k → 147.8k tokens · over budget"
+	n := CompactionNote{Subsumed: 237, SummaryTokens: 6_200, PinnedTokens: 1_855, Kept: 198, KeptTokens: 139_700, TokensBefore: 294971, TokensAfter: 147755, Cause: "shaper"}
+	want := "compacted: oldest 237 entries → summary (6.2k), pinned (1.9k), newest 198 kept (139.7k) · history 295.0k → 147.8k tokens · over budget"
+	if s := n.String(); s != want {
+		t.Errorf("got  %s\nwant %s", s, want)
+	}
+	n.PinnedTokens, n.KeptTokens = 0, 141_555
+	want = "compacted: oldest 237 entries → summary (6.2k), newest 198 kept (141.6k) · history 295.0k → 147.8k tokens · over budget"
 	if s := n.String(); s != want {
 		t.Errorf("got  %s\nwant %s", s, want)
 	}
