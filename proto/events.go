@@ -575,6 +575,9 @@ type Ready struct {
 	Tools   []string      `json:"tools"`
 	Servers []ServerState `json:"servers"`
 	Hint    string        `json:"hint"`
+	// Version is the engine's build: /upgrade says it beside the TUI's and
+	// dund's, and a TUI knows which commands an older engine lacks.
+	Version string `json:"version,omitempty"`
 }
 
 type ServerState struct {

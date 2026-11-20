@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/agent"
+	"github.com/iodesystems/dun/internal/buildinfo"
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/enginecmd"
 	"github.com/iodesystems/dun/internal/harness"
@@ -38,7 +39,7 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 		}
 	}
 	in.setInterrupt(interruptCmd)
-	em.emit(&proto.Ready{Tools: h.ToolNames(), Servers: enginecmd.ServersProto(h.Servers()),
+	em.emit(&proto.Ready{Version: buildinfo.Version, Tools: h.ToolNames(), Servers: enginecmd.ServersProto(h.Servers()),
 		Hint: withToolWarnings(enginecmd.ServerHint(h.Servers()))})
 	em.emit(catalogEvent(h))
 	em.emit(settingsEvent())

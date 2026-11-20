@@ -22,7 +22,8 @@ func jobsVtui(t *testing.T) (*vtui, *bytes.Buffer) {
 	v.m.proc = &dunProc{stdin: bufCloser{rec}}
 	v.event(map[string]any{"type": "ready", "tools": []any{"exec"}})
 	v.event(map[string]any{"type": "commands", "items": []any{
-		map[string]any{"name": "jobs", "usage": "[kill <n>|kill all]", "description": "background jobs"},
+		map[string]any{"name": "jobs", "usage": "[kill <n>|kill all|clear]", "description": "background jobs",
+			"choices": []any{map[string]any{"value": "kill"}, map[string]any{"value": "clear"}}},
 	}})
 	now := float64(time.Now().Unix())
 	v.event(map[string]any{"type": "jobs", "jobs": []any{

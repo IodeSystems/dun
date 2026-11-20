@@ -225,6 +225,9 @@ var attachNow atomic.Pointer[attachWait]
 // create: a dund too old to say hello is "an older build" with no number.
 func noteDundBuild(ev proto.Event, err error) {
 	w := &attachWait{session: true}
+	if r, ok := ev.Payload.(*proto.HelloReply); ok && err == nil {
+		dundSeen.Store(r.Version)
+	}
 	switch r, ok := ev.Payload.(*proto.HelloReply); {
 	case err != nil:
 		w.dundBuild, w.fix = "?", killLine()+", then dun again"

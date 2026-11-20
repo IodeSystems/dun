@@ -331,6 +331,10 @@ func engineSlash(name string) func(m *tuiModel, args []string) tea.Cmd {
 			*m = nm.(tuiModel)
 			return cmd
 		}
+		if m.engineLacks(name, args) {
+			m.append(warnLine(m.engineOldLine(name, args)))
+			return nil
+		}
 		// /jobs kill all asks first: it ends every running job at once.
 		if name == "jobs" && len(args) == 2 && strings.EqualFold(args[0], "kill") && strings.EqualFold(args[1], "all") {
 			m.askConfirm("kill every running job? (y/n)", func(m *tuiModel) { m.killJobsCmd("jobs kill all") })
