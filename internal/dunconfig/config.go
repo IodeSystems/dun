@@ -60,7 +60,7 @@ type DunConfig struct {
 	SpendBudget float64 `json:"spend_budget_usd,omitempty"`
 	// SpendKnown is the last real figure the user read off the Console.
 	SpendKnown SpendKnown `json:"spend_known,omitzero"`
-	// Loops is /loops: how far dun's loop detection goes (loopscmd.go).
+	// Loops is /context config loops: how far dun's loop detection goes (loopscmd.go).
 	Loops LoopConfig `json:"loops,omitzero"`
 	// VisionModel describes images for a model that cannot read them (a model
 	// id, on the active provider unless VisionProvider names another

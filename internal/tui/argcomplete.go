@@ -493,6 +493,9 @@ func contextChoices(m *tuiModel, arg string) *argList {
 	if f[0] != "config" {
 		return nil
 	}
+	if len(f) > 1 && f[1] == "loops" {
+		return loopsChoices(f, strings.HasSuffix(arg, " "))
+	}
 	// The list is for choosing a flag: none right after one (its value is
 	// typed) or while a value is typed (enter runs the line as it is).
 	last, ended := f[len(f)-1], strings.HasSuffix(arg, " ")
@@ -535,5 +538,40 @@ func contextChoices(m *tuiModel, arg string) *argList {
 		c.more = true
 		out = append(out, c)
 	}
-	return &argList{choices: out, total: len(flags), noun: "settings"}
+	if prefix == "" && len(done) == 0 {
+		out = append(out, argChoice{value: "config loops", label: "loops", more: true,
+			desc: "loop detection in the model's replies: alone says what it has found; saved for every session"})
+	}
+	return &argList{choices: out, total: len(flags) + 1, noun: "settings"}
+}
+
+// loopsChoices completes /context config loops: the mode words and the two
+// knobs, each with what it does. f is the line's words, f[:2] "config loops".
+func loopsChoices(f []string, ended bool) *argList {
+	rows := []argChoice{
+		{value: "off", desc: "only the guard on the same bytes back to back"},
+		{value: "count", desc: "find loops and count them; cut nothing the guard would not"},
+		{value: "cut", desc: "cut a reply that continues a loop, which retries it"},
+		{value: "tolerance", desc: "the loop count that cuts: tolerance N or default", more: true},
+		{value: "tools", desc: "the same for tool calls: tools N, count or default", more: true},
+	}
+	q := ""
+	switch {
+	case len(f) == 2 && ended:
+	case len(f) == 3 && !ended:
+		q = f[2]
+	default:
+		return nil
+	}
+	for i := range rows {
+		rows[i].label = rows[i].value
+		rows[i].value = "config loops " + rows[i].value
+	}
+	var out []argChoice
+	for _, r := range rows {
+		if strings.HasPrefix(r.label, q) {
+			out = append(out, r)
+		}
+	}
+	return &argList{choices: out, total: len(rows), noun: "settings"}
 }

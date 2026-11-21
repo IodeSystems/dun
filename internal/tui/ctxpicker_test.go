@@ -31,3 +31,35 @@ func TestContextPicker_EnterOnAFlagWaitsForItsValue(t *testing.T) {
 		t.Errorf("sent: %s", rec.String())
 	}
 }
+
+// /context config loops: the picker offers it after the flags, lists the
+// modes under it, and a run sends the loops control with what follows.
+func TestContextConfigLoops(t *testing.T) {
+	rec := &recWC{}
+	m := newTUIModel(&dunProc{stdin: rec}, "/ws")
+	labels := func(arg string) string {
+		var names []string
+		if l := contextChoices(&m, arg); l != nil {
+			for _, c := range l.choices {
+				names = append(names, c.label)
+			}
+		}
+		return strings.Join(names, " ")
+	}
+	if got := labels("config "); !strings.HasSuffix(got, " loops") {
+		t.Errorf("config picker: %q", got)
+	}
+	if got := labels("config loops "); got != "off count cut tolerance tools" {
+		t.Errorf("loops picker: %q", got)
+	}
+	if got := labels("config loops to"); got != "tolerance tools" {
+		t.Errorf("loops picker, to: %q", got)
+	}
+	m.runSlash("/context config loops cut")
+	if !strings.Contains(rec.String(), `"loops"`) || !strings.Contains(rec.String(), `"action":"cut"`) {
+		t.Errorf("sent: %s", rec.String())
+	}
+	if strings.Contains(rec.String(), "ctxconfig") {
+		t.Errorf("loops went as a context flag: %s", rec.String())
+	}
+}

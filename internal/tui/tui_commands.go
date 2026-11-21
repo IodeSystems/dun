@@ -193,13 +193,20 @@ func init() {
 		{"config", "", "show this session's model settings (change with `dun --setup`)", func(m *tuiModel, _ []string) tea.Cmd { m.showConfig(); return nil }},
 		{"status", "", "this session: build, workspace, model, tools and servers", func(m *tuiModel, _ []string) tea.Cmd { m.statusSlash(); return nil }},
 		{"logout", "<provider>", "log out of an AI service: forget its address and key", logoutSlash},
-		{"context", "[config [--max N] [--compact-buffer N] [--tool-lod N] [--recap-nudge N]]", "the context screen (tabs: context, usage, spend): the window, the system prompt, compaction, recaps, truncation; config: the window, the reply's buffer, tool-result stubs and the recap reminder, saved for this model", func(m *tuiModel, args []string) tea.Cmd {
+		{"context", "[config [--max N] [--compact-buffer N] [--tool-lod N] [--recap-nudge N] | config loops [off|count|cut | tolerance N|default | tools N|count|default]]", "the context screen (tabs: context, usage, spend): the window, the system prompt, compaction, recaps, truncation; config: the window, the reply's buffer, tool-result stubs and the recap reminder, saved for this model; config loops: loop detection in the model's replies, saved for every session", func(m *tuiModel, args []string) tea.Cmd {
 			if len(args) > 0 && strings.EqualFold(args[0], "config") {
 				// Bare: the picker (the flags with their values, contextChoices).
 				if len(args) == 1 {
 					m.input.SetValue("/context config ")
 					m.input.CursorEnd()
 					m.paletteSel = 0
+					return nil
+				}
+				// config loops …: loop detection (cmd/dun/loopscmd.go).
+				if len(args) > 1 && strings.EqualFold(args[1], "loops") {
+					if !m.proc.controlCmd("loops", strings.Join(args[2:], " ")) {
+						m.append(StErr.Render("no engine right now — /reconnect first"))
+					}
 					return nil
 				}
 				if !m.proc.controlCmd("ctxconfig", strings.Join(args[1:], " ")) {

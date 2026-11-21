@@ -562,16 +562,16 @@ What you change reaches the model as a note. Marking a node done is the model's.
 
 ## Loop detection
 
-`/loops` says what agentkit's loop detector has found in the model's replies,
+`/context config loops` says what agentkit's loop detector has found in the model's replies,
 thinking and tool calls, and sets how far it goes, for every session:
 
 | command | does |
 |---|---|
-| `/loops off` | only the guard on the same bytes back to back |
-| `/loops count` | the default: find and count loops, cut only what that guard cuts |
-| `/loops cut` | cut a reply that continues a loop; the round is retried |
-| `/loops tolerance N` · `default` | the loop count that cuts (3) |
-| `/loops tools N` · `count` · `default` | the same for tool calls; `count` never cuts them |
+| `/context config loops off` | only the guard on the same bytes back to back |
+| `/context config loops count` | the default: find and count loops, cut only what that guard cuts |
+| `/context config loops cut` | cut a reply that continues a loop; the round is retried |
+| `/context config loops tolerance N` · `default` | the loop count that cuts (3) |
+| `/context config loops tools N` · `count` · `default` | the same for tool calls; `count` never cuts them |
 
 `DUN_LOOP_DETECT` (`off`, `count`, `cut`) wins at start. `"loops"` in
 `config.json` also takes `window`, `min_share`, `similarity` and `tool_window`.

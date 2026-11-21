@@ -473,12 +473,13 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 			return
 		}
-		// /loops: bare says the settings and what was found; a mode or a knob
-		// applies from the next reply and is saved (loopscmd.go).
+		// loops (/context config loops, a TUI command): bare says the settings
+		// and what was found; a mode or a knob applies from the next reply and
+		// is saved (loopscmd.go).
 		if id == "loops" {
 			msg, save, err := loopWatch.command(action)
 			if err != nil {
-				msg = "loops: " + err.Error()
+				msg = "context config loops: " + err.Error()
 			} else if save != nil {
 				if err := dunconfig.SaveConfig(*save); err != nil {
 					msg += " — but not saved: " + err.Error()
