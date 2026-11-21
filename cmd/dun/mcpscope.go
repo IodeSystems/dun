@@ -70,6 +70,10 @@ func runSwitchCmd(ctx context.Context, h *harness.Harness, alias, verb string, f
 	t0 := time.Now()
 	path, err := h.SetServerOn(ctx, id, scope, on)
 	st, _ := stateOf(h, id)
+	registerMsg := ""
+	if verb == "on" {
+		registerMsg = h.RegisterDocsServer(ctx, id)
+	}
 	if path == "" && err != nil {
 		return label + ": " + textfmt.OneLine(err.Error())
 	}
@@ -90,6 +94,9 @@ func runSwitchCmd(ctx context.Context, h *harness.Harness, alias, verb string, f
 	}
 	if verb == "unset" && scope == mcpserver.ScopeProject && st.Project != "" {
 		msg += "\nthe repo's dun.json sets it for this project — that is the project value while the project's state is unset"
+	}
+	if registerMsg != "" {
+		msg += "\n" + registerMsg
 	}
 	return msg + ingestLine(h, id)
 }
