@@ -25,12 +25,19 @@ func (m *tuiModel) settleDelivered(ids []string) {
 			continue
 		}
 		text := m.convo[i].provisionalText
+		sel := m.sel == i
 		m.convo = append(m.convo[:i], m.convo[i+1:]...)
 		if m.sel > i {
 			m.sel--
 		}
+		// Delivered: the engine put the message into the conversation, so
+		// the reply streamed before it is finished, and goes above it.
+		m.flushCur()
 		m.endRun() // as history's user item does
 		m.convo = append(m.convo, convoEntry{collapsed: userRow(text), userText: text, msgID: id})
+		if sel {
+			m.sel = len(m.convo) - 1
+		}
 	}
 }
 
@@ -71,9 +78,12 @@ func (m *tuiModel) settleUnnamedQueued() {
 // row.
 func (m *tuiModel) sinkRows(settle func(*convoEntry) bool) {
 	var kept, sunk []convoEntry
-	sel := -1
+	sel, selSunk := -1, false
 	for i := range m.convo {
 		if settle(&m.convo[i]) {
+			if i == m.sel {
+				sel, selSunk = len(sunk), true
+			}
 			sunk = append(sunk, m.convo[i])
 			continue
 		}
@@ -84,6 +94,9 @@ func (m *tuiModel) sinkRows(settle func(*convoEntry) bool) {
 	}
 	if len(sunk) == 0 {
 		return
+	}
+	if selSunk {
+		sel += len(kept)
 	}
 	m.convo = append(kept, sunk...)
 	if m.sel >= 0 {

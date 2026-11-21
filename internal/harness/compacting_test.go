@@ -3,10 +3,14 @@ package harness
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/mcpserver"
 )
 
 // failRunner refuses every call: a fold's summary call that fails.
@@ -121,4 +125,116 @@ func TestCompacting_OnceEach(t *testing.T) {
 	h.foldEnd(errors.New("x"))
 	h.foldEnd(nil)
 	wantEvents(t, *got, "start", "end:x")
+}
+
+// modeRunner answers a fold's summary call by mode: "ok" a summary, "fail"
+// an error, "cancel" cancels the call's context and returns its error.
+type modeRunner struct {
+	mu     sync.Mutex
+	mode   string
+	cancel context.CancelFunc
+}
+
+func (r *modeRunner) ChatStream(ctx context.Context, _ []llm.Message, _ []llm.ToolDef, _ *llm.ChatOpts) (<-chan llm.StreamChunk, error) {
+	r.mu.Lock()
+	mode, cancel := r.mode, r.cancel
+	r.mu.Unlock()
+	switch mode {
+	case "fail":
+		return nil, errors.New("endpoint down")
+	case "cancel":
+		cancel()
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	ch := make(chan llm.StreamChunk, 1)
+	ch <- llm.StreamChunk{Content: "OPEN ASKS: none.\nSTATE: done.\nNEXT: nothing.", Done: true, Usage: &llm.Usage{}, FinishReason: "stop"}
+	close(ch)
+	return ch, nil
+}
+
+func (r *modeRunner) Capabilities() llm.Capabilities { return llm.Capabilities{} }
+
+func (r *modeRunner) set(mode string, cancel context.CancelFunc) {
+	r.mu.Lock()
+	r.mode, r.cancel = mode, cancel
+	r.mu.Unlock()
+}
+
+// startFolding is a Harness from Start (its own Shaper and Pause wiring)
+// over a small window and a history that does not fit it.
+func startFolding(t *testing.T, r *modeRunner) (*Harness, *[]string) {
+	t.Helper()
+	t.Setenv("DUN_HOME", t.TempDir())
+	dir := t.TempDir()
+	cfg := Config{Workspace: dir, Servers: []mcpserver.Server{}, Client: r, Exec: &HostShell{Dir: dir},
+		SessionFile: filepath.Join(dir, "20261120-120000.jsonl"), PlanNudgeRounds: -1, PlanNudgeFails: -1, PlanStallRounds: -1}
+	h, err := Start(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(h.Close)
+	h.windowRunner = nil
+	h.window.Store(16_000)
+	for i := 0; i < 60; i++ {
+		h.store.Append(context.Background(), "dun", agent.Entry{ID: "u" + itoa(i), Kind: agent.KindUser,
+			Content: "ask " + itoa(i) + " " + strings.Repeat("words ", 120), CreatedAt: int64(100 + i*2)})
+		h.store.Append(context.Background(), "dun", agent.Entry{ID: "a" + itoa(i), Kind: agent.KindAssistant,
+			Content: "reply " + itoa(i) + " " + strings.Repeat("prose ", 120), CreatedAt: int64(101 + i*2)})
+	}
+	return h, foldEvents(h)
+}
+
+// Start wires the Shaper's Pause to foldPause: a boundary fold through the
+// Shaper Start built says it began.
+func TestCompacting_StartWiresThePause(t *testing.T) {
+	h, got := startFolding(t, &modeRunner{mode: "ok"})
+	if _, did := h.boundaryFold(context.Background()); !did {
+		t.Fatal("no fold")
+	}
+	wantEvents(t, *got, "start", "compaction")
+}
+
+// measuredBuild outside a Turn (no completion sink): a fold the build ran
+// ends with an end and no error; one whose summary call fails, or whose
+// context is cancelled mid-summary, ends with the error.
+func TestCompacting_MeasuredBuildEnds(t *testing.T) {
+	r := &modeRunner{mode: "ok"}
+	h, got := startFolding(t, r)
+	if _, err := measuredBuild(h.shaper, h)(context.Background(), "dun", "system"); err != nil {
+		t.Fatal(err)
+	}
+	if len(*got) == 0 || (*got)[0] != "start" || (*got)[len(*got)-1] != "end:" {
+		t.Fatalf("events %q, want start … end with no error", *got)
+	}
+
+	h, got = startFolding(t, r)
+	r.set("fail", nil)
+	if _, err := measuredBuild(h.shaper, h)(context.Background(), "dun", "system"); err == nil {
+		t.Fatal("a failed fold built")
+	}
+	wantFailed(t, *got)
+
+	h, got = startFolding(t, r)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r.set("cancel", cancel)
+	if _, err := measuredBuild(h.shaper, h)(ctx, "dun", "system"); err == nil {
+		t.Fatal("a cancelled fold built")
+	}
+	wantFailed(t, *got)
+}
+
+// A rescue fold cancelled during its summary call ends with the error.
+func TestCompacting_FoldHistoryCancelled(t *testing.T) {
+	h := newNoteHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h.client = &modeRunner{mode: "cancel", cancel: cancel}
+	seedHistory(t, h, 8)
+	got := foldEvents(h)
+	if _, err := h.foldHistory(ctx, foldByShaper); err == nil {
+		t.Fatal("a cancelled fold folded")
+	}
+	wantFailed(t, *got)
 }

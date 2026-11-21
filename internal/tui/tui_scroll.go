@@ -362,7 +362,9 @@ func (m *tuiModel) scrollToLastUser() {
 	}
 	at := -1
 	for i := 0; i < before && i < len(ro); i++ {
-		if m.convo[i].userText != "" {
+		// Not a queued row: it is drawn last (drawOrder), so it is not the
+		// latest message above the ones before it.
+		if m.convo[i].userText != "" && !m.convo[i].provisional {
 			at = i
 		}
 	}

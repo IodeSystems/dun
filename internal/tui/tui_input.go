@@ -948,14 +948,14 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.syncPager()
 		}
 		// A fold in progress: its row turns with the spinner.
-		if m.turnCompacting() {
-			m.refresh()
-			return m, cmd
-		}
+		redraw := m.turnCompacting()
 		// A server still starting: the live splash counts its seconds. The
 		// row changes in place; refresh only when its words did.
 		if i := m.liveSplashAt(); len(m.srvSince)+len(m.idxSince) > 0 && i >= 0 &&
 			m.splashView(m.splashW()) != m.convo[i].collapsed {
+			redraw = true
+		}
+		if redraw {
 			m.refresh()
 		}
 		return m, cmd

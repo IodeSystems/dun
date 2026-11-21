@@ -34,8 +34,11 @@ func (m *tuiModel) selSkipDown(i int) int {
 	}
 	if i >= len(m.convo) {
 		// Only skippable rows below (queued ones at the end): the last
-		// row that is not.
-		return max(m.selSkipUp(len(m.convo)-1), 0)
+		// row that is not, or no selection when every row is skippable.
+		if j := m.selSkipUp(len(m.convo) - 1); j >= 0 && !m.selSkippable(j) {
+			return j
+		}
+		return -1
 	}
 	if i < 0 {
 		i = 0
