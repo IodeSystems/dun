@@ -99,15 +99,17 @@ func (m *tuiModel) reconcileQueued(queued []any) {
 	// The queue is empty and a row is still queued: only when no turn runs
 	// is that a message lost (with its engine); mid-turn it may be one
 	// echoed a moment before the engine queued it.
-	for i := range m.convo {
-		e := &m.convo[i]
+	// A queued row is drawn last (drawOrder): one that settles is moved
+	// last, so it stays where it was on screen.
+	m.sinkRows(func(e *convoEntry) bool {
 		if !e.provisional || e.msgID == "" || m.busy {
-			continue
+			return false
 		}
 		e.provisional, e.lost = false, true
 		e.collapsed = StDim.Render("› " + e.provisionalText + " (not delivered: the engine stopped)")
 		e.invalidateWrap()
-	}
+		return true
+	})
 }
 
 // queuedEntry is the row of a message waiting for the running turn.

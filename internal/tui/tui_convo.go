@@ -20,7 +20,9 @@ func (m *tuiModel) append(line string) {
 // selSkippable reports the entry at i as one the message selection must never
 // land on — a blank turn-gap row has nothing to select.
 func (m *tuiModel) selSkippable(i int) bool {
-	return i >= 0 && i < len(m.convo) && m.convo[i].blank
+	// A queued message is drawn below the rest (drawOrder): stepping onto it
+	// by index would jump the selection to the bottom and back.
+	return i >= 0 && i < len(m.convo) && (m.convo[i].blank || m.convo[i].provisional)
 }
 
 // selSkipDown / selSkipUp step from i to the nearest non-skippable entry in
@@ -31,7 +33,9 @@ func (m *tuiModel) selSkipDown(i int) int {
 		i++
 	}
 	if i >= len(m.convo) {
-		i = len(m.convo) - 1
+		// Only skippable rows below (queued ones at the end): the last
+		// row that is not.
+		return max(m.selSkipUp(len(m.convo)-1), 0)
 	}
 	if i < 0 {
 		i = 0
@@ -355,12 +359,10 @@ func (m *tuiModel) ascendSel() bool {
 // selGeom returns the top line offset and rendered height of the selected block
 // (from the last refresh), for tall-message intra-scroll decisions.
 func (m tuiModel) selGeom() (top, h int) {
-	bh := m.frame.blockH
-	for i := 0; i < m.sel && i < len(bh); i++ {
-		top += bh[i]
-	}
-	if m.sel >= 0 && m.sel < len(bh) {
-		h = bh[m.sel]
+	// rowOffset, not a sum of the heights above: blocks are not drawn in
+	// index order (drawOrder).
+	if m.sel >= 0 && m.sel < len(m.frame.blockH) {
+		top, h = m.frame.rowOffset[m.sel], m.frame.blockH[m.sel]
 	}
 	return top, h
 }

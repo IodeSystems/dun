@@ -947,6 +947,11 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			v.spin = m.spin.View()
 			m.syncPager()
 		}
+		// A fold in progress: its row turns with the spinner.
+		if m.turnCompacting() {
+			m.refresh()
+			return m, cmd
+		}
 		// A server still starting: the live splash counts its seconds. The
 		// row changes in place; refresh only when its words did.
 		if i := m.liveSplashAt(); len(m.srvSince)+len(m.idxSince) > 0 && i >= 0 &&

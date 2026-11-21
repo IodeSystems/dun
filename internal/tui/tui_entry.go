@@ -54,6 +54,7 @@ type convoEntry struct {
 	splash     bool   // the splash or a /status block (splash.go): client-only, never in the session log
 	liveSplash bool   // the splash at the top: drawn again from live state at every refresh
 	startKept  bool   // a message typed before ready, shown until it is sent (startqueue.go)
+	compacting bool   // the fold-in-progress row (compacting.go): its line turns with the spinner
 	// hang: a line that wraps continues at column 2, under its text, not
 	// under its mark (⚠ …, the kept-question line).
 	hang bool
