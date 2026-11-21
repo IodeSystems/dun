@@ -614,7 +614,6 @@ func (h *Harness) runRecap(ctx context.Context, from, summary string, keep, drop
 	// The bar's context figure drops now: the removed entries' characters
 	// at the measured ratio, less the text that replaced them.
 	h.req.adjustCtx(h.meter.Estimate(text) - int(float64(sp.Chars)/h.meter.CharsPerToken()+0.5))
-	h.workRecap(summary)
 	if h.cfg.OnRecap != nil {
 		h.cfg.OnRecap(RecapNote{
 			Entries: len(sp.Subsumes), Chars: sp.Chars, Note: note,
@@ -922,7 +921,6 @@ func (h *Harness) cappedReporter(onCall func(string, map[string]any, string)) fu
 		return nil
 	}
 	return func(tool string, args map[string]any, result string) {
-		h.workTool(workToolText(tool, args), result)
 		shown := h.capOnce(tool+" "+oneLine(fmt.Sprint(args), 120), result)
 		h.toolCur.report(shown) // the tool_result event's text (toolevents.go)
 		if onCall != nil {

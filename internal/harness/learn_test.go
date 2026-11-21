@@ -281,22 +281,6 @@ func TestLearn_HeldUntilTheTaskVerifies(t *testing.T) {
 	}
 }
 
-// The user ending a worklog task as done verifies it.
-func TestLearn_WorklogEndDoneVerifies(t *testing.T) {
-	h, r := learnHarness(t, &fakeRag{}, genericLesson)
-	if _, err := h.WorklogCmd("start build it"); err != nil {
-		t.Fatal(err)
-	}
-	runSteps(t, h, churn(3)...)
-	if _, err := h.WorklogCmd("end done it builds"); err != nil {
-		t.Fatal(err)
-	}
-	h.learn.wg.Wait()
-	if r.called != 1 {
-		t.Errorf("called %d", r.called)
-	}
-}
-
 // The cap counts calls, not episodes held: more episodes than the cap are
 // held, and the calls stop at the cap.
 func TestLearn_CapCountsCallsNotHeld(t *testing.T) {

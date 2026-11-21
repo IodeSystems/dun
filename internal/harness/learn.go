@@ -37,9 +37,7 @@ import (
 //   - the turn ended without an error, after an end-of-turn check in that
 //     turn (idlecheck.go: the requirement checklist, or the open-nodes
 //     note), with a plan of at least one done node and none open (done or
-//     dropped: a dropped approach replaced by another is closed); or
-//   - the user ends a worklog task as done (/worklog end): the one user
-//     signal of "it is done" dun has.
+//     dropped: a dropped approach replaced by another is closed).
 // Episodes that never verify are dropped with the session: they are held
 // in memory only.
 //

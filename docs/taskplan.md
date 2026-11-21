@@ -4,7 +4,7 @@ USER 2026-11-02: a plan system, a DAG of tasks a person can review, so agents ar
 more directed while talking with the user, and the main agent can delegate subgraphs
 to sub-agents. A dun-internal tool group, not a separate server.
 
-The worklog (`/worklog`) records what happened and is person-driven. The plan is
+The journal (`/journal`) records what happened. The plan is
 what is meant to happen, and the model keeps it. They stay separate.
 
 ## Layers
@@ -112,7 +112,7 @@ summary as the command's reply. In memory only (decisions.md, "/plan summary and
 
 **Journal.** `/journal` lists what the agent did, newest first: each compaction fold
 (its summary), each `/journal now` entry (one side call over what happened since the
-last entry), each `/worklog write` account, each ask and each turn that served none.
+last entry), each ask and each turn that served none.
 In the TUI it is a screen (enter opens an entry, `n` is `/journal now`); text clients
 use `/journal view <n>`. Kept in `<session>.journal.jsonl`.
 

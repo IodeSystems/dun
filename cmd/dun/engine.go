@@ -335,32 +335,6 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 			}()
 			return
 		}
-		// /worklog: the session's tree of tasks (dun/worklog.go). The engine
-		// owns it; write is detached, since it waits on one model call.
-		if id == "worklog" {
-			verb, rest, _ := strings.Cut(strings.TrimSpace(action), " ")
-			if strings.EqualFold(verb, "write") {
-				em.emit(&proto.ControlEvent{ID: id, Action: action, Message: "worklog: writing the account…"})
-				go func() {
-					defer harness.RecoverSide("worklog")
-					msg := ""
-					path, err := h.WriteWorklog(ctx, rest)
-					if err != nil {
-						msg = "worklog: " + err.Error()
-					} else {
-						msg = "worklog: account written to " + path
-					}
-					em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
-				}()
-				return
-			}
-			msg, err := h.WorklogCmd(action)
-			if err != nil {
-				msg = "worklog: " + err.Error()
-			}
-			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
-			return
-		}
 		// /journal: what the agent did, in time order (dun/journal.go).
 		// "screen" is the TUI's data; now is detached, since it waits on
 		// one model call.

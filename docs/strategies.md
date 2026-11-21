@@ -164,9 +164,7 @@ resolved episode, never per round; lessons from resolutions only.
     (dropped counts as closed: a dropped approach replaced by another is
     normal). The checklist has no structured answer, so "all met" is the
     model ending the turn after it;
-  - or the user ends a worklog task as done (`/worklog end`, outcome
-    done): the only user signal of "it is done" dun has. No "accept the
-    result" command exists.
+  No "accept the result" command exists.
   Episodes that never verify go with the session: they are held in
   memory only.
 - **Call.** Once verified (in the background, the turn does not wait),

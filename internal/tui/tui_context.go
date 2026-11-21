@@ -179,7 +179,6 @@ func sideCallBlock(s *contextStats) string {
 		"rescue":   "context rescue compaction",
 		"fold":     "context budget compaction",
 		"repaint":  "bug report redaction (/repaint report)",
-		"worklog":  "task accounts (/worklog write)",
 	}
 
 	var b strings.Builder

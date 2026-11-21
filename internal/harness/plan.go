@@ -28,7 +28,7 @@ import (
 //   - Stored in <session>.plan.json beside the session, so a plan survives a
 //     resume and a fold; a session with no file keeps it in memory.
 //     Read on first use, and again if the session's file changed (as the
-//     worklog is, worklog.go).
+//     the journal is).
 //   - The plan tools (plan_add, plan_update, plan_close, plan_show), in the built-in group "plan". A root's covers the
 //     graph; a child gets one only while it owns nodes (childPlanTool).
 //   - A turn that begins while the plan has open nodes carries a short line

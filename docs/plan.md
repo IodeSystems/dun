@@ -107,14 +107,9 @@ owner's call before work starts.
 - [~] Descend into a sub-agent from the activity strip and come back out.
   Built: live view (agent_entry while watched), header, esc restores the
   root's scroll, typing tells the child (ui-decisions.md).
-- [~] `/worklog`: start a task, fork a subtask, end one with why, view;
-  the model reads a closed worklog (input, events, recaps) and writes it up
-  as a clean account, with the model, effort, harness and version.
-  Built (internal/harness/worklog.go; `<session>.worklog.json`, accounts in
-  `<session>.worklog/<n>-<slug>.md`). Person-driven only. Possible
-  extension: let the model open and close tasks too (a tool).
-- [x] `/journal` (USER 2026-11-17): folds, `/journal now` entries and
-  `/worklog write` accounts in time order (internal/harness/journal.go;
+- [x] `/worklog` was removed (2026-11-20); `/journal` stays.
+- [x] `/journal` (USER 2026-11-17): folds, `/journal now` entries,
+  asks and turns in time order (internal/harness/journal.go;
   `<session>.journal.jsonl`). `/plan summary` (`s` on /plan): Done / Doing /
   Next in one side call beside the turn (plansummary.go). docs/taskplan.md,
   "Summary" and "Journal".
