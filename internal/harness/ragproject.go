@@ -94,6 +94,44 @@ func (h *Harness) RegisterProject(ctx context.Context, workspace string) (string
 	return reg.Namespace, nil
 }
 
+// RaglitProjectState returns the project's persisted registration: the
+// namespace, project id and the layer names. ok is false when the project has
+// not been registered (or its state cannot be read).
+func (h *Harness) RaglitProjectState() (raglitState, bool) {
+	path, err := raglitStateFile(h.cfg.Workspace)
+	if err != nil {
+		return raglitState{}, false
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return raglitState{}, false
+	}
+	var s raglitState
+	if json.Unmarshal(b, &s) != nil || s.Namespace == "" {
+		return raglitState{}, false
+	}
+	return s, true
+}
+
+// raglitSavings is the seam a test replaces: it asks the daemon for the
+// project's savings. The default speaks to the shared per-user daemon.
+var raglitSavings = func(ctx context.Context, c *raglit.Client, projectID, namespace string) (raglit.Savings, error) {
+	return c.Savings(ctx, projectID, namespace)
+}
+
+// RaglitSavings returns what a maintained base would save this project, from
+// its persisted registration. An error is the daemon's own (unreachable, no
+// such project); a caller shows it as a note, never as a failure.
+func (h *Harness) RaglitSavings(ctx context.Context) (raglit.Savings, error) {
+	s, ok := h.RaglitProjectState()
+	if !ok {
+		return raglit.Savings{}, fmt.Errorf("project is not registered with raglit")
+	}
+	c := raglit.New("")
+	c.Token = h.raglitBearer
+	return raglitSavings(ctx, c, s.ProjectID, s.Namespace)
+}
+
 // raglitNamespace reads a project's persisted namespace; ok is false when it has
 // not been registered (or its state cannot be read).
 func (h *Harness) raglitNamespace(workspace string) (string, bool) {

@@ -180,3 +180,64 @@ func TestRegisterProject_NotAGitRepo(t *testing.T) {
 		t.Fatal("expected an error for a non-git workspace")
 	}
 }
+
+func TestRaglitSavings_NotRegistered(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ws := t.TempDir()
+	h := &Harness{cfg: Config{Workspace: ws}}
+	_, err := h.RaglitSavings(context.Background())
+	if err == nil {
+		t.Fatal("expected an error for an unregistered project")
+	}
+}
+
+func TestRaglitSavings_ReturnsLayers(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ws := t.TempDir()
+	gitRepoOrigin(t, ws, "git@github.com:org/repo.git")
+
+	orig := raglitRegister
+	raglitRegister = func(ctx context.Context, c *raglit.Client, projectID, label string) (raglit.Registration, error) {
+		return raglit.Registration{ProjectID: projectID, Namespace: "ns-1234", Base: "ns-1234__base", Private: "p", Public: "q"}, nil
+	}
+	t.Cleanup(func() { raglitRegister = orig })
+
+	h := &Harness{cfg: Config{Workspace: ws}}
+	if _, err := h.RegisterProject(context.Background(), ws); err != nil {
+		t.Fatal(err)
+	}
+
+	want := raglit.Savings{
+		ProjectID:          "abc123",
+		DuplicateDocuments: 5,
+		DuplicateBytes:     1024,
+		DuplicateEmbeddings: 12,
+		FanoutNow:          3,
+		FanoutWithBase:     1,
+		Recommend:          true,
+		Reason:             "enough overlap",
+		Layers: []raglit.LayerSavings{
+			{Name: "private", Documents: 10, Duplicates: 3},
+			{Name: "public", Documents: 7, Duplicates: 2},
+		},
+	}
+	origSav := raglitSavings
+	raglitSavings = func(ctx context.Context, c *raglit.Client, projectID, namespace string) (raglit.Savings, error) {
+		if namespace != "ns-1234" {
+			t.Errorf("namespace = %q, want ns-1234", namespace)
+		}
+		return want, nil
+	}
+	t.Cleanup(func() { raglitSavings = origSav })
+
+	sv, err := h.RaglitSavings(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sv.DuplicateDocuments != 5 || sv.FanoutNow != 3 || !sv.Recommend {
+		t.Errorf("savings = %+v, want aggregates from the seam", sv)
+	}
+	if len(sv.Layers) != 2 || sv.Layers[0].Name != "private" || sv.Layers[1].Documents != 7 {
+		t.Errorf("layers = %+v, want 2 layers with the right names and counts", sv.Layers)
+	}
+}

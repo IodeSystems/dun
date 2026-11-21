@@ -128,7 +128,7 @@ func runServerCmd(ctx context.Context, h *harness.Harness, alias, action string)
 	}
 	switch action {
 	case "", "status":
-		return serverStatusLine(h, id, label)
+		return serverStatusLine(ctx, h, id, label)
 	case "on", "off":
 		return runSwitchCmd(ctx, h, alias, action, nil)
 	case "restart":
@@ -470,7 +470,7 @@ func serverListing(states []harness.ServerState) string {
 
 // serverStatusLine is the bare "/rag" report: what it is doing now, what it
 // will do next session, and the one command that changes each.
-func serverStatusLine(h *harness.Harness, id, label string) string {
+func serverStatusLine(ctx context.Context, h *harness.Harness, id, label string) string {
 	st, ok := stateOf(h, id)
 	if !ok {
 		return label + ": not configured"
@@ -499,6 +499,9 @@ func serverStatusLine(h *harness.Harness, id, label string) string {
 	if ix := indexStatus(st, cmd); ix != "" {
 		b.WriteString("\n" + ix)
 	}
+	if sv := raglitSavingsLine(ctx, h, id); sv != "" {
+		b.WriteString("\n" + sv)
+	}
 	switch {
 	case !st.Running || st.Setup == nil:
 	case len(st.Setup.Capabilities) > 0:
@@ -521,6 +524,42 @@ func serverStatusLine(h *harness.Harness, id, label string) string {
 				fmt.Fprintf(&b, "\n  /%s %-12s %s", cmd, own[i], own[i+1])
 			}
 		}
+	}
+	return b.String()
+}
+
+// raglitSavingsLine is the shared project's savings as part of the /rag
+// report: what a maintained base would save, and the daemon's verdict on
+// folding. Only a docs server with a registered project has one; everything
+// else — not the docs server, not registered, the daemon unreachable — says
+// nothing, because a status line is a report, not an error page.
+func raglitSavingsLine(ctx context.Context, h *harness.Harness, id string) string {
+	if id != mcpserver.ServerDocs {
+		return ""
+	}
+	sv, err := h.RaglitSavings(ctx)
+	if err != nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("project " + sv.ProjectID + ": a maintained base would save " +
+		numfmt.Grouped(sv.DuplicateDocuments) + " duplicate documents (" +
+		numfmt.HumanBytes(sv.DuplicateBytes) + "), " +
+		numfmt.TokN(sv.DuplicateEmbeddings) + " duplicate embeddings and " +
+		numfmt.Grouped(sv.FanoutNow-sv.FanoutWithBase) + " of " +
+		numfmt.Grouped(sv.FanoutNow) + " search fan-out")
+	if sv.Recommend {
+		b.WriteString(" — raglit recommends folding")
+	} else {
+		b.WriteString(" — raglit does not recommend folding yet")
+	}
+	if sv.Reason != "" {
+		b.WriteString(" (" + textfmt.OneLine(sv.Reason) + ")")
+	}
+	for _, l := range sv.Layers {
+		b.WriteString("\n  " + l.Name + ": " +
+			numfmt.Grouped(l.Documents) + " docs (" +
+			numfmt.Grouped(l.Duplicates) + " duplicates)")
 	}
 	return b.String()
 }
