@@ -78,6 +78,27 @@ const (
 // Table is the groups as aligned text, width columns wide at most (0: no
 // limit). Only the JOB column is cut to fit; a line never wraps.
 func Table(gs []Group, width int) string {
+	head, blocks := TableBlocks(gs, width)
+	var b strings.Builder
+	b.WriteString(head)
+	for _, bl := range blocks {
+		b.WriteString(bl.Text)
+	}
+	return b.String()
+}
+
+// Block is a part of the table: a process's lines (its own, then its
+// roots, indexes and notes; PID set), a group's total line (PID 0, Group
+// set) or the blank line between two groups (PID 0, Group empty).
+type Block struct {
+	PID   int
+	Group string
+	Text  string // each line ends in a newline
+}
+
+// TableBlocks is Table in parts: the header line and the blocks, which
+// joined are Table's text. Columns align across the blocks.
+func TableBlocks(gs []Group, width int) (string, []Block) {
 	wSes := len("SESSION")
 	wJob := len("JOB")
 	wRoot := 0
@@ -104,6 +125,11 @@ func Table(gs []Group, width int) string {
 		wJob = max(minJob, min(wJob, width-fixed))
 	}
 	var b strings.Builder
+	var blocks []Block
+	flush := func(pid int, group string) {
+		blocks = append(blocks, Block{PID: pid, Group: group, Text: b.String()})
+		b.Reset()
+	}
 	line := func(pid, ses, job, cpu, mem, io, age string) {
 		s := pad(pid, wPID) + sp() + pad(Fit(ses, wSes), wSes) + sp() + pad(FitJob(job, wJob), wJob) + sp() +
 			lpad(cpu, wCPU) + sp() + lpad(mem, wMEM) + sp() + lpad(io, wIO) + sp() + lpad(age, wAGE)
@@ -115,9 +141,12 @@ func Table(gs []Group, width int) string {
 		b.WriteByte('\n')
 	}
 	line("PID", "SESSION", "JOB", "CPU%", "MEM", "IO R/W /s", "AGE")
+	head := b.String()
+	b.Reset()
 	for i, g := range gs {
 		if i > 0 {
 			b.WriteByte('\n')
+			flush(0, "")
 		}
 		for _, r := range g.Rows {
 			line(fmt.Sprint(r.PID), g.Session, r.Job, CPUText(r.CPU), Size(float64(r.RSS)), IOText(r.ReadBps, r.WritBps), Age(r.AgeSec))
@@ -139,12 +168,14 @@ func Table(gs []Group, width int) string {
 				}
 				b.WriteString(msg + "\n")
 			}
+			flush(r.PID, g.Group)
 		}
 		if len(g.Rows) > 1 {
 			line("", g.Session, totalLabel(g), CPUText(g.CPU), Size(float64(g.RSS)), IOText(g.ReadBps, g.WritBps), "")
+			flush(0, g.Group)
 		}
 	}
-	return b.String()
+	return head, blocks
 }
 
 func totalLabel(g Group) string { return fmt.Sprintf("= total, %d processes", len(g.Rows)) }
