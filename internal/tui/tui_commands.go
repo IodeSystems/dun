@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/iodesystems/dun/internal/cmdstats"
 	"github.com/iodesystems/dun/internal/textfmt"
 )
 
@@ -193,13 +194,20 @@ func init() {
 		{"config", "", "show this session's model settings (change with `dun --setup`)", func(m *tuiModel, _ []string) tea.Cmd { m.showConfig(); return nil }},
 		{"status", "", "this session: build, workspace, model, tools and servers", func(m *tuiModel, _ []string) tea.Cmd { m.statusSlash(); return nil }},
 		{"logout", "<provider>", "log out of an AI service: forget its address and key", logoutSlash},
-		{"context", "[config [--max N] [--compact-buffer N] [--tool-lod N] [--recap-nudge N]]", "the context screen (tabs: context, usage, spend): the window, the system prompt, compaction, recaps, truncation; config: the window, the reply's buffer, tool-result stubs and the recap reminder, saved for this model", func(m *tuiModel, args []string) tea.Cmd {
+		{"context", "[config [--max N] [--compact-buffer N] [--tool-lod N] [--recap-nudge N] | config loops [off|count|cut | tolerance N|default | tools N|count|default]]", "the context screen (tabs: context, usage, spend): the window, the system prompt, compaction, recaps, truncation; config: the window, the reply's buffer, tool-result stubs and the recap reminder, saved for this model; config loops: loop detection in the model's replies, saved for every session", func(m *tuiModel, args []string) tea.Cmd {
 			if len(args) > 0 && strings.EqualFold(args[0], "config") {
 				// Bare: the picker (the flags with their values, contextChoices).
 				if len(args) == 1 {
 					m.input.SetValue("/context config ")
 					m.input.CursorEnd()
 					m.paletteSel = 0
+					return nil
+				}
+				// config loops …: loop detection (cmd/dun/loopscmd.go).
+				if len(args) > 1 && strings.EqualFold(args[1], "loops") {
+					if !m.proc.controlCmd("loops", strings.Join(args[2:], " ")) {
+						m.append(StErr.Render("no engine right now — /reconnect first"))
+					}
 					return nil
 				}
 				if !m.proc.controlCmd("ctxconfig", strings.Join(args[1:], " ")) {
@@ -222,30 +230,8 @@ func init() {
 		{"upgrade", "[now [--force]|off|on|--channel=release|source]", "dund's pending upgrade and each tool (mcpshell, poly-lsp-mcp, raglit) against the version this dun pins; now installs the tools that are behind and restarts dund (cut work resumes after), or, with dund already this build, restarts this session's older engine when nothing holds it (--force: now, ending its turn, jobs and sub-agents); off|on: a release build's daily update check; --channel=release on a source build installs the newest release (it may be older than this build), --channel=source on a release build says to run make install in the checkout", upgradeSlash},
 		{"version", "", "which dun this is, the newest release, and whether this build updates itself, and from where", versionSlash},
 		{"keys", "[reload|preset <name>]", "the key map: every rebindable action and its keys; yours go in ~/.dun/keys.json", keysSlash},
-		{"perf", "", "redraw timings for this session (and how to get a profile)", func(m *tuiModel, _ []string) tea.Cmd {
-			m.append(stHeader.Render("render performance") + "\n" + frames.report())
-			return nil
-		}},
 		{"repaint", "[report]", "clear and redraw the whole screen, after saving what dun drew and what the terminal shows to ~/.dun/bugreports/; report also has the model redact the capture and explain what went wrong (asks first if the model is not local)", repaintSlash},
 		{"mouse", "[all|cell|off]", "mouse reporting mode (bare shows it) — `cell` if the wheel should scroll the log; click selects, drag copies, shift+drag (iTerm2: option+drag) is the terminal's own selection", mouseSlash},
-		{"scrolldebug", "", "debug: dump scroll overlay state (rowOffset, blockH, YOffset)", func(m *tuiModel, _ []string) tea.Cmd {
-			var lines []string
-			lines = append(lines, fmt.Sprintf("YOffset=%d pinned=%v vpH=%d convo=%d blockH=%d",
-				m.vp.YOffset, m.scrollPinned, m.vp.Height, len(m.convo), len(m.frame.blockH)))
-			for i, e := range m.convo {
-				if e.userText == "" {
-					continue
-				}
-				h := 0
-				if i < len(m.frame.blockH) {
-					h = m.frame.blockH[i]
-				}
-				lines = append(lines, fmt.Sprintf("  [%d] user=%q rowOffset=%d h=%d bottom=%d offScreen=%v",
-					i, e.userText, e.rowOffset, h, e.rowOffset+h, e.rowOffset+h <= m.vp.YOffset))
-			}
-			m.append(StDim.Render(strings.Join(lines, "\n")))
-			return nil
-		}},
 		{"resume", "[id]", "switch to another saved session (bare opens the picker)", resumeSlash},
 		{"new", "", "start a fresh session in this workspace", newSlash},
 		{"trace", "[on|off|file]", "record events+scroll to a file for debugging (default: dun-trace.jsonl in the temp dir)", func(m *tuiModel, args []string) tea.Cmd {
@@ -310,7 +296,7 @@ func init() {
 			return restartEngine(m.opts, m.sessionID, m.everUp, m.seen())
 		}},
 		{"skill", "[name] [text] | on|off|unset <name|glob> [--global|--project|--session] | mode listed|surfaced|unset [--scope]", "skills: bare opens the list (~/.dun/skills, .dun/skills, ~/.claude/skills, MCP servers) — type to filter, each one's cost, on/off at each scope, and the mode (listed in every request, or surfaced when a turn fits); on/off/unset and mode change it directly; with a name, asks the model to use it; with part of a name, lists the matches", skillSlash},
-		{"exit", "", "exit dun: the session's engine stops too, unless /persist is on or another client is attached", func(m *tuiModel, _ []string) tea.Cmd {
+		{"exit", "", "exit dun: the session's engine stops too, unless another client is attached", func(m *tuiModel, _ []string) tea.Cmd {
 			return m.exit()
 		}},
 		// /splash: a clean screen with the splash on it (USER 2026-10-27:
@@ -325,22 +311,6 @@ func init() {
 		// good is /discard.
 		{"close", "", "exit dun, as /exit (to discard the session for good: /discard)", func(m *tuiModel, _ []string) tea.Cmd {
 			return m.exit()
-		}},
-		{"persist", "[on|off|status]", "keep this session running after /exit (bare: on, or the status if already on)", func(m *tuiModel, args []string) tea.Cmd {
-			mode := ""
-			if len(args) > 0 {
-				mode = strings.ToLower(args[0])
-			}
-			switch mode {
-			case "", "on", "off", "status":
-			default:
-				m.append(StErr.Render("usage: /persist [on|off|status]"))
-				return nil
-			}
-			if !m.proc.persist(mode) {
-				m.append(StErr.Render("no session service right now — /reconnect, then try again"))
-			}
-			return nil
 		}},
 	}
 }
@@ -385,12 +355,22 @@ func (m *tuiModel) runSlash(v string) tea.Cmd {
 	var hit *slashCmd
 	n := 0
 	cmds := m.allSlash()
+	// run counts the command (cmdstats) unless it went to the engine as a
+	// slash line, which counts it there.
+	run := func(name string, f func() tea.Cmd) tea.Cmd {
+		m.slashForwarded = false
+		cmd := f()
+		if !m.slashForwarded {
+			cmdstats.Record(name, cmdstats.SurfaceTUI)
+		}
+		return cmd
+	}
 	for i := range cmds {
 		if strings.Contains(cmds[i].Name, " ") {
 			continue // a subcommand's own palette row: /mcp runs /mcp
 		}
 		if cmds[i].Name == name { // exact wins outright
-			return cmds[i].run(m, fields[1:])
+			return run(name, func() tea.Cmd { return cmds[i].run(m, fields[1:]) })
 		}
 		if strings.HasPrefix(cmds[i].Name, name) && !debugCommands[cmds[i].Name] {
 			hit = &cmds[i]
@@ -398,12 +378,12 @@ func (m *tuiModel) runSlash(v string) tea.Cmd {
 		}
 	}
 	if n == 1 {
-		return hit.run(m, fields[1:])
+		return run(hit.Name, func() tea.Cmd { return hit.run(m, fields[1:]) })
 	}
 	if n == 0 {
 		// Not one of this TUI's: the engine has the last word (its list may
 		// not have arrived yet). It answers an unknown one itself.
-		return engineSlash(name)(m, fields[1:])
+		return run(name, func() tea.Cmd { return engineSlash(name)(m, fields[1:]) })
 	}
 	m.append(StDim.Render("ambiguous command: /" + name + " — try /help"))
 	return nil

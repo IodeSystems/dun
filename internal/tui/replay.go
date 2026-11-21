@@ -19,7 +19,7 @@ import (
 // after the fact — a 5s stall was found by attributing frames to message types,
 // not by reproducing it. A trace closes that gap: the exact events, in the
 // exact order, with the exact gaps, driving the exact UI, with no LLM and no
-// luck. `dun --replay t.jsonl` then `/perf` is a measurement anyone can repeat.
+// luck. `dun --replay t.jsonl` is a measurement anyone can repeat.
 //
 // It is also the only honest way to test a UI against a REAL session. The
 // fixtures in the tests are what someone imagined a conversation looks like;

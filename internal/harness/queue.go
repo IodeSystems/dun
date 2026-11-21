@@ -121,7 +121,6 @@ func (q queued) policy() queuedPolicy {
 //
 // OnNotify still fires immediately so a UI shows the job finishing in real time.
 func (h *Harness) Notify(text string) {
-	h.workNote(text)
 	h.noteMu.Lock()
 	h.queue = append(h.queue, queued{kind: queuedNotification, text: text})
 	h.noteMu.Unlock()
@@ -155,7 +154,6 @@ func (h *Harness) SayAs(id, text string) {
 		h.personMsgs.Add(1)
 		h.autoPersonReset() // the automatic-turn budget (autoturn.go)
 	}
-	h.workInput(text)
 	// A message typed mid-turn grows the intake (asks.go): the model reads
 	// it with the message itself, so no board is queued.
 	h.intakeAdd(text)

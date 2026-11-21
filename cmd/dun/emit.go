@@ -222,11 +222,11 @@ func (e *emitter) emit(payload any) {
 // spelled as typed. Views, pickers and the engine's own server starts are
 // not commands.
 func recordReplies(h *harness.Harness) func(payload any) {
-	slashOf := map[string]string{"files": "file", "ctxconfig": "context config", mcpserver.ServerDocs: "rag"}
+	slashOf := map[string]string{"files": "file", "ctxconfig": "context config", "loops": "context config loops", mcpserver.ServerDocs: "rag"}
 	kindSlash := map[string]string{"indexes": "rag", "paths": "file", "lsp": "lsp", "skills": "skill", "rules": "rules"}
 	commands := map[string]bool{"slash": true, "files": true, "switches": true, "mcp": true, "ext": true, "jobs": true,
 		"schedule": true, "loop": true, "remember": true, "rules": true, "effort": true, "retry": true, "loops": true, "spend": true, "suggest": true,
-		"worklog": true, "journal": true, "plan": true, "memories": true, "interrupt": true, "ctxconfig": true, "repaint": true}
+		"journal": true, "plan": true, "memories": true, "interrupt": true, "ctxconfig": true, "repaint": true}
 	return func(payload any) {
 		switch p := payload.(type) {
 		case *proto.ControlEvent:

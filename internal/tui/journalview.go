@@ -17,7 +17,7 @@ func entryCount(n int) string {
 }
 
 // /journal in the TUI: a screen (panes.go) with a status pane over the
-// entries, newest first: time, kind (fold, now, worklog, ask, turn), title,
+// entries, newest first: time, kind (fold, now, ask, turn), title,
 // tokens; an ask or turn row is its ledger line (harness/asks.go).
 // enter opens one. The engine sends them (control "journal" "screen", a
 // journal event) and again after a /journal now; other clients get
@@ -82,7 +82,7 @@ func (v *journalView) page() pageDoc {
 		nodes = append(nodes, pageNode{head: counts.head(), body: strings.Join(folded, "\n"), pre: true, style: &StDim})
 	}
 	if len(nodes) == 0 {
-		nodes = append(nodes, pageNode{body: "The journal is empty. Each fold adds an entry, each ask made of what you type is listed with what was done for it, /worklog write adds its account, and n (/journal now) writes one."})
+		nodes = append(nodes, pageNode{body: "The journal is empty. Each fold adds an entry, each ask made of what you type is listed with what was done for it, and n (/journal now) writes one."})
 	}
 	return pageDoc{title: entryCount(len(v.items)), nodes: nodes}
 }

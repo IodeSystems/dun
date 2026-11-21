@@ -842,11 +842,11 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   file and the entry keeps the summary; the rescue fold, which writes no span,
   does the same; recaps are not entries, they are many and small), `now`
   (`/journal now`: one side call, kind `journal`, over the plan and the
-  session's entries since the last journal entry, bounded like `/worklog
-  write`; its text goes to `<session>.journal/<n>.md` and into dund's
+  session's entries since the last journal entry, bounded like the old
+  `/worklog write`; its text goes to `<session>.journal/<n>.md` and into dund's
   sessions index as `kind:journal`, so `session_search` finds it), and
   `worklog` (an account `/worklog write` wrote, by reference). No extra model
-  call for folds or worklog accounts. `/worklog` itself is unchanged.
+  call for folds. `/worklog` and the `worklog` kind were removed (2026-11-20).
 - **Reason.** A fold deletes from the context what it summarizes; the
   summary was on disk but no view listed them in order. The plan says what
   is planned, not where the work stands; a summary on request answers that
@@ -1678,7 +1678,7 @@ Code: `internal/dunconfig/tiers.go` (resolution), `internal/harness/tiers.go`
   with the shipped texts add 509).
 - **Side calls.** `"side_calls": {"<kind>": "<tier>|session"}` in
   config.json. Defaults: suggest, fold, remember and rescue `session`;
-  plan_summary, journal, worklog, commit, rephrase and rules `fast`; learn
+  plan_summary, journal, commit, rephrase and rules `fast`; learn
   and repaint `work`. A tier with no model, an unavailable one, or a client
   that cannot be built is the runner the call used before. A tier call
   refused before any reply (context too long, auth, model not found) is
@@ -1976,9 +1976,9 @@ rescue), and agentkit's capability record on the wire. Code:
   glamour's auto-style: an OSC background query with a 5 s timeout that tmux
   does not answer, rebuilt on every `WindowSizeMsg` inside `Update`. It is now
   resolved once before the loop and skipped in multiplexers
-  (`DUN_MD_STYLE`, `DUN_MD_QUERY=1`). It was found only because `/perf` names
-  the message type behind the worst frame. Frame stats are always on
-  (`/perf`); pprof is opt-in (`DUN_PPROF`).
+  (`DUN_MD_STYLE`, `DUN_MD_QUERY=1`). It was found only because the slow-frame dump names
+  the message type behind the worst frame. Frame stats are always on (a dump
+  is written when frames stutter; `/perf` was removed); pprof is opt-in (`DUN_PPROF`).
 - **Rendering is paced and cached** (details in `tui-architecture.md`):
   `refresh()` re-wrapped the whole scrollback per streamed token (7.8 ms per
   frame at 200 blocks, ~1 s CPU per 100-token reply, on the goroutine that

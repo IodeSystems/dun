@@ -139,7 +139,7 @@ Code: `internal/dunconfig/tiers.go`; the decision is "Model tiers" in
 - Flags `--tier-fast`/`--tier-work`/`--tier-think` (`[provider/]model`) and
   `--default-tier`; env `DUN_TIER_FAST`… and `DUN_DEFAULT_TIER`.
 - `side_calls` maps a side call (suggest, fold, remember, rescue,
-  plan_summary, journal, worklog, commit, rephrase, rules, learn, repaint)
+  plan_summary, journal, commit, rephrase, rules, learn, repaint)
   to a tier or `session`. The defaults keep the calls sized from the
   session's window (suggest, fold, remember, rescue) on the session's
   model. One put on a tier runs there only when the tier model's window

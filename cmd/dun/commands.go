@@ -276,14 +276,6 @@ func routeSlash(line string, r slashRoutes) {
 		default:
 			r.reply("rephrase: " + textfmt.OnOff(enginecmd.RephraseOn))
 		}
-	case "worklog":
-		// The title and the why as typed.
-		switch arg(0) {
-		case "", "start", "end", "view", "write":
-			r.control(name, strings.TrimSpace(arg(0)+" "+strings.Join(args[min(1, len(args)):], " ")))
-		default:
-			r.reply("usage: /worklog [start <title> | end [done|dropped|blocked] <why> | view [n] | write [n]]")
-		}
 	case "plan":
 		// Text as typed: a title or a reason keeps its case.
 		switch arg(0) {
@@ -318,7 +310,7 @@ func routeSlash(line string, r slashRoutes) {
 		default:
 			r.reply("usage: /file [add|remove <path>]")
 		}
-	case "retry", "loops", "spend":
+	case "retry", "spend":
 		r.control(name, strings.Join(args, " "))
 	case "suggest":
 		r.control(name, arg(0))

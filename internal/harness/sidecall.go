@@ -131,7 +131,7 @@ func (s *sideCallStats) summary() map[string]map[string]any {
 
 // askOnce is one side call of kind: prompt as the one user message to the
 // session's model, outside the conversation. It takes no turn lock, so it
-// neither waits for a running turn nor holds the next one back (/worklog
+// neither waits for a running turn nor holds the next one back (/journal
 // write, /plan summary, /journal now). The answer is trimmed; usage is the
 // final chunk's, nil when the provider did not report one.
 func (h *Harness) askOnce(ctx context.Context, kind, prompt string) (string, *llm.Usage, error) {

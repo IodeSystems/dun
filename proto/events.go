@@ -1300,7 +1300,7 @@ type Journal struct {
 type JournalItem struct {
 	N      int    `json:"n"`
 	At     int64  `json:"at"`   // unix seconds
-	Kind   string `json:"kind"` // fold, now, worklog
+	Kind   string `json:"kind"` // fold, now, ask, turn
 	Title  string `json:"title"`
 	Tokens int    `json:"tokens,omitempty"`
 	Line   string `json:"line"` // the entry as /journal lists it

@@ -60,7 +60,7 @@ func TestSideGuard_LengthAndEmptyFailEveryCall(t *testing.T) {
 			if out, _ := h.Rephrase(ctx, task); out != task {
 				t.Errorf("rephrase: got %q, want the original", out)
 			}
-			for _, kind := range []string{"journal", "worklog", "plan_summary"} {
+			for _, kind := range []string{"journal", "plan_summary"} {
 				if _, _, err := h.askOnce(ctx, kind, "write it"); err == nil {
 					t.Errorf("askOnce %s: no error", kind)
 				}

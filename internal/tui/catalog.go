@@ -56,10 +56,10 @@ var groupOrder = []string{"setup", "tools", "session", "git", "memory", "prompts
 var tuiGroup = map[string]string{
 	"login": "setup", "provider": "setup", "model": "setup", "mcp add": "setup", "help": "setup", "config": "setup", "logout": "setup",
 	"skill":  "tools",
-	"status": "session", "context": "session", "usage": "session", "who": "session", "resume": "session", "new": "session", "persist": "session", "exit": "session", "close": "session", "splash": "session",
+	"status": "session", "context": "session", "usage": "session", "who": "session", "resume": "session", "new": "session", "exit": "session", "close": "session", "splash": "session",
 	"reconnect": "client", "mouse": "client",
-	"reload": "maintenance", "upgrade": "maintenance", "version": "maintenance", "perf": "maintenance", "repaint": "maintenance",
-	"scrolldebug": "maintenance", "trace": "maintenance",
+	"reload": "maintenance", "upgrade": "maintenance", "version": "maintenance", "repaint": "maintenance",
+	"trace": "maintenance",
 }
 
 // debugCommands are for working on dun itself: /help and the / palette leave
@@ -67,7 +67,7 @@ var tuiGroup = map[string]string{
 // name — a prefix of one is not taken for it. Deciding: does a person using
 // dun on their project ever need it? A redraw timing, a scroll dump, an event
 // trace, a bug-report capture and a launcher rebuild do not.
-var debugCommands = map[string]bool{"perf": true, "repaint": true, "scrolldebug": true, "trace": true}
+var debugCommands = map[string]bool{"repaint": true, "trace": true}
 
 func groupRank(g string) int {
 	if i := slices.Index(groupOrder, g); i >= 0 {
@@ -371,9 +371,9 @@ func engineSlash(name string) func(m *tuiModel, args []string) tea.Cmd {
 			m.openSwitches("lsp")
 			return nil
 		}
-		// Bare /effort, /retry and /loops: the picker, which is the palette's
+		// Bare /effort and /retry: the picker, which is the palette's
 		// choices for it (USER 2026-10-26: empty shows the modes).
-		if (name == "effort" || name == "retry" || name == "loops") && len(args) == 0 {
+		if (name == "effort" || name == "retry") && len(args) == 0 {
 			m.input.SetValue("/" + name + " ")
 			m.input.CursorEnd()
 			m.paletteSel = 0
@@ -407,6 +407,7 @@ func engineSlash(name string) func(m *tuiModel, args []string) tea.Cmd {
 				m.schedEditAsk = strings.TrimPrefix(args[1], "#")
 			}
 		}
+		m.slashForwarded = true
 		if !m.proc.controlCmd("slash", line) {
 			m.append(StErr.Render("no engine right now — /reconnect first"))
 		}

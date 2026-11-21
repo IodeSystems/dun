@@ -271,7 +271,7 @@ func (c DunConfig) pickOf(s string) Pick {
 // their noteSideCall kind. vision is not one of them: it has its facet.
 var SideCallKinds = []string{
 	"suggest", "fold", "remember", "rescue", "plan_summary", "journal",
-	"worklog", "commit", "rephrase", "rules", "learn", "repaint",
+	"commit", "rephrase", "rules", "learn", "repaint",
 }
 
 // WindowSideCalls are the side calls whose input is sized from the
@@ -295,7 +295,6 @@ var DefaultSideCalls = map[string]string{
 	"rescue":       TierSession,
 	"plan_summary": TierFast,
 	"journal":      TierFast,
-	"worklog":      TierFast,
 	"commit":       TierFast,
 	"rephrase":     TierFast,
 	"rules":        TierFast,

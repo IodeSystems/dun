@@ -28,7 +28,7 @@ const threeParts = "## Done\n- 1 parsed\n## Doing\n- 2 the encoder\n## Next\n- 3
 // kept with when they were made, and the call is counted.
 func TestPlanSummary_OneSideCallThreeSections(t *testing.T) {
 	r := &cannedRephraseRunner{reply: threeParts}
-	h := worklogHarness(t, r)
+	h := journalHarness(t, r)
 	var events atomic.Int32
 	var sawRunning atomic.Bool
 	h.cfg.OnPlan = func() {
@@ -77,7 +77,7 @@ func TestPlanSummary_OneSideCallThreeSections(t *testing.T) {
 // A second summary replaces the first: one more call, the new text.
 func TestPlanSummary_SecondRefreshes(t *testing.T) {
 	r := &cannedRephraseRunner{reply: threeParts}
-	h := worklogHarness(t, r)
+	h := journalHarness(t, r)
 	if _, err := h.SummarizePlan(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestJournal_FoldIsAnEntry(t *testing.T) {
 
 // Without a dund link the fold writes no file: the entry keeps the summary.
 func TestJournal_FoldWithoutAFileKeepsItsSummary(t *testing.T) {
-	h := worklogHarness(t, &cannedRephraseRunner{})
+	h := journalHarness(t, &cannedRephraseRunner{})
 	putFold(t, h, "fold-1", "x")
 	all := h.Journal()
 	if len(all) != 1 || all[0].Path != "" || all[0].Body() != "Found it." {
@@ -209,7 +209,7 @@ func TestJournal_FoldWithoutAFileKeepsItsSummary(t *testing.T) {
 // /journal now covers what happened since the last entry, not before it.
 func TestJournal_NowSinceTheLastEntry(t *testing.T) {
 	r := &cannedRephraseRunner{reply: "Fixed the parser\n- changed parse.go"}
-	h := worklogHarness(t, r)
+	h := journalHarness(t, r)
 	t0 := time.Now().Add(-time.Hour)
 	addEntry(t, h, agent.KindUser, "OLD ASK", t0)
 	if err := h.journalAdd(JournalEntry{At: t0.Add(time.Minute), Kind: JournalFold, Title: "earlier", Text: "s"}); err != nil {
@@ -250,28 +250,10 @@ func TestJournal_NowSinceTheLastEntry(t *testing.T) {
 	}
 }
 
-// /worklog write's account is an entry, pointing at its file.
-func TestJournal_WorklogAccountIsAnEntry(t *testing.T) {
-	h := worklogHarness(t, &cannedRephraseRunner{reply: "## What was asked\nA fix."})
-	mustWork(t, h, "start Fix the login bug")
-	mustWork(t, h, "end done fixed")
-	path, err := h.WriteWorklog(context.Background(), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	all := h.Journal()
-	if len(all) != 1 || all[0].Kind != JournalWorklog || all[0].Path != path || !strings.Contains(all[0].Title, "Fix the login bug") {
-		t.Fatalf("entries: %+v", all)
-	}
-	if !strings.Contains(all[0].Body(), "A fix.") {
-		t.Errorf("body %q", all[0].Body())
-	}
-}
-
 // The journal survives a resume: a new harness on the same session file
 // lists the entries, and /journal now counts from the last of them.
 func TestJournal_SurvivesResume(t *testing.T) {
-	h := worklogHarness(t, &cannedRephraseRunner{})
+	h := journalHarness(t, &cannedRephraseRunner{})
 	putFold(t, h, "fold-1", "x")
 	if err := h.journalAdd(JournalEntry{Kind: JournalNow, Title: "second", Text: "did things"}); err != nil {
 		t.Fatal(err)
@@ -279,7 +261,7 @@ func TestJournal_SurvivesResume(t *testing.T) {
 	if _, err := os.Stat(JournalFile(h.cfg.SessionFile)); err != nil {
 		t.Fatal(err)
 	}
-	h2 := worklogHarness(t, &cannedRephraseRunner{})
+	h2 := journalHarness(t, &cannedRephraseRunner{})
 	h2.cfg.SessionFile = h.cfg.SessionFile
 	out, err := h2.JournalCmd("")
 	if err != nil {
@@ -296,4 +278,14 @@ func TestJournal_SurvivesResume(t *testing.T) {
 	if _, err := h2.JournalCmd("view 9"); err == nil {
 		t.Error("view 9: want an error")
 	}
+}
+
+func journalHarness(t *testing.T, runner *cannedRephraseRunner) *Harness {
+	t.Helper()
+	h := rephraseHarness(t, runner)
+	h.cfg.SessionFile = filepath.Join(t.TempDir(), "s1.jsonl")
+	h.cfg.Endpoint.Model = "m1"
+	h.cfg.Version = "v9.9.9"
+	h.sideCalls = &sideCallStats{}
+	return h
 }

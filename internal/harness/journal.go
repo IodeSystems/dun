@@ -33,20 +33,18 @@ import (
 //     session's entries since the last journal entry. Its text is written to
 //     <session>.journal/<n>.md, so the sessions index can hold it as it holds
 //     the folds.
-//   - worklog: an account /worklog write wrote; the entry points at its file.
 //   - ask: a message the person typed, closed (done, dropped) or still open
 //     as the session ended, with what the turns that served it did (asks.go,
 //     ledger.go). Open asks are listed after the kept entries, as open.
 //   - turn: a turn that served no ask and made a tool call: its facts.
 //
 // Kept in <session>.journal.jsonl, one entry per line, append-only, so a
-// resumed session keeps its journal. The root session's only, as the worklog.
+// resumed session keeps its journal. The root session's only.
 
 // Journal entry kinds.
 const (
-	JournalFold    = "fold"
-	JournalNow     = "now"
-	JournalWorklog = "worklog"
+	JournalFold = "fold"
+	JournalNow  = "now"
 )
 
 // Bounds on a /journal now prompt.
@@ -378,10 +376,4 @@ func (h *Harness) journalIndex(ctx context.Context, e JournalEntry) {
 	}
 	_ = x.Put(ctx, agent.SessionDoc{Key: "journal-" + strconv.FormatInt(e.At.UnixNano(), 10), Kind: "journal",
 		Name: e.Title, Summary: e.Body()})
-}
-
-// journalWorklog is an account /worklog write wrote, as an entry.
-func (h *Harness) journalWorklog(t WorkTask, path, text string) {
-	_ = h.journalAdd(JournalEntry{Kind: JournalWorklog, Title: fmt.Sprintf("worklog #%d %s", t.N, t.Title),
-		Tokens: h.estimate(text), Path: path})
 }

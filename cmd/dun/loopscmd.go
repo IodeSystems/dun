@@ -13,7 +13,7 @@ import (
 	"github.com/iodesystems/dun/internal/dunconfig"
 )
 
-// /loops: agentkit's loop detection on the model's output, on every client
+// /context config loops: agentkit's loop detection on the model's output, on every client
 // (USER 2026-10-31: "we want to make loop detection configurable"). loopguard.go
 // is a different check and is set apart: it refuses a tool call at dispatch,
 // with DUN_LOOP_REPEATS.
@@ -42,7 +42,7 @@ type loopWatcher struct {
 	loaded bool
 }
 
-// loopWatch is the process's one: /loops changes every client at once.
+// loopWatch is the process's one: /context config loops changes every client at once.
 var loopWatch = &loopWatcher{}
 
 // load takes the config once, the first client's; DUN_LOOP_DETECT wins.
@@ -151,7 +151,7 @@ func kinds(m map[string]int64) string {
 	return strings.Join(out, ", ")
 }
 
-// command runs /loops's action and returns what to say and the config to save
+// command runs the loops action and returns what to say and the config to save
 // (nil when nothing changed).
 func (l *loopWatcher) command(action string) (string, *dunconfig.DunConfig, error) {
 	f := strings.Fields(strings.ToLower(action))
@@ -179,7 +179,7 @@ func (l *loopWatcher) command(action string) (string, *dunconfig.DunConfig, erro
 		}
 		cfg.ToolTolerance = n
 	default:
-		return "", nil, fmt.Errorf("usage: /loops [off|count|cut | tolerance N|default | tools N|count|default]")
+		return "", nil, fmt.Errorf("usage: /context config loops [off|count|cut | tolerance N|default | tools N|count|default]")
 	}
 	l.mu.Lock()
 	l.cfg, l.d, l.loaded = cfg, cfg.Detector(), true

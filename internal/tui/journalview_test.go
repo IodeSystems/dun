@@ -69,7 +69,7 @@ func TestPlanScreen_SummaryKey(t *testing.T) {
 func journalEvent() evMsg {
 	return evMsg{"type": "journal", "entries": []any{
 		map[string]any{"n": 1.0, "kind": "fold", "line": "#1  Nov 17 10:00  fold     find the port", "text": "Found it."},
-		map[string]any{"n": 2.0, "kind": "worklog", "line": "#2  Nov 17 11:00  worklog  worklog #1 Fix", "text": "A fix.", "path": "/s.worklog/1-fix.md"},
+		map[string]any{"n": 2.0, "kind": "now", "line": "#2  Nov 17 11:00  now  Fix", "text": "A fix.", "path": "/s.journal/2.md"},
 		map[string]any{"n": 3.0, "kind": "now", "line": "#3  Nov 17 12:00  now      Fixed the parser", "text": "- changed parse.go"},
 	}}
 }

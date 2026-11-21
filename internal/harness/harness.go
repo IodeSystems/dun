@@ -361,10 +361,6 @@ type Harness struct {
 	jobsPollOut string
 	// The turn in flight's cancel and what its round has streamed (interrupt.go).
 	interruptState
-	// The session's worklog (worklog.go), read from its sidecar on first use.
-	wlMu   sync.Mutex
-	wl     *Worklog
-	wlFile string
 	// The session's /journal (journal.go) and the last /plan summary
 	// (plansummary.go).
 	journal journalState
@@ -1084,7 +1080,6 @@ func (h *Harness) AskAs(ctx context.Context, id, task string) (agent.TurnResult,
 	h.intakeAdd(task)
 	h.prepareTurn(ctx)
 	h.ledgerBegin()
-	h.workInput(task)
 	h.store.publish(agent.Entry{
 		ID: id, Kind: agent.KindUser, Content: task, CreatedAt: time.Now().UnixNano(),
 	})
@@ -1109,7 +1104,6 @@ func (h *Harness) turnThenTriggers(ctx context.Context) (agent.TurnResult, error
 	// or without an error: a failed turn can have written files too.
 	h.codeReindex()
 	if err == nil {
-		h.workReply(res.Reply) // the worklog's open task (worklog.go)
 		// Turn-end boundary fold: the prompt is over 0.7 × the shape target
 		// and nothing is in flight, so fold the earlier turns now, keeping
 		// the cached prefix intact. The mid-turn budget fold remains as the
