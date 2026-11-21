@@ -11,6 +11,7 @@ import (
 	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/memory"
 	"github.com/iodesystems/dun/internal/project"
+	"github.com/iodesystems/dun/internal/raglit"
 )
 
 // The session's memory notes, strategies and constraints (internal/memory,
@@ -130,7 +131,16 @@ func (h *Harness) newStoreLink(parent func(*Harness) *memory.Link, store func(*m
 			return l
 		}
 	}
-	l := memory.NewLink(h.cfg.Rag, mcpserver.RaglitProject(h.cfg.Workspace), notice)
+	reg := h.cfg.RaglitReg
+	var l *memory.Link
+	if reg.Private != "" {
+		// A registered remote project: notes upload to their layer on
+		// write (internal/memory), raglit.New reading $RAGLIT_TOKEN per
+		// request (the /rag login keeps it there).
+		l = memory.NewLinkWithRaglit(h.cfg.Rag, mcpserver.RaglitProject(h.cfg.Workspace), notice, raglit.New(""), reg)
+	} else {
+		l = memory.NewLink(h.cfg.Rag, mcpserver.RaglitProject(h.cfg.Workspace), notice)
+	}
 	// The first contact: files written while no dund was there get
 	// indexed now, or the session learns it is degraded.
 	go l.Contact(store(l, h.cfg.Workspace))

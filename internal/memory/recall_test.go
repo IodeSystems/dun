@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/iodesystems/dun/internal/raglit"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -253,5 +254,116 @@ func waitFor(t *testing.T, limit time.Duration, ok func() bool) {
 			t.Fatalf("condition never held within %s", limit)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// fakeRaglitClient records the layer a document went to and serves forgets;
+// down makes every call fail (daemon unreachable).
+type fakeRaglitClient struct {
+	mu      sync.Mutex
+	down    bool
+	uploads []struct {
+		index, name, text string
+	}
+	forgets []struct{ index, path string }
+}
+
+func (f *fakeRaglitClient) Upload(_ context.Context, index string, doc raglit.UploadDoc) (raglit.UploadResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.down {
+		return raglit.UploadResult{}, raglit.ErrUnavailable
+	}
+	f.uploads = append(f.uploads, struct {
+		index, name, text string
+	}{index, doc.Name, doc.Text})
+	return raglit.UploadResult{Index: index, Path: "/layers/" + index + "/" + doc.Name}, nil
+}
+
+func (f *fakeRaglitClient) Forget(_ context.Context, index, path string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.down {
+		return raglit.ErrUnavailable
+	}
+	f.forgets = append(f.forgets, struct{ index, path string }{index, path})
+	return nil
+}
+
+// memWithRaglit is memWith plus a raglit registration: the link uploads
+// notes to their layer.
+func memWithRaglit(t *testing.T, f *fakeRag, rc *fakeRaglitClient) (*Store, raglit.Registration) {
+	t.Helper()
+	t.Setenv("DUN_HOME", t.TempDir())
+	reg := raglit.Registration{ProjectID: "r", Namespace: "ns", Base: "ns__base", Private: "ns__u1-priv", Public: "ns__u1-pub"}
+	l := NewLinkWithRaglit(f, "proj", func(s string) {}, rc, reg)
+	m := NotesFor(l, t.TempDir())
+	m.dir = memoryDir("proj")
+	return m, reg
+}
+
+// A note goes to the private layer by default, to the public layer when
+// public: true; a refine re-uploads the same name to the same layer; a void
+// forgets it from that layer and keeps the file; a layer failure leaves the
+// note saved locally.
+func TestMemRecall_RaglitLayers(t *testing.T) {
+	f := &fakeRag{}
+	rc := &fakeRaglitClient{}
+	m, reg := memWithRaglit(t, f, rc)
+	if _, err := m.apply(toolArgs{Action: "add", Content: "Builds need CGO off.", Question: "how to build?"}, NoteMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.apply(toolArgs{Action: "add", Content: "The deploy uses the canary lane.", Public: true}, NoteMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	rc.mu.Lock()
+	if len(rc.uploads) != 2 || rc.uploads[0].index != reg.Private || rc.uploads[1].index != reg.Public {
+		t.Fatalf("uploads %+v, want private then public", rc.uploads)
+	}
+	p0 := rc.uploads[0].name // the document name: the note's file name
+	rc.mu.Unlock()
+	// The daemon's path is in the note's frontmatter, so the void forgets
+	// the right document.
+	pth := ""
+	if ps, _ := filepath.Glob(filepath.Join(m.dir, "*.md")); len(ps) == 2 {
+		for _, p := range ps {
+			b, _ := os.ReadFile(p)
+			if strings.Contains(string(b), "how to build?") {
+				pth = p
+			}
+		}
+	}
+	if n, _ := readNote(pth); n.meta["raglit_path"] != "/layers/"+reg.Private+"/"+p0 {
+		t.Errorf("raglit_path in frontmatter = %q, want the upload's path", n.meta["raglit_path"])
+	}
+	// A refine re-uploads under the same name, to the same layer.
+	if _, err := m.apply(toolArgs{Action: "refine", OldText: "CGO off", Content: "Builds need CGO on.", Why: "w", Source: "user"}, NoteMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	rc.mu.Lock()
+	if len(rc.uploads) != 3 || rc.uploads[2].index != reg.Private || rc.uploads[2].name != p0 {
+		t.Fatalf("refine uploads %+v, want the same name to the private layer", rc.uploads)
+	}
+	rc.mu.Unlock()
+	// A void forgets the note from its layer and keeps the file.
+	if _, err := m.apply(toolArgs{Action: "void", OldText: "canary", Why: "w", Source: "user"}, NoteMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	rc.mu.Lock()
+	if len(rc.forgets) != 1 || rc.forgets[0].index != reg.Public || !strings.HasPrefix(rc.forgets[0].path, "/layers/"+reg.Public+"/") {
+		t.Fatalf("forgets %+v, want the public layer's path", rc.forgets)
+	}
+	rc.mu.Unlock()
+	if vs, _ := filepath.Glob(filepath.Join(m.dir, "*.md"+voidSuffix)); len(vs) != 1 {
+		t.Errorf("voided file kept: %v", vs)
+	}
+	// A layer failure is a down-note, never a hard failure: the note is
+	// saved locally and the dund ingest proceeds.
+	rc.mu.Lock()
+	rc.down = true
+	rc.mu.Unlock()
+	out, err := m.apply(toolArgs{Action: "add", Content: "The queue drains on restart.", Question: "drain?"}, NoteMeta{})
+	if err != nil || !strings.HasPrefix(out, "saved ") {
+		t.Fatalf("a layer failure failed the write: %q %v", out, err)
 	}
 }

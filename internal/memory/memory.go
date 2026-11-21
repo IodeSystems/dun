@@ -42,9 +42,12 @@ import (
 // A note is found again by a phrase from it, not by an id: a model that has to
 // carry ids between calls invents them (the exec_2 lesson in the icebox).
 //
-// Local only for now (USER, 2026-10-21). `public` is recorded in the
-// frontmatter and changes nothing yet; the remote private/public layers are a
-// later slice that uploads these same files.
+// With a registered remote project (/rag on), a note also goes to the
+// raglit project's layers: private by default, public when its frontmatter
+// says public: true (leak is irreversible, so the default stays private).
+// A refine re-uploads the note under the same name to the same layer; a void
+// forgets it from the layer and keeps the file. A layer failure is a
+// down-note, never a hard failure: the file is the record (recall.go).
 
 // NotesIndex is dund's index notes go into, a project's or the global
 // set's (internal/ragd).

@@ -27,6 +27,7 @@ import (
 	"github.com/iodesystems/dun/internal/mounttool"
 	"github.com/iodesystems/dun/internal/oauth"
 	"github.com/iodesystems/dun/internal/procstat"
+	"github.com/iodesystems/dun/internal/raglit"
 	"github.com/iodesystems/dun/internal/spendmeter"
 	"github.com/iodesystems/dun/internal/tokenmeter"
 )
@@ -313,6 +314,11 @@ type Config struct {
 	// (raglink.go, internal/memory). Set, the session has the memory tool and
 	// recalls notes, with dund down too (from the files); nil, neither.
 	Rag RagLink
+	// RaglitReg is the session's registration with the raglit daemon — the
+	// project's namespace and the caller's private and public layers, from
+	// /rag on (servers.go, internal/raglit). Set, a memory note uploads to
+	// its layer on write (internal/memory); zero, notes stay local.
+	RaglitReg raglit.Registration
 	// NoCodeSearch turns off the code and docs search through dund
 	// (codesearch.go): DUN_CODE_SEARCH=0, as under the Harbor adapter.
 	NoCodeSearch bool

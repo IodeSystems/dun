@@ -15,6 +15,7 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 
+	"github.com/iodesystems/dun/internal/raglit"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -39,10 +40,23 @@ import (
 // Link is a session's way to its notes' indexes. It is the harness's for
 // its life: a tool rebuild makes a new Store over the same dirs, not a
 // new link, so the sync runs once per contact, not once per rebuild.
+//
+// When the session has a registered remote project (raglit), ingest also
+// uploads each note to the private layer, or the public layer when the
+// note's frontmatter says public: true. The layer is the cross-machine
+// record; dund's index is the local search. A layer upload failure is
+// logged and the dund ingest proceeds: the file is the record, the layer
+// catches up on the next contact.
 type Link struct {
 	rag     Rag
 	project string       // the project's slug in dund
 	notice  func(string) // says, once, that recall is degraded
+
+	// raglitClient and raglitReg are set when the session has a registered
+	// remote project (the registration slice, on /rag on). nil client → no
+	// remote layer: notes are local only.
+	raglitClient raglitLayer
+	raglitReg    raglit.Registration
 
 	mu      sync.Mutex
 	synced  bool // a sync reached dund since the last failure
@@ -91,6 +105,24 @@ func NewLink(rag Rag, project string, notice func(string)) *Link {
 	return &Link{rag: rag, project: project, notice: notice, meta: map[string]Hit{}}
 }
 
+// raglitLayer is the raglit daemon's projects API, as the memory notes use
+// it: a document to a layer, and a document out of one. *raglit.Client
+// implements it; a test fake implements it without a daemon.
+type raglitLayer interface {
+	Upload(ctx context.Context, index string, doc raglit.UploadDoc) (raglit.UploadResult, error)
+	Forget(ctx context.Context, index, path string) error
+}
+
+// NewLinkWithRaglit is like NewLink, but also uploads each note to the
+// registered project's private or public layer on ingest, and drops it from
+// the layer on forget. A nil client is the same as NewLink: no remote layer.
+func NewLinkWithRaglit(rag Rag, project string, notice func(string), rc raglitLayer, reg raglit.Registration) *Link {
+	l := NewLink(rag, project, notice)
+	l.raglitClient = rc
+	l.raglitReg = reg
+	return l
+}
+
 // Contact is the first contact with dund: files written while no dund was
 // there get indexed now, or the session learns it is degraded.
 func (l *Link) Contact(m *Store) { l.saw(m, nil) }
@@ -105,7 +137,71 @@ func (l *Link) ingest(m *Store, path string) error {
 	_, err := l.rag.Ingest(ctx, proto.RagIngest{Project: m.scopeOf(path, l.project), Index: m.indexName(),
 		Path: path, Title: noteTitle(path, n.meta), Tags: ragTags(n.meta), Text: noteText(path, n)})
 	l.saw(m, err)
+	l.raglitUpload(path, n)
 	return err
+}
+
+// raglitUpload sends a note to the registered project's layer: public to
+// reg.Public, private to reg.Private (the default — leak is irreversible,
+// so a note only leaves the user's own layer when public: true). On success
+// the daemon-assigned path is recorded in the note's frontmatter as
+// raglit_path, so a later void can forget the right document. A failure is
+// logged and not returned: the file is the record, the layer catches up on
+// the next contact (same down-note semantics as dund).
+func (l *Link) raglitUpload(path string, n note) {
+	if l.raglitClient == nil || l.raglitReg.Private == "" {
+		return
+	}
+	layer := l.raglitReg.Private
+	if n.meta["public"] == "true" {
+		layer = l.raglitReg.Public
+	}
+	name := filepath.Base(path)
+	ctx, cancel := context.WithTimeout(context.Background(), ragCallTimeout)
+	defer cancel()
+	res, err := l.raglitClient.Upload(ctx, layer, raglit.UploadDoc{
+		Name:  name,
+		Text:  noteText(path, n),
+		Title: noteTitle(path, n.meta),
+	})
+	if err != nil {
+		log.Printf("dun: memory: %s not uploaded to %s: %v", name, layer, err)
+		return
+	}
+	setNoteField(path, "raglit_path", res.Path)
+}
+
+// setNoteField sets one scalar field in a note's frontmatter, keeping every
+// other line, and writes the file back. A failure is logged, not returned:
+// the field is for the layer (raglit_path), and the layer catches up.
+func setNoteField(path, key, value string) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		log.Printf("dun: memory: %s: %v", filepath.Base(path), err)
+		return
+	}
+	lines := strings.Split(string(b), "\n")
+	if len(lines) < 2 || lines[0] != "---" {
+		return
+	}
+	for i := 1; i < len(lines); i++ {
+		if lines[i] == "---" {
+			for j, l := range lines[1:i] {
+				if k, _, _ := strings.Cut(l, ":"); k == key {
+					lines[j+1] = key + ": " + value
+					if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+						log.Printf("dun: memory: %s: %v", filepath.Base(path), err)
+					}
+					return
+				}
+			}
+			lines = append(append(append([]string{}, lines[:i]...), key+": "+value), lines[i:]...)
+			if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+				log.Printf("dun: memory: %s: %v", filepath.Base(path), err)
+			}
+			return
+		}
+	}
 }
 
 // noteText is what a note is indexed as: a memory's question and answer, or
@@ -145,11 +241,34 @@ func ragTags(meta map[string]string) []string {
 }
 
 func (l *Link) forget(m *Store, path string) error {
+	n, _ := readNote(path)
 	ctx, cancel := context.WithTimeout(context.Background(), ragCallTimeout)
 	defer cancel()
 	_, err := l.rag.Forget(ctx, proto.RagForget{Project: m.scopeOf(path, l.project), Index: m.indexName(), Path: path})
 	l.saw(m, err)
+	l.raglitForget(path, n.meta["raglit_path"])
 	return err
+}
+
+// raglitForget drops a note from the registered project's layer on a void.
+// path is the daemon-assigned path in the note's frontmatter, set by
+// raglitUpload; "" (the upload never succeeded) means the layer holds
+// nothing to drop. A failure is logged and not returned: the file is the
+// record, and a doc left in a layer is found only by search.
+func (l *Link) raglitForget(path, layerPath string) {
+	if l.raglitClient == nil || layerPath == "" {
+		return
+	}
+	n, _ := readNote(path)
+	layer := l.raglitReg.Private
+	if n.meta["public"] == "true" {
+		layer = l.raglitReg.Public
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), ragCallTimeout)
+	defer cancel()
+	if err := l.raglitClient.Forget(ctx, layer, layerPath); err != nil {
+		log.Printf("dun: memory: %s not forgotten from %s: %v", filepath.Base(path), layer, err)
+	}
 }
 
 // saw records how a call to dund went: down marks the index behind, and a
