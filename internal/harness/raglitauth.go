@@ -47,6 +47,54 @@ import (
 // RaglitTokenFile is where /rag login keeps dun's raglit token.
 func RaglitTokenFile() string { return filepath.Join(DunHome(), "oauth", "raglit.token") }
 
+// RaglitJWTFile is where the remote-raglit login (cmd/dun/raglogin.go) keeps
+// the OIDC access token it obtained for the human. A remote raglit daemon
+// answers no request without this bearer; raglit has no device-flow of its
+// own, so dun runs the login and hands the token to its raglit subprocess.
+func RaglitJWTFile() string { return filepath.Join(DunHome(), "oauth", "raglit.jwt") }
+
+// LoadRaglitJWT returns the stored remote-raglit bearer, "" when none.
+func LoadRaglitJWT() string {
+	b, err := os.ReadFile(RaglitJWTFile())
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// SaveRaglitJWT writes the remote-raglit bearer, 0600.
+func SaveRaglitJWT(jwt string) error {
+	file := RaglitJWTFile()
+	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(file, []byte(jwt+"\n"), 0o600)
+}
+
+// RaglitTokenCommand is the value of RAGLIT_TOKEN_COMMAND for the raglit
+// subprocess: a command whose stdout is the current bearer. The subprocess
+// runs it on each start, so it re-fetches the token and picks up a refresh
+// without dun restarting it. `dun rag token` prints the stored JWT
+// (cmd/dun/raglogin.go). It resolves to dun's own path, so the command is
+// found when dun was launched by absolute path and "dun" is not on the
+// child's PATH.
+func RaglitTokenCommand() string {
+	if exe, err := os.Executable(); err == nil && exe != "" {
+		return exe + " rag token"
+	}
+	return "dun rag token"
+}
+
+// raglitRemoteEnv is the docs server's env for a remote raglit: the token
+// command, so its daemon authenticates with the human's JWT. nil when there
+// is no stored JWT, i.e. the server is not pointed at a remote daemon.
+func raglitRemoteEnv() []string {
+	if LoadRaglitJWT() == "" {
+		return nil
+	}
+	return []string{"RAGLIT_TOKEN_COMMAND=" + RaglitTokenCommand()}
+}
+
 // raglitKeyIDFile holds the token's key id, which is what revoking takes.
 func raglitKeyIDFile() string { return filepath.Join(DunHome(), "oauth", "raglit.key") }
 
@@ -102,17 +150,25 @@ func raglitKeyed(s mcpserver.Server) (string, bool) {
 }
 
 // raglitAuth is the docs server's env for a keyed raglit: RAGLIT_TOKEN set
-// to the session's key, minted on first use. nil, nil for any other server.
+// to the session's key, minted on first use, plus RAGLIT_TOKEN_COMMAND when a
+// remote-raglit JWT is stored (raglitRemoteEnv). nil, nil for any other
+// server.
 func (h *Harness) raglitAuth(ctx context.Context, s mcpserver.Server) ([]string, error) {
-	command, ok := raglitKeyed(s)
-	if !ok {
-		return nil, nil
+	var env []string
+	if command, ok := raglitKeyed(s); ok {
+		key, err := h.raglitSessionKey(ctx, command)
+		if err != nil {
+			return nil, err
+		}
+		env = append(env, "RAGLIT_TOKEN="+key)
 	}
-	key, err := h.raglitSessionKey(ctx, command)
-	if err != nil {
-		return nil, err
+	// A remote raglit authenticates with the human's OIDC bearer, not a key
+	// the local daemon minted: the token command is set whenever a JWT is
+	// stored, whether or not this raglit is also keyed.
+	if s.ID == mcpserver.ServerDocs {
+		env = append(env, raglitRemoteEnv()...)
 	}
-	return []string{"RAGLIT_TOKEN=" + key}, nil
+	return env, nil
 }
 
 // raglitEnv is the env the docs server's CLI runs with: the session key once

@@ -118,6 +118,11 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "oauth" {
 		os.Exit(oauthCmd(os.Args[2:], os.Stdout, os.Stderr))
 	}
+	// `dun rag token | login`: the remote-raglit bearer. `token` is
+	// RAGLIT_TOKEN_COMMAND for the raglit subprocess (raglogin.go).
+	if len(os.Args) > 1 && os.Args[1] == "rag" {
+		os.Exit(ragCmd(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	// `dun --usage [--json] [--no-net]`: what dun has used, from the stats
 	// ledger, and what the provider says is left (usage.go). No session.
 	if len(os.Args) > 1 && (os.Args[1] == "--usage" || os.Args[1] == "-usage") {

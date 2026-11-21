@@ -30,8 +30,8 @@ func (r raglitRun) token() string {
 	return ""
 }
 
-// fakeRaglit points $DUN_RAGLIT at a raglit with keys and answers its key and ingest
-// commands; runs records every call.
+// fakeRaglit points $DUN_RAGLIT at a raglit with keys and answers its key and
+// ingest commands; runs records every call.
 func fakeRaglit(t *testing.T) (*[]raglitRun, mcpserver.Server) {
 	t.Helper()
 	t.Setenv("DUN_HOME", t.TempDir())
@@ -120,6 +120,37 @@ func TestRaglitAuth_OlderRaglitIsUntouched(t *testing.T) {
 	}
 }
 
+// A keyed local raglit and a stored remote JWT both present: the docs server
+// gets the session key AND the remote token command, so its daemon can be the
+// shared one and raglit's EnvTokenSource still prefers the local key.
+func TestRaglitAuth_LocalKeyAndRemoteJWT(t *testing.T) {
+	_, docs := fakeRaglit(t)
+	SaveRaglitJWT("remote-jwt")
+	h := testHarness(t)
+	if _, err := h.raglitLogin(context.Background(), docs); err != nil {
+		t.Fatal(err)
+	}
+	env, err := h.raglitAuth(context.Background(), docs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var haveKey, haveCmd bool
+	for _, e := range env {
+		if e == "RAGLIT_TOKEN=key-session" {
+			haveKey = true
+		}
+		if v, ok := strings.CutPrefix(e, "RAGLIT_TOKEN_COMMAND="); ok && strings.HasSuffix(v, "rag token") {
+			haveCmd = true
+		}
+	}
+	if !haveKey {
+		t.Errorf("env %v has no RAGLIT_TOKEN=key-session", env)
+	}
+	if !haveCmd {
+		t.Errorf("env %v has no RAGLIT_TOKEN_COMMAND", env)
+	}
+}
+
 func TestRaglitLogout_RevokesAndDeletes(t *testing.T) {
 	runs, docs := fakeRaglit(t)
 	h := testHarness(t)
@@ -154,5 +185,67 @@ func TestRaglitSession_IsTheRoots(t *testing.T) {
 	root.ragKey = "key-session"
 	if env := kid.raglitEnv(); len(env) != 1 || env[0] != "RAGLIT_TOKEN=key-session" {
 		t.Errorf("child env %v", env)
+	}
+}
+
+func TestRaglitJWTFile_SavesAndLoads(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("DUN_HOME", home)
+
+	path := RaglitJWTFile()
+	if got := filepath.Base(path); got != "raglit.jwt" {
+		t.Fatalf("RaglitJWTFile() = %q, want raglit.jwt", path)
+	}
+
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("JWT file exists before Save: %v", err)
+	}
+
+	SaveRaglitJWT("eyJhbGciOiJSUzI1NiJ9.abc.def")
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("JWT file not created: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0600 {
+		t.Errorf("JWT file perms = %o, want 0600", perm)
+	}
+
+	if got := LoadRaglitJWT(); got != "eyJhbGciOiJSUzI1NiJ9.abc.def" {
+		t.Errorf("LoadRaglitJWT() = %q, want the saved JWT", got)
+	}
+}
+
+func TestRaglitJWTFile_Absent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("DUN_HOME", home)
+
+	if got := LoadRaglitJWT(); got != "" {
+		t.Errorf("LoadRaglitJWT (absent) = %q, want empty", got)
+	}
+}
+
+func TestRaglitRemoteEnv_ReturnsCommandWhenJWTStored(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("DUN_HOME", home)
+
+	SaveRaglitJWT("jwt-value")
+
+	env := raglitRemoteEnv()
+	if len(env) == 0 {
+		t.Fatal("raglitRemoteEnv() = empty, want [RAGLIT_TOKEN_COMMAND=…]")
+	}
+	v, ok := strings.CutPrefix(env[0], "RAGLIT_TOKEN_COMMAND=")
+	if !ok || v != RaglitTokenCommand() {
+		t.Errorf("raglitRemoteEnv()[0] = %q, want %q", env[0], "RAGLIT_TOKEN_COMMAND="+RaglitTokenCommand())
+	}
+}
+
+func TestRaglitRemoteEnv_NilWhenNoJWT(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("DUN_HOME", home)
+
+	if env := raglitRemoteEnv(); env != nil {
+		t.Errorf("raglitRemoteEnv() = %v, want nil", env)
 	}
 }
