@@ -368,6 +368,9 @@ func measuredBuild(shaper *agent.Shaper, h *Harness) agent.ContextBuilder {
 		// unshrunken prompt.
 		h.tryColdCacheFold(ctx)
 		msgs, err := shaper.Build(ctx, sessionID, system)
+		// A fold the build began and did not finish (its summary call
+		// failed or was cancelled) ends here; a finished one already has.
+		h.foldEnd(err)
 		if err != nil {
 			return msgs, err
 		}
@@ -443,6 +446,7 @@ func (h *Harness) boundaryFold(ctx context.Context) (agent.CompactionInfo, bool)
 	}
 	info, did, err := h.shaper.Compact(ctx, h.cacheSessionID())
 	if err != nil || !did {
+		h.foldEnd(err)
 		return agent.CompactionInfo{}, false
 	}
 	h.noteCompactionCause(info, foldByBoundary)

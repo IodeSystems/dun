@@ -74,7 +74,8 @@ func (m *tuiModel) refresh() {
 	// Blocks wholly above the view fold now, and the view's top moves up by
 	// the rows they gave back (scrollfold.go).
 	foldOK, foldY, shift := m.foldAboveOK(), m.vp.YOffset, 0
-	for i, b := range blocks {
+	for _, i := range m.drawOrder(len(blocks), curAt >= 0) {
+		b := blocks[i]
 		var w string
 		folding := foldOK && i < len(m.convo) && m.aboveView(i, foldY, selMode)
 		if folding {
@@ -111,7 +112,7 @@ func (m *tuiModel) refresh() {
 				e.invalidateWrap()
 			}
 			switch {
-			case e.userText != "":
+			case e.userText != "" && !e.provisional && !e.lost: // queued or lost: its own dim line
 				if e.wrapped == "" || e.wrapW != width || e.wrapState != e.state {
 					e.wrapped, e.wrapW, e.wrapState = userRowAt(e.userText, wrapW), width, e.state
 					if e.state == viewExpanded && e.stats != "" {
@@ -234,6 +235,38 @@ func (m *tuiModel) refresh() {
 	m.revealDoc()
 }
 
+// drawOrder is the order the n blocks are drawn in, by block index: the
+// conversation, the streaming reply, then the messages queued for the
+// running turn (provisional rows), then the suggestions. A queued message is
+// not in the conversation yet: it sits below everything the turn shows, the
+// reply still streaming included, until delivered makes it a user row at the
+// end of the conversation, where it already was on screen.
+//
+// Block indexes stay convo indexes (frame.rowOffset, frame.blockH and the
+// selection read them so); only the rows move. Rows are not in index order
+// while a provisional row is not last in the conversation.
+func (m *tuiModel) drawOrder(n int, cur bool) []int {
+	order := make([]int, 0, n)
+	var queued []int
+	for i := range m.convo {
+		if m.convo[i].provisional {
+			queued = append(queued, i)
+		} else {
+			order = append(order, i)
+		}
+	}
+	rest := len(m.convo)
+	if cur {
+		order = append(order, rest)
+		rest++
+	}
+	order = append(order, queued...)
+	for i := rest; i < n; i++ {
+		order = append(order, i)
+	}
+	return order
+}
+
 // applyScroll is where the viewport is allowed to move on its own: keep the
 // selection in view, else stick to the bottom (live tail). It reads the block
 // geometry refresh() just measured (rowOffset + blockH) rather than a rendered
@@ -329,7 +362,9 @@ func (m *tuiModel) scrollToLastUser() {
 	}
 	at := -1
 	for i := 0; i < before && i < len(ro); i++ {
-		if m.convo[i].userText != "" {
+		// Not a queued row: it is drawn last (drawOrder), so it is not the
+		// latest message above the ones before it.
+		if m.convo[i].userText != "" && !m.convo[i].provisional {
 			at = i
 		}
 	}

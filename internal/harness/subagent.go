@@ -566,6 +566,7 @@ func childConfig(parent *Harness, num int, cc childRun, iso isolation) Config {
 	cfg.OnDelivered = nil
 	cfg.OnDocs = nil
 	cfg.OnCompaction = nil
+	cfg.OnCompacting = nil
 	cfg.OnAgents = nil
 	cfg.OnAgentEntry = nil
 	cfg.OnJobs = nil

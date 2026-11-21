@@ -781,10 +781,21 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m.settleAsk()
 		m.append(StDim.Render("session cleared — fresh start"))
 		m.refresh()
+	case "compacting":
+		// A fold began, or ended without a compaction (compacting.go).
+		if str(ev["phase"]) == proto.CompactingStart {
+			m.startCompacting()
+		} else if e := str(ev["error"]); e != "" {
+			m.endCompacting(StDim.Render("compaction did not finish: " + e))
+		} else {
+			m.endCompacting("")
+		}
+		m.refresh()
 	case "compaction":
 		// On screen, not just in a log a TUI never shows: this is the one
 		// operation that DESTROYS conversation, and it used to happen silently.
-		m.append(stNote.Render("🗜 " + str(ev["text"])))
+		// It takes the place of the fold's "Compacting…" row.
+		m.endCompacting(stNote.Render("🗜 " + str(ev["text"])))
 		// Track for /context: compute saved from before/after
 		m.ctxStats.compactions++
 		before := evNum(ev["tokens_before"])
@@ -817,6 +828,9 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		case "stopped":
 			m.dropAsk()
 			m.settleAsk()
+		}
+		if st := str(ev["state"]); st == "restarting" || st == "gave_up" || st == "stopped" {
+			m.endCompacting("") // the engine that was folding is gone: no end will come
 		}
 		m.refresh()
 	case "ui_state":

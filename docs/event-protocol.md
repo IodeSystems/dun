@@ -29,6 +29,7 @@ The engine emits events as line-delimited JSON objects. Each has a `"type"` fiel
 | `reset` | Store cleared (`/clear`) | — |
 | `control` | Control action done (`/isolate`, `/prompt`) | `id`, `action`, `message` |
 | `compaction` | Context compacted | `text` |
+| `compacting` | A fold began (`phase: start`); or ended without a `compaction` (`phase: end`, `error` when it failed or was cancelled, none when nothing was folded). Every start ends with one of the two | `phase`, `error` |
 | `exit` | Engine leaving voluntarily | `reason` |
 | `image_refused` | A message with images not sent (no vision, no `vision_model`; or an unreadable image) | `message`, `content`, `images[]` — the client puts the message back in the composer; `done` follows |
 
@@ -49,6 +50,9 @@ carry `call_id`, and a client pairs them by it (`session-events.md`).
 A message typed while a turn runs is echoed as `user {id, queued: true}`; the
 engine later sends `delivered {ids}` or `withdrawn {ids}` for it
 (`session-events.md`).
+The TUI draws a queued message below everything the turn shows, the reply
+still streaming included, and delivered makes it a user row at the end of the
+conversation, where it already was (`internal/tui/tui_scroll.go` drawOrder).
 
 ## Direction: TUI → Engine (stdin, line-delimited JSON)
 

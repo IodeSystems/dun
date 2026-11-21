@@ -151,6 +151,47 @@ func (h *Harness) noteUsage(u agent.TokenUsage) {
 	h.self.noteActivity()
 }
 
+// CompactingNote is a fold in progress, for a UI: begun, or (Done) ended
+// without a CompactionNote. Err is why it ended so: "" when there was
+// nothing to fold.
+type CompactingNote struct {
+	Done bool
+	Err  string
+}
+
+// foldPause is the Shaper's Pause: called once a fold is decided, before its
+// summary call, for every Shaper fold (a build's and Compact's). It says the
+// fold has begun, then stops the host's clock (CompactionPause).
+func (h *Harness) foldPause() (resume func()) {
+	h.foldBegin()
+	if CompactionPause != nil {
+		return CompactionPause()
+	}
+	return func() {}
+}
+
+// foldBegin says a fold has begun. Once per fold: a second call before the
+// fold ends sends nothing.
+func (h *Harness) foldBegin() {
+	if h.foldOpen.CompareAndSwap(false, true) && h.cfg.OnCompacting != nil {
+		h.cfg.OnCompacting(CompactingNote{})
+	}
+}
+
+// foldEnd ends a begun fold that sent no CompactionNote: err is why (nil:
+// nothing was folded). A no-op when no fold is open, so a caller calls it
+// on every path out of a fold. noteCompactionCause is the other end.
+func (h *Harness) foldEnd(err error) {
+	if !h.foldOpen.CompareAndSwap(true, false) || h.cfg.OnCompacting == nil {
+		return
+	}
+	n := CompactingNote{Done: true}
+	if err != nil {
+		n.Err = err.Error()
+	}
+	h.cfg.OnCompacting(n)
+}
+
 // noteCompaction records a fold, decorates it with the thrash counters, and
 // hands it to the UI.
 func (h *Harness) noteCompaction(ci agent.CompactionInfo) {
@@ -248,6 +289,8 @@ func (h *Harness) noteCompactionCause(ci agent.CompactionInfo, cause foldCause) 
 	if n := h.foldRestoreNote(); n != "" {
 		h.AsideWith(n, AsideOpts{Key: "fold-restore"})
 	}
+	// The note ends the fold foldBegin opened.
+	h.foldOpen.Store(false)
 	if h.cfg.OnCompaction != nil {
 		h.cfg.OnCompaction(note)
 	}

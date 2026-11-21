@@ -105,11 +105,13 @@ func (m *tuiModel) addThought(t *thinkBlock) int {
 // would leave blank ones), and the view keeps the row it had at its top.
 func (m *tuiModel) toggleThinking() {
 	m.thinkFull = !m.thinkFull
+	// The anchor is the topmost row still in view, by row: blocks are not
+	// drawn in index order (drawOrder), a queued row is drawn last.
 	anchor, off := -1, 0
 	for i := range m.convo {
-		if e := &m.convo[i]; e.rowOffset+e.lastH > m.vp.YOffset {
+		e := &m.convo[i]
+		if e.rowOffset+e.lastH > m.vp.YOffset && (anchor < 0 || e.rowOffset < m.convo[anchor].rowOffset) {
 			anchor, off = i, e.rowOffset-m.vp.YOffset
-			break
 		}
 	}
 	for i := range m.convo {

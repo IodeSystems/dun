@@ -260,6 +260,11 @@ type Config struct {
 	// (see shapingBudget) ran for 29 minutes, wrote 154k characters of summary,
 	// and left 5 entries alive without a single line of output saying so.
 	OnCompaction func(CompactionNote)
+	// OnCompacting fires when a fold begins, so a UI can say it is compacting
+	// while the summary call runs, and again (Done) when a fold ends without
+	// an OnCompaction: nothing was folded, or it failed or was cancelled (Err).
+	// Every start is followed by exactly one OnCompaction or one Done.
+	OnCompacting func(CompactingNote)
 	// OnAgents fires whenever a sub-agent changes — spawned, status, settled,
 	// dismissed. The human's only view of what children are costing, since
 	// jobs is model-facing and there is no concurrency cap.
@@ -685,6 +690,9 @@ type Harness struct {
 	// for (turn-end 0.7×ceiling, cold-cache TTL gap), for the same reason.
 	compactBoundary int
 	compactLast     time.Time
+	// foldOpen: a fold has begun and neither its CompactionNote nor its end
+	// has gone out (foldBegin, foldEnd).
+	foldOpen atomic.Bool
 	// ask is the latest user message a fold has seen (fold.go noteAsk).
 	askMu sync.Mutex
 	ask   foldAsk
@@ -931,7 +939,8 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		// the turn past its budget mid-fold and cancel the worker with a bare
 		// "context canceled". Set by the host (cmd/dun) from its turn clock;
 		// nil (one-shot / no clock) means the fold runs on the budget as-is.
-		Pause: CompactionPause,
+		// foldPause also says the fold has begun (OnCompacting).
+		Pause: h.foldPause,
 		// Which end of an old, oversized result its stub keeps. exec output
 		// opens with what failed and closes with the verdict and [exit:N]; a
 		// head-only stub drops the line that says whether it passed (aw4

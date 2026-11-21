@@ -71,7 +71,11 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
 - **Compaction is always reported.** It is the only operation that destroys
   conversation, and it once ran unreported for three days. `OnCompaction`
   produces a TUI line, stderr and an `--engine` event, with a per-turn counter so
-  thrashing names itself.
+  thrashing names itself. A fold in progress is reported too: the summary call
+  takes seconds, and the turn looked stalled. `compacting` (start) goes out when
+  a fold begins, and every start ends with the `compaction` or a `compacting`
+  end (failed, cancelled, nothing folded), so a client's "Compacting…" row
+  always stops (`internal/harness/compaction.go` foldBegin/foldEnd).
 - **The model may rewrite its own recent history (`recap`, `internal/harness/recap.go`),
   under four constraints.** It replaces a span with the account the
   conversation should have had: cheaper than compaction (no summarizer call),
