@@ -121,6 +121,10 @@ type model struct {
 	termed map[int]termedAt
 
 	open *openReq
+
+	// frozen: the order is kept while the person navigates (freeze), nil
+	// while rows sort on every reading.
+	frozen *procps.Order
 }
 
 type sparkHist struct {
@@ -178,9 +182,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.key(msg.String())
 	case tea.MouseClickMsg:
 		if msg.Button == tea.MouseLeft {
+			m.freeze()
 			m.click(msg.Y)
 		}
 	case tea.MouseWheelMsg:
+		m.freeze()
 		switch msg.Button {
 		case tea.MouseWheelUp:
 			m.scroll(-3)
@@ -222,6 +228,9 @@ func (m *model) onSample(msg sampleMsg) {
 			delete(m.sparks, pid)
 		}
 	}
+	if m.frozen != nil {
+		m.frozen.Extend(m.view.Groups)
+	}
 	m.reselect()
 	if m.details {
 		if it, ok := m.selected(); ok && it.kind == kProc {
@@ -255,6 +264,9 @@ func (m *model) checkTermed() {
 func (m *model) groups() []procps.Group {
 	gs := make([]procps.Group, len(m.view.Groups))
 	copy(gs, m.view.Groups)
+	if m.frozen != nil {
+		return m.frozen.Apply(gs)
+	}
 	for i := range gs {
 		rows := append([]procps.Row(nil), gs[i].Rows...)
 		sort.SliceStable(rows, func(a, b int) bool {
@@ -274,6 +286,21 @@ func (m *model) groups() []procps.Group {
 		return gs[a].Group < gs[b].Group
 	})
 	return gs
+}
+
+// freeze keeps the order as it is now: values update in place, a new
+// process goes to the end of its group, an exited one is dropped. Moving
+// the selection freezes; it stays frozen until thaw (t, S).
+func (m *model) freeze() {
+	if m.frozen == nil {
+		m.frozen = procps.FreezeOrder(m.groups())
+	}
+}
+
+// thaw goes back to sorting on every reading.
+func (m *model) thaw() {
+	m.frozen = nil
+	m.reselect()
 }
 
 func (m *model) rowVal(r procps.Row) float64 {
@@ -488,6 +515,10 @@ func (m *model) key(k string) tea.Cmd {
 			return nil
 		}
 		return tea.Quit
+	case "up", "down", "pgup", "pgdown", "home", "end":
+		m.freeze()
+	}
+	switch k {
 	case "up":
 		m.move(-1)
 	case "down":
@@ -502,7 +533,9 @@ func (m *model) key(k string) tea.Cmd {
 		m.moveTo(len(m.items()) - 1)
 	case "S", "shift+s":
 		m.sort = (m.sort + 1) % nSorts
-		m.reselect()
+		m.thaw()
+	case "t":
+		m.thaw()
 	case "enter", "space":
 		it, ok := m.selected()
 		switch {
