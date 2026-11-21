@@ -51,7 +51,8 @@ func TestCostBlockAlignedAndGrouped(t *testing.T) {
 	// Every row's value ends in one column, so the amounts line up on their
 	// last digit.
 	for _, line := range strings.Split(out, "\n") {
-		if !strings.HasPrefix(line, "  ") || strings.Contains(line, "cost & limits") || strings.Contains(line, "this machine") || strings.TrimSpace(line) == "" {
+		if !strings.HasPrefix(line, "  ") || strings.Contains(line, "cost & limits") || strings.Contains(line, "this machine") ||
+			strings.Contains(line, "reading…") || strings.Contains(line, "/usage spend") || strings.TrimSpace(line) == "" {
 			continue
 		}
 		r := []rune(line)
@@ -205,7 +206,8 @@ func TestCostBlockRollups(t *testing.T) {
 		}
 	}
 	for _, line := range strings.Split(out, "\n") {
-		if !strings.HasPrefix(line, "  ") || strings.Contains(line, "cost & limits") || strings.Contains(line, "this machine") || strings.TrimSpace(line) == "" {
+		if !strings.HasPrefix(line, "  ") || strings.Contains(line, "cost & limits") || strings.Contains(line, "this machine") ||
+			strings.Contains(line, "reading…") || strings.Contains(line, "/usage spend") || strings.TrimSpace(line) == "" {
 			continue
 		}
 		if r := []rune(line); len(r) < valueEnd || r[valueEnd-1] == ' ' {
@@ -247,5 +249,20 @@ func TestLedgerBlockModelTokens(t *testing.T) {
 	s.readSpend(map[string]any{"type": "spend", "calls": float64(1)})
 	if len(s.spend.Models) != 2 {
 		t.Errorf("models lost: %+v", s.spend)
+	}
+}
+
+// The Spend tab opens on the month's spend and budget as the engine worded
+// them, "reading…" until it answers.
+func TestLedgerBlockSpendReport(t *testing.T) {
+	s := &contextStats{}
+	if out := stripANSI(ledgerBlock(s)); !strings.Contains(out, "reading…") {
+		t.Errorf("no placeholder:\n%s", out)
+	}
+	v := newVtui(80, 24)
+	v.event(map[string]any{"type": "spend_report", "text": "spend: $12.00 billed since Nov 1 · $88.00 left of your $100.00 budget"})
+	out := stripANSI(ledgerBlock(&v.m.ctxStats))
+	if !strings.Contains(out, "$12.00 billed since Nov 1 · $88.00 left") || strings.Contains(out, "spend: $12") {
+		t.Errorf("report not shown, or its prefix kept:\n%s", out)
 	}
 }

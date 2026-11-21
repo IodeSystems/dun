@@ -487,10 +487,19 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 			return
 		}
-		// /spend: real spend and the budget; the login needs a terminal, so it
-		// says the command (spendcmd.go).
+		// /usage spend: the Spend tab asks for the month's spend and the budget
+		// (a spend_report), and reconcile and budget change them; the login
+		// needs a terminal, so it says the command (spendcmd.go). Detached:
+		// the billing report is a network read.
 		if id == "spend" {
-			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: spendControl(ctx, action)})
+			go func() {
+				if strings.TrimSpace(action) == "" {
+					em.emit(&proto.SpendReport{Text: spendControl(ctx, "")})
+					return
+				}
+				em.emit(&proto.ControlEvent{ID: id, Action: action, Message: spendControl(ctx, action)})
+				em.emit(&proto.SpendReport{Text: spendControl(ctx, "")})
+			}()
 			return
 		}
 		// /model caps | probe: what the session's model is known to do, and

@@ -20,6 +20,11 @@ type contextStats struct {
 	// Money and limits as the gateway reported them (cmd/dun/spend.go). nil
 	// until the first usage or spend event.
 	spend *proto.Spend
+	// spendReport is the month's spend and budget in words, as the engine
+	// last said (spend_report): billed when the account can read the report.
+	// spendAsked is when the Spend tab last asked, zero before.
+	spendReport string
+	spendAsked  time.Time
 
 	// Token usage (cumulative across all turns)
 	totalTokens     int

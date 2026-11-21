@@ -126,13 +126,28 @@ func ledgerRow(label string, by map[string]float64, tail string) string {
 	return ctxRow(label, ctxMoney(by[curs[0]]), note+tail)
 }
 
+// spendReportBlock is the Spend tab's first section: the month's spend and
+// the budget left, as the engine words them (cmd/dun/spendcmd.go): Anthropic's
+// billed figure when the account can read it, else the ledger's estimate. The
+// billing read is a network call, so the section says so until it answers.
+func spendReportBlock(s *contextStats) string {
+	text := s.spendReport
+	if text == "" {
+		text = "reading…"
+	}
+	return "\n  " + stHeader.Render("this month") + StDim.Render(" — billed spend and budget left") +
+		"\n  " + text +
+		"\n  " + StDim.Render("/usage spend reconcile <usd> · budget <usd>|off")
+}
+
 // ledgerBlock is every session's and sub-agent's spend on this machine,
 // from the ledger (/usage's Spend tab): the periods under the all-time
 // total, then this month by model, the most first.
 func ledgerBlock(s *contextStats) string {
 	sp := s.spend
 	var b strings.Builder
-	b.WriteString("\n  " + stHeader.Render("this machine"))
+	b.WriteString(spendReportBlock(s))
+	b.WriteString("\n\n  " + stHeader.Render("this machine"))
 	b.WriteString(StDim.Render(" — every session and sub-agent, from the ledger"))
 	l := (*proto.SpendLedger)(nil)
 	if sp != nil {
