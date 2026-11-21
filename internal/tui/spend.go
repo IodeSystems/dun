@@ -41,6 +41,9 @@ func (s *contextStats) readSpend(ev map[string]any) {
 	if sp.Month == nil && s.spend != nil {
 		sp.Month = s.spend.Month // sent once, at start
 	}
+	if sp.Models == nil && s.spend != nil {
+		sp.Models = s.spend.Models // sent at start and at a turn's end
+	}
 	s.spend = &sp
 }
 
@@ -137,6 +140,9 @@ func ledgerBlock(s *contextStats) string {
 	}
 	if l == nil || !l.Entries {
 		b.WriteString("\n  " + StDim.Render("nothing spent yet: no response reported a cost this year"))
+		if sp != nil {
+			b.WriteString(modelTokensBlock(sp.Models))
+		}
 		return b.String()
 	}
 	b.WriteString(ledgerRow("machine spend", l.Total, " · all time, every session on this machine"))
@@ -172,6 +178,49 @@ func ledgerBlock(s *contextStats) string {
 		for _, n := range names {
 			b.WriteString(ledgerRow("  "+n, l.ByModel[n], ""))
 		}
+	}
+	b.WriteString(modelTokensBlock(sp.Models))
+	return b.String()
+}
+
+// modelCols are the columns of the by-model token table, after the model's
+// name. A column per measure of a model's month: a later one (closed plan
+// items, say) is one more entry here, filled from ModelTokens when the
+// engine has the number.
+var modelCols = []struct {
+	head string
+	val  func(proto.ModelTokens) int
+}{
+	{"requests", func(t proto.ModelTokens) int { return t.Requests }},
+	{"cached", func(t proto.ModelTokens) int { return t.Cached }},
+	// Processed is what the model evaluated: the prompt less what its cache
+	// served (the Usage tab's "processed").
+	{"processed", func(t proto.ModelTokens) int { return max(0, t.Prompt-t.Cached) }},
+	{"generated", func(t proto.ModelTokens) int { return t.Completion }},
+}
+
+// modelTokensBlock is this month's tokens by model, every role, from the
+// stats ledger: the counterpart of "this month by model" for models that
+// report no cost.
+func modelTokensBlock(models []proto.ModelTokens) string {
+	if len(models) == 0 {
+		return ""
+	}
+	const colW = 11
+	var b strings.Builder
+	b.WriteString("\n\n  " + stHeader.Render("this month by model, tokens"))
+	b.WriteString(StDim.Render(" — every role, from the stats ledger"))
+	head := strings.Repeat(" ", ctxLabelW)
+	for _, c := range modelCols {
+		head += fmt.Sprintf("%*s", colW, c.head)
+	}
+	b.WriteString("\n  " + StDim.Render(head))
+	for _, t := range models {
+		row := ""
+		for _, c := range modelCols {
+			row += fmt.Sprintf("%*s", colW, numfmt.Grouped(c.val(t)))
+		}
+		b.WriteString(ctxRow(t.Model, row, ""))
 	}
 	return b.String()
 }

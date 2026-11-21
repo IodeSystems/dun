@@ -334,6 +334,23 @@ type Spend struct {
 	Month *UsageMonth `json:"month,omitempty"`
 }
 
+	// Models is this machine's rounds this calendar month by model, every
+	// role, the busiest first (/usage's Spend tab). Sent at start and with
+	// each turn's end; a later Spend without it keeps the last.
+	Models []ModelTokens `json:"models,omitempty"`
+}
+
+// ModelTokens is one model's tokens over a window. Prompt includes Cached,
+// the ones reused from the provider's cache; what the model processed is the
+// rest.
+type ModelTokens struct {
+	Model      string `json:"model"`
+	Requests   int    `json:"requests"`
+	Prompt     int    `json:"prompt_tokens"`
+	Cached     int    `json:"cached_tokens"`
+	CacheWrite int    `json:"cache_write_tokens,omitempty"`
+	Completion int    `json:"completion_tokens"`
+
 // UsageMonth is the main rounds since Since (RFC 3339): their prompt
 // tokens, of them the cached ones, and the median prefill speed in tokens a
 // second (0: no round had timings).

@@ -437,6 +437,79 @@ func (l *StatsLedger) Summary(since time.Time) (s StatsSummary) {
 	return s
 }
 
+// ModelUsage is one model's rounds in the stats ledger over a window, every
+// role (main, other-model sub-agents and side calls, vision): the tokens a
+// model handled, whoever asked. Prompt includes Cached, as in RoundStat.
+type ModelUsage struct {
+	Model                                  string
+	Requests                               int
+	Prompt, Cached, CacheWrite, Completion int
+}
+
+// ByModel totals the ledger's rounds since t by model, the most prompt and
+// completion tokens first. Read the way Summary reads: this month's file and
+// the one before.
+func (l *StatsLedger) ByModel(since time.Time) []ModelUsage {
+	if l == nil {
+		return nil
+	}
+	by := map[string]*ModelUsage{}
+	l.each(since, func(r RoundStat) {
+		name := r.Model
+		if name == "" {
+			name = "(unknown)"
+		}
+		u := by[name]
+		if u == nil {
+			u = &ModelUsage{Model: name}
+			by[name] = u
+		}
+		u.Requests++
+		u.Prompt += r.Prompt
+		u.Cached += r.Cached
+		u.CacheWrite += r.CacheWrite
+		u.Completion += r.Completion
+	})
+	out := make([]ModelUsage, 0, len(by))
+	for _, u := range by {
+		out = append(out, *u)
+	}
+	slices.SortFunc(out, func(a, b ModelUsage) int {
+		if x, y := a.Prompt+a.Completion, b.Prompt+b.Completion; x != y {
+			return y - x
+		}
+		return strings.Compare(a.Model, b.Model)
+	})
+	return out
+}
+
+// each calls fn on every round at or after since, in file order, from this
+// month's file and the one before.
+func (l *StatsLedger) each(since time.Time, fn func(RoundStat)) {
+	now := time.Now().UTC()
+	prev := time.Date(now.Year(), now.Month()-1, 1, 0, 0, 0, 0, time.UTC)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, mo := range []string{prev.Format("2006-01"), now.Format("2006-01")} {
+		b, err := os.ReadFile(filepath.Join(l.dir, "rounds-"+mo+".jsonl"))
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			var r RoundStat
+			if line == "" || json.Unmarshal([]byte(line), &r) != nil || r.Time.Before(since) {
+				continue
+			}
+			fn(r)
+		}
+	}
+}
+
+// ModelUsage is the session's stats ledger by model since t; nil without one.
+func (h *Harness) ModelUsage(since time.Time) []ModelUsage {
+	return h.rounds.ledger.ByModel(since)
+}
+
 // StatsSummary is the session's stats ledger since t; empty without one.
 func (h *Harness) StatsSummary(since time.Time) StatsSummary {
 	return h.rounds.ledger.Summary(since)

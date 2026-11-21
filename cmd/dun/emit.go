@@ -122,9 +122,24 @@ func monthUsage(h *harness.Harness, now time.Time) *proto.UsageMonth {
 	return &proto.UsageMonth{Since: since.UTC().Format(time.RFC3339), Rounds: s.Rounds,
 		Prompt: s.Prompt, Cached: s.Cached, PrefillTPS: s.Speed}
 }
+
+// monthModels is the stats ledger's rounds since the start of now's month,
+// by model.
+func monthModels(h *harness.Harness, now time.Time) []proto.ModelTokens {
+	since := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	var out []proto.ModelTokens
+	for _, u := range h.ModelUsage(since) {
+		out = append(out, proto.ModelTokens{Model: u.Model, Requests: u.Requests, Prompt: u.Prompt,
+			Cached: u.Cached, CacheWrite: u.CacheWrite, Completion: u.Completion})
+	}
+	return out
+}
+
 func endTurnSpend(h *harness.Harness) *proto.Spend {
 	h.EndTurnSpend()
-	return spendProto(h.Spend(), time.Now())
+	sp := spendProto(h.Spend(), time.Now())
+	sp.Models = monthModels(h, time.Now())
+	return sp
 }
 
 // windowOf is the window division for an event. Separate so context_cost can

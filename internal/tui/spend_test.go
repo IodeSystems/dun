@@ -219,3 +219,33 @@ func TestCostBlockRollups(t *testing.T) {
 		t.Errorf("no 7d interval or all-time key spend:\n%s", out)
 	}
 }
+
+// The Spend tab's by-model token table: a column per measure, processed is the
+// prompt less the cached part, and it shows for a machine whose models report
+// no cost.
+func TestLedgerBlockModelTokens(t *testing.T) {
+	sp := &proto.Spend{Models: []proto.ModelTokens{
+		{Model: "big", Requests: 12, Prompt: 5000, Cached: 3000, Completion: 700},
+		{Model: "small", Requests: 1, Prompt: 80, Completion: 9},
+	}}
+	out := stripANSI(ledgerBlock(&contextStats{spend: sp}))
+	flat := strings.Join(strings.Fields(out), " ")
+	for _, want := range []string{
+		"requests cached processed generated",
+		"big 12 3,000 2,000 700",
+		"small 1 0 80 9",
+	} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(stripANSI(ledgerBlock(&contextStats{spend: &proto.Spend{}})), "by model, tokens") {
+		t.Error("an empty table should not show")
+	}
+	// A Spend event without the table (a budget poll) keeps the last one.
+	s := &contextStats{spend: sp}
+	s.readSpend(map[string]any{"type": "spend", "calls": float64(1)})
+	if len(s.spend.Models) != 2 {
+		t.Errorf("models lost: %+v", s.spend)
+	}
+}

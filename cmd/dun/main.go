@@ -1152,6 +1152,7 @@ func main() {
 	if *prog {
 		sp := spendProto(h.Spend(), time.Now())
 		sp.Month = monthUsage(h, time.Now())
+		sp.Models = monthModels(h, time.Now())
 		em.emit(sp)
 	}
 
