@@ -192,6 +192,7 @@ func init() {
 			return nil
 		}},
 		{"config", "", "show this session's model settings (change with `dun --setup`)", func(m *tuiModel, _ []string) tea.Cmd { m.showConfig(); return nil }},
+		{"ps", "", "every process dun runs, by session: CPU, memory, IO (read-only; kill and stop are in `dun ps --watch`)", psSlash},
 		{"status", "", "this session: build, workspace, model, tools and servers", func(m *tuiModel, _ []string) tea.Cmd { m.statusSlash(); return nil }},
 		{"logout", "<provider>", "log out of an AI service: forget its address and key", logoutSlash},
 		{"context", "[config [--max N] [--compact-buffer N] [--tool-lod N] [--recap-nudge N] | config loops [off|count|cut | tolerance N|default | tools N|count|default]]", "the context screen (tabs: context, usage, spend): the window, the system prompt, compaction, recaps, truncation; config: the window, the reply's buffer, tool-result stubs and the recap reminder, saved for this model; config loops: loop detection in the model's replies, saved for every session", func(m *tuiModel, args []string) tea.Cmd {

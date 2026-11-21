@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -329,15 +330,7 @@ func psWatch(ctx context.Context, l *loader, w io.Writer, asJSON bool, every tim
 // render is the table and its footer, cut to height lines (0: all).
 func render(v PSView, width, height int) string {
 	body := procps.Table(v.Groups, width)
-	n := 0
-	for _, g := range v.Groups {
-		n += len(g.Rows)
-	}
-	foot := fmt.Sprintf("%s, %s running; CPU%% and IO over %.1fs; %s",
-		plural(n, "process", "processes"), plural(v.Sessions, "session", "sessions"), v.Window, v.At.Format("15:04:05"))
-	if v.Note != "" {
-		foot += "\n" + v.Note
-	}
+	foot := v.Footer()
 	if height > 0 {
 		lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
 		room := height - 1 - strings.Count(foot, "\n") - 1
@@ -347,6 +340,46 @@ func render(v PSView, width, height int) string {
 		body = strings.Join(lines, "\n") + "\n"
 	}
 	return body + "\n" + foot + "\n"
+}
+
+// Footer is the line under the table (and the note, when there is one).
+func (v PSView) Footer() string {
+	n := 0
+	for _, g := range v.Groups {
+		n += len(g.Rows)
+	}
+	foot := fmt.Sprintf("%s, %s running; CPU%% and IO over %.1fs; %s",
+		plural(n, "process", "processes"), plural(v.Sessions, "session", "sessions"), v.Window, v.At.Format("15:04:05"))
+	if v.Note != "" {
+		foot += "\n" + v.Note
+	}
+	return foot
+}
+
+// PSSampler reads `dun ps`'s table for a screen inside another program
+// (the TUI's /ps), each reading rated against the one before. Sample may
+// block (the first waits a second to measure); call it off the UI loop.
+type PSSampler struct {
+	mu   sync.Mutex
+	l    *loader
+	prev procps.Snapshot
+	rc   *rootsCache
+}
+
+// NewPSSampler is a sampler of the dund at DUN_HOME home.
+func NewPSSampler(home string) *PSSampler {
+	return &PSSampler{l: &loader{home: home}, rc: &rootsCache{}}
+}
+
+// Sample is the next reading.
+func (s *PSSampler) Sample() (PSView, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, cur, err := sample(s.l, s.prev, s.rc)
+	if err == nil {
+		s.prev = cur
+	}
+	return v, err
 }
 
 func plural(n int, one, many string) string {

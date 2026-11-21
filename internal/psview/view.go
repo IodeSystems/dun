@@ -193,6 +193,9 @@ func (m *model) hints() string {
 	if it, ok := m.selected(); ok && it.kind == kProc && isPolyDaemon(*it.row) {
 		h += " · r restart"
 	}
+	if m.frozen != nil {
+		h += " · sort paused, t re-sorts"
+	}
 	return h + " · q quit"
 }
 
