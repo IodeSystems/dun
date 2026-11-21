@@ -92,6 +92,7 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 		// here, by the same handlers the TUI's commands reach. See commands.go.
 		if id == "slash" {
 			exts, _ := engineExtensions(h.Extensions())
+			recordSlash(h, action)
 			routeSlash(action, slashRoutes{server: srvCmd, control: ctrlCmd, reset: resetCmd, exts: exts,
 				reply: func(msg string) { em.emit(&proto.ControlEvent{ID: "slash", Action: action, Message: msg}) }})
 			return

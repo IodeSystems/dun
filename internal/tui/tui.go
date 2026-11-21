@@ -264,8 +264,11 @@ type tuiModel struct {
 	// command gets have lost. schedEditAsk is the entry a bare
 	// "/schedule edit <id>" from THIS client asked for: only that client's
 	// composer takes the text back (every client sees the event).
-	slashLine    string
-	schedEditAsk string
+	slashLine string
+	// slashForwarded: the line being run went to the engine as a slash, which
+	// counts it (cmdstats); one that did not is counted here.
+	slashForwarded bool
+	schedEditAsk   string
 	// unqueueAsk: THIS client sent "unqueue", so the withdrawn event that
 	// answers it puts the texts in this composer (every client drops the
 	// rows; delivery.go).

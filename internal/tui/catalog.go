@@ -407,6 +407,7 @@ func engineSlash(name string) func(m *tuiModel, args []string) tea.Cmd {
 				m.schedEditAsk = strings.TrimPrefix(args[1], "#")
 			}
 		}
+		m.slashForwarded = true
 		if !m.proc.controlCmd("slash", line) {
 			m.append(StErr.Render("no engine right now — /reconnect first"))
 		}

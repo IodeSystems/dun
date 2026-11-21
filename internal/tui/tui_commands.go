@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/iodesystems/dun/internal/cmdstats"
 	"github.com/iodesystems/dun/internal/textfmt"
 )
 
@@ -354,12 +355,22 @@ func (m *tuiModel) runSlash(v string) tea.Cmd {
 	var hit *slashCmd
 	n := 0
 	cmds := m.allSlash()
+	// run counts the command (cmdstats) unless it went to the engine as a
+	// slash line, which counts it there.
+	run := func(name string, f func() tea.Cmd) tea.Cmd {
+		m.slashForwarded = false
+		cmd := f()
+		if !m.slashForwarded {
+			cmdstats.Record(name, cmdstats.SurfaceTUI)
+		}
+		return cmd
+	}
 	for i := range cmds {
 		if strings.Contains(cmds[i].Name, " ") {
 			continue // a subcommand's own palette row: /mcp runs /mcp
 		}
 		if cmds[i].Name == name { // exact wins outright
-			return cmds[i].run(m, fields[1:])
+			return run(name, func() tea.Cmd { return cmds[i].run(m, fields[1:]) })
 		}
 		if strings.HasPrefix(cmds[i].Name, name) && !debugCommands[cmds[i].Name] {
 			hit = &cmds[i]
@@ -367,12 +378,12 @@ func (m *tuiModel) runSlash(v string) tea.Cmd {
 		}
 	}
 	if n == 1 {
-		return hit.run(m, fields[1:])
+		return run(hit.Name, func() tea.Cmd { return hit.run(m, fields[1:]) })
 	}
 	if n == 0 {
 		// Not one of this TUI's: the engine has the last word (its list may
 		// not have arrived yet). It answers an unknown one itself.
-		return engineSlash(name)(m, fields[1:])
+		return run(name, func() tea.Cmd { return engineSlash(name)(m, fields[1:]) })
 	}
 	m.append(StDim.Render("ambiguous command: /" + name + " — try /help"))
 	return nil
