@@ -219,8 +219,26 @@ func init() {
 			m.openStats(statsContext)
 			return nil
 		}},
-		{"usage", "", "this session's tokens, cache, cost and limits, and this machine's spend: a screen with tabs (tab moves, esc closes)", func(m *tuiModel, _ []string) tea.Cmd {
-			m.openStats(statsUsage)
+		{"usage", "[spend [reconcile <usd> | budget <usd>|off | login]]", "this session's tokens, cache, cost and limits, this month's spend and budget, and tokens by model: a screen with tabs (tab moves, esc closes); spend: the Spend tab, reconcile takes the real figure off the Console, budget sets the monthly budget", func(m *tuiModel, args []string) tea.Cmd {
+			if len(args) == 0 {
+				m.openStats(statsUsage)
+				return nil
+			}
+			if !strings.EqualFold(args[0], "spend") {
+				m.append(StErr.Render("usage: /usage [spend [reconcile <usd> | budget <usd>|off]]"))
+				return nil
+			}
+			if len(args) > 1 {
+				// The change's own answer refreshes the tab; a bare ask beside
+				// it could land after, with the old figure.
+				m.ctxStats.spendAsked = time.Now()
+			}
+			m.openStats(statsSpend)
+			if len(args) > 1 {
+				if !m.proc.controlCmd("spend", strings.Join(args[1:], " ")) {
+					m.append(StErr.Render("no engine right now — /reconnect first"))
+				}
+			}
 			return nil
 		}},
 		{"who", "", "who is here: this session's name, its sub-agents under it, and every other live session and dun msg listener; a screen, type to filter, esc closes", whoSlash},

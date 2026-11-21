@@ -658,6 +658,11 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m.ctxStats.readWindow(ev)
 		m.syncStats()
 		m.refresh()
+	case "spend_report":
+		// The month's spend and budget, answering the Spend tab (spendcmd.go).
+		m.ctxStats.spendReport = strings.TrimPrefix(str(ev["text"]), "spend: ")
+		m.syncStats()
+		m.refresh()
 	case "spend":
 		// A key-budget read that landed between turns (dun/spend.go).
 		m.ctxStats.readSpend(ev)

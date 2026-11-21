@@ -19,6 +19,7 @@ func init() {
 	event[Usage]("usage")
 	event[ContextCost]("context_cost")
 	event[Spend]("spend")
+	event[SpendReport]("spend_report")
 	event[Ask]("ask")
 	event[Mount]("mount")
 	event[Error]("error")
@@ -332,6 +333,23 @@ type Spend struct {
 	// ledger), sent once at start: what the splash shows before the
 	// session's first request. A later Spend without it keeps the last.
 	Month *UsageMonth `json:"month,omitempty"`
+
+	// Models is this machine's rounds this calendar month by model, every
+	// role, the busiest first (/usage's Spend tab). Sent at start and with
+	// each turn's end; a later Spend without it keeps the last.
+	Models []ModelTokens `json:"models,omitempty"`
+}
+
+// ModelTokens is one model's tokens over a window. Prompt includes Cached,
+// the ones reused from the provider's cache; what the model processed is the
+// rest.
+type ModelTokens struct {
+	Model      string `json:"model"`
+	Requests   int    `json:"requests"`
+	Prompt     int    `json:"prompt_tokens"`
+	Cached     int    `json:"cached_tokens"`
+	CacheWrite int    `json:"cache_write_tokens,omitempty"`
+	Completion int    `json:"completion_tokens"`
 }
 
 // UsageMonth is the main rounds since Since (RFC 3339): their prompt
@@ -688,6 +706,15 @@ type ServerEvent struct {
 	// Background: no command asked for this — an autostart server that came
 	// up (or did not) after the session was ready.
 	Background bool `json:"background,omitempty"`
+}
+
+// SpendReport is month-to-date spend in words, the answer to control "spend"
+// with no action: Anthropic's billed figure when this account can read it,
+// else the ledger's estimate, with the budget left (cmd/dun/spendcmd.go). A
+// read of the billing report is a network call, so it arrives after the
+// request, not with a usage event.
+type SpendReport struct {
+	Text string `json:"text"`
 }
 
 // ControlEvent reports a control command's outcome.

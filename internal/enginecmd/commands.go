@@ -176,8 +176,6 @@ func OwnCommands(iso string) []proto.CommandSpec {
 				"add", "make a file a root rules file at a scope (session when none is given); ./path with --project or --global names each project's own file",
 				"remove", "take back a file /rules add added at a scope"),
 			Description: "project rules (AGENTS.md, CLAUDE.md, their @imports): alone, each file's cost, its switch at each scope and the mode; a mode word sets the project's mode"},
-		{Name: "spend", Usage: "[reconcile <usd> | budget <usd>|off]", Group: "session",
-			Description: "estimated spend this month and the budget left; reconcile takes the real figure off the Console"},
 		{Name: "retry", Usage: "[default|patient|stubborn | attempts N | budget <dur>|unbounded|default | turn <dur>|off|default]", Group: "session",
 			Choices: choices("status", "the settings now", "default", RetryPresets[0].about, "patient", RetryPresets[1].about,
 				"stubborn", RetryPresets[2].about, "attempts", "how many times a 5xx is retried: attempts N",

@@ -200,7 +200,13 @@ Code: `internal/harness/spend.go`, `ledger.go`. Source: agentkit reads what a ga
   Usage tab has the session's spend this hour, today and over the interval;
   the Spend tab has the machine's (the ledger, every key) this hour, today,
   this week, this month, this year, over the interval, all time, and this
-  month by model. The
+  month by model, then this month's tokens by model (requests, cached,
+  processed, generated; every role, from the stats ledger, `spend.models`).
+  It opens on the month's billed spend and the budget left (/spend, folded
+  into the tab 2026-11-20): the engine answers `control spend` with a
+  `spend_report` event, detached because the billing report is a network
+  read; `/usage spend reconcile <usd>` and `/usage spend budget <usd>|off`
+  are the same control with an action. The
   **interval** is the key budget's period (one `Interval` back from
   `ResetAt`) when the gateway states both, else the last 7 days. Hour
   buckets, so an interval counts from the start of its first hour. "key

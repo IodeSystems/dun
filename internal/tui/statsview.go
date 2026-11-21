@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -17,7 +18,12 @@ import (
 //	          compaction and recaps, tool results, out-of-band messages
 //	Usage     this session's tokens, side calls, surfacing, cache, and cost
 //	          & limits (the key's budget, rate limits)
-//	Spend     this machine's spend, every session, from the ledger
+//	Spend     the month's billed spend and budget left, this machine's
+//	          spend, every session, from the ledger, and this month's
+//	          tokens by model
+//
+// /usage spend reconcile <usd> and /usage spend budget <usd>|off set the
+// reconcile figure and the monthly budget (cmd/dun/spendcmd.go).
 
 const (
 	statsContext = iota
@@ -61,8 +67,12 @@ func (v *statsView) lines(_ *tuiModel, w int) []string {
 
 // openStats opens the screen on tab, or moves an open one there.
 func (m *tuiModel) openStats(tab int) {
+	if tab == statsSpend {
+		m.askSpendReport()
+	}
 	if v := m.statsPaging(); v != nil {
 		v.tab = tab
+		v.fill(m)
 		m.pg.off = 0
 		m.syncPager()
 		return
@@ -73,6 +83,22 @@ func (m *tuiModel) openStats(tab int) {
 	m.paging = true
 	m.scr = statsScreen()
 	m.syncPager()
+}
+
+// spendAskGap is how soon the Spend tab asks again: the billing report is a
+// network read, and Anthropic's lags minutes behind anyway.
+const spendAskGap = 30 * time.Second
+
+// askSpendReport has the engine read the month's spend and budget, off the
+// UI's path: the answer arrives as a spend_report and redraws the tab.
+func (m *tuiModel) askSpendReport() {
+	s := &m.ctxStats
+	if time.Since(s.spendAsked) < spendAskGap {
+		return
+	}
+	if m.proc.controlCmd("spend", "") {
+		s.spendAsked = time.Now()
+	}
 }
 
 // statsPaging is the screen's view, if it is up.

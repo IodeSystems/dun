@@ -103,3 +103,37 @@ func TestStatsLedger_Summary(t *testing.T) {
 		t.Errorf("speed/cost %+v", s)
 	}
 }
+
+// By model: every role counts, the window cuts, the busiest model is first.
+func TestStatsLedger_ByModel(t *testing.T) {
+	l := NewStatsLedger(t.TempDir())
+	now := time.Now()
+	for _, r := range []RoundStat{
+		{Time: now.Add(-30 * 24 * time.Hour), Role: spendmeter.RoleMain, Model: "big", Prompt: 5000}, // too old
+		{Time: now, Role: spendmeter.RoleMain, Model: "big", Prompt: 1000, Cached: 900, Completion: 50},
+		{Time: now, Role: spendmeter.RoleMain, Model: "big", Prompt: 2000, Cached: 1000, CacheWrite: 10, Completion: 70},
+		{Time: now, Role: spendmeter.RoleModel, Model: "small", Prompt: 300, Completion: 5},
+		{Time: now, Role: spendmeter.RoleVision, Prompt: 40},
+	} {
+		if err := l.Append(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := l.ByModel(now.Add(-7 * 24 * time.Hour))
+	want := []ModelUsage{
+		{Model: "big", Requests: 2, Prompt: 3000, Cached: 1900, CacheWrite: 10, Completion: 120},
+		{Model: "small", Requests: 1, Prompt: 300, Completion: 5},
+		{Model: "(unknown)", Requests: 1, Prompt: 40},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("row %d: got %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	if (*StatsLedger)(nil).ByModel(now) != nil {
+		t.Error("nil ledger should have no models")
+	}
+}

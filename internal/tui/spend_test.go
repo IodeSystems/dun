@@ -51,7 +51,8 @@ func TestCostBlockAlignedAndGrouped(t *testing.T) {
 	// Every row's value ends in one column, so the amounts line up on their
 	// last digit.
 	for _, line := range strings.Split(out, "\n") {
-		if !strings.HasPrefix(line, "  ") || strings.Contains(line, "cost & limits") || strings.Contains(line, "this machine") || strings.TrimSpace(line) == "" {
+		if !strings.HasPrefix(line, "  ") || strings.Contains(line, "cost & limits") || strings.Contains(line, "this machine") ||
+			strings.Contains(line, "reading…") || strings.Contains(line, "/usage spend") || strings.TrimSpace(line) == "" {
 			continue
 		}
 		r := []rune(line)
@@ -205,7 +206,8 @@ func TestCostBlockRollups(t *testing.T) {
 		}
 	}
 	for _, line := range strings.Split(out, "\n") {
-		if !strings.HasPrefix(line, "  ") || strings.Contains(line, "cost & limits") || strings.Contains(line, "this machine") || strings.TrimSpace(line) == "" {
+		if !strings.HasPrefix(line, "  ") || strings.Contains(line, "cost & limits") || strings.Contains(line, "this machine") ||
+			strings.Contains(line, "reading…") || strings.Contains(line, "/usage spend") || strings.TrimSpace(line) == "" {
 			continue
 		}
 		if r := []rune(line); len(r) < valueEnd || r[valueEnd-1] == ' ' {
@@ -217,5 +219,50 @@ func TestCostBlockRollups(t *testing.T) {
 	out = stripANSI(costBlock(&contextStats{spend: sp}, spendNow) + ledgerBlock(&contextStats{spend: sp}))
 	if !strings.Contains(out, "last 7d") || !strings.Contains(out, "all time (no reset stated)") {
 		t.Errorf("no 7d interval or all-time key spend:\n%s", out)
+	}
+}
+
+// The Spend tab's by-model token table: a column per measure, processed is the
+// prompt less the cached part, and it shows for a machine whose models report
+// no cost.
+func TestLedgerBlockModelTokens(t *testing.T) {
+	sp := &proto.Spend{Models: []proto.ModelTokens{
+		{Model: "big", Requests: 12, Prompt: 5000, Cached: 3000, Completion: 700},
+		{Model: "small", Requests: 1, Prompt: 80, Completion: 9},
+	}}
+	out := stripANSI(ledgerBlock(&contextStats{spend: sp}))
+	flat := strings.Join(strings.Fields(out), " ")
+	for _, want := range []string{
+		"requests cached processed generated",
+		"big 12 3,000 2,000 700",
+		"small 1 0 80 9",
+	} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(stripANSI(ledgerBlock(&contextStats{spend: &proto.Spend{}})), "by model, tokens") {
+		t.Error("an empty table should not show")
+	}
+	// A Spend event without the table (a budget poll) keeps the last one.
+	s := &contextStats{spend: sp}
+	s.readSpend(map[string]any{"type": "spend", "calls": float64(1)})
+	if len(s.spend.Models) != 2 {
+		t.Errorf("models lost: %+v", s.spend)
+	}
+}
+
+// The Spend tab opens on the month's spend and budget as the engine worded
+// them, "reading…" until it answers.
+func TestLedgerBlockSpendReport(t *testing.T) {
+	s := &contextStats{}
+	if out := stripANSI(ledgerBlock(s)); !strings.Contains(out, "reading…") {
+		t.Errorf("no placeholder:\n%s", out)
+	}
+	v := newVtui(80, 24)
+	v.event(map[string]any{"type": "spend_report", "text": "spend: $12.00 billed since Nov 1 · $88.00 left of your $100.00 budget"})
+	out := stripANSI(ledgerBlock(&v.m.ctxStats))
+	if !strings.Contains(out, "$12.00 billed since Nov 1 · $88.00 left") || strings.Contains(out, "spend: $12") {
+		t.Errorf("report not shown, or its prefix kept:\n%s", out)
 	}
 }

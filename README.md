@@ -607,6 +607,11 @@ individual account cannot have it. If yours can, `dun spend login` runs Anthropi
 or put an Admin key in `$DUN_HOME/oauth/anthropic-admin.key` (mode 0600), and `dun spend` shows
 the billed figure. Nothing else needs it.
 
+In the TUI the same figures are on the Spend tab of `/usage` (this month's spend, billed or
+estimated, and the budget left, then this machine's spend and this month's tokens by model).
+`/usage spend reconcile 41.20` and `/usage spend budget 100|off` take the place of the old
+`/spend` command.
+
 ## Isolation
 
 dun works in an isolated **git worktree** (a fresh `dun/<ts>` branch off HEAD),

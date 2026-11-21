@@ -126,7 +126,7 @@ func setSpendBudget(value string) (string, error) {
 	return fmt.Sprintf("spend: budget $%.2f a month (saved)", fc.SpendBudget), nil
 }
 
-// spendControl answers /spend. The login needs a terminal, which an engine does
+// spendControl answers /usage spend. The login needs a terminal, which an engine does
 // not have, so it gives the command.
 func spendControl(ctx context.Context, action string) string {
 	f := strings.Fields(strings.ToLower(action))
@@ -150,7 +150,7 @@ func spendControl(ctx context.Context, action string) string {
 	case f[0] == "login":
 		return "spend: in a terminal, run dun spend login"
 	}
-	return "usage: /spend [reconcile <usd> | budget <usd>|off]"
+	return "usage: /usage spend [reconcile <usd> | budget <usd>|off]"
 }
 
 // spendCmd is `dun spend`.

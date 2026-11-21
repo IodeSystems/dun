@@ -122,9 +122,24 @@ func monthUsage(h *harness.Harness, now time.Time) *proto.UsageMonth {
 	return &proto.UsageMonth{Since: since.UTC().Format(time.RFC3339), Rounds: s.Rounds,
 		Prompt: s.Prompt, Cached: s.Cached, PrefillTPS: s.Speed}
 }
+
+// monthModels is the stats ledger's rounds since the start of now's month,
+// by model.
+func monthModels(h *harness.Harness, now time.Time) []proto.ModelTokens {
+	since := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	var out []proto.ModelTokens
+	for _, u := range h.ModelUsage(since) {
+		out = append(out, proto.ModelTokens{Model: u.Model, Requests: u.Requests, Prompt: u.Prompt,
+			Cached: u.Cached, CacheWrite: u.CacheWrite, Completion: u.Completion})
+	}
+	return out
+}
+
 func endTurnSpend(h *harness.Harness) *proto.Spend {
 	h.EndTurnSpend()
-	return spendProto(h.Spend(), time.Now())
+	sp := spendProto(h.Spend(), time.Now())
+	sp.Models = monthModels(h, time.Now())
+	return sp
 }
 
 // windowOf is the window division for an event. Separate so context_cost can
@@ -222,7 +237,7 @@ func (e *emitter) emit(payload any) {
 // spelled as typed. Views, pickers and the engine's own server starts are
 // not commands.
 func recordReplies(h *harness.Harness) func(payload any) {
-	slashOf := map[string]string{"files": "file", "ctxconfig": "context config", "loops": "context config loops", mcpserver.ServerDocs: "rag"}
+	slashOf := map[string]string{"spend": "usage spend", "files": "file", "ctxconfig": "context config", "loops": "context config loops", mcpserver.ServerDocs: "rag"}
 	kindSlash := map[string]string{"indexes": "rag", "paths": "file", "lsp": "lsp", "skills": "skill", "rules": "rules"}
 	commands := map[string]bool{"slash": true, "files": true, "switches": true, "mcp": true, "ext": true, "jobs": true,
 		"schedule": true, "loop": true, "remember": true, "rules": true, "effort": true, "retry": true, "loops": true, "spend": true, "suggest": true,
