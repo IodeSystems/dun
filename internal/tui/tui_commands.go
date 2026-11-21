@@ -222,30 +222,8 @@ func init() {
 		{"upgrade", "[now [--force]|off|on|--channel=release|source]", "dund's pending upgrade and each tool (mcpshell, poly-lsp-mcp, raglit) against the version this dun pins; now installs the tools that are behind and restarts dund (cut work resumes after), or, with dund already this build, restarts this session's older engine when nothing holds it (--force: now, ending its turn, jobs and sub-agents); off|on: a release build's daily update check; --channel=release on a source build installs the newest release (it may be older than this build), --channel=source on a release build says to run make install in the checkout", upgradeSlash},
 		{"version", "", "which dun this is, the newest release, and whether this build updates itself, and from where", versionSlash},
 		{"keys", "[reload|preset <name>]", "the key map: every rebindable action and its keys; yours go in ~/.dun/keys.json", keysSlash},
-		{"perf", "", "redraw timings for this session (and how to get a profile)", func(m *tuiModel, _ []string) tea.Cmd {
-			m.append(stHeader.Render("render performance") + "\n" + frames.report())
-			return nil
-		}},
 		{"repaint", "[report]", "clear and redraw the whole screen, after saving what dun drew and what the terminal shows to ~/.dun/bugreports/; report also has the model redact the capture and explain what went wrong (asks first if the model is not local)", repaintSlash},
 		{"mouse", "[all|cell|off]", "mouse reporting mode (bare shows it) — `cell` if the wheel should scroll the log; click selects, drag copies, shift+drag (iTerm2: option+drag) is the terminal's own selection", mouseSlash},
-		{"scrolldebug", "", "debug: dump scroll overlay state (rowOffset, blockH, YOffset)", func(m *tuiModel, _ []string) tea.Cmd {
-			var lines []string
-			lines = append(lines, fmt.Sprintf("YOffset=%d pinned=%v vpH=%d convo=%d blockH=%d",
-				m.vp.YOffset, m.scrollPinned, m.vp.Height, len(m.convo), len(m.frame.blockH)))
-			for i, e := range m.convo {
-				if e.userText == "" {
-					continue
-				}
-				h := 0
-				if i < len(m.frame.blockH) {
-					h = m.frame.blockH[i]
-				}
-				lines = append(lines, fmt.Sprintf("  [%d] user=%q rowOffset=%d h=%d bottom=%d offScreen=%v",
-					i, e.userText, e.rowOffset, h, e.rowOffset+h, e.rowOffset+h <= m.vp.YOffset))
-			}
-			m.append(StDim.Render(strings.Join(lines, "\n")))
-			return nil
-		}},
 		{"resume", "[id]", "switch to another saved session (bare opens the picker)", resumeSlash},
 		{"new", "", "start a fresh session in this workspace", newSlash},
 		{"trace", "[on|off|file]", "record events+scroll to a file for debugging (default: dun-trace.jsonl in the temp dir)", func(m *tuiModel, args []string) tea.Cmd {
@@ -310,7 +288,7 @@ func init() {
 			return restartEngine(m.opts, m.sessionID, m.everUp, m.seen())
 		}},
 		{"skill", "[name] [text] | on|off|unset <name|glob> [--global|--project|--session] | mode listed|surfaced|unset [--scope]", "skills: bare opens the list (~/.dun/skills, .dun/skills, ~/.claude/skills, MCP servers) — type to filter, each one's cost, on/off at each scope, and the mode (listed in every request, or surfaced when a turn fits); on/off/unset and mode change it directly; with a name, asks the model to use it; with part of a name, lists the matches", skillSlash},
-		{"exit", "", "exit dun: the session's engine stops too, unless /persist is on or another client is attached", func(m *tuiModel, _ []string) tea.Cmd {
+		{"exit", "", "exit dun: the session's engine stops too, unless another client is attached", func(m *tuiModel, _ []string) tea.Cmd {
 			return m.exit()
 		}},
 		// /splash: a clean screen with the splash on it (USER 2026-10-27:
@@ -325,22 +303,6 @@ func init() {
 		// good is /discard.
 		{"close", "", "exit dun, as /exit (to discard the session for good: /discard)", func(m *tuiModel, _ []string) tea.Cmd {
 			return m.exit()
-		}},
-		{"persist", "[on|off|status]", "keep this session running after /exit (bare: on, or the status if already on)", func(m *tuiModel, args []string) tea.Cmd {
-			mode := ""
-			if len(args) > 0 {
-				mode = strings.ToLower(args[0])
-			}
-			switch mode {
-			case "", "on", "off", "status":
-			default:
-				m.append(StErr.Render("usage: /persist [on|off|status]"))
-				return nil
-			}
-			if !m.proc.persist(mode) {
-				m.append(StErr.Render("no session service right now — /reconnect, then try again"))
-			}
-			return nil
 		}},
 	}
 }

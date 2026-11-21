@@ -112,7 +112,7 @@ func (m tuiModel) engineGone() (tea.Model, tea.Cmd) {
 	}
 	// A finished trace is not a crash — there is nothing to restart.
 	if m.replaying {
-		m.fatalErr = "replay finished — /perf for the timings"
+		m.fatalErr = "replay finished"
 		if s := m.proc.replay.String(); s != "" {
 			m.append(StDim.Render("replayed " + s))
 		}

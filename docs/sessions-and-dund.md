@@ -295,7 +295,7 @@ description, choices, group, route, current toggle state) and routes typed
 lines itself (control `slash` to `routeSlash`). The TUI, web palette and phone
 all use that router, so a command added to the engine reaches every client.
 The TUI keeps only commands that need the terminal (help, config, model,
-context, reload, perf, mouse, scrolldebug, resume, trace, reconnect, skill,
+context, reload, mouse, resume, trace, reconnect, skill,
 exit, and the `/mcp add` form); a test pins that none of them shadows an engine
 command. Provider management follows the same split: `applyProviderOp` is the
 one implementation, called directly by the TUI (it must work when no engine

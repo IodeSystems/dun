@@ -1976,9 +1976,9 @@ rescue), and agentkit's capability record on the wire. Code:
   glamour's auto-style: an OSC background query with a 5 s timeout that tmux
   does not answer, rebuilt on every `WindowSizeMsg` inside `Update`. It is now
   resolved once before the loop and skipped in multiplexers
-  (`DUN_MD_STYLE`, `DUN_MD_QUERY=1`). It was found only because `/perf` names
-  the message type behind the worst frame. Frame stats are always on
-  (`/perf`); pprof is opt-in (`DUN_PPROF`).
+  (`DUN_MD_STYLE`, `DUN_MD_QUERY=1`). It was found only because the slow-frame dump names
+  the message type behind the worst frame. Frame stats are always on (a dump
+  is written when frames stutter; `/perf` was removed); pprof is opt-in (`DUN_PPROF`).
 - **Rendering is paced and cached** (details in `tui-architecture.md`):
   `refresh()` re-wrapped the whole scrollback per streamed token (7.8 ms per
   frame at 200 blocks, ~1 s CPU per 100-token reply, on the goroutine that

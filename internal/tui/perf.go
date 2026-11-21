@@ -17,7 +17,7 @@ import (
 //
 // Three levels, because they answer different questions:
 //
-//   - stage timings: always on, ~free, readable in-session with /perf.
+//   - stage timings: always on, ~free, written to a dump when the UI stutters.
 //     "Is the UI the problem, and which half of it?"
 //   - slow-frame detection: notices on its own and writes a dump, because the
 //     user who hits this is busy working, not watching a metric.
@@ -138,7 +138,7 @@ func (f *frameStats) observeMsg(s stage, d time.Duration, kind string) (warn boo
 	return false
 }
 
-// report renders the stats for /perf.
+// report renders the stats for the slow-frame dump.
 func (f *frameStats) report() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -181,9 +181,9 @@ func (f *frameStats) slowWarning() string {
 	path := filepath.Join(os.TempDir(), fmt.Sprintf("dun-perf-%d.txt", os.Getpid()))
 	body := "dun perf dump\n\n" + f.report() + "\n"
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		return "⚠ rendering is stuttering — /perf for the numbers"
+		return "⚠ rendering is stuttering"
 	}
-	return "⚠ rendering is stuttering and may be dropping input — /perf for the numbers, details in " + path
+	return "⚠ rendering is stuttering and may be dropping input, details in " + path
 }
 
 func round(d time.Duration) time.Duration {

@@ -378,9 +378,9 @@ re-slicing whatever the pacing did.
 | one 100-token reply | 973 ms | 4.8 ms |
 | per token | 9.7 ms | 1.7 µs |
 
-`/perf` reports per-stage timings (update / view / refresh, with p50/p95/max) and
-names the message type behind the slowest frame. dun also notices its own
-stutter: past a tenth of frames over 16ms it says so once and writes a dump.
+dun notices its own stutter: past a tenth of frames over 16ms it says so once
+and writes a dump with per-stage timings (update / view / refresh, with
+p50/p95/max) and the message type behind the slowest frame.
 `DUN_PPROF=127.0.0.1:6060` serves `net/http/pprof` from any mode.
 
 **A mangled screen.** `/repaint` clears the screen, resets the terminal
@@ -439,7 +439,7 @@ order with the same gaps.
 
 This exists because every performance number above had to be inferred from
 benchmarks written after the fact — a 5s stall was found by attributing frames
-to message types, not by reproducing it. `dun --replay t.jsonl` then `/perf` is
+to message types, not by reproducing it. `dun --replay t.jsonl` is
 a measurement anyone can repeat. It is also the only honest way to test the UI
 against a *real* session rather than one someone imagined.
 

@@ -74,7 +74,8 @@ func hangWrap(s string, w int) string {
 // warnLine is a line that needs the person, in the one shape: the warning
 // mark in column 0 (as ✓ is on a line that worked: the state is not colour
 // alone), the text from column 2, in the attention colour. ⚠ is in DejaVu
-// Sans Mono and in dun's other warnings (/perf, the status line's spend).
+// Sans Mono and in dun's other warnings (the slow-frame warning, the status
+// line's spend).
 func warnLine(text string) string { return stNote.Render("⚠ " + text) }
 
 // loggedIn reports whether the session has an AI service to send to, as

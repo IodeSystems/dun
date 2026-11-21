@@ -560,19 +560,6 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 			m.upgrade = nil
 		}
 		m.refresh()
-	case "persist":
-		// dund's answer to /persist.
-		on, changed := ev["on"] == true, ev["changed"] == true
-		switch {
-		case on && changed:
-			m.append(StDim.Render("persist: on — this session and its sub-agents keep running after /exit, and come back after a restart · /persist off to undo"))
-		case on:
-			m.append(StDim.Render("persist: on — /exit leaves this session running · /persist off to let /exit stop it"))
-		case changed:
-			m.append(StDim.Render("persist: off — /exit stops this session's engine; its sub-agents come back stopped (the conversation is kept)"))
-		default:
-			m.append(StDim.Render("persist: off — /exit stops this session's engine · /persist to keep it running"))
-		}
 	case "user":
 		// The engine took a user message — from this client or another. It is
 		// rendered here, not when sent, so every client shows the same

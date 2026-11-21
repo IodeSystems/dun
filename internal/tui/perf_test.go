@@ -219,8 +219,8 @@ func TestSlowFrameDetection(t *testing.T) {
 		}
 	}
 	// The warning has to say where to look.
-	if w := f.slowWarning(); !strings.Contains(w, "/perf") {
-		t.Errorf("warning should point at the numbers: %q", w)
+	if w := f.slowWarning(); !strings.Contains(w, "dun-perf-") {
+		t.Errorf("warning should point at the dump: %q", w)
 	}
 }
 

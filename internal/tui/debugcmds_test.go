@@ -34,21 +34,22 @@ func TestDebugCommands_HiddenButTypeable(t *testing.T) {
 	}
 	m.showHelp(true)
 	all := stripANSI(m.convo[len(m.convo)-1].collapsed)
-	if !strings.Contains(all, "/scrolldebug") || strings.Contains(all, "hidden") {
+	if !strings.Contains(all, "/trace") || strings.Contains(all, "hidden") {
 		t.Errorf("/help --debug:\n%s", all)
 	}
 
-	m = typeStr(m, "/scr")
+	m = typeStr(m, "/tra")
 	if ms := m.paletteMatches(); len(ms) != 0 {
-		t.Errorf("/scr shows %v", ms)
+		t.Errorf("/tra shows %v", ms)
 	}
-	m = typeStr(m, "olldebug")
-	if ms := m.paletteMatches(); len(ms) != 1 || ms[0].Name != "scrolldebug" {
-		t.Errorf("/scrolldebug typed in full: %v", ms)
+	m = typeStr(m, "ce")
+	if ms := m.paletteMatches(); len(ms) != 1 || ms[0].Name != "trace" {
+		t.Errorf("/trace typed in full: %v", ms)
 	}
+	m = typeStr(m, " off") // runs, writes no trace file
 	n := len(m.convo)
 	m = key(m, kEnter)
 	if len(m.convo) <= n {
-		t.Errorf("/scrolldebug did not run:\n%s", convoText(m))
+		t.Errorf("/trace did not run:\n%s", convoText(m))
 	}
 }
