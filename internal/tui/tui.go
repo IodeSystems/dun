@@ -17,6 +17,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/internal/harness"
 )
 
@@ -270,20 +271,22 @@ type tuiModel struct {
 	// answers it puts the texts in this composer (every client drops the
 	// rows; delivery.go).
 	unqueueAsk   bool
-	flashUntil   time.Time      // when it goes
-	pulsePending bool           // a pulse tick is scheduled
-	bandRaw      []string       // the selected block's rows before the band, for a pulse step
-	bandAt       int            // the pane row they start at
-	pg           pager          // the pager (valid while paging)
-	scr          *paneScreen    // a pushed screen over the pager (panes.go), or nil
-	scrCmd       tea.Cmd        // what a screen's key left to run (/who asking dund again)
-	extWant      bool           // /ext asked for the list (extview.go)
-	planWant     bool           // /plan asked for the plan (planview.go)
-	journalWant  bool           // /journal asked for the entries (journalview.go)
-	planTelling  *planTellTo    // the composer is telling a plan node's owner (planview.go)
-	ctxSettings  map[string]any // /context config's settings in force, from the settings event
-	effort       string         // /effort's level, from the settings event
-	effortWords  string         // what that level does, from the settings event (the server's default, when it says)
+	flashUntil   time.Time                      // when it goes
+	pulsePending bool                           // a pulse tick is scheduled
+	bandRaw      []string                       // the selected block's rows before the band, for a pulse step
+	bandAt       int                            // the pane row they start at
+	pg           pager                          // the pager (valid while paging)
+	scr          *paneScreen                    // a pushed screen over the pager (panes.go), or nil
+	scrCmd       tea.Cmd                        // what a screen's key left to run (/who asking dund again)
+	extWant      bool                           // /ext asked for the list (extview.go)
+	planWant     bool                           // /plan asked for the plan (planview.go)
+	journalWant  bool                           // /journal asked for the entries (journalview.go)
+	psGen        int                            // /ps's openings, so a stale reading is dropped (psscreen.go)
+	psSample     func() (dundcli.PSView, error) // /ps's reading; nil: dundcli.PSSampler (tests set it)
+	planTelling  *planTellTo                    // the composer is telling a plan node's owner (planview.go)
+	ctxSettings  map[string]any                 // /context config's settings in force, from the settings event
+	effort       string                         // /effort's level, from the settings event
+	effortWords  string                         // what that level does, from the settings event (the server's default, when it says)
 	// engineTiers and engineDefaultTier are the model tiers as the engine
 	// resolved them at its start (the settings event); nil from an older one.
 	engineTiers       []dunconfig.TierPick

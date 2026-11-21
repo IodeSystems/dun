@@ -765,6 +765,12 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case jobTailMsg:
 		return m, m.jobTail(msg)
 
+	case psMsg:
+		return m.notePS(msg)
+
+	case psTickMsg:
+		return m.notePSTick(msg)
+
 	case renderTickMsg:
 		// One frame per tick at most, no matter how fast the tokens arrive.
 		m.tickPending = false
