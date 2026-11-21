@@ -27,6 +27,7 @@ func init() {
 	event[Notification]("notification")
 	event[Recap]("recap")
 	event[Compaction]("compaction")
+	event[Compacting]("compacting")
 	event[Session]("session")
 	event[History]("history")
 	event[Workspace]("workspace")
@@ -508,6 +509,20 @@ type Compaction struct {
 	SinceLastSecs int    `json:"since_last_secs"`
 	Cause         string `json:"cause"`
 }
+
+// Compacting is a fold in progress. PhaseStart: a fold has begun (its
+// summary call is running). Every start ends with a Compaction (the fold
+// applied) or a Compacting with PhaseEnd (it did not: Error says why, ""
+// when there was nothing to fold).
+type Compacting struct {
+	Phase string `json:"phase"`
+	Error string `json:"error,omitempty"`
+}
+
+const (
+	CompactingStart = "start"
+	CompactingEnd   = "end"
+)
 
 // --- the session ---
 

@@ -29,6 +29,7 @@ The engine emits events as line-delimited JSON objects. Each has a `"type"` fiel
 | `reset` | Store cleared (`/clear`) | — |
 | `control` | Control action done (`/isolate`, `/prompt`) | `id`, `action`, `message` |
 | `compaction` | Context compacted | `text` |
+| `compacting` | A fold began (`phase: start`); or ended without a `compaction` (`phase: end`, `error` when it failed or was cancelled, none when nothing was folded). Every start ends with one of the two | `phase`, `error` |
 | `exit` | Engine leaving voluntarily | `reason` |
 | `image_refused` | A message with images not sent (no vision, no `vision_model`; or an unreadable image) | `message`, `content`, `images[]` — the client puts the message back in the composer; `done` follows |
 

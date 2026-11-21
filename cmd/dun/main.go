@@ -983,6 +983,13 @@ func main() {
 				TokensBefore: n.TokensBefore, TokensAfter: n.TokensAfter,
 				Turn: n.Turn, SinceLastSecs: n.SinceLastSecs, Cause: n.Cause})
 		}
+		cfg.OnCompacting = func(n harness.CompactingNote) {
+			ev := &proto.Compacting{Phase: proto.CompactingStart}
+			if n.Done {
+				ev.Phase, ev.Error = proto.CompactingEnd, n.Err
+			}
+			em.emit(ev)
+		}
 		// askMu: one question open at a time. Every question (the model's
 		// ask_user, a mount) reads the next line of
 		// in.answers; two open at once could each take the other's answer.

@@ -122,7 +122,7 @@ func (h *Harness) rescueFold(ctx context.Context) (int, error) {
 // The split keeps the recent conversation intact — the model is mid-task, and
 // its last few exchanges are what it needs to continue — while the OLDER half,
 // which has already been acted on, is what can become a paragraph.
-func (h *Harness) foldHistory(ctx context.Context, cause foldCause) (int, error) {
+func (h *Harness) foldHistory(ctx context.Context, cause foldCause) (_ int, err error) {
 	// Never inside a build (the rescue runs between turn attempts, the
 	// overflow policy after a cut reply), so foldMu is free here.
 	h.foldMu.Lock()
@@ -175,6 +175,10 @@ func (h *Harness) foldHistory(ctx context.Context, cause foldCause) (int, error)
 		folded += h.meter.Estimate(e.Content)
 	}
 	budget := agent.DefaultSummaryTokens(folded, max(whole-folded, 0), h.windowTokens())
+	// The fold begins here; every return below ends it (noteCompactionCause
+	// on success, foldEnd otherwise).
+	h.foldBegin()
+	defer func() { h.foldEnd(err) }()
 	summary, err := h.summarizeRescue(ctx, older, budget)
 	if err != nil {
 		return 0, fmt.Errorf("summarize: %w", err)
