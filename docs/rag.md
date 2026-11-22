@@ -589,6 +589,24 @@ USER 2026-11-09: worktrees are raglit branches. Code: `internal/ragd/branch.go`,
 - **Start.** `ragd.Open` opens every branch on disk whose parent index is
   there, with the roots from its `branch.json`, so jobs queued before a
   restart run again.
+- **Includes do not survive removal.** `/rag include` (the raglit extension's
+  `include` command, `examples/extensions/raglit/extension.json`) targets
+  `{{index}}`, the membership set for this directory on this branch
+  (`RaglitIndex`, `internal/mcpserver/defs.go`): in a worktree that is the
+  worktree's index, `<dir>-<branch>`. An include is a watch root (or one read)
+  in that index's raglit config, so it belongs to the worktree's index. When
+  the worktree is removed — `PruneWorktrees` (a stale one with no work) or
+  `RemoveWorktree` (`/close`) — `dropIndexFor` (`internal/harness/prune.go`)
+  drops that index, and the includes stop applying: the included files are no
+  longer indexed on any of the project's remaining indexes. They are not
+  re-indexed. The main checkout's index holds the main checkout's files, and
+  the pool — the shared cache of extract/OCR/segment/embed, which the drop
+  deliberately does not touch — is a cache, not an index: nothing is
+  searchable from it, and a later include of the same files replays it with no
+  model calls. To keep included files indexed, include them in the main
+  checkout's index (or re-include them after the removal), not in the
+  worktree's. The raglit config of the dropped index is gone with it; there is
+  no list of its former include roots to replay.
 - **Old copies.** dund before branches indexed a worktree as a second copy
   in the project's index, filtered by path. The first `rag_index` of the
   main checkout removes them, once per index (`dropOutside`, meta key
