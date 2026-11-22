@@ -838,6 +838,10 @@ func (s *subAgent) run(ctx context.Context, prompt string) {
 // parent is never counted: it always gets its turn.
 const autoContinues = 8
 
+// jobQuietEnd is how long every remaining job must stay quiet before a
+// sub-agent's wake loop gives up on it (mirrors bareQuietJobEnd in cmd/dun).
+const jobQuietEnd = 30 * time.Second
+
 // work is one run of the child, driven as the engine's loop drives the
 // main session (cmd/dun/engine.go): first's turn, then a turn for each
 // message with images held meanwhile, then a turn for what is queued (a
@@ -897,6 +901,28 @@ func (s *subAgent) work(ctx context.Context, h *Harness, first UserInput) (agent
 		if g.Settle(queued) {
 			break
 		}
+	}
+	// A child with running jobs stays resident and runs a turn on its own
+	// job completion, as the root driver does (drainStep). These wakes are
+	// external news, not self-looping, so they bypass autoContinues.
+	for ctx.Err() == nil && h.BackgroundRunning() > 0 {
+		if h.AllJobsQuiet(jobQuietEnd) {
+			break
+		}
+		select {
+		case <-h.Wake():
+		case <-ctx.Done():
+		case <-time.After(h.QuietIn(jobQuietEnd)):
+			if h.AllJobsQuiet(jobQuietEnd) {
+				break
+			}
+		}
+		g.Begin()
+		var next agent.TurnResult
+		if next, err = h.Continue(ctx); err == nil && strings.TrimSpace(next.Reply) != "" {
+			res = next
+		}
+		g.End()
 	}
 	if owed := s.owed(); len(owed) > 0 && err == nil && ctx.Err() == nil {
 		res.Reply = strings.TrimSpace(res.Reply + "\n\n(Still owes a publish for plan node(s) " + strings.Join(owed, ", ") + ".)")
