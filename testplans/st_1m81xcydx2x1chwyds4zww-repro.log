@@ -1,3 +1,10 @@
+# Load reproduction: three harness timing flakes
+# Command: GOWORK=off go test -race -count=5 -run 'TestIndex_BudgetExcludesAndRetries|TestIndexAnyway_PersonOnly|TestJobs_AMessageEndsTheRun' .
+# Load: 40 busy-loop generators, loadavg ~53-59 on 24-core dev box
+# Result: FAIL — TestIndexAnyway_PersonOnly (indexanyway_test.go:124) and
+#   TestIndex_BudgetExcludesAndRetries (indexstate_test.go:133) fired.
+#   TestJobs_AMessageEndsTheRun did not fail in this round.
+# Shared cause: argLines read after Set* call with no wait for the async restart.
 === START 2026-11-22T20:02:16Z ===
 loadavg at start: 53.44 51.21 44.98 47/3712 814437
 cmd: GOWORK=off go test -race -count=5 -run '<the three tests>' .
