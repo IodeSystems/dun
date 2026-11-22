@@ -120,6 +120,7 @@ func TestIndexAnyway_PersonOnly(t *testing.T) {
 	if err != nil || !changed || h2.IndexAnyway(mcpserver.ServerCode) {
 		t.Fatalf("off: %v %v", changed, err)
 	}
+	waitIndex(t, h2, IndexFailed) // the restart without the flag; the spawn is logged by then
 	if args := argLines(log2); len(args) != 2 || strings.Contains(args[1], "--index-anyway") {
 		t.Fatalf("after off: %q", args)
 	}

@@ -129,6 +129,7 @@ func TestIndex_BudgetExcludesAndRetries(t *testing.T) {
 	if ex := h2.IndexExcludes(mcpserver.ServerCode); len(ex) != 0 {
 		t.Fatalf("still excluded: %v", ex)
 	}
+	waitIndex(t, h2, IndexFailed) // the restart without the exclude; the spawn is logged by then
 	if args := argLines(log2); len(args) != 2 || strings.Contains(args[1], "--exclude") {
 		t.Fatalf("after include: %q", args)
 	}
