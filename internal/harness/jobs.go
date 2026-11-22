@@ -43,6 +43,7 @@ func jobsToolDef(commands, agents bool) llm.ToolDef {
 		props["mute"] = map[string]any{"type": "boolean", "description": "true: no more reports about it, its finish included; it keeps running"}
 		props["every_bytes"] = map[string]any{"type": "integer", "description": "report each time this many more bytes are written; 0 = off"}
 		props["every_secs"] = map[string]any{"type": "integer", "description": "report new output at most this often, at least 60; 0 = off"}
+		props["input"] = map[string]any{"type": "string", "description": "text to write to the job's stdin (only for jobs started with exec stdin:true)"}
 		desc = "Manage a command that outlived its exec timeout (job:N). " +
 			"Its output is its log; read it with file_read. Reports as " +
 			"output grows are off until you set every_bytes or every_secs (whichever comes first); they say how " +
@@ -64,11 +65,12 @@ type jobsArgs struct {
 	Mute       *bool `json:"mute"`
 	EveryBytes *int  `json:"every_bytes"`
 	EverySecs  *int  `json:"every_secs"`
+	Input      string `json:"input"`
 	// unknown is what else the call sent: refused, naming what jobs takes.
 	unknown []string
 }
 
-var jobsParams = map[string]bool{"job": true, "kill": true, "mute": true, "every_bytes": true, "every_secs": true}
+var jobsParams = map[string]bool{"job": true, "kill": true, "mute": true, "every_bytes": true, "every_secs": true, "input": true}
 
 func withJobs(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
@@ -118,7 +120,7 @@ func withJobs(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[st
 // pollSig is a plain look at one job as a key; plain is false for anything
 // that changes something, which never turns into a wait.
 func (a jobsArgs) pollSig() (string, bool) {
-	if a.Kill || a.Mute != nil || a.EveryBytes != nil || a.EverySecs != nil || len(a.unknown) > 0 {
+	if a.Kill || a.Mute != nil || a.EveryBytes != nil || a.EverySecs != nil || a.Input != "" || len(a.unknown) > 0 {
 		return "", false
 	}
 	if a.Job != nil {
@@ -208,6 +210,11 @@ func runJobs(h *Harness, a jobsArgs) string {
 	j := h.bgJobByID(*a.Job)
 	if j == nil {
 		return fmt.Sprintf("ERROR: no background job #%d. %s", *a.Job, h.jobsRunning())
+	}
+	if a.Input != "" {
+		if msg := j.feedInput(a.Input); msg != "" {
+			return msg + "\n" + jobReport(j)
+		}
 	}
 	if note := tuneJob(h, j, a.EveryBytes, a.EverySecs, a.Mute); note != "" {
 		return note + "\n" + jobReport(j)

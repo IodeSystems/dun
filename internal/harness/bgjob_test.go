@@ -609,11 +609,12 @@ func TestJobs_ReplyCarriesProcessUsage(t *testing.T) {
 	t.Log(out)
 }
 
-// The handoff says ending the turn is safe (every root driver waits for a
-// running job and wakes the model), names the progress report, and says the
-// monitor sees only stdout/stderr (Terminal-Bench: a model slept beside a job
-// whose output went to files). A sub-agent's run ends with its turn, so it is
-// told that instead.
+// The handoff says ending the turn is safe (every driver — root and
+// sub-agent — waits for a running job and wakes the model), names the
+// progress report, and says the monitor sees only stdout/stderr
+// (Terminal-Bench: a model slept beside a job whose output went to files).
+// A sub-agent's work loop now waits for its jobs too, so it gets the same
+// "safe" message as a root.
 func TestHandoffNotice_SaysEndingTheTurnIsSafe(t *testing.T) {
 	h := testHarness(t)
 	j := &bgJob{id: 3, command: "make", h: h}
@@ -624,9 +625,11 @@ func TestHandoffNotice_SaysEndingTheTurnIsSafe(t *testing.T) {
 			t.Errorf("handoff missing %q:\n%s", want, out)
 		}
 	}
+	// A sub-agent gets the same "safe" message: its work loop waits for
+	// jobs and wakes on completion, just like the root drivers.
 	child := &bgJob{id: 1, command: "make", h: &Harness{parent: h}}
 	out = child.handoffNotice(time.Minute)
-	if strings.Contains(out, "is safe") || !strings.Contains(out, "your run ends") {
-		t.Errorf("a sub-agent must not be told ending its turn is safe:\n%s", out)
+	if !strings.Contains(out, "ending your turn is safe") {
+		t.Errorf("a sub-agent must be told ending its turn is safe:\n%s", out)
 	}
 }

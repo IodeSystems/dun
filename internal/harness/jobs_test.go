@@ -104,7 +104,7 @@ func TestJobs_SchemaIsManagementOnly(t *testing.T) {
 		slices.Sort(ks)
 		return ks
 	}
-	want := []string{"every_bytes", "every_secs", "job", "kill", "mute"}
+	want := []string{"every_bytes", "every_secs", "input", "job", "kill", "mute"}
 	for _, agents := range []bool{true, false} {
 		if got := props(jobsToolDef(true, agents)); !slices.Equal(got, want) {
 			t.Errorf("agents=%v: %v", agents, got)

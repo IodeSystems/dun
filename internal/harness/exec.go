@@ -57,6 +57,17 @@ type ExecBackend interface {
 	Run(ctx context.Context, command string, w io.Writer) ExecResult
 }
 
+// StdinExec is an ExecBackend that can open a stdin FIFO for a command, so
+// the model can feed it input (ssh-copy-id, an interactive prompt). Only the
+// persistent shell does this; a stateless backend gives every command its own
+// process and has no pipe to hand over.
+type StdinExec interface {
+	// SetStdinPath points the next command's stdin at the FIFO at path
+	// ("" restores /dev/null). Called before Run; the shell's script
+	// redirect reads from it.
+	SetStdinPath(path string)
+}
+
 // ExecResult is one command's outcome. It exists because the outcome used to be
 // a STRING, and "did it fail?" was therefore `strings.Contains(out, "[exit:")`
 // — which a command that merely PRINTS that marker turns into a false failure,
@@ -321,6 +332,22 @@ type HostShell struct {
 	mu  sync.Mutex
 	p   *shellProc
 	seq int
+
+	// stdinPath, when set, is the FIFO the next command's stdin reads from
+	// (SetStdinPath). Reset to "" after the command starts, so a command
+	// that does not ask for input gets /dev/null.
+	stdinPath string
+}
+
+// SetStdinPath implements StdinExec. It points the next command's stdin at
+// the FIFO at path ("" restores /dev/null). The FIFO must already exist;
+// the backend opens it for writing so the command's read does not block
+// waiting for a writer, and stores the write end on the job so jobs(job:N,
+// input:"…") can feed it later.
+func (h *HostShell) SetStdinPath(path string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.stdinPath = path
 }
 
 // shellProc is ONE live `sh` process: the pipes we talk to it through, the
@@ -395,9 +422,19 @@ func (h *HostShell) RunPromotable(ctx context.Context, command string, w io.Writ
 	// pipe, sentinel included, so a command that inherited it (head, read, an
 	// installer's prompt) ate the sentinel and waited forever for more. Braces,
 	// not a subshell: export and cd still reach the next call.
+	//
+	// With exec(stdin:true), stdinPath is the FIFO the harness created; the
+	// command reads from it instead of /dev/null, so jobs(job:N, input:"…")
+	// can feed it. stdinPath is consumed here and reset to "" so the next
+	// command gets /dev/null again.
+	stdinRedirect := "</dev/null"
+	if h.stdinPath != "" {
+		stdinRedirect = "</" + shellQuote(h.stdinPath)
+		h.stdinPath = ""
+	}
 	script := "cd " + shellQuote(h.Dir) + " 2>/dev/null\n" +
 		exportLive(h.Live) +
-		"{ " + command + "\n} </dev/null\n" +
+		"{ " + command + "\n} " + stdinRedirect + "\n" +
 		"echo " + sentinel + " $?\n\n"
 	if _, err := h.p.stdin.Write([]byte(script)); err != nil {
 		// The shell died between calls. Start a fresh one and retry once.
@@ -922,12 +959,14 @@ func execToolDef(person bool, b ExecBackend) llm.ToolDef {
 		"are notified when it finishes: do not sleep or poll for it. " + waitNote +
 		" another background job or a sub-agent finishes while you wait: its notice is in the result. Its output is its log: read " +
 		"it with file_read while it runs. " +
-		"Do not run anything interactive: there is no terminal and no input, so it can only hang."
+		"Commands that need interactive input (a password prompt, `ssh-copy-id`) should set stdin:true; " +
+		"feed input with jobs({job:N, input:\"…\"}). Without stdin:true the command gets /dev/null and any prompt hangs it."
 	td.Function.Parameters = map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"command": map[string]any{"type": "string", "description": "the shell command to run"},
 			"timeout": map[string]any{"type": "integer", "description": "seconds to wait for the command before it becomes a background job (default 30, at most 300)"},
+			"stdin":   map[string]any{"type": "boolean", "description": "true: open a stdin pipe for the command (for interactive prompts). Default false (/dev/null). Feed input later with jobs({job:N, input:\"…\"})"},
 		},
 		"required": []string{"command"},
 	}
@@ -973,7 +1012,7 @@ func execWhere(b ExecBackend) string {
 // It ends the same way when other background work ends (workEnded: a job's
 // completion or a sub-agent's report): the notice rides the handoff, so a
 // model that waits in exec beside a job hears of its finish at once.
-func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(string, map[string]any, string), startJob func(command string) *bgJob, spill func(command, output string) string, userWaiting, workEnded func() <-chan struct{}) agent.ToolDispatcher {
+func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(string, map[string]any, string), startJob func(command, stdinPath string) *bgJob, spill func(command, output string) string, userWaiting, workEnded func() <-chan struct{}) agent.ToolDispatcher {
 	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
 		if tc.Function.Name != "exec" {
 			return inner(ctx, tc)
@@ -981,6 +1020,7 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 		var args struct {
 			Command string `json:"command"`
 			Timeout *int   `json:"timeout"`
+			Stdin   bool   `json:"stdin"`
 		}
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
 		if strings.TrimSpace(args.Command) == "" {
@@ -1025,7 +1065,20 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 			ended = workEnded()
 		}
 		start := time.Now()
-		j := startJob(args.Command)
+
+		// stdin:true opens a FIFO the command reads from, so jobs({job:N,
+		// input:"…"}) can feed it. Only the persistent shell (StdinExec)
+		// supports this; a stateless backend gives every command /dev/null.
+		stdinPath := ""
+		if args.Stdin {
+			if se, ok := backend.(StdinExec); ok {
+				if p, err := mkStdinFIFO(); err == nil {
+					stdinPath = p
+					se.SetStdinPath(p)
+				}
+			}
+		}
+		j := startJob(args.Command, stdinPath)
 		woken, cut := false, false
 		if grace > 0 {
 			t := time.NewTimer(grace)
@@ -1066,6 +1119,23 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 		}
 		return out, nil
 	}
+}
+
+// mkStdinFIFO creates a named FIFO in the system temp dir for a command's
+// stdin. The harness opens it O_RDWR (startJobStdin) so the open does not
+// block waiting for a reader; the shell's < redirect is the reader.
+//
+// Go has no os.Mkfifo; syscall.Mknod with S_IFIFO is the portable Unix call.
+// This is not available on Windows, but dun's exec backends are Unix-only.
+func mkStdinFIFO() (string, error) {
+	p := filepath.Join(os.TempDir(), fmt.Sprintf("dun-stdin-%d-%d", os.Getpid(), time.Now().UnixNano()))
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		return "", err
+	}
+	if err := syscall.Mknod(p, syscall.S_IFIFO|0o600, 0); err != nil {
+		return "", err
+	}
+	return p, nil
 }
 
 // exportLive is the export line that goes before a command in the persistent

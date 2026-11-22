@@ -742,8 +742,8 @@ func (h *Harness) rebuildTools() {
 		// command serializes on; now it donates that shell when it is promoted
 		// (HostShell.RunPromotable), so the persistent environment is available
 		// to every command without any of them being able to block the rest.
-		startJob := func(command string) *bgJob {
-			return h.startJob(cfg.Exec, command)
+		startJob := func(command, stdinPath string) *bgJob {
+			return h.startJobStdin(cfg.Exec, command, stdinPath)
 		}
 		dispatch = withExec(dispatch, cfg.Exec, report, startJob, h.spillExec, h.userWaiting, h.workEnded)
 		dispatch = withCdNudge(dispatch, execStartDir(cfg.Exec))

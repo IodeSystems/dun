@@ -114,6 +114,13 @@ type bgJob struct {
 	killedBy  string
 	killAfter time.Duration
 
+	// stdin is the write end of the job's stdin FIFO (exec stdin:true),
+	// set by startJob before the command runs. nil for jobs without a
+	// stdin pipe. Closed by finish so the command's read gets EOF.
+	stdin io.WriteCloser
+	// stdinPath is the FIFO's path, removed by finish.
+	stdinPath string
+
 	// escalations counts the heartbeats that woke the agent (capped at
 	// maxHeartbeatEscalations, asidettl.go).
 	escalations atomic.Int32
@@ -289,6 +296,26 @@ func (j *bgJob) reportMayWake(now time.Time) bool {
 	return true
 }
 
+// feedInput writes text to the job's stdin FIFO. It returns an error message
+// when the job has no stdin pipe (exec stdin:true was not used) or the write
+// failed; "" on success.
+func (j *bgJob) feedInput(text string) string {
+	j.mu.Lock()
+	w := j.stdin
+	done := j.done
+	j.mu.Unlock()
+	if done {
+		return fmt.Sprintf("ERROR: job #%d is already finished; its stdin is closed", j.id)
+	}
+	if w == nil {
+		return fmt.Sprintf("ERROR: job #%d was not started with exec stdin:true; it has no stdin pipe", j.id)
+	}
+	if _, err := w.Write([]byte(text)); err != nil {
+		return fmt.Sprintf("ERROR: writing to job #%d stdin: %v", j.id, err)
+	}
+	return ""
+}
+
 // finish records the outcome and releases whoever is waiting on it. If the job
 // was already promoted it also announces itself, because a background job's
 // completion is news; a provisional job's is not — the tool call that started
@@ -310,6 +337,14 @@ func (j *bgJob) finish(res ExecResult) {
 		}
 		_ = j.log.Close()
 		j.log = nil
+	}
+	if j.stdin != nil {
+		_ = j.stdin.Close() // the command's read gets EOF
+		j.stdin = nil
+	}
+	if j.stdinPath != "" {
+		_ = os.Remove(j.stdinPath)
+		j.stdinPath = ""
 	}
 	bg := j.bg
 	j.mu.Unlock()
@@ -436,23 +471,16 @@ func (j *bgJob) openLogLocked() {
 //
 // "Ending your turn is safe" is said outright: a Terminal-Bench model told only
 // "do other work or end your turn" ran `sleep 280` three times beside its job
-// and killed it at 33 min. Every driver waits for a running job and wakes the
-// model with its completion (cmd/dun engine.go runLoop and drainStep,
-// human.go). The progress line names the one blind spot: a monitor counts
-// only stdout/stderr, and that run sent its output to files.
-//
-// A sub-agent is the exception: its run ends with its turn (subAgent.work does
-// not wait for jobs), so a finish after that reaches it only when its parent
-// tells it more. It is told that instead of being told it is safe.
+// and killed it at 33 min. Every driver — including a sub-agent's work loop —
+// waits for a running job and wakes the model with its completion (cmd/dun
+// engine.go runLoop and drainStep, human.go; subAgent.work). The progress
+// line names the one blind spot: a monitor counts only stdout/stderr, and
+// that run sent its output to files.
 func (j *bgJob) handoffNotice(waited time.Duration) string {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	wait := "Do not sleep or poll for it. Do other work or end your turn: ending your turn is safe, " +
 		"the run waits for the job and wakes you when it finishes. "
-	if j.h != nil && j.h.parent != nil {
-		wait = "Do not poll for it. If you end your turn, your run ends: the job keeps running, and its " +
-			"finish reaches you only when your parent tells you more. "
-	}
 	return fmt.Sprintf(
 		"`%s` is still running after %s (not killed, not failed): background job #%d. %s"+
 			"For progress reports, call jobs({job: %d, every_secs: 60}) or every_bytes. They count only "+
@@ -631,7 +659,23 @@ func (h *Harness) bgLogDir() string {
 // can block forever: what used to hold a session silent for ten minutes is now
 // just a job nobody promoted yet.
 func (h *Harness) startJob(backend ExecBackend, command string) *bgJob {
+	return h.startJobStdin(backend, command, "")
+}
+
+// startJobStdin is startJob with a stdin FIFO: when stdinPath is non-empty,
+// the FIFO is opened for writing and stored on the job so jobs(job:N,
+// input:"…") can feed it. The shell's script already points the command's
+// stdin at it (SetStdinPath was called before this).
+func (h *Harness) startJobStdin(backend ExecBackend, command, stdinPath string) *bgJob {
 	j := h.newJob(command)
+	if stdinPath != "" {
+		// O_RDWR so the open does not block waiting for a reader: the
+		// shell's < redirect is the reader, and it starts after this returns.
+		if f, err := os.OpenFile(stdinPath, os.O_RDWR, 0); err == nil {
+			j.stdin = f
+			j.stdinPath = stdinPath
+		}
+	}
 	j.run(backend)
 	return j
 }

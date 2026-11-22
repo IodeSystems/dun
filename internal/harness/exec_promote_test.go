@@ -18,8 +18,8 @@ func execDispatcher(t *testing.T, h *Harness) agent.ToolDispatcher {
 	t.Helper()
 	be := &HostShell{Dir: t.TempDir()}
 	t.Cleanup(be.Close)
-	return withExec(nil, be, nil, func(command string) *bgJob {
-		return h.startJob(be, command)
+	return withExec(nil, be, nil, func(command, stdinPath string) *bgJob {
+		return h.startJobStdin(be, command, stdinPath)
 	}, nil, h.userWaiting, h.workEnded)
 }
 
