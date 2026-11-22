@@ -2854,6 +2854,30 @@ func TestSuggest_DefaultIsOff_NoIdleModelCall(t *testing.T) {
 	}
 }
 
+// /suggest reaches the engine as a slash line (the engine's router owns it),
+// and the engine's settings answer turns the idle call on.
+func TestSuggest_SlashOnThenIdleAsks(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	var buf bytes.Buffer
+	m := newTUIModel(&dunProc{stdin: bufCloser{&buf}}, "/ws")
+	nm, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = nm.(tuiModel)
+	m.starting = false
+	m.runSlash("/suggest auto")
+	if !strings.Contains(buf.String(), `"slash"`) || !strings.Contains(buf.String(), "suggest auto") {
+		t.Fatalf("/suggest auto not forwarded: %q", buf.String())
+	}
+	m = m.feed(evMsg{"type": "settings", "suggest": "auto"})
+	m.convo = []convoEntry{{userText: "q"}, {collapsed: "a reply"}}
+	m = m.feed(evMsg{"type": "done"})
+	buf.Reset()
+	m.lastKeyAt = time.Now().Add(-2 * idleSuggestDelay)
+	_, _ = m.update(idleSuggestMsg{})
+	if !strings.Contains(buf.String(), `"suggest"`) {
+		t.Errorf("an idle session in auto must ask the engine for suggestions: %q", buf.String())
+	}
+}
+
 // Pending messages: a mid-turn message is queued, then lifted into the next
 // tool result. The tool result alone settles nothing; the engine's delivered
 // event, after it, makes the row a normal user entry after the result.
