@@ -63,6 +63,47 @@ func TestSample_BusyAndIdle(t *testing.T) {
 	t.Log(u.Line(), "—", u.Verdict(5*time.Minute))
 }
 
+func TestIsNetworkWchan(t *testing.T) {
+	net := []string{
+		"inet_csk_accept",
+		"tcp_recvmsg",
+		"tcp_sendmsg",
+		"udp_recvmsg",
+		"sk_wait_data",
+		"napi_poll",
+		"sock_wait_for_connect",
+		"netfilter_queue",
+		"nf_conntrack_in",
+	}
+	for _, w := range net {
+		if !isNetworkWchan(w) {
+			t.Errorf("isNetworkWchan(%q) = false, want true", w)
+		}
+	}
+	nonet := []string{"hrtimer_nanosleep", "futex_wait_queue", "0", "-", ""}
+	for _, w := range nonet {
+		if isNetworkWchan(w) {
+			t.Errorf("isNetworkWchan(%q) = true, want false", w)
+		}
+	}
+}
+
+func TestVerdict_NetworkWait(t *testing.T) {
+	u := Usage{Rated: true, Procs: []Proc{{State: "S", CPU: 0, WChan: "tcp_recvmsg"}}}
+	v := u.Verdict(0)
+	if !strings.Contains(v, "waiting on network") {
+		t.Errorf("network-wait verdict %q, want 'waiting on network'", v)
+	}
+}
+
+func TestVerdict_NotNetworkWait(t *testing.T) {
+	u := Usage{Rated: true, Procs: []Proc{{State: "S", CPU: 0, WChan: "hrtimer_nanosleep"}}}
+	v := u.Verdict(0)
+	if strings.Contains(v, "waiting on network") {
+		t.Errorf("non-network verdict %q should not say 'waiting on network'", v)
+	}
+}
+
 // A group with nothing in it says so.
 func TestSample_Gone(t *testing.T) {
 	var s Sampler

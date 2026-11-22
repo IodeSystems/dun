@@ -226,11 +226,24 @@ func (u Usage) Verdict(quiet time.Duration) string {
 		}
 		return "busy on CPU"
 	case u.CPU < 1 && (u.ReadBps < 0 || u.ReadBps+u.WritBps < 1024):
+		ws := wchanList(u)
+		w := strings.Join(ws, ", ")
+		netW := filterNetwork(ws)
+		if len(netW) > 0 {
+			v := "waiting on network"
+			if w != "" {
+				v += " (waiting in " + w + ")"
+			}
+			if quiet >= 2*time.Minute {
+				v += fmt.Sprintf(", no output for %s", short(quiet))
+			}
+			return v
+		}
 		v := "idle: every process sleeping, no CPU"
 		if u.ReadBps >= 0 {
 			v += ", no IO"
 		}
-		if w := waits(u); w != "" {
+		if w != "" {
 			v += " (waiting in " + w + ")"
 		}
 		if quiet >= 2*time.Minute {
@@ -239,6 +252,47 @@ func (u Usage) Verdict(quiet time.Duration) string {
 		return v
 	}
 	return ""
+}
+
+// isNetworkWchan reports whether a wchan name indicates a network wait:
+// TCP/UDP socket operations, accept, connect, recv, send, or the NAPI poll
+// loop. A job sleeping in one of these is waiting for the network, not
+// stuck on disk.
+func isNetworkWchan(w string) bool {
+	switch {
+	case strings.Contains(w, "inet_"),
+		strings.Contains(w, "tcp_"),
+		strings.Contains(w, "udp_"),
+		strings.Contains(w, "sk_wait"),
+		strings.Contains(w, "napi_poll"),
+		strings.Contains(w, "sock_"),
+		strings.Contains(w, "netfilter"),
+		strings.Contains(w, "nf_conntrack"):
+		return true
+	}
+	return false
+}
+
+// wchanList collects the wchan names from all processes, deduplicated.
+func wchanList(u Usage) []string {
+	var w []string
+	for _, p := range u.Procs {
+		if p.WChan != "" && p.WChan != "0" && p.WChan != "-" {
+			w = append(w, p.WChan)
+		}
+	}
+	return uniq(w)
+}
+
+// filterNetwork returns only the wchans that are network waits.
+func filterNetwork(ws []string) []string {
+	var out []string
+	for _, w := range ws {
+		if isNetworkWchan(w) {
+			out = append(out, w)
+		}
+	}
+	return out
 }
 
 // waits names where the sleeping processes wait, most common first.
