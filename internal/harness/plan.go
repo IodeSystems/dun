@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
@@ -339,10 +340,41 @@ func withPlan(inner agent.ToolDispatcher, tg *taskgraph.Tools, onCall func(strin
 	}
 }
 
+// closerModel is the model this harness's calls run on, for a node it closes
+// (taskgraph.WithClosedBy): the session's own model for a root, and for a
+// child the model it was spawned on. A /model switch restarts the engine
+// (dund SwitchModel), so a harness never changes model; the tool call's ctx
+// is not needed to tell. A child's Endpoint is the parent's unless the child
+// is on another endpoint, so its ChildModel (set to its own model by
+// childConfig) comes first.
+func (h *Harness) closerModel(context.Context) string {
+	if h.isChild() && h.cfg.ChildModel != "" {
+		return h.cfg.ChildModel
+	}
+	return h.cfg.Endpoint.Model
+}
+
+// noteClosed records each node a tool call just made done, with the model
+// that did it, in the stats ledger (StatsLedger.AppendClosed). A node closed
+// before ClosedBy was kept, or by the host, has none and is not recorded.
+func (h *Harness) noteClosed(cs []taskgraph.Change) {
+	l := h.cfg.StatsLedger
+	if l == nil {
+		return
+	}
+	for _, c := range cs {
+		if a := c.After; a != nil && a.Status == taskgraph.Done && a.ClosedBy != "" && (c.Before == nil || c.Before.Status != taskgraph.Done) {
+			_ = l.AppendClosed(h.sessionName(), a.ClosedBy, time.Now())
+		}
+	}
+}
+
 // planTools is the plan tools for a root session.
 func (h *Harness) planTools() *taskgraph.Tools {
 	return taskgraph.New(planStore{h}, "",
+		taskgraph.WithClosedBy(h.closerModel),
 		taskgraph.WithOnChange(func(_ context.Context, _ string, cs []taskgraph.Change) {
+			h.noteClosed(cs)    // the closed column of /usage (roundstats.go)
 			h.planMoved(cs)     // the stall window (plannudge.go)
 			h.ledgerTouched(cs) // which ask the turn worked on (asks.go)
 			h.planTell(cs, "the main agent", "")
@@ -1104,7 +1136,9 @@ func (h *Harness) childPlanTool() *taskgraph.Tools {
 	parent, actor := h.cfg.Parent, planOwner(h.cfg.AgentID)
 	return taskgraph.New(planStore{parent}, actor,
 		taskgraph.WithMayChange(func(a string, n *taskgraph.Node) bool { return n != nil && n.Owner == a }),
+		taskgraph.WithClosedBy(h.closerModel),
 		taskgraph.WithOnChange(func(_ context.Context, _ string, cs []taskgraph.Change) {
+			h.noteClosed(cs)
 			parent.planFromChild(h.cfg.AgentID, cs)
 		}))
 }

@@ -444,6 +444,9 @@ type ModelUsage struct {
 	Model                                  string
 	Requests                               int
 	Prompt, Cached, CacheWrite, Completion int
+	// Closed is the plan items the model closed as done in the window
+	// (closed-YYYY-MM.jsonl; items closed before it was kept are not in it).
+	Closed int
 }
 
 // ByModel totals the ledger's rounds since t by model, the most prompt and
@@ -470,6 +473,14 @@ func (l *StatsLedger) ByModel(since time.Time) []ModelUsage {
 		u.CacheWrite += r.CacheWrite
 		u.Completion += r.Completion
 	})
+	l.eachClosed(since, func(c closedRecord) {
+		u := by[c.Model]
+		if u == nil {
+			u = &ModelUsage{Model: c.Model}
+			by[c.Model] = u
+		}
+		u.Closed++
+	})
 	out := make([]ModelUsage, 0, len(by))
 	for _, u := range by {
 		out = append(out, *u)
@@ -481,6 +492,59 @@ func (l *StatsLedger) ByModel(since time.Time) []ModelUsage {
 		return strings.Compare(a.Model, b.Model)
 	})
 	return out
+}
+
+// closedRecord is one plan item a model closed as done: a line of
+// closed-YYYY-MM.jsonl, beside the rounds file (a line in the rounds file
+// would count as a round for every reader of it).
+type closedRecord struct {
+	Time    time.Time `json:"t"`
+	Session string    `json:"session,omitempty"`
+	Model   string    `json:"model"`
+}
+
+// AppendClosed records that model closed a plan item as done at t.
+func (l *StatsLedger) AppendClosed(session, model string, t time.Time) error {
+	if l == nil || model == "" {
+		return nil
+	}
+	b, err := json.Marshal(closedRecord{Time: t, Session: session, Model: model})
+	if err != nil || len(b)+1 > statsLineMax {
+		return err
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if err := os.MkdirAll(l.dir, 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(filepath.Join(l.dir, "closed-"+t.UTC().Format("2006-01")+".jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(append(b, '\n'))
+	return err
+}
+
+// eachClosed is each for the close records.
+func (l *StatsLedger) eachClosed(since time.Time, fn func(closedRecord)) {
+	now := time.Now().UTC()
+	prev := time.Date(now.Year(), now.Month()-1, 1, 0, 0, 0, 0, time.UTC)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, mo := range []string{prev.Format("2006-01"), now.Format("2006-01")} {
+		b, err := os.ReadFile(filepath.Join(l.dir, "closed-"+mo+".jsonl"))
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			var c closedRecord
+			if line == "" || json.Unmarshal([]byte(line), &c) != nil || c.Time.Before(since) || c.Model == "" {
+				continue
+			}
+			fn(c)
+		}
+	}
 }
 
 // each calls fn on every round at or after since, in file order, from this

@@ -199,9 +199,8 @@ func ledgerBlock(s *contextStats) string {
 }
 
 // modelCols are the columns of the by-model token table, after the model's
-// name. A column per measure of a model's month: a later one (closed plan
-// items, say) is one more entry here, filled from ModelTokens when the
-// engine has the number.
+// name. A column per measure of a model's month: a later one is one more
+// entry here, filled from ModelTokens when the engine has the number.
 var modelCols = []struct {
 	head string
 	val  func(proto.ModelTokens) int
@@ -212,6 +211,8 @@ var modelCols = []struct {
 	// served (the Usage tab's "processed").
 	{"processed", func(t proto.ModelTokens) int { return max(0, t.Prompt-t.Cached) }},
 	{"generated", func(t proto.ModelTokens) int { return t.Completion }},
+	// Plan items the model closed as done; none before closes were recorded.
+	{"closed", func(t proto.ModelTokens) int { return t.Closed }},
 }
 
 // modelTokensBlock is this month's tokens by model, every role, from the

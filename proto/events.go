@@ -350,6 +350,8 @@ type ModelTokens struct {
 	Cached     int    `json:"cached_tokens"`
 	CacheWrite int    `json:"cache_write_tokens,omitempty"`
 	Completion int    `json:"completion_tokens"`
+	// Closed is the plan items the model closed as done in the window.
+	Closed int `json:"closed,omitempty"`
 }
 
 // UsageMonth is the main rounds since Since (RFC 3339): their prompt

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/iodesystems/agentkit/taskgraph"
 	"github.com/iodesystems/dun/internal/mcpserver"
@@ -815,5 +816,31 @@ func TestPlan_AutoArchiveWiring(t *testing.T) {
 	h.parent = nil
 	if len(h.Plan().Rows) != 1 {
 		t.Error("a child archived")
+	}
+}
+
+// plan_close names the model on the node, and a done close reaches the stats
+// ledger's closed count for that model; a drop does not.
+func TestPlan_CloseNamesTheModel(t *testing.T) {
+	h := planHarness(t, true)
+	h.cfg.Endpoint.Model = "big"
+	h.cfg.StatsLedger = NewStatsLedger(t.TempDir())
+	h.rounds.ledger = h.cfg.StatsLedger
+	planCall(t, h, "plan_add", `{"title":"a","done_when":"x"}`)
+	planCall(t, h, "plan_add", `{"title":"b","done_when":"x"}`)
+	planCall(t, h, "plan_update", `{"id":"1","status":"doing"}`)
+	planCall(t, h, "plan_update", `{"id":"2","status":"doing"}`)
+	planCall(t, h, "plan_close", `{"outcome":"done","id":"1","account":"ok"}`)
+	planCall(t, h, "plan_close", `{"outcome":"drop","id":"2","reason":"no"}`)
+	g := h.planNow().store.g
+	if n := g.Get("1"); n.ClosedBy != "big" || n.ClosedAt.IsZero() {
+		t.Errorf("node 1: %+v", n)
+	}
+	if n := g.Get("2"); n.ClosedBy != "big" {
+		t.Errorf("node 2: %+v", n)
+	}
+	got := h.ModelUsage(time.Now().Add(-time.Hour))
+	if len(got) != 1 || got[0].Model != "big" || got[0].Closed != 1 {
+		t.Errorf("by model: %+v", got)
 	}
 }
