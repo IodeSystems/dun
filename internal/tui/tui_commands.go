@@ -315,7 +315,7 @@ func init() {
 			return restartEngine(m.opts, m.sessionID, m.everUp, m.seen())
 		}},
 		{"skill", "[name] [text] | on|off|unset <name|glob> [--global|--project|--session] | mode listed|surfaced|unset [--scope]", "skills: bare opens the list (~/.dun/skills, .dun/skills, ~/.claude/skills, MCP servers) — type to filter, each one's cost, on/off at each scope, and the mode (listed in every request, or surfaced when a turn fits); on/off/unset and mode change it directly; with a name, asks the model to use it; with part of a name, lists the matches", skillSlash},
-		{"exit", "", "exit dun: the session's engine stops too, unless another client is attached", func(m *tuiModel, _ []string) tea.Cmd {
+		{"exit", "", "exit dun: the session's engine stops too, unless /persist is on or another client is attached", func(m *tuiModel, _ []string) tea.Cmd {
 			return m.exit()
 		}},
 		// /splash: a clean screen with the splash on it (USER 2026-10-27:
@@ -330,6 +330,22 @@ func init() {
 		// good is /discard.
 		{"close", "", "exit dun, as /exit (to discard the session for good: /discard)", func(m *tuiModel, _ []string) tea.Cmd {
 			return m.exit()
+		}},
+		{"persist", "[on|off|status]", "keep this session running after /exit (bare: on, or the status if already on)", func(m *tuiModel, args []string) tea.Cmd {
+			mode := ""
+			if len(args) > 0 {
+				mode = strings.ToLower(args[0])
+			}
+			switch mode {
+			case "", "on", "off", "status":
+			default:
+				m.append(StErr.Render("usage: /persist [on|off|status]"))
+				return nil
+			}
+			if !m.proc.persist(mode) {
+				m.append(StErr.Render("no session service right now — /reconnect, then try again"))
+			}
+			return nil
 		}},
 	}
 }

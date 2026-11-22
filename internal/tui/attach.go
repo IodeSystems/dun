@@ -389,6 +389,15 @@ func (p *dunProc) leave() bool {
 	return json.NewEncoder(p.stdin).Encode(map[string]any{"type": "leave"}) == nil
 }
 
+// persist sets or asks the session's persist setting ("on", "off",
+// "status", or "" — on if off, else status); a persist event answers.
+func (p *dunProc) persist(mode string) bool {
+	if p == nil {
+		return false
+	}
+	return json.NewEncoder(p.stdin).Encode(map[string]any{"type": "persist", "mode": mode}) == nil
+}
+
 // forget asks the service to drop this session (after /close deleted it).
 func (p *dunProc) forget() bool {
 	if p == nil {
