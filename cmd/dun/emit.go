@@ -130,7 +130,7 @@ func monthModels(h *harness.Harness, now time.Time) []proto.ModelTokens {
 	var out []proto.ModelTokens
 	for _, u := range h.ModelUsage(since) {
 		out = append(out, proto.ModelTokens{Model: u.Model, Requests: u.Requests, Prompt: u.Prompt,
-			Cached: u.Cached, CacheWrite: u.CacheWrite, Completion: u.Completion})
+			Cached: u.Cached, CacheWrite: u.CacheWrite, Completion: u.Completion, Closed: u.Closed})
 	}
 	return out
 }

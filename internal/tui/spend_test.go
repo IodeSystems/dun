@@ -266,3 +266,14 @@ func TestLedgerBlockSpendReport(t *testing.T) {
 		t.Errorf("report not shown, or its prefix kept:\n%s", out)
 	}
 }
+
+// The by-model table has a closed column: plan items the model closed.
+func TestModelTokensBlock_Closed(t *testing.T) {
+	out := stripANSI(modelTokensBlock([]proto.ModelTokens{{Model: "big", Requests: 2, Completion: 7, Closed: 3}}))
+	if !strings.Contains(out, "closed") {
+		t.Fatalf("no closed column: %q", out)
+	}
+	if row := out[strings.LastIndex(out, "big"):]; !strings.HasSuffix(strings.TrimRight(row, " \n"), "3") {
+		t.Errorf("row %q does not end in the closed count", row)
+	}
+}
