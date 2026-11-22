@@ -278,10 +278,17 @@ func TestSetIndex_OwnIndexOffNarrowsTheSearch(t *testing.T) {
 	}
 	own := mcpserver.RaglitProject(ws)
 	old := listIndexes
+	listIndexesMu.Lock()
 	listIndexes = func(context.Context, string, string, []string) ([]raglitIndexRow, error) {
 		return []raglitIndexRow{{Project: own, Index: "main"}, {Project: own, Index: "memory"}, {Project: "x", Index: "y"}}, nil
 	}
-	t.Cleanup(func() { listIndexes = old; ownIdxCache.Delete(own) })
+	listIndexesMu.Unlock()
+	t.Cleanup(func() {
+		listIndexesMu.Lock()
+		listIndexes = old
+		listIndexesMu.Unlock()
+		ownIdxCache.Delete(own)
+	})
 	noteOwnIndexes(own, []raglitIndexRow{{Project: own, Index: "main"}, {Project: own, Index: "memory"}})
 
 	if _, _, changed, err := h.SetIndex(ctx, mcpserver.ServerDocs, "memory", mcpserver.ScopeSession, ptr(false)); err != nil || !changed {

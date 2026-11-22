@@ -27,6 +27,7 @@ func TestIndexesKind_ListAttachDetach(t *testing.T) {
 	defer h.Close()
 	listErr := error(nil)
 	old := listIndexes
+	listIndexesMu.Lock()
 	listIndexes = func(context.Context, string, string, []string) ([]raglitIndexRow, error) {
 		if listErr != nil {
 			return nil, listErr
@@ -36,7 +37,12 @@ func TestIndexesKind_ListAttachDetach(t *testing.T) {
 			{Selector: ":code", Index: "code"},
 		}, nil
 	}
-	defer func() { listIndexes = old }()
+	listIndexesMu.Unlock()
+	defer func() {
+		listIndexesMu.Lock()
+		listIndexes = old
+		listIndexesMu.Unlock()
+	}()
 
 	v, ok := h.SwitchView(indexesKind)
 	// [0] is dund's project index, with no switch (USER 2026-11-17); [1]
@@ -97,8 +103,14 @@ func TestIndexesKind_ProjectIndexRow(t *testing.T) {
 	rag := &fakeRag{}
 	h, _, _ := codeHarness(t, rag, Config{})
 	old := listIndexes
+	listIndexesMu.Lock()
 	listIndexes = func(context.Context, string, string, []string) ([]raglitIndexRow, error) { return nil, nil }
-	t.Cleanup(func() { listIndexes = old })
+	listIndexesMu.Unlock()
+	t.Cleanup(func() {
+		listIndexesMu.Lock()
+		listIndexes = old
+		listIndexesMu.Unlock()
+	})
 	v, _ := h.SwitchView(indexesKind)
 	if len(v.Items) < 2 || v.Items[0].Name != projectIndexName || !v.Items[0].On ||
 		!strings.Contains(v.Items[0].Source, "project index (dund) · up · ") || v.Items[1].Name != mcpserver.ServerDocs {

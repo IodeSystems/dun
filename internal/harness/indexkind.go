@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/iodesystems/dun/internal/mcpserver"
@@ -39,7 +40,12 @@ type raglitIndexRow struct {
 	Meaning   bool     `json:"meaning"`
 }
 
-// listIndexes runs the search extension's index CLI for every index.
+// listIndexes runs the search extension's index CLI for every index. Tests
+// swap it, while a listing another test started (attach.go's background
+// goroutine, alive for seconds under load) can still be reading it: the
+// swap is guarded by listIndexesMu so a stray read gets one or the other
+// function, never a torn write.
+var listIndexesMu sync.RWMutex
 var listIndexes = func(ctx context.Context, cli, dir string, env []string) ([]raglitIndexRow, error) {
 	p, err := mcpserver.FindCommandContext(ctx, cli)
 	if err != nil {
@@ -69,6 +75,15 @@ var listIndexes = func(ctx context.Context, cli, dir string, env []string) ([]ra
 func firstLine(s string) string {
 	l, _, _ := strings.Cut(strings.TrimSpace(s), "\n")
 	return l
+}
+
+// listIndexesFn snapshots the current listIndexes under the lock the
+// tests' swaps take: the caller keeps the one function it got, even if a
+// swap lands while it runs.
+func listIndexesFn() func(context.Context, string, string, []string) ([]raglitIndexRow, error) {
+	listIndexesMu.RLock()
+	defer listIndexesMu.RUnlock()
+	return listIndexes
 }
 
 // indexesKind is the kind; it has no modes.
@@ -130,7 +145,7 @@ func (h *Harness) indexesView() SwitchView {
 	if e, ok := h.extension(mcpserver.ServerDocs); ok && e.Roles.Index != nil && e.Roles.Index.CLI != "" {
 		cli = e.Roles.Index.CLI
 	}
-	rows, err := listIndexes(context.Background(), cli, h.cfg.Workspace, h.raglitEnv())
+	rows, err := listIndexesFn()(context.Background(), cli, h.cfg.Workspace, h.raglitEnv())
 	if err != nil {
 		v.Note = err.Error() + " — only the indexes a scope names are shown"
 	} else {

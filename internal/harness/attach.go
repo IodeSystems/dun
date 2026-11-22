@@ -385,7 +385,8 @@ func (h *Harness) ownIndexes(e mcpserver.Extension, s mcpserver.Server, own stri
 	ws, env := h.cfg.Workspace, h.raglitEnv()
 	go func() {
 		defer ownIdxListing.Delete(own)
-		rows, err := listIndexes(context.Background(), cli, ws, env)
+		fn := listIndexesFn()
+		rows, err := fn(context.Background(), cli, ws, env)
 		if err != nil {
 			return
 		}
