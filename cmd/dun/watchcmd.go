@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/internal/tui"
 	"github.com/iodesystems/dun/proto"
 )
@@ -191,9 +192,5 @@ func firstLine(s string) string {
 }
 
 func oneLineText(s string) string {
-	s = strings.Join(strings.Fields(s), " ")
-	if r := []rune(s); len(r) > watchLineCap {
-		return string(r[:watchLineCap]) + "…"
-	}
-	return s
+	return textfmt.ClipRune(textfmt.OneLine(s), watchLineCap)
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/iodesystems/raglit"
 
+	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -304,11 +305,7 @@ func unixNano(n int64) time.Time {
 }
 
 func oneLine(s string) string {
-	s = strings.Join(strings.Fields(s), " ")
-	if r := []rune(s); len(r) > 200 {
-		s = string(r[:199]) + "…"
-	}
-	return s
+	return textfmt.ClipRune(textfmt.OneLine(s), 199)
 }
 
 // meteredVector is an index's embed client: the Host's (embedRoute), with

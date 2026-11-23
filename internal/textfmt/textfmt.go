@@ -24,6 +24,16 @@ func Clip(s string, n int) string {
 	return s[:n] + "…"
 }
 
+// ClipRune is Clip over runes: it cuts at n runes and appends the ellipsis
+// when the text is longer, never splitting a rune in the cut.
+func ClipRune(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
 func Pad(s string, w int) string {
 	if n := len([]rune(s)); n < w {
 		return s + strings.Repeat(" ", max(0, w-n))

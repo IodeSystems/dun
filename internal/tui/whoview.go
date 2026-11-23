@@ -13,6 +13,7 @@ import (
 
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/dundcli"
+	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -172,7 +173,7 @@ func sessionRow(name string, p *proto.PeerSession, you, narrow bool) (head, sub,
 	return head, sub, b.String()
 }
 
-func oneLineOf(s string) string { return strings.Join(strings.Fields(s), " ") }
+func oneLineOf(s string) string { return textfmt.OneLine(s) }
 
 // shown is the rows the filter keeps: every word of the query in the row.
 // A sub-agent that is kept keeps this session (row 0) above it.

@@ -29,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -230,7 +231,7 @@ func (a *attributor) walkSession(s proto.ProcSession) {
 			return
 		}
 		if j, ok := jobs[p.PGID]; ok && !strings.HasPrefix(prefix, "job #") {
-			a.add(p, s.ID, label, "background job #"+itoa(j.ID)+" `"+clip(oneLine(j.Command), 40)+"`", "", false)
+			a.add(p, s.ID, label, "background job #"+itoa(j.ID)+" `"+textfmt.ClipRune(textfmt.OneLine(j.Command), 39)+"`", "", false)
 			a.descend(pid, func(c int) { walk(c, "job #"+itoa(j.ID)+" › ") })
 			return
 		}
@@ -614,15 +615,7 @@ func sortedPIDs(s Snapshot) []int {
 	return out
 }
 
-func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-func clip(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n-1]) + "…"
-}
 
 // resolve is p with symlinks resolved (macOS's /tmp is /private/tmp), else
 // cleaned.

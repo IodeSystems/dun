@@ -20,6 +20,7 @@ import (
 	"github.com/iodesystems/agentkit/taskgraph"
 	"github.com/iodesystems/dun/internal/fsutil"
 	"github.com/iodesystems/dun/internal/heartbeat"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // Sub-agents — spending someone else's context.
@@ -1112,11 +1113,7 @@ func (s *subAgent) peek(n int) string {
 // oneLine flattens whitespace and clips, so a 30k-line answer cannot become the
 // parent's context window by accident.
 func oneLine(s string, max int) string {
-	s = strings.Join(strings.Fields(s), " ")
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "…"
+	return textfmt.ClipRune(textfmt.OneLine(s), max)
 }
 
 // restoreAgents registers the children of a RESUMED session. Their processes

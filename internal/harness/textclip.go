@@ -5,16 +5,13 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // workClip is s on one line, cut at max runes.
 func workClip(s string, max int) string {
-	s = strings.Join(strings.Fields(s), " ")
-	if utf8.RuneCountInString(s) <= max {
-		return s
-	}
-	r := []rune(s)
-	return string(r[:max]) + "…"
+	return textfmt.ClipRune(textfmt.OneLine(s), max)
 }
 
 // headLine is the first non-blank line of s, cut at max runes.
@@ -29,12 +26,7 @@ func headLine(s string, max int) string {
 
 // clipBlock keeps line breaks and cuts at max runes.
 func clipBlock(s string, max int) string {
-	s = strings.TrimSpace(s)
-	if utf8.RuneCountInString(s) <= max {
-		return s
-	}
-	r := []rune(s)
-	return string(r[:max]) + "…"
+	return textfmt.ClipRune(strings.TrimSpace(s), max)
 }
 
 // boundLines keeps lines from the start and the end, at most max runes in

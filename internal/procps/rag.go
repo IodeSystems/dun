@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/dun/proto"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // Retrieval inside dund (internal/ragd) runs in the dund process: the
@@ -115,7 +116,7 @@ func RagLine(r RagIndex) string {
 	}
 	s := fmt.Sprintf("rag %s %s  %s  queue %s  files/min %d  embeds/min %d", project, kind, r.State, queue, r.FilesMin, r.EmbedsMin)
 	if r.LastErr != "" {
-		s += "  err " + Age(r.ErrAgeSec) + " " + oneLine(r.LastErr)
+		s += "  err " + Age(r.ErrAgeSec) + " " + textfmt.OneLine(r.LastErr)
 	}
 	return s
 }

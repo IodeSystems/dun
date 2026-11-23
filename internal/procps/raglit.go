@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/dun/proto"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // The raglit daemon's indexes come from `raglit status --json --all`
@@ -146,7 +147,7 @@ func ReadRaglit(d *Proc, env []string, now time.Time) (*RaglitReading, error) {
 			return nil, fmt.Errorf("%s", RaglitNeeds)
 		}
 		if m != "" {
-			return nil, fmt.Errorf("raglit status: %s", oneLine(m))
+			return nil, fmt.Errorf("raglit status: %s", textfmt.OneLine(m))
 		}
 		return nil, fmt.Errorf("raglit status: %w", err)
 	}

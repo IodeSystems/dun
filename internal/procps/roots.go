@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/dun/proto"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // StatusTimeout bounds `poly-lsp-mcp status`: a hung daemon must not hang
@@ -127,7 +128,7 @@ func ReadRoots(d *Proc) ([]Root, error) {
 	}
 	if err != nil {
 		if m := strings.TrimSpace(stderr.String()); m != "" {
-			return nil, fmt.Errorf("%s", oneLine(m))
+			return nil, fmt.Errorf("%s", textfmt.OneLine(m))
 		}
 		return nil, err
 	}
