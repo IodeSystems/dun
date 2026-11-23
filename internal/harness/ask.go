@@ -22,10 +22,11 @@ import (
 
 // AskFunc presents a question and its choices to the user and returns their
 // answer. It blocks until answered or ctx is done. multi = the user may pick
-// several options (the answer is their joined selection). recommended is what
-// the model recommends: exactly one option, or for multi any number of them
-// (the ones to check). The user may always answer in their own words instead.
-type AskFunc func(ctx context.Context, question string, options []string, multi bool, recommended []string) (string, error)
+// several options (the answer is their joined selection). noCustom = the
+// answer must be one of the options (no free text). recommended is what the
+// model recommends: exactly one option, or for multi any number of them
+// (the ones to check).
+type AskFunc func(ctx context.Context, question string, options []string, multi bool, noCustom bool, recommended []string) (string, error)
 
 // askMinOptions: a question with fewer choices pushes all the work onto the
 // user. USER 2026-10-21: an ask with no options or recommendation is invalid.
@@ -92,7 +93,7 @@ func withAsk(inner agent.ToolDispatcher, ask AskFunc, onCall func(string, map[st
 			// nothing until it does.
 			return "ERROR: " + msg, nil
 		}
-		ans, err := ask(ctx, args.Question, args.Options, args.Multi, rec)
+		ans, err := ask(ctx, args.Question, args.Options, args.Multi, false, rec)
 		if err != nil {
 			// Feed the failure back to the model rather than aborting the turn.
 			return "ERROR: could not get an answer: " + err.Error(), nil

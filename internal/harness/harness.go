@@ -1228,7 +1228,7 @@ func (h *Harness) Worktree() *Worktree {
 // the goroutine that reads control commands is the same one that reads answer
 // events. Calling this from a control-command callback deadlocks — run it on
 // its own goroutine. See setCtrlCmd in cmd/dun/main.go.
-func (h *Harness) AskUser(ctx context.Context, question string, options []string, recommended string) (string, error) {
+func (h *Harness) AskUser(ctx context.Context, question string, options []string, noCustom bool, recommended string) (string, error) {
 	h.srvMu.Lock()
 	ask := h.cfg.Ask
 	h.srvMu.Unlock()
@@ -1239,7 +1239,7 @@ func (h *Harness) AskUser(ctx context.Context, question string, options []string
 	if recommended != "" {
 		rec = []string{recommended}
 	}
-	return ask(ctx, question, options, false, rec)
+	return ask(ctx, question, options, false, noCustom, rec)
 }
 
 // Home is the directory the session works in when it is in place: the

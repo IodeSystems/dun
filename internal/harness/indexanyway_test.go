@@ -20,7 +20,7 @@ type asker struct {
 	opts [][]string
 }
 
-func (a *asker) ask(_ context.Context, q string, opts []string, _ bool, _ []string) (string, error) {
+func (a *asker) ask(_ context.Context, q string, opts []string, _ bool, _ bool, _ []string) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.qs, a.opts = append(a.qs, q), append(a.opts, opts)

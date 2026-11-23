@@ -994,17 +994,14 @@ func main() {
 		// ask_user, a mount) reads the next line of
 		// in.answers; two open at once could each take the other's answer.
 		var askMu sync.Mutex
-		ask := func(actx context.Context, q string, opts []string, multi bool, rec []string) (string, error) {
+		ask := func(actx context.Context, q string, opts []string, multi bool, noCustom bool, rec []string) (string, error) {
 			askMu.Lock()
 			defer askMu.Unlock()
 			// Paused for the whole wait: the person deciding is not the turn
 			// working, and a question left open should never be what kills the
 			// turn that asked it.
 			return withoutClock(func() (string, error) {
-				ask := &proto.Ask{AskID: harness.NewMessageID(), CallID: em.turn.callID(), Question: q, Options: opts, Multi: multi, RecommendedAll: rec}
-				if len(rec) > 0 {
-					ask.Recommended = rec[0]
-				}
+				ask := newAskEvent(em.turn.callID(), q, opts, multi, noCustom, rec)
 				em.emit(ask)
 				a, err := awaitAnswer(actx, in.answers, ask.AskID)
 				if err != nil {
@@ -1058,14 +1055,14 @@ func main() {
 		}
 		cfg.OnRetry = func(n harness.RetryNote) { fmt.Fprintf(os.Stderr, "\n  %s %s\n", retryGlyph(n), n.String()) }
 		cfg.OnCompaction = func(n harness.CompactionNote) { fmt.Fprintf(os.Stderr, "\n  🗜 %s\n", n) }
-		cfg.Ask = func(actx context.Context, q string, opts []string, multi bool, rec []string) (string, error) {
-			return withoutClock(func() (string, error) { return humanAsk(actx, q, opts, multi, rec) })
+		cfg.Ask = func(actx context.Context, q string, opts []string, multi bool, noCustom bool, rec []string) (string, error) {
+			return withoutClock(func() (string, error) { return humanAsk(actx, q, opts, multi, noCustom, rec) })
 		}
 		cfg.Mount = func(actx context.Context, source, name string) (bool, error) {
 			return withoutClock(func() (bool, error) {
 				ans, err := humanAsk(actx,
 					fmt.Sprintf("Mount %s as /%s inside the container?", source, name),
-					[]string{"yes", "no"}, false, nil)
+					[]string{"yes", "no"}, false, false, nil)
 				if err != nil {
 					return false, err
 				}
@@ -1280,4 +1277,22 @@ func settleDelayFlag(d time.Duration) time.Duration {
 		return -1
 	}
 	return d
+}
+
+// newAskEvent builds the proto.Ask the engine closure emits. Extracted so a
+// unit test can assert the NoCustom field is set from the parameter.
+func newAskEvent(callID, question string, options []string, multi, noCustom bool, recommended []string) *proto.Ask {
+	a := &proto.Ask{
+		AskID:        harness.NewMessageID(),
+		CallID:       callID,
+		Question:     question,
+		Options:      options,
+		Multi:        multi,
+		NoCustom:     noCustom,
+		RecommendedAll: recommended,
+	}
+	if len(recommended) > 0 {
+		a.Recommended = recommended[0]
+	}
+	return a
 }

@@ -96,8 +96,10 @@ func runHuman(ctx context.Context, h *harness.Harness, task, workspace string, i
 }
 
 // humanAsk prompts on the terminal and reads a line. A number picks an option;
-// with multi, comma-separated numbers (e.g. "1,3") pick several.
-func humanAsk(_ context.Context, question string, options []string, multi bool, recommended []string) (string, error) {
+// with multi, comma-separated numbers (e.g. "1,3") pick several. When noCustom
+// is set, free text is refused — the answer must be one of the numbered
+// options.
+func humanAsk(_ context.Context, question string, options []string, multi, noCustom bool, recommended []string) (string, error) {
 	fmt.Fprintf(os.Stderr, "\n❓ %s\n", safeErr(question))
 	for i, o := range options {
 		mark := ""
@@ -108,6 +110,8 @@ func humanAsk(_ context.Context, question string, options []string, multi bool, 
 	}
 	if multi && len(options) > 0 {
 		fmt.Fprint(os.Stderr, "answer (comma-separated numbers for several): ")
+	} else if noCustom {
+		fmt.Fprint(os.Stderr, "answer (number only): ")
 	} else {
 		fmt.Fprint(os.Stderr, "answer: ")
 	}
@@ -126,6 +130,9 @@ func humanAsk(_ context.Context, question string, options []string, multi bool, 
 	}
 	if n, err := strconv.Atoi(line); err == nil && n >= 1 && n <= len(options) {
 		return options[n-1], nil
+	}
+	if noCustom {
+		return "", fmt.Errorf("answer must be one of the %d options (a number 1–%d)", len(options), len(options))
 	}
 	return line, nil
 }

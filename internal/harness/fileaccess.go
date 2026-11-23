@@ -272,7 +272,7 @@ func (h *Harness) accessOne(ctx context.Context, ts *filetools.Toolset, name, ar
 			map[bool]string{true: "to read and write", false: "to read only"}[writes])
 	}
 	q += " Or answer in your own words: the model gets them as the reason."
-	ans, err := ask(ctx, q, []string{accessSession, accessProject, accessGlobal, accessNo}, false, []string{accessSession})
+	ans, err := ask(ctx, q, []string{accessSession, accessProject, accessGlobal, accessNo}, false, false, []string{accessSession})
 	if err != nil {
 		return args, "ERROR: " + what + " The user was asked and gave no answer (" + err.Error() + "). Do not work around this with exec.", ""
 	}

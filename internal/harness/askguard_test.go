@@ -24,7 +24,7 @@ func asksOnHarness(t *testing.T) *Harness {
 func TestAskGuard_RefusedInAutomaticRounds(t *testing.T) {
 	h := asksOnHarness(t)
 	asked := 0
-	d := withAskGuard(withAsk(nil, func(context.Context, string, []string, bool, []string) (string, error) {
+	d := withAskGuard(withAsk(nil, func(context.Context, string, []string, bool, bool, []string) (string, error) {
 		asked++
 		return "a", nil
 	}, nil), h)

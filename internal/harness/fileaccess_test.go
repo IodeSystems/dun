@@ -18,7 +18,7 @@ type accessAsker struct {
 	opts [][]string
 }
 
-func (a *accessAsker) ask(_ context.Context, q string, opts []string, _ bool, _ []string) (string, error) {
+func (a *accessAsker) ask(_ context.Context, q string, opts []string, _ bool, _ bool, _ []string) (string, error) {
 	a.asks = append(a.asks, q)
 	a.opts = append(a.opts, opts)
 	return a.ans, nil

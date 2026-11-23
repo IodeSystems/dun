@@ -13,7 +13,7 @@ func TestWithAsk_MultiPassthrough(t *testing.T) {
 	var gotQ string
 	var gotOpts []string
 	var gotMulti bool
-	ask := func(_ context.Context, q string, opts []string, multi bool, _ []string) (string, error) {
+	ask := func(_ context.Context, q string, opts []string, multi bool, _ bool, _ []string) (string, error) {
 		gotQ, gotOpts, gotMulti = q, opts, multi
 		return "A, C", nil
 	}
@@ -38,7 +38,7 @@ func TestWithAsk_MultiPassthrough(t *testing.T) {
 // A missing `multi` defaults to false (single-select).
 func TestWithAsk_MultiDefaultsFalse(t *testing.T) {
 	var gotMulti = true
-	ask := func(_ context.Context, _ string, _ []string, multi bool, _ []string) (string, error) {
+	ask := func(_ context.Context, _ string, _ []string, multi bool, _ bool, _ []string) (string, error) {
 		gotMulti = multi
 		return "x", nil
 	}
@@ -58,7 +58,7 @@ func TestWithAsk_MultiDefaultsFalse(t *testing.T) {
 // goes back to the model; the user never sees it. USER 2026-10-21.
 func TestWithAsk_RequiresOptionsAndARecommendation(t *testing.T) {
 	asked := ""
-	ask := func(_ context.Context, q string, _ []string, _ bool, rec []string) (string, error) {
+	ask := func(_ context.Context, q string, _ []string, _ bool, _ bool, rec []string) (string, error) {
 		asked = q + "|" + strings.Join(rec, ",")
 		return "ok", nil
 	}
@@ -123,6 +123,25 @@ func TestAskRecommended(t *testing.T) {
 	// Single-select never splits.
 	if got := askRecommended([]byte(`"lint, tests"`), opts, false); len(got) != 1 {
 		t.Errorf("single split the string: %q", got)
+	}
+}
+
+// The model's ask_user always allows free text: noCustom is false.
+func TestWithAsk_NoCustomIsFalse(t *testing.T) {
+	var gotNoCustom bool
+	ask := func(_ context.Context, _ string, _ []string, _ bool, noCustom bool, _ []string) (string, error) {
+		gotNoCustom = noCustom
+		return "a", nil
+	}
+	d := withAsk(nil, ask, nil)
+	var tc llm.ToolCall
+	tc.Function.Name = "ask_user"
+	tc.Function.Arguments = `{"question":"Q","options":["a","b"],"recommended":"a"}`
+	if _, err := d(context.Background(), tc); err != nil {
+		t.Fatal(err)
+	}
+	if gotNoCustom {
+		t.Error("withAsk must pass noCustom=false: the model's ask_user allows free text")
 	}
 }
 

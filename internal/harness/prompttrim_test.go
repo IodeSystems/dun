@@ -39,7 +39,7 @@ func TestWorker_PromptAndToolSet(t *testing.T) {
 		h, err := Start(context.Background(), Config{
 			Workspace: dir, Servers: []mcpserver.Server{}, Client: &scriptRunner{}, Worker: worker,
 			Peers: stubPeers{}, Loops: stubPeers{},
-			Ask: func(context.Context, string, []string, bool, []string) (string, error) { return "", nil },
+			Ask: func(context.Context, string, []string, bool, bool, []string) (string, error) { return "", nil },
 		})
 		if err != nil {
 			t.Fatal(err)

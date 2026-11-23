@@ -159,7 +159,7 @@ func TestPeerMessage_DoesNotAnswerAnAsk(t *testing.T) {
 	h := testHarness(t)
 	answers := make(chan string)
 	asked := make(chan struct{})
-	ask := func(ctx context.Context, _ string, _ []string, _ bool, _ []string) (string, error) {
+	ask := func(ctx context.Context, _ string, _ []string, _ bool, _ bool, _ []string) (string, error) {
 		close(asked)
 		select {
 		case a := <-answers:
