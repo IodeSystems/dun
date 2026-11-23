@@ -103,7 +103,18 @@ type Gateway struct {
 	clients map[string]*gwClient // by bearer
 	closed  bool
 	starts  int // upstream starts, for tests
+
+	// stopping holds, per key, the stop of a retired upstream still in
+	// flight: its manager entry has the key the next upstream's start
+	// takes, so that start waits for it (retire).
+	stopping map[string]chan struct{}
+
+	// afterFunc arms the grace stop: time.AfterFunc, or a test's clock.
+	afterFunc func(time.Duration, func()) gwTimer
 }
+
+// gwTimer is the grace stop's timer: a *time.Timer, or a test's.
+type gwTimer interface{ Stop() bool }
 
 type gwUpstream struct {
 	key  string
@@ -112,7 +123,9 @@ type gwUpstream struct {
 	ready chan struct{} // closed when the start ended; err is then set
 	err   error
 
-	timer *time.Timer // the grace stop, while it has no client
+	after chan struct{} // the stop of the key's last upstream, or nil: start waits for it
+
+	timer gwTimer // the grace stop, while it has no client
 
 	lmu      sync.Mutex
 	loginTo  map[string]GatewayClient // sessions shown a login's URL (Login, LoginEnd)
@@ -128,7 +141,9 @@ type gwClient struct {
 
 // NewGateway is a gateway whose OAuth servers log in through b.
 func NewGateway(b *oauth.Broker) *Gateway {
-	g := &Gateway{broker: b, mgr: mcpmgr.NewManager(), ups: map[string]*gwUpstream{}, clients: map[string]*gwClient{}}
+	g := &Gateway{broker: b, mgr: mcpmgr.NewManager(), ups: map[string]*gwUpstream{}, clients: map[string]*gwClient{},
+		stopping:  map[string]chan struct{}{},
+		afterFunc: func(d time.Duration, f func()) gwTimer { return time.AfterFunc(d, f) }}
 	g.mgr.SetNotificationHandler(g.notify)
 	return g
 }
@@ -163,7 +178,8 @@ func (g *Gateway) Share(ctx context.Context, c GatewayClient, req ShareRequest) 
 		up = nil // dropped as it failed; this ask starts it again
 	}
 	if up == nil {
-		up = &gwUpstream{key: key, spec: req.Spec, ready: make(chan struct{}), loginTo: map[string]GatewayClient{}}
+		up = &gwUpstream{key: key, spec: req.Spec, ready: make(chan struct{}), loginTo: map[string]GatewayClient{},
+			after: g.stopping[key]}
 		g.ups[key] = up
 		g.starts++
 		go g.start(up)
@@ -248,6 +264,9 @@ func (u *gwUpstream) endLogin(id string, err error) {
 // start connects the upstream: an OAuth login first (through the broker,
 // outside the handshake's timeout), then the handshake and its tools.
 func (g *Gateway) start(up *gwUpstream) {
+	if up.after != nil {
+		<-up.after // the last upstream's stop of this key, or it stops this one
+	}
 	s := up.spec
 	timeout := time.Duration(s.Timeout) * time.Second
 	if timeout <= 0 {
@@ -308,17 +327,36 @@ func (g *Gateway) graceStop(up *gwUpstream) {
 	if up.timer != nil {
 		up.timer.Stop()
 	}
-	up.timer = time.AfterFunc(GatewayGrace, func() {
+	up.timer = g.afterFunc(GatewayGrace, func() {
 		g.mu.Lock()
-		stop := g.ups[up.key] == up && g.clientsOf(up.key) == 0
-		if stop {
-			delete(g.ups, up.key)
+		var stop func()
+		if g.ups[up.key] == up && g.clientsOf(up.key) == 0 {
+			stop = g.retire(up)
 		}
 		g.mu.Unlock()
-		if stop {
-			g.mgr.StopServer(up.key)
+		if stop != nil {
+			stop()
 		}
 	})
+}
+
+// retire takes up out of ups; the returned func, run outside mu, stops
+// its manager entry. Until it has, a new upstream of the key waits to
+// start: the manager knows a server by key, so a stop that ran after the
+// new start would end the new connection. Caller holds mu.
+func (g *Gateway) retire(up *gwUpstream) func() {
+	delete(g.ups, up.key)
+	done := make(chan struct{})
+	g.stopping[up.key] = done
+	return func() {
+		g.mgr.StopServer(up.key)
+		g.mu.Lock()
+		if g.stopping[up.key] == done {
+			delete(g.stopping, up.key)
+		}
+		g.mu.Unlock()
+		close(done)
+	}
 }
 
 // Release gives back one client. Its upstream stops GatewayGrace after its
@@ -364,14 +402,14 @@ func (g *Gateway) drop(up *gwUpstream) {
 		g.mu.Unlock()
 		return
 	}
-	delete(g.ups, up.key)
+	stop := g.retire(up)
 	for b, c := range g.clients {
 		if c.key == up.key {
 			delete(g.clients, b)
 		}
 	}
 	g.mu.Unlock()
-	g.mgr.StopServer(up.key)
+	stop()
 }
 
 // Starts is how many upstream starts the gateway has made.
