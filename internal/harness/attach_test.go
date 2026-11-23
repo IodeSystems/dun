@@ -38,49 +38,62 @@ func TestUnionAttachAndSelector(t *testing.T) {
 	if !slices.Equal(u, []string{"a:x", "b:y", "own:z", "c:w"}) {
 		t.Errorf("union: %v", u)
 	}
-	if s := attachSelector("own", u, nil, nil, nil); s != "own:*,a:x,b:y,c:w" {
+	if s := attachSelector("own", u, nil, nil, nil, false); s != "own:*,a:x,b:y,c:w" {
 		t.Errorf("selector: %q", s)
 	}
 	// This project's own indexes are read by "<own>:*" already: no selector,
 	// so raglit's default (with the config's shared namespaces) stays.
-	if s := attachSelector("own", []string{"own:z"}, nil, nil, nil); s != "" {
+	if s := attachSelector("own", []string{"own:z"}, nil, nil, nil, false); s != "" {
 		t.Errorf("own only: %q", s)
 	}
-	if s := attachSelector("own", nil, nil, nil, nil); s != "" {
+	if s := attachSelector("own", nil, nil, nil, nil, false); s != "" {
 		t.Errorf("none: %q", s)
 	}
 	// The shared namespaces are never the reason a selector is emitted: with
 	// only its own attached, raglit's default already reads own plus shared.
-	if s := attachSelector("own", []string{"own:z"}, nil, nil, []string{"common"}); s != "" {
+	if s := attachSelector("own", []string{"own:z"}, nil, nil, []string{"common"}, false); s != "" {
 		t.Errorf("own only, shared in config: %q", s)
 	}
 	// One of its own switched off: its own named one by one, less that one
 	// (USER 2026-10-28: /rag); before the list is known, all of its own.
 	ownIdx := []string{"own:main", "own:memory", "own:skills"}
-	if s := attachSelector("own", nil, []string{"own:memory"}, ownIdx, nil); s != "own:main,own:skills" {
+	if s := attachSelector("own", nil, []string{"own:memory"}, ownIdx, nil, false); s != "own:main,own:skills" {
 		t.Errorf("own off: %q", s)
 	}
-	if s := attachSelector("own", []string{"a:x"}, []string{"own:memory"}, ownIdx, nil); s != "own:main,own:skills,a:x" {
+	if s := attachSelector("own", []string{"a:x"}, []string{"own:memory"}, ownIdx, nil, false); s != "own:main,own:skills,a:x" {
 		t.Errorf("own off, other on: %q", s)
 	}
-	if s := attachSelector("own", nil, []string{"own:memory"}, nil, nil); s != "own:*" {
+	if s := attachSelector("own", nil, []string{"own:memory"}, nil, nil, false); s != "own:*" {
 		t.Errorf("own off, list unknown: %q", s)
 	}
-	if s := attachSelector("own", nil, ownIdx, ownIdx, nil); s != "own:-*" {
+	if s := attachSelector("own", nil, ownIdx, ownIdx, nil, false); s != "own:-*" {
 		t.Errorf("all off: %q", s)
 	}
 	// Shared namespaces come back once a list is in force: a foreign index on,
 	// or one of its own off (the list that drops raglit's default read set).
 	// The project's own name is not added, and a stale one raglit skips is
 	// harmless.
-	if s := attachSelector("own", []string{"a:x"}, nil, nil, []string{"common", "own", "stale"}); s != "own:*,a:x,common:*,stale:*" {
+	if s := attachSelector("own", []string{"a:x"}, nil, nil, []string{"common", "own", "stale"}, false); s != "own:*,a:x,common:*,stale:*" {
 		t.Errorf("shared with foreign: %q", s)
 	}
-	if s := attachSelector("own", nil, []string{"own:memory"}, ownIdx, []string{"common"}); s != "own:main,own:skills,common:*" {
+	if s := attachSelector("own", nil, []string{"own:memory"}, ownIdx, []string{"common"}, false); s != "own:main,own:skills,common:*" {
 		t.Errorf("shared with own off: %q", s)
 	}
-	if s := attachSelector("own", nil, ownIdx, ownIdx, []string{"common"}); s != "own:-*" {
+	if s := attachSelector("own", nil, ownIdx, ownIdx, []string{"common"}, false); s != "own:-*" {
 		t.Errorf("all off keeps out shared: %q", s)
+	}
+	// A raglit that takes the default-set token (raglitCaps): the token
+	// stands in for "<own>:*" and expands to own plus shared, so the
+	// per-namespace additions are left to it. The all-off sentinel is its
+	// own, and the token never makes a selector on its own.
+	if s := attachSelector("own", []string{"a:x"}, nil, nil, []string{"common"}, true); s != "default-set,a:x" {
+		t.Errorf("default-set with foreign: %q", s)
+	}
+	if s := attachSelector("own", []string{"own:z"}, nil, nil, []string{"common"}, true); s != "" {
+		t.Errorf("default-set, own only: %q", s)
+	}
+	if s := attachSelector("own", nil, ownIdx, ownIdx, []string{"common"}, true); s != "own:-*" {
+		t.Errorf("default-set, all off: %q", s)
 	}
 }
 

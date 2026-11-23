@@ -47,7 +47,10 @@ import (
 // exactly what makes the list explicit. There is no in-list token meaning
 // "the default set" in the raglit this pins, so the shared namespaces are
 // read out of raglit's config.json (sharedNamespaces) and added to the list
-// as "<ns>:*" tokens, which nsResolveToken resolves.
+// as "<ns>:*" tokens, which nsResolveToken resolves. A raglit that takes
+// the default-set token (detected from its --help, raglitCaps) gets the
+// token in place of "<own>:*" and the per-namespace additions are left to
+// it.
 
 // attachName is what an attachment may be once qualified.
 // ":<index>" is a global index (raglit 359f049).
@@ -106,13 +109,15 @@ func (h *Harness) AttachName(id, index string) string {
 }
 
 // attachSelector is the `index` argument a search with no index of its own
-// gets: own's indexes (all of them, "<own>:*", or ownIdx less the ones
-// switched off) plus the switched-on ones of other projects; "" when that
-// is just own's own and its shared namespaces (the server's default reads
-// them already). shared is the project's raglit-config shared namespaces:
-// raglit expands "all" only as the WHOLE selector, so once a list is in
-// force they drop out and are added back one namespace at a time ("ns:*").
-func attachSelector(own string, attach, detach, ownIdx, shared []string) string {
+// gets: own's indexes (all of them, "<own>:*" — or the default-set token,
+// to a raglit that takes it (raglitCaps) — or ownIdx less the ones switched
+// off) plus the switched-on ones of other projects; "" when that is just
+// own's own and its shared namespaces (the server's default reads them
+// already). shared is the project's raglit-config shared namespaces: raglit
+// expands "all" only as the WHOLE selector, so once a list is in force they
+// drop out and are added back one namespace at a time ("ns:*") — not
+// needed with the token, which expands to own plus shared.
+func attachSelector(own string, attach, detach, ownIdx, shared []string, defaultSet bool) string {
 	var parts []string
 	ownOff := false
 	for _, d := range detach {
@@ -122,7 +127,11 @@ func attachSelector(own string, attach, detach, ownIdx, shared []string) string 
 	}
 	switch {
 	case !ownOff || len(ownIdx) == 0: // nothing off, or own's list unknown yet
-		parts = append(parts, own+":*")
+		if defaultSet {
+			parts = append(parts, raglitDefaultSetToken) // expands to own plus shared
+		} else {
+			parts = append(parts, own+":*")
+		}
 	default:
 		for _, i := range ownIdx {
 			if !slices.Contains(detach, i) {
@@ -137,6 +146,9 @@ func attachSelector(own string, attach, detach, ownIdx, shared []string) string 
 	}
 	foreign := 0
 	for _, p := range parts {
+		if p == raglitDefaultSetToken {
+			continue // expands to own plus shared: not a foreign namespace
+		}
 		if p, _, _ := strings.Cut(p, ":"); p != own && p != "" {
 			foreign++
 		}
@@ -150,12 +162,16 @@ func attachSelector(own string, attach, detach, ownIdx, shared []string) string 
 	// the reason a selector is emitted (raglit's default already reads own
 	// plus shared), and the all-off case above keeps it out: it means "read
 	// nothing". raglit skips a "ns:*" it does not recognize, so a stale
-	// shared list is harmless.
-	for _, ns := range shared {
-		if ns == "" || ns == own || slices.Contains(attach, ns+":*") {
-			continue
+	// shared list is harmless. With the default-set token in force it is
+	// already covered (the token expands to own plus shared), so the list is
+	// left to it.
+	if !defaultSet {
+		for _, ns := range shared {
+			if ns == "" || ns == own || slices.Contains(attach, ns+":*") {
+				continue
+			}
+			parts = append(parts, ns+":*")
 		}
-		parts = append(parts, ns+":*")
 	}
 	if !ownOff && foreign == 0 {
 		return ""
@@ -307,7 +323,12 @@ func (h *Harness) attachSelectors(exts []mcpserver.Extension, tools []mcpmgr.MCP
 		}
 		own := h.ownProject(s)
 		ownIdx := h.ownIndexes(e, s, own)
-		if sel := attachSelector(own, s.Attach, s.Detach, ownIdx, sharedNamespaces(h.cfg.RaglitHome, own)); sel != "" {
+		// The gate reads the binary the server runs: a raglit that takes the
+		// default-set token says so in its --help (raglitCaps), and the token
+		// is sent in place of "<own>:*" — it expands to own plus shared. A
+		// raglit that cannot be read keeps the old selector.
+		sup, _, _ := RaglitCaps(s.Command)
+		if sel := attachSelector(own, s.Attach, s.Detach, ownIdx, sharedNamespaces(h.cfg.RaglitHome, own), sup.DefaultSet); sel != "" {
 			out[e.ID] = sel
 		}
 	}
