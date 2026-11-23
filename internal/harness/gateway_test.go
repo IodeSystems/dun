@@ -134,16 +134,69 @@ func TestGateway_TwoSessionsOneUpstream(t *testing.T) {
 	}
 }
 
+// graceClock is a test's clock for the grace stop: each one armed waits
+// for fire, so no grace ends on its own however slow the run.
+type graceClock struct {
+	mu     sync.Mutex
+	timers []*graceTimer
+}
+
+type graceTimer struct {
+	mu      sync.Mutex
+	f       func()
+	stopped bool
+}
+
+func (t *graceTimer) Stop() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	was := !t.stopped
+	t.stopped = true
+	return was
+}
+
+func (c *graceClock) install(g *Gateway) {
+	g.afterFunc = func(_ time.Duration, f func()) gwTimer {
+		t := &graceTimer{f: f}
+		c.mu.Lock()
+		c.timers = append(c.timers, t)
+		c.mu.Unlock()
+		return t
+	}
+}
+
+// armed is the grace stops armed and not stopped.
+func (c *graceClock) armed() []*graceTimer {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []*graceTimer
+	for _, t := range c.timers {
+		t.mu.Lock()
+		if !t.stopped {
+			out = append(out, t)
+		}
+		t.mu.Unlock()
+	}
+	return out
+}
+
+// fire ends the grace: as time.AfterFunc does, in the caller here, so the
+// stop has run when it returns.
+func (t *graceTimer) fire() {
+	if t.Stop() {
+		t.f()
+	}
+}
+
 // A client's DELETE (the manager's stop) and its engine's exit release it;
 // the upstream stops a grace after its last client, and a share in the
 // grace keeps it.
 func TestGateway_ReleaseAndGrace(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
-	old := GatewayGrace
-	GatewayGrace = 100 * time.Millisecond
-	t.Cleanup(func() { GatewayGrace = old })
 	ts, inits := countingMCP(t)
 	g := newGateway(t)
+	var clock graceClock
+	clock.install(g)
 	ctx := context.Background()
 	h1 := gatewayHarness(t, g, "s1", nil)
 	if _, err := h1.AddServer(ctx, mcpserver.Spec{ID: "ctr", URL: ts.URL}); err != nil {
@@ -153,23 +206,68 @@ func TestGateway_ReleaseAndGrace(t *testing.T) {
 	if err := h1.StopServer("ctr"); err != nil {
 		t.Fatal(err)
 	}
-	g.mu.Lock()
-	n := g.clientsOf(key)
-	g.mu.Unlock()
-	if n != 0 {
+	if n := g.Clients(key); n != 0 {
 		t.Fatalf("the stop's DELETE left %d clients", n)
 	}
-	// Back within the grace: the same upstream.
+	if n := len(clock.armed()); n != 1 {
+		t.Fatalf("the last client's release armed %d grace stops, want one", n)
+	}
+	// Back within the grace: the same upstream, and its grace stop is off.
 	if err := h1.StartServer(ctx, "ctr"); err != nil {
 		t.Fatal(err)
 	}
 	if inits.Load() != 1 {
 		t.Errorf("a share within the grace started it again: %d handshakes", inits.Load())
 	}
+	if n := len(clock.armed()); n != 0 {
+		t.Fatalf("a share in the grace left %d grace stops armed", n)
+	}
 	g.ReleaseEngine(h1) // the engine exited
-	time.Sleep(300 * time.Millisecond)
+	armed := clock.armed()
+	if len(armed) != 1 {
+		t.Fatalf("the engine's exit armed %d grace stops, want one", len(armed))
+	}
+	if !g.Running(key) {
+		t.Fatal("stopped before its grace ended")
+	}
+	armed[0].fire()
 	if g.Running(key) {
 		t.Error("still running a grace after its last client")
+	}
+}
+
+// A grace stop that ends as a share starts the key again: the new start
+// waits for the old stop, so that stop does not end the new connection
+// (the manager knows both by the key).
+func TestGateway_RestartWaitsForGraceStop(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	ts, inits := countingMCP(t)
+	g := newGateway(t)
+	ctx := context.Background()
+	req := ShareRequest{Spec: ShareSpec{ID: "ctr", URL: ts.URL}, Instance: mcpserver.InstanceShared}
+	c := GatewayClient{Session: "s1", Engine: "e1"}
+	gr, err := g.Share(ctx, c, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.mu.Lock()
+	old := g.ups[gr.Key]
+	stop := g.retire(old) // the grace stop, between its retire and its manager stop
+	delete(g.clients, gr.Bearer)
+	g.mu.Unlock()
+	done := make(chan error, 1)
+	go func() { _, err := g.Share(ctx, c, req); done <- err }()
+	select {
+	case err := <-done:
+		t.Fatalf("the new start did not wait for the old stop: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	stop()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if !g.Running(gr.Key) || inits.Load() != 2 {
+		t.Errorf("after the old stop: running %v, %d handshakes", g.Running(gr.Key), inits.Load())
 	}
 }
 
