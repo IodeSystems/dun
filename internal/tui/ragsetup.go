@@ -22,6 +22,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/fsutil"
 	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/textfmt"
@@ -262,11 +263,7 @@ func keyFile(name, key string) (string, error) {
 	if b, err := os.ReadFile(p); err == nil && string(b) == key {
 		return p, os.Chmod(p, 0o600)
 	}
-	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, []byte(key), 0o600); err != nil {
-		return "", err
-	}
-	return p, os.Rename(tmp, p)
+	return p, fsutil.WriteAtomic(p, []byte(key), 0o600)
 }
 
 // ragPlan is the change: raglit's providers after it (cur's, and one per
@@ -446,14 +443,7 @@ func (pl ragPlan) patchConfig(path string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return fsutil.WriteAtomic(path, append(b, '\n'), 0o600)
 }
 
 // ragOnNow is what the report after a save says: the capabilities on now

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"slices"
 	"time"
+
+	"github.com/iodesystems/dun/internal/fsutil"
 )
 
 // The daily check of a release build: fetch the newest release's manifest
@@ -50,14 +52,7 @@ func saveState(path string, s State) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return fsutil.WriteAtomic(path, append(b, '\n'), 0o600)
 }
 
 // Updater is one release build's check.

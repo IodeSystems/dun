@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/iodesystems/dun/internal/fsutil"
 	"github.com/iodesystems/dun/internal/update"
 )
 
@@ -86,15 +87,12 @@ func (s *Store) Refresh(ctx context.Context) (ix *Index, changed bool, err error
 		s.touch()
 		return cached, false, fmt.Errorf("registry: %s is older than the one kept (%s); kept that one", got.Published, cached.Published)
 	}
-	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
-		return got, false, err
-	}
-	if err := writeAtomic(filepath.Join(s.Dir, indexFile), body); err != nil {
+	if err := fsutil.WriteAtomic(filepath.Join(s.Dir, indexFile), body, 0o600); err != nil {
 		return got, false, err
 	}
 	// The signature last: Fresh reads its time, and a crash between the
 	// two leaves a pair that does not verify, which is fetched again.
-	if err := writeAtomic(filepath.Join(s.Dir, sigFile), sig); err != nil {
+	if err := fsutil.WriteAtomic(filepath.Join(s.Dir, sigFile), sig, 0o600); err != nil {
 		return got, false, err
 	}
 	return got, cerr != nil || got.Published != cached.Published, nil
@@ -106,23 +104,4 @@ func (s *Store) touch() {
 	_ = os.Chtimes(filepath.Join(s.Dir, sigFile), now, now)
 }
 
-func writeAtomic(path string, b []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
-	if err != nil {
-		return err
-	}
-	if _, err := tmp.Write(b); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmp.Name())
-		return err
-	}
-	if err := os.Chmod(tmp.Name(), 0o600); err != nil {
-		os.Remove(tmp.Name())
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
-}
+

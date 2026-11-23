@@ -21,6 +21,7 @@ import (
 	_ "golang.org/x/image/webp"
 
 	"github.com/iodesystems/dun/internal/dunconfig"
+	"github.com/iodesystems/dun/internal/fsutil"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -181,14 +182,7 @@ func saveClipboardImage(data []byte) (string, error) {
 	if _, err := os.Stat(path); err == nil {
 		return path, nil
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return "", err
-	}
-	return path, os.Rename(tmp, path)
+	return path, fsutil.WriteAtomic(path, data, 0o644)
 }
 
 // clipImageMsg is ctrl+v's answer: an image file to insert, or ok=false

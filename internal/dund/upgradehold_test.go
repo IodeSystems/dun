@@ -2,8 +2,6 @@ package dund
 
 import (
 	"errors"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -147,10 +145,9 @@ func TestUpgradeRecordFailureAborts(t *testing.T) {
 	sock, _ := serve(t, svc)
 	c := dial(t, sock)
 	busy := working(t, svc, false)
-	block := filepath.Join(dir, "sessions.json.tmp") // the atomic write's temp file
-	if err := os.Mkdir(block, 0o700); err != nil {
-		t.Fatal(err)
-	}
+	orig := writeFileAtomic
+	writeFileAtomic = func(string, []byte) error { return errors.New("no room") }
+	t.Cleanup(func() { writeFileAtomic = orig })
 	_ = svc.RequestUpgrade("/x/dun", "v2")
 	_ = svc.UpgradeNow()
 	ev := c.until(func(ev proto.Event) bool {
@@ -171,7 +168,7 @@ func TestUpgradeRecordFailureAborts(t *testing.T) {
 	if b, _ := svc.Get(alice, busy); b.resumeNote() != "" || len(b.waiting()) != 1 {
 		t.Fatalf("after the failed write: resume %q, waiting %v", b.resumeNote(), b.waiting())
 	}
-	_ = os.Remove(block)
+	writeFileAtomic = orig // the write works again
 	select {
 	case <-svc.UpgradeReady():
 	case <-time.After(5 * time.Second):
@@ -192,11 +189,11 @@ func TestUpgradeRecordFailureGivesUp(t *testing.T) {
 	oldR, oldG := upgradeRetry, upgradeRecordGiveUp
 	upgradeRetry, upgradeRecordGiveUp = 10*time.Millisecond, 50*time.Millisecond
 	t.Cleanup(func() { upgradeRetry, upgradeRecordGiveUp = oldR, oldG })
-	svc, sp, dir := newSvc(t)
+	svc, sp, _ := newSvc(t)
 	busy := working(t, svc, false)
-	if err := os.Mkdir(filepath.Join(dir, "sessions.json.tmp"), 0o700); err != nil {
-		t.Fatal(err)
-	}
+	orig := writeFileAtomic
+	writeFileAtomic = func(string, []byte) error { return errors.New("no room") }
+	t.Cleanup(func() { writeFileAtomic = orig })
 	_ = svc.RequestUpgrade("/x/dun", "v2")
 	_ = svc.UpgradeNow()
 	waitRecord(t, sp, "hold "+busy+": false")

@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/iodesystems/dun/internal/fsutil"
 	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
@@ -931,12 +932,11 @@ func (s *Service) PutUI(principal, id string, state map[string]any) error {
 	return writeFileAtomic(p, b)
 }
 
-func writeFileAtomic(path string, b []byte) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+// writeFileAtomic is the registry and UI-state writes' atomic write, a
+// package var so a test can make it fail. fsutil.WriteAtomic's unique temp
+// name means a test cannot block one the way the old fixed .tmp name allowed.
+var writeFileAtomic = func(path string, b []byte) error {
+	return fsutil.WriteAtomic(path, b, 0o600)
 }
 
 // stampAnswer sets an answer's By to the principal that sent it: answered
