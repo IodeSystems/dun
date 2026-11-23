@@ -40,13 +40,17 @@ EOF
 }
 
 # clear_error prints why the trials of job $1 show a harness failure, if any.
+# AgentTimeoutError is the one tolerated exception: the agent ran and timed out,
+# which is a model outcome, not a harness failure. Every other exception —
+# including RewardFileNotFoundError, which is what a broken test shim produces
+# (the reward file is never written) — is a harness failure and aborts the run.
 clear_error() {
 	python3 - "$out/$1" <<'EOF'
 import json, pathlib, sys
 for p in pathlib.Path(sys.argv[1]).glob("*__*/result.json"):
     r = json.loads(p.read_text())
     exc = (r.get("exception_info") or {}).get("exception_type")
-    if exc and exc != "AgentTimeoutError":
+    if exc and exc not in ("AgentTimeoutError",):
         print(f"{p.parent.name}: {exc}"); break
     log = p.parent / "agent" / "dun.jsonl"
     reqs = sum('"type":"request"' in l for l in log.open()) if log.exists() else 0
@@ -57,6 +61,46 @@ for p in pathlib.Path(sys.argv[1]).glob("*__*/result.json"):
 EOF
 }
 
+# task_path resolves task $1 to a dir that has a task.toml. Harbor 0.26.0
+# requires task.toml; TB2.1's original-tasks use task.yaml. If the task dir
+# has no task.toml but has a task.yaml, convert it into a STABLE temp dir
+# (named after the task, so the jobconfig path and the trial's path agree
+# across runs and a resume of the same job works) with the task.toml added,
+# and return that path. Prints the path to stdout.
+task_path() {
+	local task="$1" src="$TASKS/$1"
+	if [ -f "$src/task.toml" ]; then
+		echo "$src"
+		return
+	fi
+	if [ -f "$src/task.yaml" ]; then
+		local tmp="/tmp/harbor-tasks-$task"
+		[ -d "$tmp" ] || { rm -rf "$tmp"; cp -r "$src" "$tmp"; }
+		python3 "$(dirname "$0")/convert_task_yaml.py" "$src" "$tmp/task.toml"
+		echo "$tmp"
+		return
+	fi
+	echo "no task.toml or task.yaml in $src" >&2
+	return 1
+}
+
+# jobconfig writes a JobConfig YAML for task $1 to $2.
+# The dun agent reads its URL and key from DUN_URL / DUN_LLM_KEY env vars
+# (exported above), not from the harbor AgentConfig's base_url field.
+jobconfig() {
+	local task="$1" dest="$2" taskdir
+	taskdir=$(task_path "$task") || exit 1
+	cat > "$dest" <<EOF
+tasks:
+  - path: "$taskdir"
+environment:
+  type: docker
+agents:
+  - import_path: "dun_agent:Dun"
+    model_name: "$DUN_MODEL"
+EOF
+}
+
 for t in "$@"; do
 	s=$(spent)
 	if python3 -c "import sys; sys.exit(float('$s') < float('$BUDGET'))"; then
@@ -64,8 +108,19 @@ for t in "$@"; do
 		break
 	fi
 	echo "== $t (spent so far \$$s)"
-	"$HARBOR" run -p "$TASKS/$t" --agent dun_agent:Dun -m "$DUN_MODEL" -e docker -k "$ATTEMPTS" -n 1 \
-		-o "$out" --job-name "$t" ${HARBOR_ARGS:-} 2>&1 | grep -E "Mean|Exceptions|│ +[0-9]" || true
+	cfgfile=$(mktemp /tmp/harbor-jobconfig-XXXXXX.yaml)
+	jobconfig "$t" "$cfgfile"
+	# No grep filter: harbor's real exit code must reach set -e, and a crash
+	# traceback must not be hidden. The summary lines are shown for convenience.
+	if ! "$HARBOR" run --config "$cfgfile" \
+		-o "$out" -k "$ATTEMPTS" -n 1 \
+		--job-name "$t" ${HARBOR_ARGS:-} 2>&1 | tee "$out/harbor-$t.log"; then
+		echo "abort: harbor run for $t failed; see $out/harbor-$t.log"
+		rm -f "$cfgfile"
+		exit 2
+	fi
+	grep -E "Mean|Exceptions|│ +[0-9]" "$out/harbor-$t.log" || true
+	rm -f "$cfgfile"
 	if why=$(clear_error "$t") && [ -n "$why" ]; then
 		echo "abort: $why"
 		exit 2
