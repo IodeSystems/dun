@@ -17,6 +17,7 @@
 # A clear error stops the run (exit 2): a trial exception other than an agent
 # timeout, or dun ending before its first model request. Those are the harness's
 # failures, not the model's, and every trial after one would be noise.
+# RewardFileNotFoundError is a harness failure (broken shim), not a model outcome.
 set -euo pipefail
 cd "$(dirname "$0")"
 : "${HARBOR:?path to the harbor CLI}" "${TASKS:?path to the tasks directory}"

@@ -6,6 +6,7 @@ Usage: convert_task_yaml.py <task_dir> <out_path>
 Reads <task_dir>/task.yaml, writes <out_path> as a TOML file with the
 instruction and metadata. Harbor's TaskConfig requires a [task] section
 with at least a name; the instruction is the core content the agent sees.
+Also generates tests/test.sh (the verifier shim) and instruction.md.
 """
 import sys
 from pathlib import Path
