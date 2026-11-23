@@ -2011,7 +2011,9 @@ rescue), and agentkit's capability record on the wire. Code:
   blocked the root file the model already had (rules.go loads the root AGENTS.md
   and CLAUDE.md), a read through the shell did not count, and a hook can only
   cancel, not proceed with a note. Agents began to avoid the code server to
-  dodge it. Gone with it: `host_hooks` in extension manifests (the guard was its
-  only script), `DUN_AGENTS_STATE`, the `agents_read` state and its import from
+  dodge it. Gone with it: the host-hook arming (the guard was the only
+  script), `DUN_AGENTS_STATE`, the `agents_read` state and its import from
   `.dun/`. Existing `agents_read` files under `$DUN_HOME/projects/*/` stay on
   disk; only a pruned worktree's overlay dir is removed, as before.
+  `host_hooks` is still accepted in a manifest as a deprecated field and
+  ignored, because installed and published poly-lsp manifests still carry it.
