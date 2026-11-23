@@ -161,12 +161,12 @@ func fileGrepRender(rc renderCtx) (string, string) {
 	}
 	switch m := reGrepHead.FindStringSubmatch(head); {
 	case m != nil:
-		return StDim.Render(" → ") + stSecondary.Render(m[1]+" "+m[2]+" in "+m[3]+" "+pluralWord(m[3], "file")), body
+		return StDim.Render(" → ") + stSecondary.Render(m[1]+" "+m[2]+" in "+pluralCount(m[3], "file")), body
 	case strings.HasPrefix(head, "no matches"):
 		return StDim.Render(" → ") + stSecondary.Render("no matches"), body
 	}
 	if m := reGrepFiles.FindStringSubmatch(head); m != nil {
-		return StDim.Render(" → ") + stSecondary.Render(m[1]+" "+pluralWord(m[1], "file")), body
+		return StDim.Render(" → ") + stSecondary.Render(pluralCount(m[1], "file")), body
 	}
 	return StDim.Render(" → ") + stSecondary.Render(textfmt.Clip(textfmt.OneLine(head), 80)), body
 }
@@ -183,7 +183,7 @@ func fileListRender(rc renderCtx) (string, string) {
 		return StDim.Render(" → ") + stSecondary.Render(m[1]+", "+m[2]), body
 	}
 	if m := reGrepFiles.FindStringSubmatch(head); m != nil {
-		return StDim.Render(" → ") + stSecondary.Render(m[1]+" "+pluralWord(m[1], "file")), body
+		return StDim.Render(" → ") + stSecondary.Render(pluralCount(m[1], "file")), body
 	}
 	return StDim.Render(" → ") + stSecondary.Render(textfmt.Clip(textfmt.OneLine(head), 80)), body
 }
@@ -196,12 +196,13 @@ func fileOtherRender(rc renderCtx) (string, string) {
 	return stSecondary.Render(" ✓"), stSecondary.Render(rc.result)
 }
 
-// pluralWord is "file" for "1" and "files" for anything else ("2", "10+").
-func pluralWord(n, word string) string {
+// pluralCount is a count as text ("1", "2", "10+") with its noun, the way the
+// file tool's output reports it: "1 file", "3 files".
+func pluralCount(n, word string) string {
 	if n == "1" {
-		return word
+		return "1 " + word
 	}
-	return word + "s"
+	return n + " " + word + "s"
 }
 
 func init() {

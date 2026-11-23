@@ -16,6 +16,8 @@ import (
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/taskgraph"
+
+	"github.com/iodesystems/dun/internal/numfmt"
 )
 
 // ledger.go — the turn ledger (USER 2026-11-17): what each turn did, from
@@ -216,32 +218,25 @@ func (f *LedgerFacts) capLists() {
 func (f LedgerFacts) Summary() string {
 	var parts []string
 	if f.NFiles > 0 {
-		parts = append(parts, fmt.Sprintf("%s (+%d/−%d)", plurals(f.NFiles, "file"), f.Added, f.Removed))
+		parts = append(parts, fmt.Sprintf("%s (+%d/−%d)", numfmt.Plural(f.NFiles, "file", "files"), f.Added, f.Removed))
 	}
 	if f.NCommits > 0 {
-		parts = append(parts, plurals(f.NCommits, "commit"))
+		parts = append(parts, numfmt.Plural(f.NCommits, "commit", "commits"))
 	}
 	if f.NCmds > 0 {
-		s := plurals(f.NCmds, "cmd")
+		s := numfmt.Plural(f.NCmds, "cmd", "cmds")
 		if f.NFailed > 0 {
 			s += fmt.Sprintf(" (%d failed)", f.NFailed)
 		}
 		parts = append(parts, s)
 	}
 	if f.NAgents > 0 {
-		parts = append(parts, plurals(f.NAgents, "agent"))
+		parts = append(parts, numfmt.Plural(f.NAgents, "agent", "agents"))
 	}
 	if f.NErrors > 0 {
-		parts = append(parts, plurals(f.NErrors, "error"))
+		parts = append(parts, numfmt.Plural(f.NErrors, "error", "errors"))
 	}
 	return strings.Join(parts, " · ")
-}
-
-func plurals(n int, w string) string {
-	if n == 1 {
-		return "1 " + w
-	}
-	return strconv.Itoa(n) + " " + w + "s"
 }
 
 // more is "\n  … +N more" when a list was cut.
@@ -322,7 +317,7 @@ func (f LedgerFacts) Text() string {
 		b.WriteString(moreLine(f.NErrors, len(f.Errors)) + "\n")
 	}
 	fmt.Fprintf(&b, "totals: %s, %s, %s tok in (%s cached), %s out",
-		plurals(f.Rounds, "round"), plurals(f.ToolCalls, "tool call"),
+		numfmt.Plural(f.Rounds, "round", "rounds"), numfmt.Plural(f.ToolCalls, "tool call", "tool calls"),
 		strconv.Itoa(f.Prompt), strconv.Itoa(f.Cached), strconv.Itoa(f.Completion))
 	if f.Costed {
 		fmt.Fprintf(&b, ", %.4f %s", f.Cost, f.Currency)

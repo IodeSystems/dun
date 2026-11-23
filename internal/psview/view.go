@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/procps"
 	"github.com/iodesystems/dun/internal/tui"
 )
@@ -131,8 +132,8 @@ func (m *model) render() string {
 	}
 	title := "dun ps  sort " + strings.Join(sorts, " ")
 	if m.have {
-		title += fmt.Sprintf("  %s, %s  %s", plural(nproc, "process", "processes"),
-			plural(m.view.Sessions, "session", "sessions"), m.view.At.Format("15:04:05"))
+		title += fmt.Sprintf("  %s, %s  %s", numfmt.Plural(nproc, "process", "processes"),
+			numfmt.Plural(m.view.Sessions, "session", "sessions"), m.view.At.Format("15:04:05"))
 	}
 	add(lipgloss.NewStyle().Bold(true).Render(procps.Fit(title, w)))
 	hdr := map[sortKey]string{sortCPU: "CPU%", sortMEM: "MEM", sortIO: "IO R/W /s", sortAGE: "AGE"}
@@ -210,7 +211,7 @@ func (m *model) itemLine(it item, sel bool, c cols, w int) string {
 		if m.folded[g.Group] {
 			mark = "▸ "
 		}
-		label := mark + g.Session + "  " + plural(len(g.Rows), "process", "processes")
+		label := mark + g.Session + "  " + numfmt.Plural(len(g.Rows), "process", "processes")
 		s = c.groupLine(label, procps.CPUText(g.CPU), procps.Size(float64(g.RSS)), procps.IOText(g.ReadBps, g.WritBps), w)
 		if sel {
 			return tui.AccentStyle().Render("▎ " + s)
@@ -302,7 +303,7 @@ func (m *model) detailLines() []string {
 	}
 	if r.RagEmbed != nil {
 		kv("rag", fmt.Sprintf("%s  %s active, %d idle", procps.RagEmbedLine(*r.RagEmbed),
-			plural(len(r.Rag), "index", "indexes"), len(r.RagIdle)))
+			numfmt.Plural(len(r.Rag), "index", "indexes"), len(r.RagIdle)))
 	}
 	if chain := m.parents(r.PPID); chain != "" {
 		kv("parents", chain)
@@ -385,13 +386,6 @@ func (m *model) parents(ppid int) string {
 		pid = p.PPID
 	}
 	return strings.Join(parts, " › ")
-}
-
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return "1 " + one
-	}
-	return fmt.Sprintf("%d %s", n, many)
 }
 
 func sp() string { return strings.Repeat(" ", gap) }

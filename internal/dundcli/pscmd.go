@@ -19,6 +19,7 @@ import (
 
 	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/procps"
 	"github.com/iodesystems/dun/proto"
 	"github.com/iodesystems/dun/release"
@@ -349,7 +350,7 @@ func (v PSView) Footer() string {
 		n += len(g.Rows)
 	}
 	foot := fmt.Sprintf("%s, %s running; CPU%% and IO over %.1fs; %s",
-		plural(n, "process", "processes"), plural(v.Sessions, "session", "sessions"), v.Window, v.At.Format("15:04:05"))
+		numfmt.Plural(n, "process", "processes"), numfmt.Plural(v.Sessions, "session", "sessions"), v.Window, v.At.Format("15:04:05"))
 	if v.Note != "" {
 		foot += "\n" + v.Note
 	}
@@ -380,13 +381,6 @@ func (s *PSSampler) Sample() (PSView, error) {
 		s.prev = cur
 	}
 	return v, err
-}
-
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return "1 " + one
-	}
-	return fmt.Sprintf("%d %s", n, many)
 }
 
 // termSize is w's terminal size, else $COLUMNS wide; 0, 0 when w is not a

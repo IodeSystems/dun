@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/proc"
 	"github.com/iodesystems/dun/internal/project"
 )
@@ -240,7 +241,7 @@ func (w *Worktree) Status() string {
 	if len(files) == 0 {
 		return head + "\nclean"
 	}
-	return fmt.Sprintf("%s\n%s\n%d file%s changed", head, strings.Join(files, "\n"), len(files), plural(len(files)))
+	return fmt.Sprintf("%s\n%s\n%s changed", head, strings.Join(files, "\n"), numfmt.Plural(len(files), "file", "files"))
 }
 
 // Cleanup removes the worktree (a no-op for a pass-through). The branch is kept

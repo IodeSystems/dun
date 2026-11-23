@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/dun/internal/numfmt"
 	"github.com/iodesystems/dun/internal/project"
 )
 
@@ -77,7 +78,7 @@ func (w WorktreeInfo) HoldsWork() bool { return w.Commits > 0 || len(w.Dirty) > 
 func (w WorktreeInfo) Summary() string {
 	var what []string
 	if w.Commits > 0 {
-		what = append(what, fmt.Sprintf("%d commit%s", w.Commits, plural(w.Commits)))
+		what = append(what, numfmt.Plural(w.Commits, "commit", "commits"))
 	}
 	if len(w.Dirty) > 0 {
 		s := w.Dirty[0]
@@ -90,13 +91,6 @@ func (w WorktreeInfo) Summary() string {
 		what = append(what, "nothing")
 	}
 	return fmt.Sprintf("%-28s %-22s %s", w.Branch, strings.Join(what, ", "), roundAge(w.Age))
-}
-
-func plural(n int) string {
-	if n == 1 {
-		return ""
-	}
-	return "s"
 }
 
 func roundAge(d time.Duration) string {

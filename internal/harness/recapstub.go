@@ -11,6 +11,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/iodesystems/agentkit/agent"
+
+	"github.com/iodesystems/dun/internal/numfmt"
 )
 
 // Recap stubs: the level between keep and drop.
@@ -298,5 +300,5 @@ func countLine(lines []stubLine) string {
 	if dir != "" {
 		where = "results in " + dir + " (the first line of each file is the call)"
 	}
-	return fmt.Sprintf("%d earlier call%s: %s — %s", len(lines), plural(len(lines)), strings.Join(parts, ", "), where)
+	return fmt.Sprintf("%d earlier %s: %s — %s", len(lines), numfmt.Noun(len(lines), "call", "calls"), strings.Join(parts, ", "), where)
 }

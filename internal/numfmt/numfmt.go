@@ -182,6 +182,23 @@ func MoneyOf(v float64, cur string) string {
 // when it cannot count (dun/context_tokens.go).
 func EstimateTok(s string) int { return len(s) / 4 }
 
+// Noun is the word for a count: "file" for 1, "files" otherwise. The count
+// stays in the caller's format string.
+func Noun(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
+// Plural is a count with its noun: "1 file", "3 files".
+func Plural(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return strconv.Itoa(n) + " " + many
+}
+
 // Secs is milliseconds as "41.2s", or "850ms" under a second.
 func Secs(ms float64) string {
 	if ms < 1000 {

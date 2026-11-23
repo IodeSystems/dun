@@ -435,7 +435,7 @@ const summaryDirs = 5
 // why, and the include that brings a skipped path back.
 func (p IngestPlan) Summary() string {
 	var b strings.Builder
-	b.WriteString("docs: indexing " + numfmt.Grouped(len(p.Files)) + " file" + plural(len(p.Files)))
+	b.WriteString("docs: indexing " + numfmt.Grouped(len(p.Files)) + " " + numfmt.Noun(len(p.Files), "file", "files"))
 	if p.Huge {
 		fmt.Fprintf(&b, " (%s, over the directory limit — the workspace itself is large)", numfmt.HumanBytes(p.KeptBytes))
 	}
@@ -470,10 +470,10 @@ func (p IngestPlan) Summary() string {
 			big = append(big, path.Base(f.Rel)+" "+numfmt.HumanBytes(f.Bytes))
 		}
 		skips = append(skips, fmt.Sprintf("%s %s over %s (largest: %s)",
-			numfmt.Grouped(n), "file"+plural(n), numfmt.HumanBytes(p.MaxFile), strings.Join(big, ", ")))
+			numfmt.Grouped(n), numfmt.Noun(n, "file", "files"), numfmt.HumanBytes(p.MaxFile), strings.Join(big, ", ")))
 	}
 	if p.Binary > 0 {
-		skips = append(skips, numfmt.Grouped(p.Binary)+" binary file"+plural(p.Binary))
+		skips = append(skips, numfmt.Grouped(p.Binary)+" binary "+numfmt.Noun(p.Binary, "file", "files"))
 	}
 	if len(skips) == 0 {
 		return b.String()

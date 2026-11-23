@@ -17,6 +17,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+
+	"github.com/iodesystems/dun/internal/numfmt"
 )
 
 // Recap — the model rewriting its own recent history.
@@ -360,10 +362,10 @@ func (sp recapSpan) report(text string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Removed %d entries (~%d characters) from the model's context.\n", len(sp.Subsumes), sp.Chars)
 	if n := len(sp.KeptCalls); n > 0 {
-		fmt.Fprintf(&b, "Kept the %s call%s and its result.\n", strings.Join(sp.KeptCalls, ", "), plural(n))
+		fmt.Fprintf(&b, "Kept the %s %s and its result.\n", strings.Join(sp.KeptCalls, ", "), numfmt.Noun(n, "call", "calls"))
 	}
 	if n := len(sp.DroppedCalls); n > 0 {
-		fmt.Fprintf(&b, "Dropped the %s call%s with no stub.\n", strings.Join(sp.DroppedCalls, ", "), plural(n))
+		fmt.Fprintf(&b, "Dropped the %s %s with no stub.\n", strings.Join(sp.DroppedCalls, ", "), numfmt.Noun(n, "call", "calls"))
 	}
 	if len(sp.Unmatched) > 0 {
 		fmt.Fprintf(&b, "NOTE: %q matched nothing and was NOT kept.\n", strings.Join(sp.Unmatched, ", "))

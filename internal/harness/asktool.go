@@ -13,6 +13,8 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+
+	"github.com/iodesystems/dun/internal/numfmt"
 )
 
 // asktool.go — the person's asks are acknowledged and marked (USER
@@ -472,7 +474,7 @@ func (h *Harness) idleAsks() string {
 	d := h.asksLocked()
 	var lines, do []string
 	if n := len(d.Intake); n > 0 {
-		line := fmt.Sprintf("- intake: %s, not acknowledged: %s", plurals(n, "message"), strconv.Quote(workClip(d.Intake[0].Text, idleAskMsgQuote)))
+		line := fmt.Sprintf("- intake: %s, not acknowledged: %s", numfmt.Plural(n, "message", "messages"), strconv.Quote(workClip(d.Intake[0].Text, idleAskMsgQuote)))
 		if n > 1 {
 			line += fmt.Sprintf(" +%d", n-1)
 		}
@@ -524,7 +526,7 @@ func (h *Harness) asksBlock() string {
 	d := h.asksLocked()
 	var b strings.Builder
 	if n := len(d.Intake); n > 0 {
-		fmt.Fprintf(&b, "- intake (id 0), not acknowledged (%s):", plurals(n, "message"))
+		fmt.Fprintf(&b, "- intake (id 0), not acknowledged (%s):", numfmt.Plural(n, "message", "messages"))
 		from := max(0, n-askBlockIntake)
 		if from > 0 {
 			fmt.Fprintf(&b, " +%d earlier,", from)

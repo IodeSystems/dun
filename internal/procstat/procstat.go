@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/iodesystems/dun/internal/numfmt"
 )
 
 // Proc is one process of the group.
@@ -173,10 +175,10 @@ func (u Usage) Line() string {
 	if u.Rated {
 		parts = append(parts, fmt.Sprintf("cpu %.0f%%", u.CPU))
 	}
-	parts = append(parts, fmt.Sprintf("%d proc%s (%s)", len(u.Procs), plural(len(u.Procs)), u.States()),
+	parts = append(parts, numfmt.Plural(len(u.Procs), "proc", "procs")+" ("+u.States()+")",
 		Bytes(float64(u.RSS)))
 	if u.Threads > 0 {
-		parts = append(parts, fmt.Sprintf("%d thread%s", u.Threads, plural(u.Threads)))
+		parts = append(parts, numfmt.Plural(u.Threads, "thread", "threads"))
 	}
 	if u.FDs >= 0 {
 		parts = append(parts, fmt.Sprintf("%d fds", u.FDs))
@@ -330,13 +332,6 @@ func short(d time.Duration) string {
 		return fmt.Sprintf("%dm", int(d.Minutes()))
 	}
 	return fmt.Sprintf("%ds", int(d.Seconds()))
-}
-
-func plural(n int) string {
-	if n == 1 {
-		return ""
-	}
-	return "s"
 }
 
 // Bytes is a size the short way: 0 B, 812 B, 4.1 KB, 412 MB, 1.2 GB.

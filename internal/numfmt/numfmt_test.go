@@ -15,6 +15,32 @@ func TestGrouped(t *testing.T) {
 	}
 }
 
+func TestPlural(t *testing.T) {
+	for _, c := range []struct{ n int; one, many, want string }{
+		{1, "file", "files", "1 file"},
+		{2, "file", "files", "2 files"},
+		{0, "file", "files", "0 files"},
+		{1, "process", "processes", "1 process"},
+		{1, "tool call", "tool calls", "1 tool call"},
+	} {
+		if got := Plural(c.n, c.one, c.many); got != c.want {
+			t.Errorf("Plural(%d, %q, %q) = %q, want %q", c.n, c.one, c.many, got, c.want)
+		}
+	}
+}
+
+func TestNoun(t *testing.T) {
+	for _, c := range []struct{ n int; one, many, want string }{
+		{1, "call", "calls", "call"},
+		{2, "call", "calls", "calls"},
+		{0, "call", "calls", "calls"},
+	} {
+		if got := Noun(c.n, c.one, c.many); got != c.want {
+			t.Errorf("Noun(%d, %q, %q) = %q, want %q", c.n, c.one, c.many, got, c.want)
+		}
+	}
+}
+
 func TestCommaf(t *testing.T) {
 	for _, c := range []struct {
 		got, want string
