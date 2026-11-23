@@ -349,7 +349,7 @@ func npmPackages(dir string) ([]pkg, []string, error) {
 	visit = func(key string) {
 		name, version := keyName(key)
 		id := name + "@" + version
-		if seen[id] {
+		if _, skip := buildOnly[name]; skip || seen[id] {
 			return
 		}
 		seen[id] = true
@@ -411,6 +411,19 @@ func npmPackages(dir string) ([]pkg, []string, error) {
 		visit(r)
 	}
 	return pkgs, problems, nil
+}
+
+// buildOnly are packages that run in Node while the app is built and put none
+// of their code in the bundle. The walk neither lists them nor follows their
+// dependencies; a package they share with the shipped tree is still listed via
+// that other path. Each entry carries its evidence.
+var buildOnly = map[string]string{
+	// expo depends on both. The Metro config and CLI run the build: lightningcss
+	// (MPL-2.0, a Node native addon) is their CSS transform and is reachable
+	// only through @expo/metro-config (pnpm why lightningcss, 2026-11-23). A
+	// local `expo export --platform web` bundle has no lightningcss string.
+	"@expo/cli":          "build CLI; runs under Node, not in the bundle",
+	"@expo/metro-config": "Metro config used at build time; pulls lightningcss, a Node-only CSS minifier",
 }
 
 // scanModules records every package under a node_modules directory, and
