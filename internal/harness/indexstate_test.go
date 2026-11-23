@@ -392,9 +392,6 @@ func TestIndex_DaemonWhenTheHookIsKept(t *testing.T) {
 		if len(args) != 1 || strings.HasSuffix(args[0], " --daemon") != daemon {
 			t.Errorf("%+v: spawns %q", c, args)
 		}
-		if !strings.Contains(strings.Join(fakeLog(log), "\n"), "start POLY_LSP_HOOK=/") {
-			t.Errorf("%+v: no hook in the env:\n%s", c, strings.Join(fakeLog(log), "\n"))
-		}
 		h.Close()
 	}
 }

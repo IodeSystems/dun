@@ -171,7 +171,6 @@ leaves them out (the Harbor adapter's default, for repeatable runs). See
     $DUN_HOME/projects.json                  absolute repo dir → id (minted on first sight)
     $DUN_HOME/projects/<id>/dun.json         optional, yours to write
     $DUN_HOME/projects/<id>/dun.local.json   the project switches (/rag auto, /mcp on --project) (0600)
-    $DUN_HOME/projects/<id>/agents_read      the AGENTS.md guard's memory
     $DUN_HOME/projects/<id>/worktrees/       --worktree session trees
     $DUN_HOME/projects/<id>/overlays/<dir>/  one linked worktree's own state
 

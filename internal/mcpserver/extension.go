@@ -65,9 +65,6 @@ import (
 //	               rules.changed    the rules' imports, in /rules index mode
 //	               mcp.docs         MCP servers' resources, on /mcp add|refresh
 //	             the index events need roles.index
-//	host_hooks   the extension calls dun: {ENV_VAR: script} starts the server
-//	             with ENV_VAR naming one of dun's host scripts
-//	             (agents_md_guard: the AGENTS.md guard, harness/agents_hook.go)
 //	env          {KEY: value} for the server, "$NAME" read from dun's env
 //	skills       a directory of skills, relative to the manifest, read like
 //	             ~/.dun/skills
@@ -100,15 +97,17 @@ const ExtensionFile = "extension.json"
 
 // Extension is one loaded manifest.
 type Extension struct {
-	ID          string            `json:"id"`
-	Description string            `json:"description,omitempty"`
-	Server      Spec              `json:"server"`
-	Slash       *ExtSlash         `json:"slash,omitempty"`
-	Roles       ExtRoles          `json:"roles,omitempty"`
-	Hooks       []string          `json:"hooks,omitempty"`
-	HostHooks   map[string]string `json:"host_hooks,omitempty"`
-	Env         map[string]string `json:"env,omitempty"`
-	Skills      string            `json:"skills,omitempty"`
+	ID          string    `json:"id"`
+	Description string    `json:"description,omitempty"`
+	Server      Spec      `json:"server"`
+	Slash       *ExtSlash `json:"slash,omitempty"`
+	Roles       ExtRoles  `json:"roles,omitempty"`
+	Hooks       []string  `json:"hooks,omitempty"`
+	// HostHooks is deprecated: accepted and ignored. Older published
+	// manifests carry it for the removed AGENTS.md guard.
+	HostHooks map[string]string `json:"host_hooks,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+	Skills    string            `json:"skills,omitempty"`
 
 	// Source is bundled, user or project; Path the manifest ("" bundled).
 	Source string `json:"-"`
@@ -178,9 +177,6 @@ const (
 
 // indexHooks are the events that send documents, so need roles.index.
 var indexHooks = map[string]bool{HookWorkspaceOpen: true, HookMemorySave: true, HookSkillsChanged: true, HookRulesChanged: true, HookMCPDocs: true}
-
-// HostAgentsGuard is the AGENTS.md guard (harness/agents_hook.go).
-const HostAgentsGuard = "agents_md_guard"
 
 // slashActions are what every extension's slash command does to its server;
 // a command of its own cannot take one of these names.
@@ -294,14 +290,6 @@ func (e *Extension) validate() error {
 			return fmt.Errorf("hooks[%d]: unknown event %q", i, h)
 		}
 		seen[h] = true
-	}
-	for k, v := range e.HostHooks {
-		if !envName.MatchString(k) {
-			return fmt.Errorf("host_hooks.%s: not an environment variable name", k)
-		}
-		if v != HostAgentsGuard {
-			return fmt.Errorf("host_hooks.%s: unknown host script %q (have %s)", k, v, HostAgentsGuard)
-		}
 	}
 	for k := range e.Env {
 		if !envName.MatchString(k) {

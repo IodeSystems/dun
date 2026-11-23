@@ -20,9 +20,8 @@ func TestBundledExtensions_AreRaglitAndPolyLsp(t *testing.T) {
 			t.Errorf("raglit does not take %s", h)
 		}
 	}
-	lsp, _ := bundledExt("code") // a pre-rename id still finds it
-	if lsp.HostHooks["POLY_LSP_HOOK"] != HostAgentsGuard {
-		t.Errorf("poly-lsp host hooks: %v", lsp.HostHooks)
+	if _, ok := bundledExt("code"); !ok { // a pre-rename id still finds it
+		t.Errorf("bundled: no poly-lsp by its old id")
 	}
 	ws := t.TempDir()
 	for _, s := range DefaultServers(ws, "") {
@@ -97,7 +96,6 @@ func TestParseExtension_ErrorsNameTheField(t *testing.T) {
 		`{"id":"a","server":{"command":"x"},"hooks":["turn.before"]}`:                                       "hooks[0]:",
 		`{"id":"a","server":{"command":"x"},"roles":{"search":{"tool":"s"}},"hooks":["turn.before","x.y"]}`: "hooks[1]:",
 		`{"id":"a","server":{"command":"x"},"hooks":["memory.save"]}`:                                       "hooks[0]:",
-		`{"id":"a","server":{"command":"x"},"host_hooks":{"X":"nope"}}`:                                     "host_hooks.X:",
 		`{"id":"a","server":{"command":"x"},"env":{"1X":"v"}}`:                                              "env.1X:",
 		`{"id":"a","server":{"command":"x"},"skills":"../up"}`:                                              "skills:",
 		`{"id":"a","server":{"command":"x"},"hoks":[]}`:                                                     `unknown field "hoks"`,
@@ -106,5 +104,17 @@ func TestParseExtension_ErrorsNameTheField(t *testing.T) {
 		if err == nil || !strings.HasPrefix(err.Error(), field) && !strings.Contains(err.Error(), field) {
 			t.Errorf("%s: want %q, got %v", body, field, err)
 		}
+	}
+}
+
+// An older published manifest carries host_hooks (the removed AGENTS.md
+// guard). It loads, and nothing in it arms a hook.
+func TestParseExtension_DeprecatedHostHooksAreIgnored(t *testing.T) {
+	e, err := ParseExtension([]byte(`{"id":"a","server":{"command":"x"},"host_hooks":{"POLY_LSP_HOOK":"agents_md_guard"}}`))
+	if err != nil {
+		t.Fatalf("a manifest with host_hooks must load: %v", err)
+	}
+	if e.Server.Command != "x" {
+		t.Errorf("server: %+v", e.Server)
 	}
 }

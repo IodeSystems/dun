@@ -40,7 +40,7 @@ import (
 // the user's files out: the Harbor adapter's default, for reproducible
 // evals. A child has its parent's Config, so the same rules.
 //
-// The root files are standing context (see agents_hook.go): the model has the
+// The root files are standing context: the model has the
 // project's rules from the first message, and a system block survives
 // compaction. The block is re-read on every system rebuild, so a rule edited
 // mid-session is in the next rebuild without a restart.
@@ -685,8 +685,7 @@ func (s rulesSet) render(mode, summary string) string {
 	section(true, "User rules", "These are the user's own rules, read in every project. "+
 		"Project rules, when there are any, come after them and refine them: where the two disagree, follow the project's.")
 	section(false, "Project rules", "These rules apply to this workspace. Nested directories may have their "+
-		"own AGENTS.md; the code tool will ask you to read one before you touch "+
-		"files under it.")
+		"own AGENTS.md.")
 	list := func() {
 		for _, d := range s.Imports {
 			b.WriteString("\n- " + d.Name)

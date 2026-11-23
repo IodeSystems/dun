@@ -1219,9 +1219,8 @@ type ExtItem struct {
 	Description string    `json:"description,omitempty"`
 	Slash       string    `json:"slash,omitempty"` // its command, without the /
 	Commands    []ExtVerb `json:"commands,omitempty"`
-	Roles       []string  `json:"roles,omitempty"`     // "search:<tool>", "index:<tool>/<forget>"
-	Hooks       []string  `json:"hooks,omitempty"`     // the dun hooks it subscribes to
-	HostHooks   []string  `json:"hostHooks,omitempty"` // "<name>=<what>"
+	Roles       []string  `json:"roles,omitempty"` // "search:<tool>", "index:<tool>/<forget>"
+	Hooks       []string  `json:"hooks,omitempty"` // the dun hooks it subscribes to
 }
 
 // ExtVerb is one of an extension's slash commands.

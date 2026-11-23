@@ -23,7 +23,7 @@ import (
 type extItem struct {
 	id, source, path, desc, slash string
 	commands                      [][2]string // name, help
-	roles, hooks, hostHooks       []string
+	roles, hooks                  []string
 }
 
 type extView struct {
@@ -116,9 +116,6 @@ func (v *extView) page() pageDoc {
 		if len(it.hooks) > 0 {
 			body = append(body, "hooks: "+strings.Join(it.hooks, ", "))
 		}
-		if len(it.hostHooks) > 0 {
-			body = append(body, "host hooks: "+strings.Join(it.hostHooks, ", "))
-		}
 		from := it.source
 		if it.path != "" {
 			from += " · " + it.path
@@ -189,7 +186,7 @@ func (m tuiModel) noteExtensions(ev evMsg) tuiModel {
 	for _, x := range items {
 		o, _ := x.(map[string]any)
 		it := extItem{id: str(o["id"]), source: str(o["source"]), path: str(o["path"]), desc: str(o["description"]), slash: str(o["slash"]),
-			roles: strList(o["roles"]), hooks: strList(o["hooks"]), hostHooks: strList(o["hostHooks"])}
+			roles: strList(o["roles"]), hooks: strList(o["hooks"])}
 		if cs, ok := o["commands"].([]any); ok {
 			for _, c := range cs {
 				co, _ := c.(map[string]any)

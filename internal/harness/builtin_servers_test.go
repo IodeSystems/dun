@@ -344,36 +344,3 @@ func TestRaglit_MCPDocsRefreshIngestsIntoTheServersIndex(t *testing.T) {
 	}
 	logHas(t, logPath, "raglit ingest --project "+mcpserver.RaglitProject(ws)+" --index mcp-corp --now", mcpDocsDir("corp"))
 }
-
-// Starting poly-lsp-mcp arms the AGENTS.md guard: POLY_LSP_HOOK names the
-// embedded script and DUN_AGENTS_STATE the workspace's state file. No other
-// server gets them.
-func TestPolyLspStart_ArmsTheAgentsMDGuard(t *testing.T) {
-	t.Setenv("DUN_HOME", t.TempDir())
-	ws := t.TempDir()
-	lsp, lspLog := fakeBin(t, "poly-lsp-mcp", "poly-lsp")
-	other, otherLog := fakeBin(t, "poly-lsp-mcp", "poly-lsp")
-	h, err := Start(context.Background(), Config{Workspace: ws, Servers: []mcpserver.Server{
-		{ID: mcpserver.ServerCode, Command: lsp, Args: []string{"mcp", "--root", ws}, Timeout: 20},
-		{ID: "other", Command: other, Timeout: 20},
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer h.Close()
-	for _, id := range []string{mcpserver.ServerCode, "other"} {
-		if err := h.StartServer(context.Background(), id); err != nil {
-			t.Fatal(err)
-		}
-	}
-	line := logHas(t, lspLog, "start POLY_LSP_HOOK=/", " DUN_AGENTS_STATE="+agentsStateFile(ws))
-	hook := strings.TrimPrefix(strings.Fields(line)[1], "POLY_LSP_HOOK=")
-	b, err := os.ReadFile(hook)
-	if err != nil || string(b) != agentsHookScript {
-		t.Errorf("POLY_LSP_HOOK is not the guard script: %v", err)
-	}
-	if st, err := os.Stat(hook); err != nil || st.Mode().Perm()&0o100 == 0 {
-		t.Errorf("the hook is not executable: %v", err)
-	}
-	logHas(t, otherLog, "start POLY_LSP_HOOK= DUN_AGENTS_STATE=")
-}

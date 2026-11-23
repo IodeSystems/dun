@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/iodesystems/dun/internal/enginecmd"
@@ -82,14 +81,6 @@ func extListing(h *harness.Harness) string {
 		if len(e.Hooks) > 0 {
 			b.WriteString(" · hooks " + strings.Join(e.Hooks, ", "))
 		}
-		keys := make([]string, 0, len(e.HostHooks))
-		for k := range e.HostHooks {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			b.WriteString(" · host hook " + k + "=" + e.HostHooks[k])
-		}
 		if e.Path != "" {
 			b.WriteString("\n    " + e.Path)
 		}
@@ -138,9 +129,6 @@ func extensionsEvent(h *harness.Harness) *proto.Extensions {
 				idx += ":" + r.Tool + "/" + r.Forget
 			}
 			it.Roles = append(it.Roles, idx)
-		}
-		for _, k := range slices.Sorted(maps.Keys(e.HostHooks)) {
-			it.HostHooks = append(it.HostHooks, k+"="+e.HostHooks[k])
 		}
 		ev.Items = append(ev.Items, it)
 	}

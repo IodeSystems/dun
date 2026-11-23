@@ -458,12 +458,6 @@ func (h *Harness) startServer(ctx context.Context, s mcpserver.Server) error {
 		h.srvMu.Unlock()
 	}
 	env := append(slices.Clone(s.Env), ragEnv...) // appended to below; never the spec's own slice
-	// Host hooks: the extension calls back into dun. poly-lsp's arms the
-	// AGENTS.md guard, a file-access hook that cancels reads/edits until the
-	// model has seen the project's rules.
-	if isExt {
-		env = append(env, hostHookEnv(ext, h.cfg.Workspace)...)
-	}
 	args := s.Args
 	roots := false // the shell asks dun for its file roots (shellroots.go)
 	if s.ID == mcpserver.ServerShell {
