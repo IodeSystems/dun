@@ -455,3 +455,13 @@ func TestSessionRender(t *testing.T) {
 		t.Errorf("merge: %q", set)
 	}
 }
+
+func TestRenderersFailedVerdict(t *testing.T) {
+	const res = "ERROR: mcp tool error: boom\nsecond line"
+	for _, tool := range []string{"get_document", "ocr", "ingest", "recap"} {
+		pv, _ := renderToolResult(renderCtx{tool: tool, result: res})
+		if strings.Contains(pv, "✓") || strings.Contains(pv, "lines") || !strings.Contains(pv, "✗") {
+			t.Errorf("%s: failed result should render as error only: %q", tool, pv)
+		}
+	}
+}
