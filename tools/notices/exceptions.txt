@@ -1,0 +1,3 @@
+# Packages approved by the owner although their license is not on the
+# allow-list in main.go. One "<name> <reason>" per line: a Go module path or an
+# npm package name. Empty means none.
