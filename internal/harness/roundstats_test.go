@@ -153,13 +153,14 @@ func TestRoundStats_ShrinkEvent(t *testing.T) {
 
 	h.BeginTurnStats()
 	// A build before the fold sets prevSigs so noteBuild can detect the rewrite.
-	h.cache.noteBuild([]llm.Message{{Role: "user", Content: "long prompt"}}, nil, time.Now())
+	h.cache.noteBuild([]llm.Message{{Role: "user", Content: "first message"}, {Role: "user", Content: "second message"}}, nil, time.Now())
 	// Two rounds with no drop: no shrink line.
 	main(llm.Usage{PromptTokens: 10000, CompletionTokens: 200})
 	main(llm.Usage{PromptTokens: 10400, CompletionTokens: 50})
 	// A fold rewrote the prompt; the round after it carries the drop.
+	// The kept prefix is the first message (13 chars), so KeptChars > 0.
 	h.cache.noteFold()
-	h.cache.noteBuild([]llm.Message{{Role: "user", Content: "short"}}, nil, time.Now())
+	h.cache.noteBuild([]llm.Message{{Role: "user", Content: "first message"}, {Role: "user", Content: "folded"}}, nil, time.Now())
 	main(llm.Usage{PromptTokens: 6000, CompletionTokens: 40})
 	h.EndTurnStats()
 
@@ -179,10 +180,12 @@ func TestRoundStats_ShrinkEvent(t *testing.T) {
 		ev.Window != 188160 || ev.Budget != shapingBudget(188160) || ev.Session != "20261024-2" || ev.Model != "m" {
 		t.Errorf("shrink: %+v", ev)
 	}
-	// The kept estimate is at the meter's fallback ratio: 4 chars/token, and
-	// it says so.
-	if ev.KeptTokens != 0 || !ev.Estimated {
-		t.Errorf("kept estimate: %+v", ev)
+	// The kept prefix is the first message (13 chars), recorded as-is, and
+	// the token estimate is at the meter's fallback ratio (4 chars/token):
+	// 13/4 = 3.25, rounds to 3. Estimated is true because the meter is not
+	// calibrated.
+	if ev.KeptChars != 13 || ev.KeptTokens != 3 || !ev.Estimated {
+		t.Errorf("kept prefix: %+v", ev)
 	}
 	// The round that carries the drop is the line after.
 	var r RoundStat
