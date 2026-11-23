@@ -149,8 +149,10 @@ var Supported = []Tool{
 	// integer still works; a malformed value now errors instead of being
 	// ignored); `path:Symbol` reads as #'path#Symbol', Type.Method works, a
 	// hyphenated bare word is read as an id, a double-quoted path is accepted.
+	// v0.5.5: a node_edit whose new errors are all "incomplete" kinds lands
+	// (action "LANDED, NOT clean: ...", incomplete:true, validated:false).
 	{Name: "poly-lsp-mcp", Module: "github.com/iodesystems/poly-lsp-mcp",
-		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.5.4"},
+		Min: "v0.0.0-20261024175639-46caee4f6393", Recommended: "v0.5.5"},
 	// Min 5d24299 (main, 2026-10-24): the raglit/setup notification, doctor
 	// --json and provider keys by api_key_file, which /rag setup and
 	// doctor read. v0.1.0 (a32c5db): raglit's first release. v0.2.0 (574d91e,
