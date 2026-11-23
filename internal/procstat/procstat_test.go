@@ -31,20 +31,34 @@ func group(t *testing.T, script string) int {
 func TestSample_BusyAndIdle(t *testing.T) {
 	var s Sampler
 	busy := group(t, "yes > /dev/null & yes > /dev/null & wait")
+	// How much CPU the two yes get is the host's: on a loaded box (go test
+	// runs packages in parallel; loadavg 80 on 24 cores) they got 30-50%,
+	// under the Verdict's busy line. So the live read asserts what load
+	// does not change: every member found, rated, CPU read, both yes
+	// runnable; TestVerdict_Busy holds the busy line. A sample comes each
+	// 100ms until the group is rated with CPU, so a slow start is waited for.
 	s.Sample(busy)
-	time.Sleep(500 * time.Millisecond)
-	u := s.Sample(busy)
+	var u Usage
+	for deadline := time.Now().Add(10 * time.Second); ; {
+		time.Sleep(100 * time.Millisecond)
+		u = s.Sample(busy)
+		if (len(u.Procs) == 3 && u.Rated && u.CPU > 0) || time.Now().After(deadline) {
+			break
+		}
+	}
 	if len(u.Procs) != 3 || !u.Rated {
 		t.Fatalf("busy group: %d procs, rated %v: %+v", len(u.Procs), u.Rated, u.Procs)
 	}
-	// 50%, the Verdict's own "busy" line, not "over a core": go test runs
-	// packages in parallel, and on a CI runner two yes processes got 71%
-	// (v0.2.6 release, twice). Idle reads 0%.
-	if runtime.GOOS == "linux" && u.CPU < 50 {
-		t.Errorf("two yes processes should read as busy (>= 50%%): %.0f%%", u.CPU)
-	}
-	if v := u.Verdict(0); runtime.GOOS == "linux" && !strings.Contains(v, "busy on CPU") {
-		t.Errorf("busy verdict %q (%s)", v, u.Line())
+	if runtime.GOOS == "linux" {
+		running := 0
+		for _, p := range u.Procs {
+			if p.State == "R" {
+				running++
+			}
+		}
+		if u.CPU <= 0 || running < 2 {
+			t.Errorf("two yes processes should read as on CPU: %.0f%%, %d runnable (%s)", u.CPU, running, u.Line())
+		}
 	}
 
 	idle := group(t, "exec sleep 30")
@@ -85,6 +99,22 @@ func TestIsNetworkWchan(t *testing.T) {
 		if isNetworkWchan(w) {
 			t.Errorf("isNetworkWchan(%q) = true, want false", w)
 		}
+	}
+}
+
+// A group at or over half a core reads as busy, and quiet for a minute
+// says so; under it, it is not called busy.
+func TestVerdict_Busy(t *testing.T) {
+	busy := Usage{Rated: true, CPU: 150, Procs: []Proc{{State: "R", CPU: 75}, {State: "R", CPU: 75}, {State: "S", CPU: 0}}}
+	if v := busy.Verdict(0); v != "busy on CPU" {
+		t.Errorf("busy verdict %q", v)
+	}
+	if v := busy.Verdict(5 * time.Minute); !strings.Contains(v, "busy on CPU") || !strings.Contains(v, "printing nothing") {
+		t.Errorf("busy and quiet verdict %q", v)
+	}
+	under := Usage{Rated: true, CPU: 30, Procs: []Proc{{State: "R", CPU: 30}}}
+	if v := under.Verdict(0); strings.Contains(v, "busy") {
+		t.Errorf("30%% read as busy: %q", v)
 	}
 }
 
