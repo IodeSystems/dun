@@ -13,6 +13,7 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/dun/internal/dunhome"
+	"github.com/iodesystems/dun/internal/fsutil"
 )
 
 // Session persistence layout — à la ~/.claude, scoped by the workspace ROOT.
@@ -357,11 +358,7 @@ func SaveSessionMeta(root, id string, meta SessionMeta) error {
 	if err != nil {
 		return err
 	}
-	tmp := MetaFile(root, id) + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, MetaFile(root, id))
+	return fsutil.WriteAtomic(MetaFile(root, id), data, 0o600)
 }
 
 // LoadSessionMeta reads the worktree metadata for a session, or zero if none.

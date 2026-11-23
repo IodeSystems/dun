@@ -219,7 +219,7 @@ func TestSessionIndex_VanishedSpanDoesNotAbortTheSync(t *testing.T) {
 	if len(notices) != 0 {
 		t.Errorf("notices %q", notices)
 	}
-	if tmp, _ := filepath.Glob(filepath.Join(x.dir, ".span-*")); len(tmp) != 0 {
+	if tmp, _ := filepath.Glob(filepath.Join(x.dir, ".*.tmp-*")); len(tmp) != 0 {
 		t.Errorf("temp files left: %v", tmp)
 	}
 }

@@ -23,6 +23,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+
+	"github.com/iodesystems/dun/internal/fsutil"
 	xdraw "golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"
 )
@@ -247,12 +249,11 @@ func (v VisionConfig) record(vision bool, detail string) {
 	m := readVision(file)
 	m[v.Key] = visionRecord{Vision: vision, Checked: time.Now().UTC().Format(time.RFC3339), Detail: detail}
 	b, err := json.MarshalIndent(m, "", "  ")
-	if err != nil || os.MkdirAll(filepath.Dir(file), 0o755) != nil {
-		return
-	}
-	tmp := file + ".tmp"
-	if os.WriteFile(tmp, append(b, '\n'), 0o644) == nil {
-		_ = os.Rename(tmp, file)
+	// 0644 as before: vision.json is a probe cache, readable by any reader of
+	// the home dir. WriteAtomic creates the home dir 0700 where it does not
+	// already exist (0755 before), a narrowing no reader depends on.
+	if err == nil {
+		_ = fsutil.WriteAtomic(file, append(b, '\n'), 0o644)
 	}
 }
 

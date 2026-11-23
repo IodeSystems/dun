@@ -16,6 +16,8 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+
+	"github.com/iodesystems/dun/internal/fsutil"
 )
 
 // sessionStore is dun's conversation store: the agent.Store the Turn loop needs,
@@ -209,8 +211,7 @@ func (s *sessionStore) writeBlob(content string) (ref string, ok bool) {
 	}
 	path := filepath.Join(s.blobsDir(), name+".blob")
 	if _, err := os.Stat(path); err != nil { // write once
-		tmp := path + ".tmp"
-		if os.WriteFile(tmp, []byte(content), 0o600) != nil || os.Rename(tmp, path) != nil {
+		if fsutil.WriteAtomic(path, []byte(content), 0o600) != nil {
 			return "", false
 		}
 	}
@@ -254,8 +255,7 @@ func (s *sessionStore) saveImages(parts []llm.ContentPart) []llm.ContentPart {
 		name := hex.EncodeToString(sum[:]) + "." + strings.TrimPrefix(mime, "image/")
 		path := filepath.Join(s.blobsDir(), name)
 		if _, err := os.Stat(path); err != nil {
-			tmp := path + ".tmp"
-			if os.MkdirAll(s.blobsDir(), 0o700) != nil || os.WriteFile(tmp, data, 0o600) != nil || os.Rename(tmp, path) != nil {
+			if fsutil.WriteAtomic(path, data, 0o600) != nil {
 				continue
 			}
 		}
@@ -327,10 +327,7 @@ func (s *sessionStore) flushLocked() {
 		e.Parts = s.saveImages(e.Parts)
 		_ = enc.Encode(e)
 	}
-	tmp := s.path + ".tmp"
-	if os.WriteFile(tmp, b.Bytes(), 0o600) == nil {
-		_ = os.Rename(tmp, s.path) // atomic replace
-	}
+	_ = fsutil.WriteAtomic(s.path, b.Bytes(), 0o600) // atomic replace
 }
 
 // ── agent.Store ────────────────────────────────────────────────────

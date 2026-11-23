@@ -21,6 +21,7 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/fsutil"
 	"github.com/iodesystems/dun/internal/textfmt"
 )
 
@@ -257,11 +258,7 @@ func appendTurnError(path string, rec TurnError) error {
 	if len(lines) > turnErrorsKept {
 		lines = lines[len(lines)-turnErrorsKept:]
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(bytes.Join(lines, []byte("\n")), '\n'), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return fsutil.WriteAtomic(path, append(bytes.Join(lines, []byte("\n")), '\n'), 0o600)
 }
 
 // ReadTurnErrors is the records in one errors file, oldest first; a line

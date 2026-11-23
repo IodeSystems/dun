@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/llm"
+
+	"github.com/iodesystems/dun/internal/fsutil"
 )
 
 // capstore.go — dun's copy of what agentkit learns about each (endpoint,
@@ -116,25 +118,11 @@ func storeLocked(dir string, snap llm.Capabilities) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	p := capsFileIn(dir, snap.Endpoint, snap.Model)
-	f, err := os.CreateTemp(dir, filepath.Base(p)+".*.tmp")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	_, err = f.Write(b)
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	if err := os.Rename(tmp, p); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return nil
+	// 0600 as before: the old CreateTemp opened 0600 and never chmod'd, so the
+	// record was never world-readable. WriteAtomic creates the dir 0700 where
+	// it does not already exist (0755 before), a narrowing no reader depends
+	// on.
+	return fsutil.WriteAtomic(capsFileIn(dir, snap.Endpoint, snap.Model), b, 0o600)
 }
 
 // TrackCaps seeds c from the store, pins off as the provider's effort_off

@@ -38,6 +38,7 @@ import (
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
 
+	"github.com/iodesystems/dun/internal/fsutil"
 	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/proto"
 )
@@ -153,26 +154,11 @@ func (x *dundSessionIndex) write(d agent.SessionDoc) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s\n\n%s%s\n%s%s\n\n## Summary\n\n%s\n\n## Span\n\n%s", oneLine(name, 200),
 		foldKind, d.Kind, foldKey, d.Key, strings.TrimSpace(d.Summary), d.Body)
-	// Whole or not at all: a sync never reads a half-written span. The temp
-	// name does not end in .md, so the sync's glob skips it.
-	f, err := os.CreateTemp(x.dir, ".span-*.tmp")
-	if err != nil {
-		return err
-	}
-	if _, err := f.WriteString(b.String()); err != nil {
-		f.Close()
-		os.Remove(f.Name())
-		return err
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(f.Name())
-		return err
-	}
-	if err := os.Rename(f.Name(), filepath.Join(x.dir, foldFileName(d.Key))); err != nil {
-		os.Remove(f.Name())
-		return err
-	}
-	return nil
+	// Whole or not at all: a sync never reads a half-written span. WriteAtomic's
+	// temp name (.<base>.tmp-<rand>) does not end in .md, so the sync's glob
+	// skips it. 0600 as before: the old CreateTemp opened 0600 and never
+	// chmod'd.
+	return fsutil.WriteAtomic(filepath.Join(x.dir, foldFileName(d.Key)), []byte(b.String()), 0o600)
 }
 
 // foldFileName is key as a file name, one name per key: a byte that is not
