@@ -24,6 +24,7 @@ type renderCtx struct {
 	args   map[string]any
 	result string
 	width  int
+	failed bool // the one failure verdict, set by renderToolResult from toolFailed
 }
 
 // ToolRenderer turns a tool result into (collapsed preview, full body).
@@ -41,6 +42,7 @@ func registerRenderer(tool string, r ToolRenderer) { toolRenderers[tool] = r }
 
 // renderToolResult dispatches to a registered renderer or the generic fallback.
 func renderToolResult(rc renderCtx) (preview, full string) {
+	rc.failed = toolFailed(rc.tool, rc.result)
 	if r, ok := toolRenderers[rc.tool]; ok {
 		return r.Render(rc)
 	}
@@ -506,7 +508,7 @@ func nodeReadRender(rc renderCtx) (string, string) {
 func getDocRender(rc renderCtx) (string, string) {
 	body := stSecondary.Render(rc.result)
 	first := firstLine(rc.result)
-	if strings.HasPrefix(first, "error") || strings.HasPrefix(first, "Error") {
+	if rc.failed {
 		return StDim.Render("  → ") + StErr.Render("✗ "+textfmt.Clip(first, previewClip)), body
 	}
 	n := countLines(rc.result)
@@ -518,7 +520,7 @@ func getDocRender(rc renderCtx) (string, string) {
 func ocrRender(rc renderCtx) (string, string) {
 	body := stSecondary.Render(rc.result)
 	first := firstLine(rc.result)
-	if strings.HasPrefix(first, "error") || strings.HasPrefix(first, "Error") {
+	if rc.failed {
 		return StDim.Render("  → ") + StErr.Render("✗ "+textfmt.Clip(first, previewClip)), body
 	}
 	// OCR output mentions page counts; fall back to line count.
@@ -534,7 +536,7 @@ func ocrRender(rc renderCtx) (string, string) {
 func ingestRender(rc renderCtx) (string, string) {
 	body := stSecondary.Render(rc.result)
 	first := firstLine(rc.result)
-	if strings.HasPrefix(first, "error") || strings.HasPrefix(first, "Error") {
+	if rc.failed {
 		return StDim.Render("  → ") + StErr.Render("✗ "+textfmt.Clip(first, previewClip)), body
 	}
 	return StDim.Render("  → ") + stSecondary.Render("⏱ queued") + stSecondary.Render(" · "+textfmt.Clip(first, previewClip)), body
@@ -544,7 +546,7 @@ func ingestRender(rc renderCtx) (string, string) {
 func recapRender(rc renderCtx) (string, string) {
 	body := stSecondary.Render(rc.result)
 	first := firstLine(rc.result)
-	if strings.HasPrefix(first, "error") || strings.HasPrefix(first, "Error") {
+	if rc.failed {
 		return StDim.Render("  → ") + StErr.Render("✗ "+textfmt.Clip(first, previewClip)), body
 	}
 	return StDim.Render("  → ") + stSecondary.Render("↺ recap") + stSecondary.Render(" · "+textfmt.Clip(first, previewClip)), body
