@@ -234,7 +234,7 @@ func loopCmd(ctx context.Context, ask schedAsk, action string, now time.Time) st
 	}
 	pace := "self-paced: the model sets each next run with loop_ctl"
 	if every > 0 {
-		pace = "every " + shortDur(every)
+		pace = "every " + textfmt.ShortDur(every)
 	}
 	return fmt.Sprintf("loop %d: runs now, then %s (/loop stop %d)", rep.Entry.ID, pace, rep.Entry.ID)
 }
@@ -288,7 +288,7 @@ func schedListing(es []proto.SchedEntry, now time.Time, loops bool) string {
 		if e.Loop() {
 			pace := "self-paced"
 			if e.Every > 0 {
-				pace = "every " + shortDur(e.Every)
+				pace = "every " + textfmt.ShortDur(e.Every)
 			}
 			line += fmt.Sprintf("  loop, %s, %d run(s)", pace, e.Iteration)
 		}
@@ -325,7 +325,7 @@ func whenShown(e proto.SchedEntry, now time.Time) string {
 	case rel <= 0:
 		return abs + " (in <1m)"
 	}
-	return abs + " (in " + shortDur(rel) + ")"
+	return abs + " (in " + textfmt.ShortDur(rel) + ")"
 }
 
 // schedLine is s's first line, clipped to n runes.
@@ -368,16 +368,4 @@ func (p *peerLink) LoopCtl(ctx context.Context, nextIn time.Duration, stop bool,
 	}
 	p.em.emit(&proto.Notification{Kind: "schedule", Text: what})
 	return st, nil
-}
-
-// shortDur is d without its zero units: "20m", "1h30m" (as dund words it).
-func shortDur(d time.Duration) string {
-	s := d.Round(time.Second).String()
-	if strings.HasSuffix(s, "m0s") {
-		s = strings.TrimSuffix(s, "0s")
-	}
-	if strings.HasSuffix(s, "h0m") {
-		s = strings.TrimSuffix(s, "0m")
-	}
-	return s
 }

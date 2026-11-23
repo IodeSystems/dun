@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/iodesystems/dun/internal/textfmt"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -654,9 +655,9 @@ func scheduledText(e schedEntry, sent time.Time, here bool) string {
 	if e.Loop() {
 		fmt.Fprintf(&b, "%s %d, run %d", loopPrefix, e.ID, e.Iteration)
 		if e.Every == proto.SelfPaced {
-			fmt.Fprintf(&b, ", self-paced: loop_ctl sets the next run (else %s) or stops it]", shortDur(selfPaceDefault))
+			fmt.Fprintf(&b, ", self-paced: loop_ctl sets the next run (else %s) or stops it]", textfmt.ShortDur(selfPaceDefault))
 		} else {
-			fmt.Fprintf(&b, ", every %s: loop_ctl can stop it]", shortDur(e.Every))
+			fmt.Fprintf(&b, ", every %s: loop_ctl can stop it]", textfmt.ShortDur(e.Every))
 		}
 	} else {
 		fmt.Fprintf(&b, "%s %s", scheduledPrefix, clock(e.Created, sent))
@@ -690,18 +691,6 @@ func clock(t, now time.Time) string {
 	return t.Format("Jan 2 15:04")
 }
 
-// shortDur is d without its zero units: "20m", "1h30m".
-func shortDur(d time.Duration) string {
-	s := d.Round(time.Second).String()
-	if strings.HasSuffix(s, "m0s") {
-		s = strings.TrimSuffix(s, "0s")
-	}
-	if strings.HasSuffix(s, "h0m") {
-		s = strings.TrimSuffix(s, "0m")
-	}
-	return s
-}
-
 // loopTurnEnded is a turn's end in ses: a self-paced loop that fired into
 // it and was not given a next time by loop_ctl gets the default, and the
 // person is told in the session, since the model chose nothing.
@@ -711,7 +700,7 @@ func (s *Service) loopTurnEnded(ses *session) {
 	}
 	for _, e := range s.sched.turnEnded(ses.id) {
 		ev := proto.NewEvent(&proto.Notification{Kind: "schedule", Text: fmt.Sprintf(
-			"loop %d: loop_ctl was not called; next run in %s (%s)", e.ID, shortDur(selfPaceDefault), clock(e.At, time.Now()))})
+			"loop %d: loop_ctl was not called; next run in %s (%s)", e.ID, textfmt.ShortDur(selfPaceDefault), clock(e.At, time.Now()))})
 		ev.TS = time.Now()
 		ses.log.Append(ev)
 	}

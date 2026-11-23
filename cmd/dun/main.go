@@ -1093,7 +1093,7 @@ func main() {
 			spent: func(budget, grace time.Duration) {
 				h.NoteBudget(budget, grace)
 				msg := fmt.Sprintf("turn budget %s spent — the model is told to wrap up; cut in %s",
-					harness.BudgetDur(budget), harness.BudgetDur(grace))
+					textfmt.ShortDur(budget), textfmt.ShortDur(grace))
 				if em != nil {
 					em.emit(&proto.Notification{Kind: "budget", Text: msg})
 				} else {

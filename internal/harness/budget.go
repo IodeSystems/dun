@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/iodesystems/agentkit/agent"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // The turn budget, as the model hears about it (USER, 2026-10-23).
@@ -48,18 +49,18 @@ type BudgetCut struct{ Budget, Grace time.Duration }
 
 func (e BudgetCut) Error() string {
 	if e.Grace <= 0 {
-		return fmt.Sprintf("the turn ran past its %s budget (--timeout) and was cut off", BudgetDur(e.Budget))
+		return fmt.Sprintf("the turn ran past its %s budget (--timeout) and was cut off", textfmt.ShortDur(e.Budget))
 	}
 	return fmt.Sprintf("the turn ran past its %s budget plus %s grace (--timeout, --timeout-grace) and was cut off",
-		BudgetDur(e.Budget), BudgetDur(e.Grace))
+		textfmt.ShortDur(e.Budget), textfmt.ShortDur(e.Grace))
 }
 
 // reason is the cut as a tool result names it.
 func (e BudgetCut) reason() string {
 	if e.Grace <= 0 {
-		return fmt.Sprintf("the turn ran past its %s budget", BudgetDur(e.Budget))
+		return fmt.Sprintf("the turn ran past its %s budget", textfmt.ShortDur(e.Budget))
 	}
-	return fmt.Sprintf("the turn ran past its %s budget plus %s grace", BudgetDur(e.Budget), BudgetDur(e.Grace))
+	return fmt.Sprintf("the turn ran past its %s budget plus %s grace", textfmt.ShortDur(e.Budget), textfmt.ShortDur(e.Grace))
 }
 
 // budgetTag marks the budget notice. It is about the turn it was sent in, in
@@ -67,24 +68,12 @@ func (e BudgetCut) reason() string {
 // hint (see clearBudgetNotes).
 const budgetTag = "budget"
 
-// BudgetDur is a budget as a person writes it: 30m, 1m30s, 2h.
-func BudgetDur(d time.Duration) string {
-	s := d.Round(time.Second).String()
-	if strings.HasSuffix(s, "m0s") {
-		s = strings.TrimSuffix(s, "0s")
-	}
-	if strings.HasSuffix(s, "h0m") {
-		s = strings.TrimSuffix(s, "0m")
-	}
-	return s
-}
-
 // budgetNotice is what the model reads when the budget is spent.
 func budgetNotice(budget, grace time.Duration) string {
 	return fmt.Sprintf("[dun] This turn has used its %s time budget. dun cuts the turn off in %s. "+
 		"Finish or checkpoint the current step now: commit (a WIP commit if it is not done) and note "+
 		"where you are. Then summarize what is done and what is left, and end the turn.",
-		BudgetDur(budget), BudgetDur(grace))
+		textfmt.ShortDur(budget), textfmt.ShortDur(grace))
 }
 
 // NoteBudget queues the budget notice for the model's next call in the running
@@ -135,9 +124,9 @@ func (h *Harness) clearBudgetNotes() {
 // The turn then returns ErrInterrupted.
 func (h *Harness) NoteBudgetCut(budget, grace time.Duration) {
 	c := BudgetCut{budget, grace}
-	spent := BudgetDur(budget) + " budget"
+	spent := textfmt.ShortDur(budget) + " budget"
 	if grace > 0 {
-		spent += " plus " + BudgetDur(grace) + " grace"
+		spent += " plus " + textfmt.ShortDur(grace) + " grace"
 	}
 	lead := fmt.Sprintf("[dun] Your previous turn was cut off after its %s, during %s", spent, h.cutDuring())
 	h.intMu.Lock()

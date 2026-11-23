@@ -21,6 +21,7 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // Turn errors, kept for diagnosis (aw4 i_1m7rqbptp6z6f22q6jgff8: real logs of
@@ -153,19 +154,7 @@ func orNone(s string) string {
 
 // stallText is "stalled: no bytes for 2m (between_chunks)".
 func stallText(e *llm.StallError) string {
-	return fmt.Sprintf("stalled: no bytes for %s (%s)", shortDur(e.After), e.Phase)
-}
-
-// shortDur is d without zero tails: 2m, 10m, 1m30s.
-func shortDur(d time.Duration) string {
-	s := d.String()
-	if strings.HasSuffix(s, "m0s") {
-		s = strings.TrimSuffix(s, "0s")
-	}
-	if strings.HasSuffix(s, "h0m") {
-		s = strings.TrimSuffix(s, "0m")
-	}
-	return s
+	return fmt.Sprintf("stalled: no bytes for %s (%s)", textfmt.ShortDur(e.After), e.Phase)
 }
 
 var statusInText = regexp.MustCompile(`\bstatus (\d{3})\b`)

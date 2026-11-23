@@ -9,6 +9,7 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
+	"github.com/iodesystems/dun/internal/textfmt"
 )
 
 // toolRound is a model round that makes one call to name.
@@ -35,8 +36,8 @@ func TestBudgetDur(t *testing.T) {
 		30 * time.Minute: "30m", 6 * time.Minute: "6m", 90 * time.Second: "1m30s",
 		2 * time.Hour: "2h", 45 * time.Second: "45s", 90 * time.Minute: "1h30m",
 	} {
-		if got := BudgetDur(d); got != want {
-			t.Errorf("BudgetDur(%s) = %q, want %q", d, got, want)
+		if got := textfmt.ShortDur(d); got != want {
+			t.Errorf("ShortDur(%s) = %q, want %q", d, got, want)
 		}
 	}
 }
