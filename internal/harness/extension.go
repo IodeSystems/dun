@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 
@@ -154,22 +153,6 @@ func mcpIndexSink(mgr *mcpmgr.Manager, id, ingest, forget string) *mcpDocsSink {
 		ingest: func(index string, paths []string) error { return call(ingest, index, paths) },
 		forget: func(index string, paths []string) error { return call(forget, index, paths) },
 	}
-}
-
-// hostHookEnv is the env that arms e's host hooks for workspace.
-func hostHookEnv(e mcpserver.Extension, workspace string) []string {
-	var env []string
-	keys := make([]string, 0, len(e.HostHooks))
-	for k := range e.HostHooks {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		if e.HostHooks[k] == mcpserver.HostAgentsGuard {
-			env = append(env, agentsHookEnv(k, workspace)...)
-		}
-	}
-	return env
 }
 
 // surfacer is the proactive search over the turn.before extensions: their

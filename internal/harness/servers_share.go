@@ -40,9 +40,6 @@ func (h *Harness) sharedInstance(s mcpserver.Server) bool {
 	if s.Instance != mcpserver.InstanceShared && (s.Instance != mcpserver.InstanceAgent || h.parent == nil) {
 		return false
 	}
-	if e, ok := h.extension(s.ID); ok && len(e.HostHooks) > 0 {
-		return false
-	}
 	return true
 }
 

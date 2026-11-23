@@ -702,7 +702,7 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
 - **Extensions are manifests (`internal/mcpserver/extension.go`).** An extension is an MCP server
   plus `extension.json`: its server spec, slash commands, roles (`search`,
   `index`), hooks. Special cases (proactive search, memory, skill and rules
-  indexes, the AGENTS.md guard) are lookups by role, not by server id. Bundled
+  indexes) are lookups by role, not by server id. Bundled
   manifests are embedded (one copy, no drift). Index calls go to the MCP
   `ingest`/`forget` tools when the server has them, else a CLI fallback; when
   raglit adds both, dun switches with no code change. A slash name taken by an
@@ -2005,3 +2005,13 @@ rescue), and agentkit's capability record on the wire. Code:
   those scopes, as before; session scope is unchanged. At project scope the
   `./` resolves per worktree or subdirectory that shares the project's
   config, so each reads its own copy.
+- **The AGENTS.md guard is removed (2026-11-23).** poly-lsp-mcp's file hook
+  (`POLY_LSP_HOOK`, `agents_hook.go`) cancelled a read or edit until the model
+  had read the nearest AGENTS.md. It predates rules in the system prompt: it
+  blocked the root file the model already had (rules.go loads the root AGENTS.md
+  and CLAUDE.md), a read through the shell did not count, and a hook can only
+  cancel, not proceed with a note. Agents began to avoid the code server to
+  dodge it. Gone with it: `host_hooks` in extension manifests (the guard was its
+  only script), `DUN_AGENTS_STATE`, the `agents_read` state and its import from
+  `.dun/`. Existing `agents_read` files under `$DUN_HOME/projects/*/` stay on
+  disk; only a pruned worktree's overlay dir is removed, as before.

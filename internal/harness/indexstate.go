@@ -199,7 +199,7 @@ type IndexSupport struct {
 
 // daemonMarker is in the --hook help of a poly-lsp-mcp whose --daemon proxy
 // runs the hook itself (poly-lsp-mcp e9b0020). An earlier --daemon dropped
-// the hook, and with it dun's AGENTS.md guard, so dun passes --daemon only to
+// the hook, so dun passes --daemon only to
 // a build that says this. A substring: with $POLY_LSP_HOOK set, cobra
 // appends the default to the line.
 const daemonMarker = "--daemon: the proxy runs it"

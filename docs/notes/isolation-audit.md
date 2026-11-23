@@ -62,9 +62,8 @@ are disjoint.
 
 - `os.MkdirTemp`/`os.CreateTemp` in tests all get OS temp dirs with random
   suffixes — two runs cannot pick the same name.
-- `internal/harness/agents_hook.go:134` writes a random-suffix script to the
-  OS temp dir; `internal/harness/files_test.go:235` uses `/tmp/dun-readtmp-`
-  (random suffix, same story).
+- `internal/harness/files_test.go:235` uses `/tmp/dun-readtmp-` (random
+  suffix, same story).
 - No test writes to a fixed machine-wide path.
 
 ## Locks, databases, external services

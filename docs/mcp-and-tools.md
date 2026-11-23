@@ -247,8 +247,6 @@ release on the engine's exit). The engine's half is `internal/harness/servers_sh
   endpoint>`, stops the server, shares again, starts it, and repeats the
   call (`regainShared`).
 - A changed instance restarts a running server (the other connection).
-- Not shared, though `shared`: a server of an extension with a host hook
-  (`host_hooks`): the hook calls back into the engine that started it.
 - What a shared stdio server writes to stderr goes to dund's log, not the
   engine's activity log for it.
 - A scripted server that is shared: before the shell starts
@@ -445,7 +443,7 @@ anyone. Code: `internal/project/project.go`, `internal/mcpserver/config.go` (`se
 
 - `$DUN_HOME/projects.json` maps an absolute source dir to an id, written
   temp-and-rename under flock. State lives in `$DUN_HOME/projects/<id>/`
-  (`dun.json`, `dun.local.json`, `agents_read`, `worktrees/`, `overlays/`).
+  (`dun.json`, `dun.local.json`, `worktrees/`, `overlays/`).
 - **The id is minted at first sight** (`<slug>-<6 hex>`), not derived from the
   path: a path hash is unreadable by a human, and a bare directory name
   collides between two checkouts of one repo. The cost: a moved repo gets a new
@@ -465,12 +463,10 @@ anyone. Code: `internal/project/project.go`, `internal/mcpserver/config.go` (`se
   worktree; go.mod is never rewritten. Discovery reads `replace ( ... )` blocks
   and mounts `../x/sub` as `x`. `replace` that climbs past the worktree's
   parent, and a go.mod not at the repo root, do not resolve on the host.
-- Migration: on first sight `.dun/dun.local.json` and `.dun/agents_read` are
+- Migration: on first sight `.dun/dun.local.json` is
   **copied** in (the original is the user's file in the user's tree), logged
   once. Old `<repo>/.dun/worktrees/*` is still listed, reused and pruned;
   nothing new goes there.
-- The AGENTS.md guard's state path reaches the hook through
-  `DUN_AGENTS_STATE`.
 - A `/rag auto` made in a linked worktree belongs to that worktree (its
   overlay); pruning a session tree also removes its overlay.
 - poly-lsp-mcp still writes `<root>/.poly-lsp-mcp/cache.gob` into the repo; it

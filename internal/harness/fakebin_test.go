@@ -149,7 +149,7 @@ func fakeBinMain(persona string) {
 			}
 			return
 		}
-		fakeLogf("start POLY_LSP_HOOK=%s DUN_AGENTS_STATE=%s", os.Getenv("POLY_LSP_HOOK"), os.Getenv("DUN_AGENTS_STATE"))
+		fakeLogf("start %d", os.Getpid())
 		if mode := os.Getenv(fakeIndexEnv); mode != "" {
 			fakeLogf("args %s", strings.Join(args, " "))
 			fakeAfterInit = func(out *bufio.Writer) { fakeIndexReport(out, mode, args) }

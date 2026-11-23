@@ -557,7 +557,7 @@ func TestLegacyServerIDs_ReadAsTheNewOnes(t *testing.T) {
 	}
 }
 
-// An older dun's .dun/dun.local.json and agents_read are COPIED in on first
+// An older dun's .dun/dun.local.json is COPIED in on first
 // sight — the original stays — and an import never overwrites state that is
 // already there.
 func TestProject_ImportsLegacyState(t *testing.T) {
@@ -568,13 +568,12 @@ func TestProject_ImportsLegacyState(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeJSON(t, legacy, project.LocalServersFile, `{"servers":[{"id":"docs","autostart":true}]}`)
-	writeJSON(t, legacy, "agents_read", "/x/AGENTS.md 1\n")
 
 	p, err := project.Ensure(repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{project.LocalServersFile, "agents_read"} { // project.legacyState
+	for _, name := range []string{project.LocalServersFile} { // project.legacyState
 		b, err := os.ReadFile(filepath.Join(p.StateDir, name))
 		if err != nil {
 			t.Fatalf("%s was not imported: %v", name, err)
