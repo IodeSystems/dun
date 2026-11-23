@@ -27,7 +27,9 @@ import (
 
 // raglitDefaultSetMarker is in the --help of a raglit whose read selector
 // accepts the default-set token inside a list. A substring, as daemonMarker
-// is: the help line names it, and a longer line still carries it.
+// is: the help line names it, and a longer line still carries it. It is
+// probed once per binary (cashed in raglitProbes) and read the same way
+// IndexProtocol reads its protocol marker.
 const raglitDefaultSetMarker = "--index default-set"
 
 // raglitDefaultSetToken is what a raglit that carries raglitDefaultSetMarker
