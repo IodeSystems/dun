@@ -15,6 +15,7 @@ import (
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/agentkit/mcpmgr"
 	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/raglit"
 )
 
 // Attached indexes (plan item 20): index a directory once, and let many
@@ -38,9 +39,15 @@ import (
 // "<own>:*,<project>:<index>,…" (raglit's read selector: its own indexes,
 // plus one named index of any project). With one of its own off, "<own>:*"
 // becomes its own indexes named one by one, less those (the list is
-// raglit's, cached: ownIndexes). raglit expands "all" only as the whole
-// selector, so a selector drops the `shared` namespaces of raglit's project
-// config while it is in force (risk recorded in the plan).
+// raglit's, cached: ownIndexes).
+//
+// raglit expands "all" only as the WHOLE selector (nsReadSelector, raglit
+// namespace.go), so a list of its own drops the `shared` namespaces of
+// raglit's project config while it is in force — an explicit selector is
+// exactly what makes the list explicit. There is no in-list token meaning
+// "the default set" in the raglit this pins, so the shared namespaces are
+// read out of raglit's config.json (sharedNamespaces) and added to the list
+// as "<ns>:*" tokens, which nsResolveToken resolves.
 
 // attachName is what an attachment may be once qualified.
 // ":<index>" is a global index (raglit 359f049).
@@ -101,8 +108,11 @@ func (h *Harness) AttachName(id, index string) string {
 // attachSelector is the `index` argument a search with no index of its own
 // gets: own's indexes (all of them, "<own>:*", or ownIdx less the ones
 // switched off) plus the switched-on ones of other projects; "" when that
-// is just own's own (the server's default reads them already).
-func attachSelector(own string, attach, detach, ownIdx []string) string {
+// is just own's own and its shared namespaces (the server's default reads
+// them already). shared is the project's raglit-config shared namespaces:
+// raglit expands "all" only as the WHOLE selector, so once a list is in
+// force they drop out and are added back one namespace at a time ("ns:*").
+func attachSelector(own string, attach, detach, ownIdx, shared []string) string {
 	var parts []string
 	ownOff := false
 	for _, d := range detach {
@@ -125,11 +135,30 @@ func attachSelector(own string, attach, detach, ownIdx []string) string {
 			parts = append(parts, a)
 		}
 	}
-	if !ownOff && len(parts) == 1 {
-		return ""
+	foreign := 0
+	for _, p := range parts {
+		if p, _, _ := strings.Cut(p, ":"); p != own && p != "" {
+			foreign++
+		}
 	}
-	if len(parts) == 0 {
+	if foreign == 0 && ownOff && len(parts) == 0 {
 		return own + ":-*" // every index of its own off, nothing else on: a glob that matches none (a plain name raglit lacks is a 404)
+	}
+	// shared is added only once a foreign index is in force: raglit expands
+	// "all" only as the WHOLE selector, so a list drops the config's shared
+	// namespaces and they come back one namespace at a time. shared is never
+	// the reason a selector is emitted (raglit's default already reads own
+	// plus shared), and the all-off case above keeps it out: it means "read
+	// nothing". raglit skips a "ns:*" it does not recognize, so a stale
+	// shared list is harmless.
+	for _, ns := range shared {
+		if ns == "" || ns == own || slices.Contains(attach, ns+":*") {
+			continue
+		}
+		parts = append(parts, ns+":*")
+	}
+	if !ownOff && foreign == 0 {
+		return ""
 	}
 	return strings.Join(parts, ",")
 }
@@ -278,7 +307,7 @@ func (h *Harness) attachSelectors(exts []mcpserver.Extension, tools []mcpmgr.MCP
 		}
 		own := h.ownProject(s)
 		ownIdx := h.ownIndexes(e, s, own)
-		if sel := attachSelector(own, s.Attach, s.Detach, ownIdx); sel != "" {
+		if sel := attachSelector(own, s.Attach, s.Detach, ownIdx, sharedNamespaces(h.cfg.RaglitHome, own)); sel != "" {
 			out[e.ID] = sel
 		}
 	}
@@ -405,4 +434,66 @@ func noteOwnIndexes(own string, rows []raglitIndexRow) {
 		}
 	}
 	ownIdxCache.Store(own, idx)
+}
+
+// sharedNamespaces is the project's raglit-config shared namespaces, read from
+// the config raglit itself reads: raglit's DiscoverHome resolves --home, else
+// the nearest .raglit/ walking up from the cwd (findProjectHome), so the path
+// here mirrors it — RaglitHome if set, else the nearest .raglit/ above the
+// workspace. The daemon reads the same file (projectShared, cmd/raglit/daemon.go)
+// when it expands the "all" selector, so the namespaces it adds to a list are
+// the ones raglit would have read by default. Names come back normalized as
+// raglit stores them; a missing config means no shared namespaces.
+func sharedNamespaces(raglitHome, workspace string) []string {
+	dir := raglitHome
+	if dir == "" {
+		dir = findProjectHomeUp(workspace)
+	}
+	if dir == "" {
+		return nil
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	if err != nil {
+		return nil
+	}
+	var cfg struct {
+		Shared []string `json:"shared"`
+	}
+	if json.Unmarshal(data, &cfg) != nil {
+		return nil
+	}
+	// Normalize as raglit's projectShared does (NormalizeIndexName), skipping
+	// empties as it does: the token sent must name the namespace the daemon
+	// resolved.
+	var out []string
+	for _, s := range cfg.Shared {
+		if strings.TrimSpace(s) == "" {
+			continue
+		}
+		if n := raglit.NormalizeIndexName(s); !slices.Contains(out, n) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// findProjectHomeUp is the nearest .raglit/ at or above dir, walking to the
+// filesystem root, or "" when there is none — raglit's findProjectHome, which
+// walks up from the process's cwd, that raglit runs with the workspace as its
+// cwd.
+func findProjectHomeUp(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	for {
+		cand := filepath.Join(dir, ".raglit")
+		if fi, err := os.Stat(cand); err == nil && fi.IsDir() {
+			return cand
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
 }

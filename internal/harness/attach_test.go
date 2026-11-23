@@ -38,31 +38,78 @@ func TestUnionAttachAndSelector(t *testing.T) {
 	if !slices.Equal(u, []string{"a:x", "b:y", "own:z", "c:w"}) {
 		t.Errorf("union: %v", u)
 	}
-	if s := attachSelector("own", u, nil, nil); s != "own:*,a:x,b:y,c:w" {
+	if s := attachSelector("own", u, nil, nil, nil); s != "own:*,a:x,b:y,c:w" {
 		t.Errorf("selector: %q", s)
 	}
 	// This project's own indexes are read by "<own>:*" already: no selector,
 	// so raglit's default (with the config's shared namespaces) stays.
-	if s := attachSelector("own", []string{"own:z"}, nil, nil); s != "" {
+	if s := attachSelector("own", []string{"own:z"}, nil, nil, nil); s != "" {
 		t.Errorf("own only: %q", s)
 	}
-	if s := attachSelector("own", nil, nil, nil); s != "" {
+	if s := attachSelector("own", nil, nil, nil, nil); s != "" {
 		t.Errorf("none: %q", s)
+	}
+	// The shared namespaces are never the reason a selector is emitted: with
+	// only its own attached, raglit's default already reads own plus shared.
+	if s := attachSelector("own", []string{"own:z"}, nil, nil, []string{"common"}); s != "" {
+		t.Errorf("own only, shared in config: %q", s)
 	}
 	// One of its own switched off: its own named one by one, less that one
 	// (USER 2026-10-28: /rag); before the list is known, all of its own.
 	ownIdx := []string{"own:main", "own:memory", "own:skills"}
-	if s := attachSelector("own", nil, []string{"own:memory"}, ownIdx); s != "own:main,own:skills" {
+	if s := attachSelector("own", nil, []string{"own:memory"}, ownIdx, nil); s != "own:main,own:skills" {
 		t.Errorf("own off: %q", s)
 	}
-	if s := attachSelector("own", []string{"a:x"}, []string{"own:memory"}, ownIdx); s != "own:main,own:skills,a:x" {
+	if s := attachSelector("own", []string{"a:x"}, []string{"own:memory"}, ownIdx, nil); s != "own:main,own:skills,a:x" {
 		t.Errorf("own off, other on: %q", s)
 	}
-	if s := attachSelector("own", nil, []string{"own:memory"}, nil); s != "own:*" {
+	if s := attachSelector("own", nil, []string{"own:memory"}, nil, nil); s != "own:*" {
 		t.Errorf("own off, list unknown: %q", s)
 	}
-	if s := attachSelector("own", nil, ownIdx, ownIdx); s != "own:-*" {
+	if s := attachSelector("own", nil, ownIdx, ownIdx, nil); s != "own:-*" {
 		t.Errorf("all off: %q", s)
+	}
+	// Shared namespaces come back once a list is in force: a foreign index on,
+	// or one of its own off (the list that drops raglit's default read set).
+	// The project's own name is not added, and a stale one raglit skips is
+	// harmless.
+	if s := attachSelector("own", []string{"a:x"}, nil, nil, []string{"common", "own", "stale"}); s != "own:*,a:x,common:*,stale:*" {
+		t.Errorf("shared with foreign: %q", s)
+	}
+	if s := attachSelector("own", nil, []string{"own:memory"}, ownIdx, []string{"common"}); s != "own:main,own:skills,common:*" {
+		t.Errorf("shared with own off: %q", s)
+	}
+	if s := attachSelector("own", nil, ownIdx, ownIdx, []string{"common"}); s != "own:-*" {
+		t.Errorf("all off keeps out shared: %q", s)
+	}
+}
+
+// sharedNamespaces reads the config raglit itself reads (the project home:
+// RaglitHome if set, else the nearest .raglit/ above the workspace), and
+// normalizes the names as raglit stores them.
+func TestSharedNamespaces_ReadsTheProjectConfig(t *testing.T) {
+	if got := sharedNamespaces("", t.TempDir()); got != nil {
+		t.Errorf("no config: %v", got)
+	}
+	ws := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(ws, ".raglit"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := `{"shared":["common", "OWN", "common"]}`
+	if err := os.WriteFile(filepath.Join(ws, ".raglit", "config.json"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := sharedNamespaces("", ws); !slices.Equal(got, []string{"common", "own"}) {
+		t.Errorf("project home: %v", got)
+	}
+	// An explicit home wins over the discovered one, and the name is
+	// normalized as raglit stores it: lowercase, stripped to [a-z0-9_-].
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "config.json"), []byte(`{"shared":["a b", ""]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := sharedNamespaces(home, ws); !slices.Equal(got, []string{"ab"}) {
+		t.Errorf("explicit home: %v", got)
 	}
 }
 
