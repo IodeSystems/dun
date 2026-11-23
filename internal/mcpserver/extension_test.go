@@ -106,3 +106,15 @@ func TestParseExtension_ErrorsNameTheField(t *testing.T) {
 		}
 	}
 }
+
+// An older published manifest carries host_hooks (the removed AGENTS.md
+// guard). It loads, and nothing in it arms a hook.
+func TestParseExtension_DeprecatedHostHooksAreIgnored(t *testing.T) {
+	e, err := ParseExtension([]byte(`{"id":"a","server":{"command":"x"},"host_hooks":{"POLY_LSP_HOOK":"agents_md_guard"}}`))
+	if err != nil {
+		t.Fatalf("a manifest with host_hooks must load: %v", err)
+	}
+	if e.Server.Command != "x" {
+		t.Errorf("server: %+v", e.Server)
+	}
+}

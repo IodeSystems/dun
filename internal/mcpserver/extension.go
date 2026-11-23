@@ -97,14 +97,17 @@ const ExtensionFile = "extension.json"
 
 // Extension is one loaded manifest.
 type Extension struct {
-	ID          string            `json:"id"`
-	Description string            `json:"description,omitempty"`
-	Server      Spec              `json:"server"`
-	Slash       *ExtSlash         `json:"slash,omitempty"`
-	Roles       ExtRoles          `json:"roles,omitempty"`
-	Hooks       []string          `json:"hooks,omitempty"`
-	Env         map[string]string `json:"env,omitempty"`
-	Skills      string            `json:"skills,omitempty"`
+	ID          string    `json:"id"`
+	Description string    `json:"description,omitempty"`
+	Server      Spec      `json:"server"`
+	Slash       *ExtSlash `json:"slash,omitempty"`
+	Roles       ExtRoles  `json:"roles,omitempty"`
+	Hooks       []string  `json:"hooks,omitempty"`
+	// HostHooks is deprecated: accepted and ignored. Older published
+	// manifests carry it for the removed AGENTS.md guard.
+	HostHooks map[string]string `json:"host_hooks,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+	Skills    string            `json:"skills,omitempty"`
 
 	// Source is bundled, user or project; Path the manifest ("" bundled).
 	Source string `json:"-"`
