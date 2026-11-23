@@ -2,6 +2,7 @@ package harness
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -115,6 +116,32 @@ type TurnStats struct {
 	SubAgents int `json:"sub_agents,omitempty"` // started during the turn
 }
 
+// ShrinkEvent is one line in the rounds ledger: a main round whose prompt
+// dropped below the session's previous main round's. kind is the build's
+// rewrite cause when dun knows it (fold, boundary, rehead, recap, tools,
+// other) — the round's BUILD was what shrank the prompt, and the cause
+// cachestats attributes it to is the answer to "why did it drop". KeptChars
+// is the leading prefix the build kept from the previous one, and KeptTokens
+// the same at the meter's ratio (Estimated true: the ratio is the
+// provider-measured one, the estimate is arithmetic on it). The line is a
+// SIBLING of the round stat that carries the drop, written to the same file
+// just before it, so a reader pairing lines by order sees the drop and its
+// attribution together.
+type ShrinkEvent struct {
+	Kind       string `json:"kind"` // "shrink"
+	Time       time.Time `json:"t"`
+	Session    string `json:"session,omitempty"`
+	Model      string `json:"model,omitempty"`
+	Cause      string `json:"cause,omitempty"` // the build's rewrite cause
+	Before     int    `json:"before"` // the previous main round's prompt tokens
+	After      int    `json:"after"`  // this round's prompt tokens
+	KeptChars  int    `json:"kept_chars,omitempty"`
+	KeptTokens int    `json:"kept_tokens,omitempty"`
+	Estimated  bool   `json:"estimated,omitempty"` // KeptTokens is at the meter's ratio
+	Window     int    `json:"window,omitempty"`    // the context window in force
+	Budget     int    `json:"budget,omitempty"`    // the shaping target in force
+}
+
 // roundStats is the root session's collector.
 type roundStats struct {
 	mu     sync.Mutex
@@ -123,6 +150,9 @@ type roundStats struct {
 	agents int // the session's sub-agent count at the turn's start
 	speeds []float64
 	ledger *StatsLedger
+	// prevMainPrompt is each session's last main round's prompt tokens: the
+	// baseline a shrink event's "before" is measured against. Under mu.
+	prevMainPrompt map[string]int
 }
 
 // speedWindow is how many recent rounds the prefill speed is the median of,
@@ -148,6 +178,7 @@ func (h *Harness) noteRound(src spendmeter.Source, u llm.Usage) {
 	if u.Cost.Reported {
 		r.Cost, r.Currency, r.Costed = u.Cost.Amount, u.Cost.Currency, true
 	}
+	var shrink *ShrinkEvent
 	if src.Role == spendmeter.RoleMain {
 		sp := h.SystemParts()
 		r.Prefix = sp.Total
@@ -161,6 +192,7 @@ func (h *Harness) noteRound(src spendmeter.Source, u llm.Usage) {
 		}
 		r.Scripted = h.scriptedStandalone()
 		r.Recaps = int(h.recapsSince.Swap(0))
+		shrink = h.shrinkOf(r)
 	}
 	rs := &h.rounds
 	rs.mu.Lock()
@@ -170,6 +202,12 @@ func (h *Harness) noteRound(src spendmeter.Source, u llm.Usage) {
 	if l == nil {
 		return
 	}
+	// A drop in the prompt is one line before the round that carries it, so
+	// a reader pairing lines by order sees the shrink and the round it
+	// landed on together.
+	if shrink != nil {
+		_ = l.AppendShrink(*shrink)
+	}
 	// Written when the traced stream that carried it names it (trace.go).
 	var hub *traceHub
 	if h.trace != nil {
@@ -178,6 +216,46 @@ func (h *Harness) noteRound(src spendmeter.Source, u llm.Usage) {
 	if !hub.park(roundKeyOf(u), r, func(r RoundStat) { _ = l.Append(r) }) {
 		_ = l.Append(r)
 	}
+}
+
+// shrinkOf says whether r is a main round whose prompt dropped below the
+// session's previous main round's, and what to record about it. The
+// previous round's prompt is the "before"; the build that preceded r is
+// what r's prompt is, so its rewrite cause is the drop's cause and its
+// kept prefix is what the next build keeps.
+func (h *Harness) shrinkOf(r RoundStat) *ShrinkEvent {
+	rs := &h.rounds
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	if rs.prevMainPrompt == nil {
+		rs.prevMainPrompt = map[string]int{}
+	}
+	prev, seen := rs.prevMainPrompt[r.Session]
+	if r.Prompt > 0 {
+		rs.prevMainPrompt[r.Session] = r.Prompt
+	}
+	if !seen || r.Prompt >= prev {
+		return nil
+	}
+	ev := &ShrinkEvent{
+		Kind:    "shrink",
+		Time:    r.Time,
+		Session: r.Session,
+		Model:   r.Model,
+		Before:  prev,
+		After:   r.Prompt,
+		Window:  h.windowTokens(),
+	}
+	ev.Budget = shapingBudget(ev.Window)
+	if b := h.cache.PeekBuild(); b.Cause != "" {
+		ev.Cause = b.Cause
+		ev.KeptChars = b.KeptChars
+		if cpt := h.meter.CharsPerToken(); cpt > 0 {
+			ev.KeptTokens = int(math.Round(float64(b.KeptChars) / cpt))
+			ev.Estimated = !h.meter.Measured()
+		}
+	}
+	return ev
 }
 
 // add folds r into the open turn and the speed window. Under mu.
@@ -317,6 +395,29 @@ func (l *StatsLedger) Append(r RoundStat) error {
 		return err
 	}
 	f, err := os.OpenFile(filepath.Join(l.dir, "rounds-"+r.Time.UTC().Format("2006-01")+".jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(append(b, '\n'))
+	return err
+}
+
+// AppendShrink writes a shrink event as one line, the same file and the same
+// append rule as Append: the readers glob rounds-*.jsonl and skip what does
+// not parse as a round stat, and "kind":"shrink" is how a reader that DOES
+// look for it picks the line out.
+func (l *StatsLedger) AppendShrink(e ShrinkEvent) error {
+	b, err := json.Marshal(e)
+	if err != nil || len(b)+1 > statsLineMax {
+		return err
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if err := os.MkdirAll(l.dir, 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(filepath.Join(l.dir, "rounds-"+e.Time.UTC().Format("2006-01")+".jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return err
 	}

@@ -137,3 +137,84 @@ func TestStatsLedger_ByModel(t *testing.T) {
 		t.Error("nil ledger should have no models")
 	}
 }
+
+// A main round whose prompt dropped below the session's previous main round's
+// is a shrink: one ledger line before the round that carries it, with the
+// prompt before, the prompt after, and the prefix the next build keeps — the
+// drop's cause is the build that preceded the round.
+func TestRoundStats_ShrinkEvent(t *testing.T) {
+	dir := t.TempDir()
+	h := &Harness{cfg: Config{SessionFile: "/x/20261024-2.jsonl"}, cache: &cacheStats{}}
+	h.window.Store(188160)
+	h.rounds.ledger = NewStatsLedger(dir)
+	m := spendmeter.NewMeter()
+	m.SetRoundHook(h.noteRound)
+	main := m.NoteAs(spendmeter.Source{Provider: "p", Model: "m", Role: spendmeter.RoleMain})
+
+	h.BeginTurnStats()
+	// A build before the fold sets prevSigs so noteBuild can detect the rewrite.
+	h.cache.noteBuild([]llm.Message{{Role: "user", Content: "long prompt"}}, nil, time.Now())
+	// Two rounds with no drop: no shrink line.
+	main(llm.Usage{PromptTokens: 10000, CompletionTokens: 200})
+	main(llm.Usage{PromptTokens: 10400, CompletionTokens: 50})
+	// A fold rewrote the prompt; the round after it carries the drop.
+	h.cache.noteFold()
+	h.cache.noteBuild([]llm.Message{{Role: "user", Content: "short"}}, nil, time.Now())
+	main(llm.Usage{PromptTokens: 6000, CompletionTokens: 40})
+	h.EndTurnStats()
+
+	b, err := os.ReadFile(filepath.Join(dir, "rounds-"+time.Now().UTC().Format("2006-01")+".jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("ledger: %d lines\n%s", len(lines), b)
+	}
+	var ev ShrinkEvent
+	if err := json.Unmarshal([]byte(lines[2]), &ev); err != nil {
+		t.Fatalf("line 3: %v\n%s", err, lines[2])
+	}
+	if ev.Kind != "shrink" || ev.Before != 10400 || ev.After != 6000 || ev.Cause != "fold" ||
+		ev.Window != 188160 || ev.Budget != shapingBudget(188160) || ev.Session != "20261024-2" || ev.Model != "m" {
+		t.Errorf("shrink: %+v", ev)
+	}
+	// The kept estimate is at the meter's fallback ratio: 4 chars/token, and
+	// it says so.
+	if ev.KeptTokens != 0 || !ev.Estimated {
+		t.Errorf("kept estimate: %+v", ev)
+	}
+	// The round that carries the drop is the line after.
+	var r RoundStat
+	if err := json.Unmarshal([]byte(lines[3]), &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.Prompt != 6000 {
+		t.Errorf("carrying round: %+v", r)
+	}
+}
+
+// Grows are not shrinks; a sub-agent's drop is not the session's.
+func TestRoundStats_NoShrinkWithoutDrop(t *testing.T) {
+	dir := t.TempDir()
+	h := &Harness{cfg: Config{SessionFile: "/x/20261024-3.jsonl"}, cache: &cacheStats{}}
+	h.rounds.ledger = NewStatsLedger(dir)
+	m := spendmeter.NewMeter()
+	m.SetRoundHook(h.noteRound)
+	main := m.NoteAs(spendmeter.Source{Provider: "p", Model: "m", Role: spendmeter.RoleMain})
+	child := m.NoteAs(spendmeter.Source{Provider: "p", Model: "s", Role: spendmeter.RoleModel})
+
+	h.BeginTurnStats()
+	main(llm.Usage{PromptTokens: 10000, CompletionTokens: 200})
+	child(llm.Usage{PromptTokens: 8000, CompletionTokens: 100}) // a child's prompt is its own
+	main(llm.Usage{PromptTokens: 11000, CompletionTokens: 30})  // a grow
+	h.EndTurnStats()
+
+	b, err := os.ReadFile(filepath.Join(dir, "rounds-"+time.Now().UTC().Format("2006-01")+".jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(b), `"kind":"shrink"`); got != 0 {
+		t.Errorf("%d shrink lines:\n%s", got, b)
+	}
+}

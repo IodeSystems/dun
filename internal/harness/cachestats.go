@@ -89,6 +89,10 @@ type cacheStats struct {
 	pending     cacheClass
 	havePending bool
 	lastResp    time.Time
+	// lastCause is the rewrite cause of the pending build, for the round
+	// ledger's shrink event: the BUILD that preceded a round is what its
+	// prompt is, so the build's cause is the round's drop's cause.
+	lastCause string
 
 	// Cumulative usage at the last round, for deltas.
 	prevCached, prevProcessed int
@@ -215,6 +219,7 @@ func (s *cacheStats) noteBuild(msgs []llm.Message, tools []llm.ToolDef, now time
 		if keep == len(s.prevSigs) && !toolsChanged {
 			s.AppendOnly++
 			class = classAfterGap
+			s.lastCause = ""
 			if !s.lastResp.IsZero() && now.Sub(s.lastResp) < backToBack {
 				class = classBackToBack
 			}
@@ -224,16 +229,22 @@ func (s *cacheStats) noteBuild(msgs []llm.Message, tools []llm.ToolDef, now time
 			switch {
 			case s.foldMarked:
 				s.RewritesFold++
+				s.lastCause = "fold"
 			case s.boundaryMarked:
 				s.RewritesBoundary++
+				s.lastCause = "boundary"
 			case s.reheadMarked:
 				s.RewritesRehead++
+				s.lastCause = "rehead"
 			case s.recapMarked:
 				s.RewritesRecap++
+				s.lastCause = "recap"
 			case toolsChanged:
 				s.RewritesTools++
+				s.lastCause = "tools"
 			default:
 				s.RewritesOther++
+				s.lastCause = "other"
 			}
 		}
 	} else {
@@ -243,6 +254,25 @@ func (s *cacheStats) noteBuild(msgs []llm.Message, tools []llm.ToolDef, now time
 	s.prevTools, s.haveTools = th, true
 	s.foldMarked, s.boundaryMarked, s.reheadMarked, s.recapMarked = false, false, false, false
 	s.pending, s.havePending = class, true
+}
+
+// BuildNote is what the round ledger's shrink event needs from a build:
+// its rewrite cause and the leading prefix it kept from the previous
+// build. PeekBuild returns it for the build now waiting for its round.
+type BuildNote struct {
+	Cause    string
+	KeptChars int
+}
+
+// PeekBuild is the pending build's note: "" cause when it is not a rewrite
+// (nothing to attribute a drop to).
+func (s *cacheStats) PeekBuild() BuildNote {
+	if s == nil {
+		return BuildNote{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return BuildNote{Cause: s.lastCause, KeptChars: s.LastKeptChars}
 }
 
 // noteRound files one round's usage delta under the class of the build that
