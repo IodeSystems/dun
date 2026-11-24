@@ -92,6 +92,7 @@ func clearNow(h *harness.Harness, em *emitter, clk *harness.PhaseClock, c clearC
 	if c.plan == "drop" {
 		h.DropOpenWork(harness.ClearDroppedWhy)
 	}
+	h.DropIntake() // unacknowledged messages never carry over, kept or not
 	jobs, items := clearKept(h, c)
 	h.Reset()
 	h.ClearKept(jobs, items)

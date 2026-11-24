@@ -9,9 +9,9 @@ import (
 	"github.com/iodesystems/agentkit/taskgraph"
 )
 
-// ClearItems lists the intake, the open asks and the open plan nodes; the
-// fold's ask node and closed items are not listed. DropOpenWork drops each:
-// the intake emptied, the asks closed as dropped, the nodes dropped.
+// ClearItems lists the open asks and the open plan nodes; the intake
+// (unacknowledged messages), the fold's ask node and closed items are not
+// listed. DropOpenWork drops each and empties the intake.
 func TestClearItemsAndDrop(t *testing.T) {
 	h, _, _ := startAsks(t)
 	if !h.askOpen("fix the flaky test") {
@@ -35,12 +35,12 @@ func TestClearItemsAndDrop(t *testing.T) {
 		lines = append(lines, ClearItemLine(it))
 	}
 	got := strings.Join(lines, "\n")
-	for _, want := range []string{"intake: and the docs", "ask 1 ", "write the docs"} {
+	for _, want := range []string{"ask 1 ", "write the docs"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("ClearItems lacks %q:\n%s", want, got)
 		}
 	}
-	if len(lines) != 3 || strings.Contains(got, "done already") || strings.Contains(got, "fold") {
+	if len(lines) != 2 || strings.Contains(got, "done already") || strings.Contains(got, "fold") || strings.Contains(got, "and the docs") {
 		t.Errorf("ClearItems lists more than the open items:\n%s", got)
 	}
 
@@ -53,6 +53,31 @@ func TestClearItemsAndDrop(t *testing.T) {
 	}
 	if b := h.asksBlock(); b != "" {
 		t.Errorf("the model is still shown asks: %q", b)
+	}
+}
+
+// DropIntake empties the intake and leaves the acknowledged asks; an intake
+// alone is no item.
+func TestDropIntake(t *testing.T) {
+	h, _, _ := startAsks(t)
+	h.intakeAdd("never acknowledged")
+	if items := h.ClearItems(); len(items) != 0 {
+		t.Errorf("intake listed: %+v", items)
+	}
+	if !h.askOpen("fix the flaky test") {
+		t.Fatal("ask not opened")
+	}
+	h.intakeAdd("another, unacknowledged")
+	h.DropIntake()
+	items := h.ClearItems()
+	if len(items) != 1 || items[0].Kind != "ask" {
+		t.Errorf("items = %+v, want the ask alone", items)
+	}
+	h.asks.mu.Lock()
+	n := len(h.asksLocked().Intake)
+	h.asks.mu.Unlock()
+	if n != 0 {
+		t.Errorf("intake still has %d messages", n)
 	}
 }
 
