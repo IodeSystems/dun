@@ -517,6 +517,7 @@ func main() {
 		}
 	}
 
+	startClock.Mark("flags and config")
 	// Session persistence, scoped by the workspace ROOT (~/.dun/sessions/<root>/).
 	var sessionFile, sessionID string
 	switch {
@@ -554,6 +555,7 @@ func main() {
 	// the worktree (symlink) and the Docker container (volume mount).
 	// Loaded from dun.json / dun.local.json and auto-discovered from go.mod.
 	mounts := mcpserver.LoadMounts(absWS, absWS)
+	startClock.Mark("project")
 
 	// Isolation tier 1: a git worktree (with --worktree). The agent's file
 	// changes land here on a fresh branch, not on the checked-out branch.
@@ -597,6 +599,7 @@ func main() {
 		wt, _ = harness.WorktreeInPlace(absWS)
 	}
 
+	startClock.Mark("worktree")
 	// Housekeeping, once the live worktree is known so it is never a candidate:
 	// remove session trees that hold nothing, drop registrations whose directory
 	// is gone, and bound the session history. Anything holding work is reported,
@@ -622,6 +625,7 @@ func main() {
 		}
 	}
 
+	startClock.Mark("housekeeping")
 	// Isolation tier 2: exec runs in a Docker container (--docker IMAGE), or host.
 	// --docker=true resolves to the default image (ubuntu:24.04).
 	dockerImage := resolveDockerImage(*docker)
@@ -1078,6 +1082,8 @@ func main() {
 	for _, n := range (harness.RoleResolver{Cfg: cfg}).TierDefaultNotes() {
 		fmt.Fprintln(os.Stderr, "dun: "+n)
 	}
+	startClock.Mark("setup")
+	cfg.StartClock = startClock
 	h, err := harness.Start(ctx, cfg)
 	if h != nil {
 		started.Store(h)
