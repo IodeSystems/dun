@@ -146,8 +146,8 @@ func isType(typ string) func(map[string]any) bool {
 // queued message runs in the cleared conversation — none of the old turn
 // in its request.
 //
-// The old task is an open ask (the intake), so a bare /clear asks first
-// (clear_confirm) and the turn runs on; the answer interrupts it.
+// The old task is an unacknowledged message, which /clear drops without
+// asking, so a bare /clear interrupts the turn at once.
 func TestEngineClearWaitsForTheTurn(t *testing.T) {
 	r := &slowStopRunner{stopIn: 300 * time.Millisecond}
 	g := newEngineRig(t, r)
@@ -156,13 +156,6 @@ func TestEngineClearWaitsForTheTurn(t *testing.T) {
 	g.send(&proto.User{Content: "the old task"})
 	g.waitFor("the partial reply", isType("token"))
 	g.send(&proto.ControlCmd{ID: "slash", Action: "clear"})
-	g.waitFor("the question", isType("clear_confirm"))
-	for _, ev := range g.seen {
-		if ev["type"] == "clearing" || ev["type"] == "done" {
-			t.Fatalf("the question must leave the turn running; saw %v", ev["type"])
-		}
-	}
-	g.send(&proto.ControlCmd{ID: "slash", Action: "clear keep"})
 	cl := g.waitFor("clearing", isType("clearing"))
 	if cl["waiting"] != "the model's reply" {
 		t.Errorf("clearing waits for %v, want the model's reply", cl["waiting"])

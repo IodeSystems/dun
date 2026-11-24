@@ -826,7 +826,7 @@ type ClearConfirm struct {
 }
 
 // ClearItem is one open ask or plan item a /clear asks about. Kind is
-// "intake" (the person's messages not yet acknowledged), "ask" or "node".
+// "ask" or "node".
 type ClearItem struct {
 	Kind  string `json:"kind"`
 	ID    string `json:"id"`

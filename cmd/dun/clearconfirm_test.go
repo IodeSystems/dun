@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -14,9 +15,12 @@ import (
 
 // clearRunner answers "ok" to every call and records each request. With
 // exec, its first call runs `sleep 30` with a 1s grace instead: a
-// background job #1 that outlives the turn.
+// background job #1 that outlives the turn. With ack, the next call
+// acknowledges the person's message as an open ask (the asks tool), so the
+// message is an ask and not unacknowledged intake.
 type clearRunner struct {
 	exec bool
+	ack  bool
 	mu   sync.Mutex
 	n    int
 	reqs [][]llm.Message
@@ -25,13 +29,19 @@ type clearRunner struct {
 func (r *clearRunner) ChatStream(_ context.Context, msgs []llm.Message, _ []llm.ToolDef, _ *llm.ChatOpts) (<-chan llm.StreamChunk, error) {
 	r.mu.Lock()
 	r.n++
-	first := r.n == 1
+	var name, args string
+	switch n := r.n; {
+	case r.exec && n == 1:
+		name, args = "exec", `{"command":"sleep 30","timeout":1}`
+	case r.ack && n == map[bool]int{true: 2, false: 1}[r.exec]:
+		name, args = "asks", `{"asks":[{"id":0,"state":"open"}]}`
+	}
 	r.reqs = append(r.reqs, msgs)
 	r.mu.Unlock()
 	out := make(chan llm.StreamChunk, 4)
-	if first && r.exec {
-		tc := &llm.ToolCall{ID: "c1", Type: "function"}
-		tc.Function.Name, tc.Function.Arguments = "exec", `{"command":"sleep 30","timeout":1}`
+	if name != "" {
+		tc := &llm.ToolCall{ID: "c" + strconv.Itoa(r.n), Type: "function"}
+		tc.Function.Name, tc.Function.Arguments = name, args
 		out <- llm.StreamChunk{ToolCall: tc}
 	} else {
 		out <- llm.StreamChunk{Content: "ok"}
@@ -60,7 +70,14 @@ func (r *clearRunner) last() string {
 // after it.
 func clearRig(t *testing.T, exec bool) (*engineRig, *clearRunner) {
 	t.Helper()
-	r := &clearRunner{exec: exec}
+	return clearRigAck(t, exec, true)
+}
+
+// clearRigAck is clearRig with the first message acknowledged as an ask
+// (ack) or left unacknowledged on the intake.
+func clearRigAck(t *testing.T, exec, ack bool) (*engineRig, *clearRunner) {
+	t.Helper()
+	r := &clearRunner{exec: exec, ack: ack}
 	g := newEngineRig(t, r, func(c *harness.Config) { c.Exec = &harness.HostShell{Dir: c.Workspace} })
 	t.Cleanup(func() { g.h.KillAllJobs("user") })
 	g.waitFor("ready", isType("ready"))
@@ -91,7 +108,7 @@ func (g *engineRig) noReset(why string) {
 	}
 }
 
-// Only open asks (the old task, on the intake): a bare /clear asks about
+// Only open asks (the old task, acknowledged): a bare /clear asks about
 // the plan alone, clears nothing, and the message names the line to send.
 // Sending nothing is the cancel: the items are still there.
 func TestEngineClearAsksAboutPlanOnly(t *testing.T) {
@@ -102,8 +119,8 @@ func TestEngineClearAsksAboutPlanOnly(t *testing.T) {
 		t.Errorf("no job runs, yet jobs = %v", q["jobs"])
 	}
 	plan, _ := q["plan"].([]any)
-	if len(plan) != 1 || plan[0].(map[string]any)["kind"] != "intake" || !strings.Contains(plan[0].(map[string]any)["title"].(string), "the old task") {
-		t.Errorf("plan = %v, want the intake with the old task", q["plan"])
+	if len(plan) != 1 || plan[0].(map[string]any)["kind"] != "ask" || !strings.Contains(plan[0].(map[string]any)["title"].(string), "the old task") {
+		t.Errorf("plan = %v, want the ask for the old task", q["plan"])
 	}
 	msg, _ := q["message"].(string)
 	if !strings.Contains(msg, "/clear plan=keep|drop") || strings.Contains(msg, "jobs=") {
@@ -142,7 +159,7 @@ func TestEngineClearKeepTellsTheNewConversation(t *testing.T) {
 	g.send(&proto.User{Content: "the new task"})
 	g.waitFor("the new turn's done", isType("done"))
 	got := r.last()
-	for _, want := range []string{"kept these from before it", "#1 `sleep 30`", "intake: the old task", "user: the new task"} {
+	for _, want := range []string{"kept these from before it", "#1 `sleep 30`", "ask 1 ", "the old task", "user: the new task"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the new conversation's request lacks %q:\n%s", want, got)
 		}
@@ -209,5 +226,50 @@ func TestParseClear(t *testing.T) {
 		if _, err := parseClear([]string{bad}); err == nil {
 			t.Errorf("parseClear(%q) took it", bad)
 		}
+	}
+}
+
+// Only an unacknowledged message (the model never acked it): a bare /clear
+// asks nothing and clears at once; the message is gone from the new
+// conversation (USER 2026-11-24).
+func TestEngineClearDropsUnacknowledgedWithoutAsking(t *testing.T) {
+	g, r := clearRigAck(t, false, false)
+	if len(g.h.ClearItems()) != 0 {
+		t.Fatalf("an unacknowledged message is not an item: %+v", g.h.ClearItems())
+	}
+	g.slash("clear")
+	g.waitFor("reset", isType("reset"))
+	for _, ev := range g.seen {
+		if ev["type"] == "clear_confirm" {
+			t.Fatal("asked about an unacknowledged message")
+		}
+	}
+	g.send(&proto.User{Content: "the new task"})
+	g.waitFor("the new turn's done", isType("done"))
+	got := r.last()
+	if strings.Contains(got, "the old task") || strings.Contains(got, "kept these") {
+		t.Errorf("the new conversation's request has the unacknowledged message:\n%s", got)
+	}
+}
+
+// An acknowledged ask and a later unacknowledged message: the question
+// lists the ask alone; keep carries the ask, not the message.
+func TestEngineClearKeepCarriesAskNotUnacknowledged(t *testing.T) {
+	g, r := clearRig(t, false)
+	g.send(&proto.User{Content: "the unacked one"})
+	g.waitFor("the second turn's done", isType("done"))
+	g.slash("clear")
+	q := g.waitFor("the question", isType("clear_confirm"))
+	plan, _ := q["plan"].([]any)
+	if len(plan) != 1 || plan[0].(map[string]any)["kind"] != "ask" || strings.Contains(plan[0].(map[string]any)["title"].(string), "unacked") {
+		t.Fatalf("plan = %v, want the one ask", q["plan"])
+	}
+	g.slash("clear keep")
+	g.waitFor("reset", isType("reset"))
+	g.send(&proto.User{Content: "the new task"})
+	g.waitFor("the new turn's done", isType("done"))
+	got := r.last()
+	if !strings.Contains(got, "ask 1 ") || strings.Contains(got, "unacked") {
+		t.Errorf("the new conversation's request:\n%s", got)
 	}
 }

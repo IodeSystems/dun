@@ -22,17 +22,19 @@ import (
 
 // ClearItem is one open ask or plan item /clear asks about.
 type ClearItem struct {
-	Kind  string // "intake" (messages not yet acknowledged), "ask", "node"
-	ID    string // "intake", the ask's number, the node's id
+	Kind  string // "ask", "node"
+	ID    string // the ask's number, the node's id
 	Title string
 }
 
 // ClearDroppedWhy is the reason an ask or plan node dropped by /clear gives.
 const ClearDroppedWhy = "the conversation was cleared"
 
-// ClearItems is the open asks (the intake first) and the open plan nodes,
-// what the model is shown in the [asks] and [plan] blocks. The fold's ask
-// node is not one: it is the cleared conversation's, and Reset drops it.
+// ClearItems is the open asks and the open plan nodes, what the model is
+// shown in the [asks] and [plan] blocks. Not the intake (messages the model
+// never acknowledged; USER 2026-11-24: always dropped on /clear, never
+// asked about: DropIntake). The fold's ask node is not one either: it is
+// the cleared conversation's, and Reset drops it.
 func (h *Harness) ClearItems() []ClearItem {
 	if h.isChild() {
 		return nil
@@ -41,13 +43,6 @@ func (h *Harness) ClearItems() []ClearItem {
 	if h.asksOn() {
 		h.asks.mu.Lock()
 		d := h.asksLocked()
-		if n := len(d.Intake); n > 0 {
-			t := workClip(d.Intake[n-1].Text, askTitleMax)
-			if n > 1 {
-				t += fmt.Sprintf(" (+%d earlier)", n-1)
-			}
-			out = append(out, ClearItem{Kind: "intake", ID: askIntakeID, Title: t})
-		}
 		for _, r := range d.Asks {
 			if r.Outcome == "" {
 				out = append(out, ClearItem{Kind: "ask", ID: strconv.Itoa(r.N), Title: r.Title})
@@ -67,7 +62,25 @@ func (h *Harness) ClearItems() []ClearItem {
 	return out
 }
 
-// DropOpenWork drops what ClearItems lists: the intake is emptied, each open
+// DropIntake empties the intake: the person's messages the model never
+// acknowledged. /clear always does this, whatever else it keeps.
+func (h *Harness) DropIntake() {
+	if h.isChild() {
+		return
+	}
+	h.asks.mu.Lock()
+	defer h.asks.mu.Unlock()
+	d := h.asksLocked()
+	if len(d.Intake) > 0 {
+		d.Intake = nil
+		h.asksSaveLocked()
+	}
+	if h.asks.cur == askIntakeID {
+		h.asks.cur = ""
+	}
+}
+
+// DropOpenWork drops what ClearItems lists (and the intake): each open
 // ask is closed as dropped (its /journal entry written), each open plan node
 // is dropped, all with why.
 func (h *Harness) DropOpenWork(why string) {
@@ -165,11 +178,9 @@ func ClearKeptNote(jobs []JobInfo, items []ClearItem) string {
 }
 
 // ClearItemLine is one item as a short line: "ask 2 fix the flaky test",
-// "plan n4 write the docs", "intake: <newest message>".
+// "plan n4 write the docs".
 func ClearItemLine(it ClearItem) string {
 	switch it.Kind {
-	case "intake":
-		return "intake: " + it.Title
 	case "node":
 		return "plan " + it.ID + " " + it.Title
 	}
