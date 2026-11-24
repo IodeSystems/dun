@@ -2043,3 +2043,40 @@ rescue), and agentkit's capability record on the wire. Code:
   for it, and what the model reads. Size: one line per editing call, plus one
   blob per file version over 8 KiB (content-addressed, so an edit's old text
   is the previous edit's new text, kept once). `/clear` removes it.
+
+## ACP bridge (USER 2026-11-24)
+
+`dun acp` (`internal/acp`, `docs/acp.md`) lets editors (Zed, JetBrains
+Air, Neovim) drive dun over the Agent Client Protocol.
+
+- **A dund client, not an engine mode** (USER). The bridge talks to dund
+  over its unix socket as the TUI does and translates; dund keeps owning
+  sessions, so an ACP session is an ordinary one that the TUI and web
+  follow too, and the rule that clients stay dumb holds: no turn state is
+  inferred beyond what a prompt's answer needs.
+- **SDK: github.com/coder/acp-go-sdk v0.20.0** (USER: a community Go SDK,
+  coder's first). Apache-2.0 (on the notices allow-list, no exception),
+  standard library only, ACP protocol version 1 at schema 1.32.0, generated
+  from the official schemas, every method behind an interface the build
+  checks (`sdk.Agent`, `sdk.AgentLoader`). Maintained by Coder, many
+  releases (v0.18 to v0.20 on 2026-11-18): v0.20 broke API on purpose
+  (MIGRATION_v0.20.md), so an upgrade is a reviewed change, not a
+  renovate merge. Not evaluated further: it fit.
+- **In place** (USER). session/new's `cwd` is the workspace and no
+  `--worktree` is passed (dun's default is in place): the editor shows the
+  files on disk. No dund change was needed.
+- **A mid-turn prompt is queued** (USER), and its JSON-RPC answer waits
+  for the end of the turn that gave its message to the model (`delivered`,
+  or a turn's input), with that turn's stop reason. ACP does not say what a
+  second prompt means; answering the earlier prompt at its own turn's end
+  and the queued one at the end of the turn that read it is the one rule
+  that never answers a prompt before the model has seen it. The SDK
+  cancels the earlier prompt's context when the next arrives; the bridge
+  ignores prompt contexts and stops a turn only on session/cancel.
+- **Questions**: one answer from options is session/request_permission
+  (the file-access question is the case it was asked for); a multiple
+  choice is the agent's text, answered by the next prompt. ACP's
+  permission is one choice from options, and the editor has no other
+  question UI.
+- **--no-suggest** on ACP sessions: no ACP client shows suggestions, and
+  each costs a side call.

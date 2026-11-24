@@ -9,7 +9,7 @@ Other docs: `README.md` (use), `decisions.md` (why the code is the way it is),
 `event-protocol.md` (engine wire format), `mid-turn-messages.md`,
 `tui-architecture.md`, `node_query.md` (tool cheat sheet),
 `sessions-and-dund.md`, `session-events.md`, `providers-and-cost.md`, `mcp-and-tools.md`,
-`memory.md`, `scheduling.md`.
+`memory.md`, `scheduling.md`, `acp.md` (editors over ACP).
 
 ## What dun composes
 
@@ -32,7 +32,7 @@ composition. The tool composition itself is small: `mcpToolDefs` and
 ## Architecture
 
 ```
-clients: TUI (cmd/dun) · browser · phone (mobile/)
+clients: TUI (cmd/dun) · browser · phone (mobile/) · editors (dun acp)
    │  attach over a unix socket / HTTP
    ▼
 dund — session service (internal/dund). Owns sessions; they outlive clients.

@@ -150,6 +150,10 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "mcp" {
 		os.Exit(mcpCmd(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
 	}
+	// `dun acp`: dun as an ACP agent on stdio, for editors (acp.go).
+	if len(os.Args) > 1 && os.Args[1] == "acp" {
+		os.Exit(acpCmd(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+	}
 	// `dun watch`: a line each time a session ends a turn or asks (watchcmd.go).
 	if len(os.Args) > 1 && os.Args[1] == "watch" {
 		os.Exit(watchCmd(os.Args[2:], os.Stdout, os.Stderr))
@@ -1290,12 +1294,12 @@ func settleDelayFlag(d time.Duration) time.Duration {
 // unit test can assert the NoCustom field is set from the parameter.
 func newAskEvent(callID, question string, options []string, multi, noCustom bool, recommended []string) *proto.Ask {
 	a := &proto.Ask{
-		AskID:        harness.NewMessageID(),
-		CallID:       callID,
-		Question:     question,
-		Options:      options,
-		Multi:        multi,
-		NoCustom:     noCustom,
+		AskID:          harness.NewMessageID(),
+		CallID:         callID,
+		Question:       question,
+		Options:        options,
+		Multi:          multi,
+		NoCustom:       noCustom,
 		RecommendedAll: recommended,
 	}
 	if len(recommended) > 0 {
