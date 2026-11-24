@@ -39,6 +39,7 @@ func init() {
 	event[PromptText]("prompt")
 	event[ResetEvent]("reset")
 	event[Clearing]("clearing")
+	event[ClearConfirm]("clear_confirm")
 	event[Agents]("agents")
 	event[Jobs]("jobs")
 	event[AgentHistory]("agent_history")
@@ -786,6 +787,28 @@ type ResetEvent struct {
 // meanwhile is queued, and runs in the cleared conversation.
 type Clearing struct {
 	Waiting string `json:"waiting,omitempty"`
+}
+
+// ClearConfirm: a /clear was not done, because something would outlive the
+// conversation and the person did not say what becomes of it: background
+// jobs still running (Jobs), open asks or plan items (Plan). A category
+// already answered on the line, or with nothing in it, is not listed. The
+// client asks and sends the answer as the slash line
+// "clear jobs=keep|stop plan=keep|drop" (a category not asked left out);
+// sending nothing cancels. Message says the same in words, naming that
+// form: what a client that does not ask shows.
+type ClearConfirm struct {
+	Jobs    []JobInfo   `json:"jobs,omitempty"`
+	Plan    []ClearItem `json:"plan,omitempty"`
+	Message string      `json:"message"`
+}
+
+// ClearItem is one open ask or plan item a /clear asks about. Kind is
+// "intake" (the person's messages not yet acknowledged), "ask" or "node".
+type ClearItem struct {
+	Kind  string `json:"kind"`
+	ID    string `json:"id"`
+	Title string `json:"title"`
 }
 
 // Agents is every sub-agent, the whole list each time.

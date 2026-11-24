@@ -11,7 +11,7 @@ func TestRouteSlash_MCPInfoHelp(t *testing.T) {
 	r := slashRoutes{
 		server:  func(a, b string) { got = append(got, "server "+a+" "+b) },
 		control: func(a, b string) { got = append(got, "control "+a+" "+b) },
-		reset:   func() {},
+		reset:   func(clearChoice) {},
 		reply:   func(m string) { got = append(got, "reply "+m) },
 	}
 	routeSlash("mcp INFO", r)
@@ -37,7 +37,7 @@ func TestRouteSlash_MCPUnknownActionOnce(t *testing.T) {
 	r := slashRoutes{
 		server:  func(a, b string) { got = append(got, "server "+a+" "+b) },
 		control: func(a, b string) { got = append(got, "control "+a+" "+b) },
-		reset:   func() {},
+		reset:   func(clearChoice) {},
 		reply:   func(m string) { got = append(got, "reply "+m) },
 	}
 	routeSlash("mcp inf9", r)

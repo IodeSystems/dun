@@ -112,7 +112,7 @@ func TestRouteSlash(t *testing.T) {
 	r := slashRoutes{
 		server:  func(a, b string) { calls = append(calls, call{"server", a, b}) },
 		control: func(a, b string) { calls = append(calls, call{"control", a, b}) },
-		reset:   func() { calls = append(calls, call{"reset", "", ""}) },
+		reset:   func(clearChoice) { calls = append(calls, call{"reset", "", ""}) },
 		reply:   func(m string) { calls = append(calls, call{"reply", m, ""}) },
 	}
 	for line, want := range map[string]call{
@@ -196,7 +196,7 @@ func TestRouteSlash_Jobs(t *testing.T) {
 	r := slashRoutes{
 		server:  func(a, b string) { calls = append(calls, call{"server", a, b}) },
 		control: func(a, b string) { calls = append(calls, call{"control", a, b}) },
-		reset:   func() { calls = append(calls, call{"reset", "", ""}) },
+		reset:   func(clearChoice) { calls = append(calls, call{"reset", "", ""}) },
 		reply:   func(m string) { calls = append(calls, call{"reply", m, ""}) },
 	}
 	for line, want := range map[string]call{

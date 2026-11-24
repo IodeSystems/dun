@@ -117,8 +117,8 @@ func jobsListing(jobs []harness.JobInfo, now time.Time) string {
 type slashRoutes struct {
 	server  func(alias, action string)
 	control func(id, action string)
-	reset   func()
-	reply   func(msg string) // an answer that is not a command's own event
+	reset   func(clearChoice) // /clear, with what becomes of the jobs and the plan
+	reply   func(msg string)  // an answer that is not a command's own event
 	// exts are the extensions whose slash commands route (engineExtensions);
 	// nil is the bundled ones.
 	exts []mcpserver.Extension
@@ -366,7 +366,12 @@ func routeSlash(line string, r slashRoutes) {
 		_, rest := textfmt.CutFields(strings.TrimPrefix(strings.TrimSpace(line), "/"), 1)
 		r.control(name, rest)
 	case "clear":
-		r.reset()
+		c, err := parseClear(args)
+		if err != nil {
+			r.reply(err.Error())
+			return
+		}
+		r.reset(c)
 	default:
 		r.reply("no command /" + name)
 	}

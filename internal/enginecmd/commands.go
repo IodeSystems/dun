@@ -221,7 +221,15 @@ func OwnCommands(iso string) []proto.CommandSpec {
 				"/loop <prompt>, with no interval, lets the model pace it: while a loop runs it has a loop_ctl tool to set the next run or stop; a run that ends without it waits 20m.\n" +
 				"A run waits while the session is in a turn. /loop lists the loops, /loop stop [id] ends one; /schedule push|edit|cancel work on loops too."},
 		{Name: "interrupt", Group: "session", Description: "stop the running turn; what it wrote so far stays, and your next message continues from there"},
-		{Name: "clear", Group: "session", Description: "clear the conversation and start a fresh session log"},
+		{Name: "clear", Usage: "[keep|drop] [jobs=keep|stop] [plan=keep|drop]", Group: "session",
+			Choices: choices("keep", "keep running jobs and open asks and plan items; the new conversation is told about them",
+				"drop", "stop running jobs and drop open asks and plan items"),
+			Description: "clear the conversation and start a fresh session log; asks first what becomes of running background jobs and open asks and plan items",
+			Help: "/clear starts the conversation again, in a fresh session log (the old one is kept beside it).\n" +
+				"Background jobs still running, and open asks and plan items, outlive the conversation, so /clear asks first what becomes of them:\n" +
+				"jobs=keep (they run on; the new conversation is told which ones, and hears when each ends) or jobs=stop (killed);\n" +
+				"plan=keep (carried over; the new conversation is told about them) or plan=drop (dropped with the conversation).\n" +
+				"/clear keep keeps both, /clear drop stops and drops both. With nothing running or open it clears at once. A turn running is stopped once you answer."},
 		{Name: "discard", Group: "session", Description: "discard this session for good: remove its worktree and branch, forget its transcript (it was /close; /close now exits, USER 2026-10-27)"},
 	}
 }
