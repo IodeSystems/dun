@@ -87,13 +87,16 @@ SCRATCH="$(mktemp -d /tmp/dun-ux-XXXXXX)"
 BIN="$SCRATCH/bin"
 mkdir -p "$BIN"
 
+DUN_PIDS=""
 stop_run() {
   [ -n "${STUB_PID:-}" ] && kill "$STUB_PID" 2>/dev/null || true
   STUB_PID=""
-  # dun starts a launcher and dund that outlive the TUI; each runs from $BIN.
-  pkill -TERM -f "^$BIN/" 2>/dev/null || true
+  # Kill the launcher and dund by PID. pkill -f matches the full command
+  # line and can hit the caller's shell; pgrep + kill by PID cannot.
+  for pid in $DUN_PIDS; do kill "$pid" 2>/dev/null || true; done
   sleep 0.5
-  pkill -KILL -f "^$BIN/" 2>/dev/null || true
+  for pid in $DUN_PIDS; do kill -9 "$pid" 2>/dev/null || true; done
+  DUN_PIDS=""
 }
 cleanup() {
   stop_run
@@ -172,6 +175,7 @@ walk_one() {
   )
   REC=$?
   set -e
+  DUN_PIDS="$(pgrep -f "^$BIN/" 2>/dev/null || true)"
   stop_run
   [ -f "$RUN/rec.json" ] || die "the recorder wrote no result at $tag (exit $REC)"
 
