@@ -499,15 +499,19 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m.input.Blur()
 		m.settleAsk() // a new question replaces any parked one
 		// The row its call already has (a snapshot's history drew it) is the
-		// question's row; otherwise it gets one.
+		// question's row; otherwise it gets one. A restored question's row
+		// came from history, so its answer is the wake message, not a second
+		// "› value" row.
 		call := str(ev["call_id"])
 		if i := slices.IndexFunc(m.convo, func(e convoEntry) bool { return call != "" && e.askCall == call }); i >= 0 {
 			m.convo[i].askOpen = true
 			m.convo[i].renderAsk(false)
+			m.askRestored = true
 		} else {
 			q := convoEntry{askText: str(ev["question"]), askOpen: true, askCall: call}
 			q.renderAsk(false)
 			m.convo = append(m.convo, q)
+			m.askRestored = false
 		}
 		m.refresh()
 		m.askOptions = nil
@@ -621,9 +625,13 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 			break
 		}
 		// The client that answered has already closed it; on another, it is
-		// still open and closes now.
+		// still open and closes now. A restored question's answer is the wake
+		// message dund sends next, so the "› value" row is redundant here.
 		m.settleAsk()
-		m.appendUser(str(ev["value"]))
+		if !m.askRestored {
+			m.appendUser(str(ev["value"]))
+		}
+		m.askRestored = false
 		if m.asking {
 			m = m.clearAsk()
 		}

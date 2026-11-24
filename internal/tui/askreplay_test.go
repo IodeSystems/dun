@@ -126,8 +126,44 @@ func TestAskReplay_OpenQuestionIsOneRow(t *testing.T) {
 	if c := strings.Count(stripANSI(convoText(m)), "which one?"); c != 1 || !m.asking || m.askEntry() < 0 {
 		t.Fatalf("after reconnect: rows %d asking %v:\n%s", c, m.asking, convoText(m))
 	}
+	// A restored question's answer is the wake message dund sends next; the
+	// Answered event alone draws no "› value" row.
 	m = m.handleEvent(evMsg{"type": "answered", "ask_id": "k1", "value": "red"})
+	m = m.handleEvent(evMsg{"type": "user", "content": "[automatic] Answer to your question \"which one?\": red"})
 	if m.asking || !strings.Contains(stripANSI(convoText(m)), "red") {
 		t.Errorf("answer:\n%s", convoText(m))
+	}
+}
+
+// A RESTORED question's answer is one row: the wake message (the user
+// message dund sends with the answer) IS the answer, so the TUI must not
+// draw a second "› value" row from the Answered event. A live question
+// (TestAskReplay_SameRowsAsLive) keeps its "› value" row: there no wake
+// message follows.
+func TestAskReplay_AnswerIsOneRow(t *testing.T) {
+	ask := map[string]any{"ask_id": "k1", "call_id": "c1", "question": "which one?", "options": []any{"red", "blue"}}
+	snap := evMsg{"type": "snapshot", "items": []any{
+		map[string]any{"kind": "user", "id": "u1", "content": "go"},
+		map[string]any{"kind": "tool_call", "tool": "ask_user", "call_id": "c1", "args": ask},
+	}, "state": []any{map[string]any{"type": "turn_state", "phase": "waiting_answer", "queued": []any{}, "ask": ask, "replayed": true}}}
+
+	m := newTUIModel(&dunProc{}, "/ws")
+	m = resized(m, 100, 30)
+	m = m.handleEvent(snap)
+	if !m.asking {
+		t.Fatalf("setup: question not open:\n%s", convoText(m))
+	}
+	// The answer: dund sends the Answered event, then the wake user message.
+	m = m.handleEvent(evMsg{"type": "answered", "ask_id": "k1", "value": "green"})
+	m = m.handleEvent(evMsg{"type": "user", "content": "[automatic] Answer to your question \"which one?\": green"})
+	text := stripANSI(convoText(m))
+	if c := strings.Count(text, "green"); c != 1 {
+		t.Errorf("the answer is in %d rows (want 1, the wake line):\n%s", c, text)
+	}
+	if !strings.Contains(text, "↻ resumed") {
+		t.Errorf("the wake line is not drawn as the resume row:\n%s", text)
+	}
+	if strings.Contains(text, "› green") {
+		t.Errorf("a second answer row:\n%s", text)
 	}
 }

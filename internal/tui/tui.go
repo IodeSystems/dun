@@ -187,6 +187,7 @@ type tuiModel struct {
 	confirm       confirmState // a pending y/n question (jobkill.go)
 	busyStart     time.Time    // when the current busy turn started
 	asking        bool         // agent is waiting on an ask_user answer
+	askRestored   bool         // the question's row came from history (a dund restart), so its answer is the wake message, not a second row
 	askID         string       // the open question's ask_id: the answer names it
 	askOptions    []string     // the offered options; a trailing text row is implicit (askTextRow)
 	askRec        []string     // the options the model recommends (marked, preselected)
