@@ -58,7 +58,8 @@ func nodeEditWarned(result string) bool {
 }
 
 // nodeEditRender: node_edit answers JSON, not a diff. The preview carries the
-// note, the byte delta, the diagnostic count and "incomplete" when the edit
+// note (poly-lsp's note already carries the byte delta; without a note, the
+// node path and the delta), the diagnostic count and "incomplete" when the edit
 // landed not clean; the body lists what is wrong, in the attention colour as
 // evalRender's warnings are. A result with a diff field, or one that is not
 // JSON, keeps the diff rendering.
@@ -71,12 +72,13 @@ func nodeEditRender(rc renderCtx) (string, string) {
 		return diffRender(rc)
 	}
 	head := v.Note
-	if head == "" {
+	parts := []string{stSecondary.Render(textfmt.Clip(textfmt.OneLine(head), 200))}
+	if v.Note == "" {
 		head = v.Node
-	}
-	parts := []string{
-		stSecondary.Render(textfmt.Clip(textfmt.OneLine(head), 200)),
-		stSecondary.Render(fmt.Sprintf("+%d −%d", v.BytesAdded, v.BytesRemoved)),
+		parts = []string{
+			stSecondary.Render(textfmt.Clip(textfmt.OneLine(v.Node), 200)),
+			stSecondary.Render(fmt.Sprintf("+%d −%d", v.BytesAdded, v.BytesRemoved)),
+		}
 	}
 	if n := len(v.Diagnostics); n > 0 {
 		parts = append(parts, stSecondary.Render(textfmt.Plural(n, "diagnostic")))
