@@ -25,7 +25,7 @@ var toolKinds = map[string]sdk.ToolKind{
 	"file_grep": sdk.ToolKindSearch, "node_query": sdk.ToolKindSearch, "search": sdk.ToolKindSearch,
 	"docs_search": sdk.ToolKindSearch, "lookup": sdk.ToolKindSearch,
 	"exec": sdk.ToolKindExecute, "eval": sdk.ToolKindExecute,
-	"recap": sdk.ToolKindThink, "plan_add": sdk.ToolKindThink, "plan_update": sdk.ToolKindThink,
+	"recap": sdk.ToolKindThink, "asks": sdk.ToolKindThink, "plan_add": sdk.ToolKindThink, "plan_update": sdk.ToolKindThink,
 	"plan_close": sdk.ToolKindThink, "plan_show": sdk.ToolKindThink,
 	"fetch": sdk.ToolKindFetch, "web_fetch": sdk.ToolKindFetch,
 }
