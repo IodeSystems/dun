@@ -26,6 +26,11 @@ import (
 // skillPoll is how often the engine looks for changed skill files.
 var skillPoll = 3 * time.Second
 
+// startClock times the engine's start, from package init (the process's
+// start, near enough) to ready, in phases (harness.PhaseClock): ready
+// carries it, and a client says where the time went when it is long.
+var startClock = harness.NewPhaseClock(time.Now())
+
 func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *inputStream, peers *peerLink, firstTask string, cc closeCtx) {
 	// Stop the turn in flight (proto.Interrupt, /interrupt). On the reader
 	// goroutine: it only cancels a context, and the turn loop reports the end
@@ -39,8 +44,9 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 		}
 	}
 	in.setInterrupt(interruptCmd)
+	startClock.Mark("session history")
 	em.emit(&proto.Ready{Version: buildinfo.Version, Tools: h.ToolNames(), Servers: enginecmd.ServersProto(h.Servers()),
-		Hint: withToolWarnings(enginecmd.ServerHint(h.Servers()))})
+		Hint: withToolWarnings(enginecmd.ServerHint(h.Servers())), Startup: startClock.Timing()})
 	em.emit(catalogEvent(h))
 	em.emit(settingsEvent())
 	em.emit(commandsEvent(h))
@@ -82,9 +88,18 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 			}
 		}
 	}()
+	// /clear (clear.go): at once when no turn runs; otherwise the turn is
+	// interrupted and the loop clears when it is over.
+	var clr clearing
 	resetCmd := func() {
-		h.Reset()
-		em.emit(&proto.ResetEvent{})
+		clk := newClear()
+		waiting := em.turn.waitingFor()
+		if clr.begin(clk, waiting, func() bool { return h.Interrupt("the conversation was cleared") }) {
+			em.turn.interrupting()
+			em.emit(&proto.Clearing{Waiting: waiting})
+			return
+		}
+		clearNow(h, em, clk)
 	}
 	var ctrlCmd func(id, action string)
 	ctrlCmd = func(id, action string) {
@@ -685,6 +700,11 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 	// background completion), which is exactly when a retry is worth making.
 	autoContinue := true
 	for {
+		// A /clear that waited for the turn just over: before anything runs.
+		if clk, waited := clr.take(); clk != nil {
+			clk.Mark("stopping " + waited)
+			clearNow(h, em, clk)
+		}
 		// A message with images held during the last turn starts the next.
 		if msg, ok := h.Gate().TakeHeld(); ok {
 			turn(ctx, h, em, msg.Text, protoImages(msg.Images))

@@ -35,6 +35,9 @@ import (
 // Config configures a dun harness.
 type Config struct {
 	Workspace string
+	// StartClock, when set, is marked at each phase of Start (phaseclock.go):
+	// where an engine's start spent its time. Nil: not timed.
+	StartClock *PhaseClock
 	// RaglitHome overrides where raglit keeps its index. Empty — the normal
 	// case — lets raglit resolve its own home and namespace this workspace by
 	// project, so the index survives the session. It used to be a temp dir
@@ -793,6 +796,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// instance agent, and, for a child isolated in a tree of its own, each
 	// server keyed on {{workspace}}. They run in a manager of the child's,
 	// under the same ids, so the tool names the model sees do not change.
+	cfg.StartClock.Mark("config")
 	mgr, ownsMgr := cfg.Parent.managerFor()
 	var own map[string]bool
 	if cfg.Parent != nil {
@@ -895,7 +899,13 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 			}
 		}()
 	}
+	cfg.StartClock.Mark("session")
+	// Measured 2026-11-24: a slow poly-lsp takes the whole grace, 1.5s of a
+	// 1.76s start. Not moved to the first turn: code that runs while a
+	// built-in starts (the code guard, index-anyway) counts on the session
+	// not existing until the grace is over.
 	waitGrace(&builtins, serverStartGrace)
+	cfg.StartClock.Mark("built-in servers")
 	// Carry the client's own retry narration out to the UI. Without this the
 	// waiting is only ever logged, and a TUI's log is not on screen.
 	applyRetryPolicy(cfg.Client)
@@ -906,6 +916,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// when the endpoint cannot say yet, asked again as the session runs — see
 	// ensureWindow for why one missed request must not disarm a whole session.
 	h.window.Store(int64(h.contextWindow(ctx, cfg.Client)))
+	cfg.StartClock.Mark("model's context window")
 	if h.windowTokens() == 0 {
 		h.windowRunner = cfg.Client
 	}
@@ -1016,6 +1027,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	if h.applyPending.Load() { // a server came up while the lock was held
 		h.applyTools()
 	}
+	cfg.StartClock.Mark("tools")
 	// The workspace into dund's code and docs indexes, in the background
 	// (codesearch.go); again at each turn end.
 	h.codeReindex()
@@ -1030,6 +1042,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// are not. Register them (restarted, in a session that persists; else
 	// stopped) and SAY so — a model that spawned an agent last session must
 	// not assume it is still working.
+	cfg.StartClock.Mark("index")
 	if !ownsMgr {
 		return h, nil // a child does not have children: depth stays at 1
 	}
@@ -1043,6 +1056,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// (a test's temp dir removed) fails its cleanup.
 	h.writeHarnessInfo()
 	h.netWaitResume() // a wait for the network the last engine left on (netwait.go)
+	cfg.StartClock.Mark("sub-agents")
 	return h, nil
 }
 

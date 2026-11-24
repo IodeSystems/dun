@@ -955,6 +955,8 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// A fold in progress: its row turns with the spinner.
 		redraw := m.turnCompacting()
+		// A /clear waiting for the turn to stop: its row too.
+		redraw = m.turnClearing() || redraw
 		// A server still starting: the live splash counts its seconds. The
 		// row changes in place; refresh only when its words did.
 		if i := m.liveSplashAt(); len(m.srvSince)+len(m.idxSince) > 0 && i >= 0 &&

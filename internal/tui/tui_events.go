@@ -126,6 +126,13 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		}
 		m.proc.uiGet() // this user's UI state in the session, kept by dund
 	case "ready":
+		// A start this TUI waited for, and that was slow: where the time
+		// went (clearing.go), once.
+		if m.starting && freshEvent(ev) {
+			if l := startLine(ev, m.startingStart); l != "" {
+				m.append(StDim.Render(l))
+			}
+		}
 		m.starting = false
 		m.engineVersion, m.engineReady = str(ev["version"]), true
 		if m.keysErr != nil { // said once, where the person is looking
@@ -784,7 +791,8 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m.refresh()
 	case "reset":
 		// The conversation was cleared — by this client's /clear or another's.
-		m.convo = nil
+		// What is queued is not: it runs in the cleared conversation.
+		m.convo = keptByReset(m.convo)
 		m.cur = ""
 		m.activeTool = ""
 		m.sel = -1
@@ -793,6 +801,16 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m.suggestions, m.suggestSel = nil, 0 // they were about the conversation just cleared
 		m.settleAsk()
 		m.append(StDim.Render("session cleared — fresh start"))
+		if total, phases := timingOf(ev["timing"]); freshEvent(ev) {
+			if l := slowLine("clear", total, phases); l != "" {
+				m.append(StDim.Render(l))
+			}
+		}
+		m.refresh()
+	case "clearing":
+		// A /clear waits for the running turn to stop (clearing.go); the
+		// reset that follows takes the row with the conversation.
+		m.startClearing(str(ev["waiting"]))
 		m.refresh()
 	case "compacting":
 		// A fold began, or ended without a compaction (compacting.go).

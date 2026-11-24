@@ -12,7 +12,7 @@ The engine emits events as line-delimited JSON objects. Each has a `"type"` fiel
 |------|------|------------|
 | `workspace` | Engine starts, reports worktree | `branch` |
 | `session` | Session created/resumed | `id` |
-| `ready` | Servers spawned, tools available | `tools[]`, `servers[]`, `hint` |
+| `ready` | The engine takes messages; servers still starting join later | `tools[]`, `servers[]`, `hint`, `startup` (`total_ms`, `phases[]` of `name`, `ms`: where the start's time went) |
 | `server` | Server status changed (`/rag`, `/lsp`) | `id`, `action`, `message`, `tools[]`, `servers[]` |
 | `token` | Streaming assistant text | `text` (chunk) |
 | `tool_call` | A tool call started | `call_id`, `tool`, `args` |
@@ -26,7 +26,8 @@ The engine emits events as line-delimited JSON objects. Each has a `"type"` fiel
 | `done` | Turn completed | `reason` (`interrupted` when the user stopped it) |
 | `error` | Turn failed | `error`, `fatal` |
 | `retry` | Provider outage, retrying | `note`, `due`, `seen` |
-| `reset` | Store cleared (`/clear`) | — |
+| `clearing` | A `/clear` came while a turn ran: the turn is interrupted, and the clear waits for it to stop. A message sent meanwhile is queued for the cleared conversation. The `reset` that follows ends it | `waiting` (what the turn was doing: a tool, `the model's reply`) |
+| `reset` | Store cleared (`/clear`); the queue is kept | `timing` (`total_ms`, `phases[]`) |
 | `control` | Control action done (`/isolate`, `/prompt`) | `id`, `action`, `message` |
 | `compaction` | Context compacted | `text` |
 | `compacting` | A fold began (`phase: start`); or ended without a `compaction` (`phase: end`, `error` when it failed or was cancelled, none when nothing was folded). Every start ends with one of the two | `phase`, `error` |

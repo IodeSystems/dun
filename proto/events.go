@@ -38,6 +38,7 @@ func init() {
 	event[Catalog]("catalog")
 	event[PromptText]("prompt")
 	event[ResetEvent]("reset")
+	event[Clearing]("clearing")
 	event[Agents]("agents")
 	event[Jobs]("jobs")
 	event[AgentHistory]("agent_history")
@@ -613,6 +614,22 @@ type Ready struct {
 	// Version is the engine's build: /upgrade says it beside the TUI's and
 	// dund's, and a TUI knows which commands an older engine lacks.
 	Version string `json:"version,omitempty"`
+	// Startup is how long the engine took from its process start to this
+	// event, by phase. A client says it when it is long (> 3s).
+	Startup *Timing `json:"startup,omitempty"`
+}
+
+// Timing is how long an operation took, and where the time went: its
+// phases in the order they ran. A phase not listed took no measurable time.
+type Timing struct {
+	TotalMS int64   `json:"total_ms"`
+	Phases  []Phase `json:"phases,omitempty"`
+}
+
+// Phase is one named step of a Timing.
+type Phase struct {
+	Name string `json:"name"`
+	MS   int64  `json:"ms"`
 }
 
 type ServerState struct {
@@ -757,8 +774,19 @@ type PromptText struct {
 	Text string `json:"text"`
 }
 
-// ResetEvent: the conversation was cleared.
-type ResetEvent struct{}
+// ResetEvent: the conversation was cleared. Timing is how long the clear
+// took from the command: a turn that had to stop first is a phase of it.
+type ResetEvent struct {
+	Timing *Timing `json:"timing,omitempty"`
+}
+
+// Clearing: a /clear waits for the running turn to stop before it clears
+// the conversation. Waiting names what the turn is doing ("exec", "the
+// model's reply"). The ResetEvent that follows ends it. A message sent
+// meanwhile is queued, and runs in the cleared conversation.
+type Clearing struct {
+	Waiting string `json:"waiting,omitempty"`
+}
 
 // Agents is every sub-agent, the whole list each time.
 type Agents struct {
