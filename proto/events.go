@@ -125,6 +125,25 @@ type ToolResult struct {
 	// Agent is the sub-agent an agent call started or acted on; 0 for any
 	// other call, and for one that reached no agent.
 	Agent int `json:"agent,omitempty"`
+	// Edits are the files the call changed, read by the engine before and
+	// after it (docs/event-protocol.md, "File edits"); none for a call that
+	// changed nothing, or for a tool that is not read (exec).
+	Edits []FileEdit `json:"edits,omitempty"`
+}
+
+// FileEdit is one file a tool call changed: its whole text before and after,
+// what an ACP diff ({path, oldText, newText}) carries. Path is absolute.
+// Created: there was no file before (OldText empty); Deleted: there is none
+// after (NewText empty). Skipped names why the texts are left out (the file
+// is still named): "too_large", "binary", "directory", "symlink",
+// "unreadable", "call_cap", "history_cap".
+type FileEdit struct {
+	Path    string `json:"path"`
+	OldText string `json:"old_text,omitempty"`
+	NewText string `json:"new_text,omitempty"`
+	Created bool   `json:"created,omitempty"`
+	Deleted bool   `json:"deleted,omitempty"`
+	Skipped string `json:"skipped,omitempty"`
 }
 
 // Done ends a turn. Reason is empty for a turn that finished,
@@ -599,6 +618,9 @@ type HistoryItem struct {
 	// Agent: as the live tool_call, tool_result and notification events
 	// carry it.
 	Agent int `json:"agent,omitempty"`
+	// Edits: a tool_result's, as its live event carried them (kept in the
+	// session's edits sidecar; the newest within a cap).
+	Edits []FileEdit `json:"edits,omitempty"`
 }
 
 // Workspace is the worktree the session runs in.

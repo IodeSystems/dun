@@ -16,7 +16,7 @@ The engine emits events as line-delimited JSON objects. Each has a `"type"` fiel
 | `server` | Server status changed (`/rag`, `/lsp`) | `id`, `action`, `message`, `tools[]`, `servers[]` |
 | `token` | Streaming assistant text | `text` (chunk) |
 | `tool_call` | A tool call started | `call_id`, `tool`, `args` |
-| `tool_result` | Tool returned | `call_id`, `tool`, `result`, `is_error`, `elapsed_ms` |
+| `tool_result` | Tool returned | `call_id`, `tool`, `result`, `is_error`, `elapsed_ms`, `edits[]` (see File edits) |
 | `message` | Turn reply finalized | `role`, `content`, `id` (the reply's history item id) |
 | `suggestions` | Predicted next messages | `items[]` |
 | `notification` | Proactive notification (RAG, background) | `kind`, `text` |
@@ -46,6 +46,36 @@ Tea copies the model each `Update`). Rendering is deferred via `renderDue` +
 
 `tool_call` is sent when the call starts, `tool_result` when it returns; both
 carry `call_id`, and a client pairs them by it (`session-events.md`).
+
+### File edits
+
+A `tool_result` whose call changed files carries `edits[]`, one per file:
+`{path, old_text, new_text, created, deleted, skipped}` (`proto.FileEdit`),
+the whole text before and after, what an ACP `diff` tool-call content
+(`{path, oldText, newText}`) needs. `path` is absolute. `created`: no file
+before (`old_text` empty); `deleted`: none after (`new_text` empty). Every
+field but `path` is omitted when empty; an engine before it sends no `edits`.
+
+The engine reads the files itself, before and after the call
+(`internal/harness/fileedits.go`), so the tool's own result is unchanged and
+the model is not sent the texts. Read: dun's file tools that write (`edit`,
+`write`, `delete`, `move`: a move is the old path deleted and the new one
+created) and poly-lsp's `node_edit` and `node_delete` (`file`, or the file of
+`node`). Not read, so no `edits`: `exec`, mcpshell's `eval`, `node_refactor`
+and `node_rename_file` (they change files their arguments do not name), any
+other MCP server's tools, and a sub-agent's calls. A file another process
+changed during the call is in its edit too.
+
+`skipped` names a file whose texts are left out: `too_large` (over 1 MiB,
+before or after), `binary` (a NUL byte, or not UTF-8), `directory`,
+`symlink`, `unreadable`, `call_cap` (the call's texts passed 2 MiB),
+`history_cap` (in a replay, below).
+
+The edits are kept in the session's `<id>.edits.jsonl` sidecar (a text over
+8 KiB as a content-addressed blob, so one version of a file is kept once),
+and the `history` event's `tool_result` items carry them, the newest within
+8 MiB of texts (older ones `skipped: history_cap`). `/clear` removes the
+sidecar with the transcript.
 
 ### Queued Messages
 
