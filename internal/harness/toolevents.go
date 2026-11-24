@@ -38,6 +38,8 @@ type ToolEnd struct {
 	// Agent is the sub-agent an agent call started or acted on (withAgent
 	// notes it); 0 for any other call and for one that reached no agent.
 	Agent int
+	// Edits are the files the call changed (withEdits, fileedits.go).
+	Edits []FileEdit
 }
 
 // ToolFailed reads whether a result is a failure: exec's own exit marker,
@@ -59,7 +61,24 @@ type toolCur struct {
 	mu       sync.Mutex
 	reported string
 	has      bool
-	agent    int // the sub-agent the call started or acted on (noteAgent)
+	agent    int        // the sub-agent the call started or acted on (noteAgent)
+	edits    []FileEdit // the files the call changed (noteEdits)
+}
+
+// noteEdits records the files the call being dispatched changed, for its
+// tool_result event.
+func (c *toolCur) noteEdits(e []FileEdit) {
+	c.mu.Lock()
+	c.edits = e
+	c.mu.Unlock()
+}
+
+func (c *toolCur) takeEdits() []FileEdit {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e := c.edits
+	c.edits = nil
+	return e
 }
 
 func (c *toolCur) report(result string) {
@@ -108,10 +127,12 @@ func withToolEvents(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher
 		}
 		h.toolCur.take() // nothing left over from a call that never ended
 		h.toolCur.takeAgent()
+		h.toolCur.takeEdits()
 		t0 := time.Now()
 		out, err := inner(ctx, tc)
 		shown, ok := h.toolCur.take()
 		agentNum := h.toolCur.takeAgent()
+		edits := h.toolCur.takeEdits()
 		if !ok {
 			shown = out
 		}
@@ -121,7 +142,8 @@ func withToolEvents(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher
 		}
 		if end != nil {
 			end(ToolEnd{CallID: tc.ID, Tool: name, Result: shown,
-				IsError: failed || ToolFailed(name, shown), Elapsed: time.Since(t0), Agent: agentNum})
+				IsError: failed || ToolFailed(name, shown), Elapsed: time.Since(t0), Agent: agentNum,
+				Edits: edits})
 		}
 		return out, err
 	}

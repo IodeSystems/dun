@@ -33,6 +33,9 @@ type HistoryItem struct {
 	// acted on, or a notification is from or about; 0 otherwise. The same
 	// number the live events carry (ToolStart, ToolEnd, NoticeAgent).
 	Agent int `json:"agent,omitempty"`
+	// Edits: a tool_result's, from the session's edits sidecar
+	// (fileedits.go).
+	Edits []FileEdit `json:"edits,omitempty"`
 }
 
 // History returns the loaded conversation as replayable items in chronological
@@ -50,7 +53,7 @@ func (h *Harness) History() []HistoryItem {
 		}
 		sa.mu.Unlock()
 	}
-	return withSpawns(historyItems(h.store.History()), spawns)
+	return attachEdits(withSpawns(historyItems(h.store.History()), spawns), h.store.edits())
 }
 
 // RoundUsages is the saved cost of each model round in the conversation, in
@@ -82,7 +85,7 @@ func SessionHistory(sessionFile string) []HistoryItem {
 	if err != nil {
 		return nil
 	}
-	return withSpawns(historyItems(st.History()), agentSpawns(sessionFile))
+	return attachEdits(withSpawns(historyItems(st.History()), agentSpawns(sessionFile)), st.edits())
 }
 
 // withSpawns names the child on each agent call that spawned one: the call

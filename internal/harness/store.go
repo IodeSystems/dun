@@ -651,6 +651,9 @@ func (s *sessionStore) Reset() {
 	if s.path != "" && len(s.entries) > 0 {
 		_ = os.Rename(s.path, clearedPath(s.path, time.Now()))
 	}
+	if p := s.editsPath(); p != "" {
+		_ = os.Remove(p) // its calls went with the transcript (fileedits.go)
+	}
 	s.entries = nil
 	s.unclaimed = 0
 	s.flushLocked()

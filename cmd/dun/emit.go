@@ -338,7 +338,19 @@ func historyProto(items []harness.HistoryItem) []proto.HistoryItem {
 	out := make([]proto.HistoryItem, 0, len(items))
 	for _, it := range items {
 		out = append(out, proto.HistoryItem{Kind: it.Kind, ID: it.ID, Queued: it.Queued, IsError: it.IsError, Content: it.Content, Tool: it.Tool,
-			CallID: it.CallID, Args: it.Args, Agent: it.Agent})
+			CallID: it.CallID, Args: it.Args, Agent: it.Agent, Edits: editsProto(it.Edits)})
+	}
+	return out
+}
+
+// editsProto is a tool result's file edits for the event stream; nil for none.
+func editsProto(edits []harness.FileEdit) []proto.FileEdit {
+	if len(edits) == 0 {
+		return nil
+	}
+	out := make([]proto.FileEdit, len(edits))
+	for i, e := range edits {
+		out[i] = proto.FileEdit(e)
 	}
 	return out
 }

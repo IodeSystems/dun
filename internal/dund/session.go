@@ -860,7 +860,19 @@ var errEpoch = errors.New("seq from another epoch")
 func historyItems(items []harness.HistoryItem) []proto.HistoryItem {
 	out := make([]proto.HistoryItem, 0, len(items))
 	for _, it := range items {
-		out = append(out, proto.HistoryItem{Kind: it.Kind, ID: it.ID, Queued: it.Queued, IsError: it.IsError, Content: it.Content, Tool: it.Tool, CallID: it.CallID, Args: it.Args, Agent: it.Agent})
+		out = append(out, proto.HistoryItem{Kind: it.Kind, ID: it.ID, Queued: it.Queued, IsError: it.IsError, Content: it.Content, Tool: it.Tool, CallID: it.CallID, Args: it.Args, Agent: it.Agent, Edits: fileEdits(it.Edits)})
+	}
+	return out
+}
+
+// fileEdits is a history item's file edits as the protocol carries them.
+func fileEdits(edits []harness.FileEdit) []proto.FileEdit {
+	if len(edits) == 0 {
+		return nil
+	}
+	out := make([]proto.FileEdit, len(edits))
+	for i, e := range edits {
+		out[i] = proto.FileEdit(e)
 	}
 	return out
 }

@@ -994,6 +994,10 @@ func (h *Harness) rebuildTools() {
 	// Outside everything: a call the turn reaches after an interrupt is not
 	// run at all (interrupt.go).
 	dispatch = withInterrupt(dispatch)
+	// The files a call changed, read before and after it, for its
+	// tool_result (fileedits.go). Inside the interrupt: a call not run
+	// changed nothing.
+	dispatch = withEdits(dispatch, h, ft)
 	// Outermost: every dispatched call starts and ends (toolevents.go).
 	dispatch = withToolEvents(dispatch, h)
 	// Outside that: the turn ledger hears every call (ledger.go).
