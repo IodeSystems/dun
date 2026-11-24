@@ -1294,12 +1294,12 @@ func settleDelayFlag(d time.Duration) time.Duration {
 // unit test can assert the NoCustom field is set from the parameter.
 func newAskEvent(callID, question string, options []string, multi, noCustom bool, recommended []string) *proto.Ask {
 	a := &proto.Ask{
-		AskID:        harness.NewMessageID(),
-		CallID:       callID,
-		Question:     question,
-		Options:      options,
-		Multi:        multi,
-		NoCustom:     noCustom,
+		AskID:          harness.NewMessageID(),
+		CallID:         callID,
+		Question:       question,
+		Options:        options,
+		Multi:          multi,
+		NoCustom:       noCustom,
 		RecommendedAll: recommended,
 	}
 	if len(recommended) > 0 {
