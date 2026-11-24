@@ -173,7 +173,7 @@ func TestMemory_AddPointsToTheUserDefaultsFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(out, defaultsNote) {
+	if strings.Contains(out, defaultsNote()) {
 		t.Errorf("no defaults file: the reply must not point to one: %q", out)
 	}
 	home := os.Getenv("DUN_HOME")
@@ -184,7 +184,11 @@ func TestMemory_AddPointsToTheUserDefaultsFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, defaultsNote) {
+	if !strings.Contains(out, defaultsNote()) {
 		t.Errorf("defaults file present: the reply must point to it: %q", out)
+	}
+	// The note must name the actual DUN_HOME path, not a hardcoded ~.
+	if !strings.Contains(out, home+"/AGENTS.md") {
+		t.Errorf("reply must point to the DUN_HOME path %s/AGENTS.md, got: %q", home, out)
 	}
 }

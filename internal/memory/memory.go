@@ -177,16 +177,24 @@ func (m *Store) dirs() []string {
 // reached: said, so the model does not retry a write that happened.
 const downNote = " — dund is not reachable: the note is on disk, and it is indexed when dund is"
 
+// defaultsPath returns the path to the user's defaults file, honouring
+// DUN_HOME like every other dun path.
+func defaultsPath() string {
+	return filepath.Join(dunhome.Dir(), "AGENTS.md")
+}
+
 // defaultsNote is the line an add's result carries when the user's defaults
-// file (~/.dun/AGENTS.md, loaded into the rules by harness) is present: a
-// preference that should hold in every turn belongs in that hand-edited file,
-// not only in a note that comes back when a later conversation is about it.
-const defaultsNote = " — for a preference that should apply every turn, put it in ~/.dun/AGENTS.md"
+// file is present: a preference that should hold in every turn belongs in
+// that hand-edited file, not only in a note that comes back when a later
+// conversation is about it.
+func defaultsNote() string {
+	return " — for a preference that should apply every turn, put it in " + defaultsPath()
+}
 
 // hasDefaultsFile says whether the user's defaults file is present, so an
 // add's reply can point there for every-turn preferences.
 func hasDefaultsFile() bool {
-	_, err := os.Stat(filepath.Join(dunhome.Dir(), "AGENTS.md"))
+	_, err := os.Stat(defaultsPath())
 	return err == nil
 }
 
@@ -235,7 +243,7 @@ func (m *Store) apply(a toolArgs, meta NoteMeta) (string, error) {
 			out += " (global)"
 		}
 		if hasDefaultsFile() {
-			out += defaultsNote
+			out += defaultsNote()
 		}
 		return out + down, nil
 	case "refine", "replace":
