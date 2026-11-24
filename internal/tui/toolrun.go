@@ -44,6 +44,7 @@ type runItem struct {
 	result string
 	done   bool   // the result arrived
 	failed bool   // it was a failure (toolFailed)
+	warned bool   // it succeeded with a caveat (toolWarned), e.g. an incomplete node_edit
 	head   string // the call and its one-line preview, styled
 	// preview is the result's one-line preview alone ("  → …"), for a
 	// narrow pane, where it takes rows of its own (callPreviewRows).
@@ -64,6 +65,15 @@ type toolRun struct {
 	rows    []string // the box body as of rowsVer at rowsW
 	rowsVer int
 	rowsW   int
+}
+
+// toolWarned reads whether a successful result carries a caveat the call mark
+// should show (OK, but): a node_edit that landed incomplete or unvalidated.
+func toolWarned(tool, result string) bool {
+	if tool == "node_edit" {
+		return nodeEditWarned(result)
+	}
+	return false
 }
 
 // toolFailed reads whether a result is a failure: exec's own exit marker, or
@@ -197,11 +207,14 @@ func (r *toolRun) live() bool {
 	return n > 0 && r.items[n-1].think != nil && r.items[n-1].think.live
 }
 
-// callMark is a call's status glyph, in its colour: … running, ✓, ✗.
+// callMark is a call's status glyph, in its colour: … running, ✓, ✗ failed,
+// ⚠ done with a caveat (OK, but).
 func callMark(it *runItem) string {
 	switch {
 	case it.done && it.failed:
 		return StErr.Render("✗ ")
+	case it.done && it.warned:
+		return stNote.Render("⚠ ")
 	case it.done:
 		return StTool.Render("✓ ")
 	}
@@ -503,6 +516,7 @@ func (m *tuiModel) callResult(id, tool, result string, failed *bool) {
 	} else {
 		it.failed = toolFailed(it.tool, result)
 	}
+	it.warned = !it.failed && toolWarned(it.tool, result)
 	it.preview = strings.ReplaceAll(preview, "\n", " ")
 	it.head = callText(it.tool, it.args, previewClip) + it.preview
 	m.touchRun(i)
