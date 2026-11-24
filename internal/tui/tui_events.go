@@ -807,6 +807,11 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 			}
 		}
 		m.refresh()
+	case "clear_confirm":
+		// A /clear that asks first what becomes of running jobs and open
+		// asks and plan items (clearconfirm.go).
+		m.clearConfirm(ev)
+		m.refresh()
 	case "clearing":
 		// A /clear waits for the running turn to stop (clearing.go); the
 		// reset that follows takes the row with the conversation.

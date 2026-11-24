@@ -27,7 +27,8 @@ The engine emits events as line-delimited JSON objects. Each has a `"type"` fiel
 | `error` | Turn failed | `error`, `fatal` |
 | `retry` | Provider outage, retrying | `note`, `due`, `seen` |
 | `clearing` | A `/clear` came while a turn ran: the turn is interrupted, and the clear waits for it to stop. A message sent meanwhile is queued for the cleared conversation. The `reset` that follows ends it | `waiting` (what the turn was doing: a tool, `the model's reply`) |
-| `reset` | Store cleared (`/clear`); the queue is kept | `timing` (`total_ms`, `phases[]`) |
+| `clear_confirm` | A `/clear` was not done: background jobs run, or asks or plan items are open, and the line did not say what becomes of them. The client asks, then sends the slash line `clear jobs=keep\|stop plan=keep\|drop` (only the categories listed); sending nothing cancels. A turn running runs on until the answer. A client that does not ask shows `message`, which names that line | `jobs[]` (as in `jobs`), `plan[]` (`kind`: `intake`/`ask`/`node`, `id`, `title`), `message` |
+| `reset` | Store cleared (`/clear`); the queue is kept. Kept jobs and items are told to the new conversation in one `[clear]` aside on its first turn; stopped jobs send no completion notice | `timing` (`total_ms`, `phases[]`) |
 | `control` | Control action done (`/isolate`, `/prompt`) | `id`, `action`, `message` |
 | `compaction` | Context compacted | `text` |
 | `compacting` | A fold began (`phase: start`); or ended without a `compaction` (`phase: end`, `error` when it failed or was cancelled, none when nothing was folded). Every start ends with one of the two | `phase`, `error` |
@@ -62,7 +63,7 @@ conversation, where it already was (`internal/tui/tui_scroll.go` drawOrder).
 | `user` | Send a message | `content`, `images[]` (optional: `{path, label}` — a file on the engine's machine and the text in `content` that stands for it) |
 | `answer` | Respond to `ask_user` | `value` |
 | `server` | Control a server (`/rag`, `/lsp`) | `id`, `action` (`status`/`on`/`off`/`auto`/`manual`) |
-| `reset` | Clear the session store | — |
+| `reset` | Clear the session store: as a bare `/clear`, so it may be answered by `clear_confirm` (the slash line `clear …` carries the answer) | — |
 | `interrupt` | Stop the turn in flight, keep the session (see below) | `reason` (optional: what stopped it, when not the user) |
 | `stop` | Stop processing, exit | — |
 | `quit` | Quit entirely | — |

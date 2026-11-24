@@ -58,12 +58,13 @@ func (r *slowStopRunner) ChatStream(ctx context.Context, msgs []llm.Message, _ [
 // event.
 type engineRig struct {
 	t      *testing.T
+	h      *harness.Harness
 	inW    io.Writer
 	events chan map[string]any
 	seen   []map[string]any
 }
 
-func newEngineRig(t *testing.T, r agent.LLMRunner) *engineRig {
+func newEngineRig(t *testing.T, r agent.LLMRunner, opts ...func(*harness.Config)) *engineRig {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -73,12 +74,16 @@ func newEngineRig(t *testing.T, r agent.LLMRunner) *engineRig {
 	evR, evW := io.Pipe()
 	em := &emitter{w: evW}
 	em.turn = newTurnTracker(em, func() *harness.Harness { return nil })
-	h, err := harness.Start(ctx, harness.Config{
+	cfg := harness.Config{
 		Workspace: home, Servers: []mcpserver.Server{}, Client: r,
 		SessionFile: filepath.Join(home, "s.jsonl"),
 		OnToken:     func(s string) { em.emit(&proto.Token{Text: s}) },
 		OnDelivered: func(d harness.Delivery) { em.emit(&proto.Delivered{IDs: d.IDs, CallID: d.CallID}) },
-	})
+	}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	h, err := harness.Start(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +91,7 @@ func newEngineRig(t *testing.T, r agent.LLMRunner) *engineRig {
 	em.turn.h = func() *harness.Harness { return h }
 	inR, inW := io.Pipe()
 	go runProgrammatic(ctx, h, em, newInputStreamFrom(inR), nil, "", closeCtx{})
-	rig := &engineRig{t: t, inW: inW, events: make(chan map[string]any, 512)}
+	rig := &engineRig{t: t, h: h, inW: inW, events: make(chan map[string]any, 512)}
 	go func() {
 		sc := bufio.NewScanner(evR)
 		sc.Buffer(nil, 1<<20)
@@ -140,6 +145,9 @@ func isType(typ string) func(map[string]any) bool {
 // reset comes when the turn is over and says how long it took, and the
 // queued message runs in the cleared conversation — none of the old turn
 // in its request.
+//
+// The old task is an open ask (the intake), so a bare /clear asks first
+// (clear_confirm) and the turn runs on; the answer interrupts it.
 func TestEngineClearWaitsForTheTurn(t *testing.T) {
 	r := &slowStopRunner{stopIn: 300 * time.Millisecond}
 	g := newEngineRig(t, r)
@@ -148,6 +156,13 @@ func TestEngineClearWaitsForTheTurn(t *testing.T) {
 	g.send(&proto.User{Content: "the old task"})
 	g.waitFor("the partial reply", isType("token"))
 	g.send(&proto.ControlCmd{ID: "slash", Action: "clear"})
+	g.waitFor("the question", isType("clear_confirm"))
+	for _, ev := range g.seen {
+		if ev["type"] == "clearing" || ev["type"] == "done" {
+			t.Fatalf("the question must leave the turn running; saw %v", ev["type"])
+		}
+	}
+	g.send(&proto.ControlCmd{ID: "slash", Action: "clear keep"})
 	cl := g.waitFor("clearing", isType("clearing"))
 	if cl["waiting"] != "the model's reply" {
 		t.Errorf("clearing waits for %v, want the model's reply", cl["waiting"])

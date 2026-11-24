@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -13,11 +14,13 @@ import (
 //   - x on a running job in the activity pane: "kill job N? (y/n)";
 //   - /jobs kill all: "kill every running job? (y/n)".
 
-// confirmState is one pending y/n question. While q is set it owns the keys:
-// y runs yes, anything else drops it.
+// confirmState is one pending one-key question. While q is set it owns the
+// keys: y runs yes (or, with keys, the key's own answer), anything else
+// drops it.
 type confirmState struct {
-	q   string
-	yes func(m *tuiModel)
+	q    string
+	yes  func(m *tuiModel)
+	keys map[string]func(m *tuiModel) // a question with more answers than y/n (clearconfirm.go)
 }
 
 // askConfirm puts a y/n question on the status line.
@@ -26,11 +29,20 @@ func (m *tuiModel) askConfirm(q string, yes func(m *tuiModel)) {
 	m.refresh()
 }
 
+// askChoice puts a question answered by one of keys' keys on the status
+// line; any other key drops it.
+func (m *tuiModel) askChoice(q string, keys map[string]func(m *tuiModel)) {
+	m.confirm = confirmState{q: q, keys: keys}
+	m.refresh()
+}
+
 // updateConfirm answers the pending question with one key.
 func (m tuiModel) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	c := m.confirm
 	m.confirm = confirmState{}
-	if k := msg.String(); k == "y" || k == "Y" {
+	if f := c.keys[strings.ToLower(msg.String())]; f != nil {
+		f(&m)
+	} else if k := msg.String(); c.keys == nil && (k == "y" || k == "Y") {
 		c.yes(&m)
 	} else {
 		m.append(StDim.Render("not done: " + c.q))

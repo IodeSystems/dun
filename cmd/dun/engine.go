@@ -89,17 +89,26 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 		}
 	}()
 	// /clear (clear.go): at once when no turn runs; otherwise the turn is
-	// interrupted and the loop clears when it is over.
+	// interrupted and the loop clears when it is over. First, with jobs
+	// running or asks or plan items open and c not saying what becomes of
+	// them, nothing is done but the question (clearQuestion).
 	var clr clearing
-	resetCmd := func() {
+	resetCmd := func(c clearChoice) {
+		if q := clearQuestion(h, c); q != nil {
+			em.emit(q)
+			return
+		}
+		if c.jobs == "stop" {
+			h.StopJobsForClear("user") // now: a turn waiting on one ends sooner
+		}
 		clk := newClear()
 		waiting := em.turn.waitingFor()
-		if clr.begin(clk, waiting, func() bool { return h.Interrupt("the conversation was cleared") }) {
+		if clr.begin(clk, waiting, c, func() bool { return h.Interrupt("the conversation was cleared") }) {
 			em.turn.interrupting()
 			em.emit(&proto.Clearing{Waiting: waiting})
 			return
 		}
-		clearNow(h, em, clk)
+		clearNow(h, em, clk, c)
 	}
 	var ctrlCmd func(id, action string)
 	ctrlCmd = func(id, action string) {
@@ -619,7 +628,7 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 		}
 	}
 	in.setCtrlCmd(ctrlCmd)
-	in.setResetCb(resetCmd)
+	in.setResetCb(func() { resetCmd(clearChoice{}) }) // a bare reset command: as bare /clear
 	// Agent scope: the human reading a child's conversation, or steering it.
 	// `view` sends the scrollback (a stopped child's too) and starts the
 	// watch that forwards its new entries; `leave` ends it.
@@ -701,9 +710,9 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 	autoContinue := true
 	for {
 		// A /clear that waited for the turn just over: before anything runs.
-		if clk, waited := clr.take(); clk != nil {
+		if clk, waited, c := clr.take(); clk != nil {
 			clk.Mark("stopping " + waited)
-			clearNow(h, em, clk)
+			clearNow(h, em, clk, c)
 		}
 		// A message with images held during the last turn starts the next.
 		if msg, ok := h.Gate().TakeHeld(); ok {
