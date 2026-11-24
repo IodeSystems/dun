@@ -165,8 +165,10 @@ carries the caveat and the invitation** (`internal/harness/notify.go`, group mem
   current request. Standing preferences belong in a user-level file the user
   edits by hand: since 2026-11-10 that is `~/AGENTS.md`, `~/CLAUDE.md` or
   `~/.claude/CLAUDE.md`, read before the project's rules (`decisions.md`,
-  "User rules files"); the `~/.dun/AGENTS.md` once planned here is not built. A "remember I want..." goes to a private note and the reply tells the
-  user to move it if it should apply every turn.
+  "User rules files"); `~/.dun/AGENTS.md` is read as **User defaults** after the
+  project's rules, in the project's budget, and labelled as defaults the current
+  request overrides. A "remember I want..." goes to a private note and the reply tells the
+  user to move it to `~/.dun/AGENTS.md` if it should apply every turn.
 
 ## Sharing (designed with raglit, not built in dun)
 

@@ -345,6 +345,93 @@ func TestSyncRulesIndex(t *testing.T) {
 	}
 }
 
+// The user defaults file ~/.dun/AGENTS.md is read after the workspace's
+// rules, capped like the project's, shown as ~/.dun/AGENTS.md, and included
+// in the system prompt so a fork shares it.
+func TestUserDefaults(t *testing.T) {
+	home := t.TempDir()
+	defer func(f func() (string, error)) { userHomeDir = f }(userHomeDir)
+	userHomeDir = func() (string, error) { return home, nil }
+	ws := t.TempDir()
+	writeRule(t, filepath.Join(ws, "AGENTS.md"), "project rule")
+	writeRule(t, filepath.Join(home, ".dun", "AGENTS.md"), "user default rule")
+
+	set := loadRules(ws, true)
+	// The file is in Roots, named ~/.dun/AGENTS.md, marked UserDefault.
+	found := false
+	for _, d := range set.Roots {
+		if d.UserDefault {
+			found = true
+			if d.Name != "~/.dun/AGENTS.md" {
+				t.Errorf("name: %q", d.Name)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("~/.dun/AGENTS.md not in Roots")
+	}
+
+	// In the rendered block it is a section after the project rules.
+	block := set.render(RulesFull, "")
+	idxProject := strings.Index(block, "## Project rules")
+	idxDefaults := strings.Index(block, "## User defaults")
+	if idxProject < 0 || idxDefaults < 0 {
+		t.Fatalf("missing sections:\n%s", block)
+	}
+	if idxProject > idxDefaults {
+		t.Errorf("user defaults before project rules:\n%s", block)
+	}
+	if !strings.Contains(block, "user default rule") {
+		t.Errorf("content missing:\n%s", block)
+	}
+	if !strings.Contains(block, "override them") {
+		t.Errorf("override note missing:\n%s", block)
+	}
+
+	// files() includes it, so /context counts its tokens.
+	parts := set.files(RulesFull)
+	inParts := false
+	for _, p := range parts {
+		if p.Name == "~/.dun/AGENTS.md" && p.Tokens > 0 {
+			inParts = true
+		}
+	}
+	if !inParts {
+		t.Errorf("files() lacks ~/.dun/AGENTS.md: %v", parts)
+	}
+
+	// Absent file: no section, no error.
+	home2 := t.TempDir()
+	userHomeDir = func() (string, error) { return home2, nil }
+	ws2 := t.TempDir()
+	writeRule(t, filepath.Join(ws2, "AGENTS.md"), "only project")
+	set2 := loadRules(ws2, true)
+	if strings.Contains(set2.render(RulesFull, ""), "User defaults") {
+		t.Error("section present with no file")
+	}
+}
+
+// A ~/.dun/AGENTS.md larger than the cap is cut like any other rule file.
+func TestUserDefaults_Cap(t *testing.T) {
+	home := t.TempDir()
+	defer func(f func() (string, error)) { userHomeDir = f }(userHomeDir)
+	userHomeDir = func() (string, error) { return home, nil }
+	ws := t.TempDir()
+	writeRule(t, filepath.Join(ws, "AGENTS.md"), "project")
+	writeRule(t, filepath.Join(home, ".dun", "AGENTS.md"), strings.Repeat("x", rulesFileMax+100))
+
+	set := loadRules(ws, true)
+	for _, d := range set.Roots {
+		if d.UserDefault && len(d.Text) > rulesFileMax {
+			t.Errorf("user defaults %d bytes past the file cap", len(d.Text))
+		}
+	}
+	block := set.render(RulesFull, "")
+	if !strings.Contains(block, "cut: the first") {
+		t.Errorf("no cap note:\n%s", block)
+	}
+}
+
 // TestRulesFiles names every context file with its share, by mode.
 func TestRulesFiles(t *testing.T) {
 	ws := t.TempDir()

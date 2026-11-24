@@ -737,7 +737,9 @@ UI rules are in `ui-decisions.md`, retrieval in `surfacing.md`.
   project keeps its whole 256 KiB, so a large `~/CLAUDE.md` cannot crowd the
   project's rules out. Past the budget a file is cut with a note and an import
   is "not read: the user rules reached their 64 KiB total". `$XDG_CONFIG_HOME`
-  and `~/.dun/AGENTS.md` are not read (no doc named them as rules files).
+  and `$XDG_CONFIG_HOME` is not read (no doc named it a rules file);
+  `~/.dun/AGENTS.md` is read as **User defaults** after the project rules,
+  in the project's budget.
   Off: `DUN_USER_RULES=0` (`Config.NoUserRules`; a child inherits it with its
   Config, as it does the rules); the Harbor adapter sets it by default so a
   trial does not depend on the image's home. Each user file is also a `/rules`

@@ -98,6 +98,9 @@ type rulesDoc struct {
 	Size int    // bytes on disk
 	Note string // why it is missing, unread or cut
 	User bool   // a user file (userRulesRoots) or a file one imports
+	// UserDefault is ~/.dun/AGENTS.md, read after the workspace's rules:
+	// defaults the user and project rules override.
+	UserDefault bool
 	// Added is the scope /rules add made it a root file at (contextfiles.go);
 	// "" for a file found by name or imported.
 	Added string
@@ -159,28 +162,34 @@ func loadRulesAdded(workspace string, user bool, adds []rulesAdd) rulesSet {
 	home, _ := userHomeDir()
 	l := &rulesLoader{ws: workspace, home: home, seen: map[string]bool{}, shown: map[string]string{}}
 	type root struct {
-		path string
-		data []byte
-		user bool
-		also string
+		path        string
+		data        []byte
+		user        bool
+		userDefault bool
+		also        string
 	}
 	var roots []*root
-	read := func(dir string, names []string, user bool) {
+	read := func(dir string, names []string, user, userDefault bool) {
 		for _, n := range names {
 			p := filepath.Join(dir, n)
 			if b, err := os.ReadFile(p); err == nil {
-				roots = append(roots, &root{path: p, data: b, user: user})
+				roots = append(roots, &root{path: p, data: b, user: user, userDefault: userDefault})
 				return
 			}
 		}
 	}
 	if user && home != "" {
 		for _, names := range userRulesRoots(workspace, home) {
-			read(home, names, true)
+			read(home, names, true, false)
 		}
 	}
 	for _, names := range rulesRoots {
-		read(workspace, names, false)
+		read(workspace, names, false, false)
+	}
+	if user && home != "" {
+		// The user defaults file, after the workspace's rules, so it is the
+		// group the user's and project's rules override.
+		read(home, []string{userDefaultsRel}, false, true)
 	}
 	// Every root is seen before any import is followed, so an import of a
 	// root is "already included", not a second copy. A root that is the
@@ -188,11 +197,15 @@ func loadRulesAdded(workspace string, user bool, adds []rulesAdd) rulesSet {
 	var kept []*root
 	for _, r := range roots {
 		l.seen[project.RealPath(r.path)] = true
-		l.shown[project.RealPath(r.path)] = l.rootName(r.path, r.user)
+		name := l.rootName(r.path, r.user)
+		if r.userDefault {
+			name = l.homeName(r.path)
+		}
+		l.shown[project.RealPath(r.path)] = name
 		dup := false
 		for _, k := range kept {
 			if project.RealPath(k.path) == project.RealPath(r.path) || string(k.data) == string(r.data) {
-				k.also = l.rootName(r.path, r.user)
+				k.also = name
 				dup = true
 				break
 			}
@@ -209,16 +222,24 @@ func loadRulesAdded(workspace string, user bool, adds []rulesAdd) rulesSet {
 	// the project's rules.
 	l.out = &set.Imports
 	for _, g := range []struct {
-		user  bool
-		total int
-		what  string
-	}{{true, rulesUserMax, "the user rules"}, {false, rulesTotalMax, "the rules"}} {
+		user        bool
+		userDefault bool
+		total       int
+		what        string
+	}{{true, false, rulesUserMax, "the user rules"}, {false, false, rulesTotalMax, "the rules"},
+		{false, true, rulesTotalMax, "the user defaults"}} {
 		l.user, l.left, l.total, l.what = g.user, g.total, g.total, g.what
 		start := len(set.Roots)
 		for _, r := range kept {
-			if r.user == g.user {
+			if r.user == g.user && r.userDefault == g.userDefault {
 				d := l.doc(r.path, "", r.data)
-				d.Name, d.Also = l.rootName(r.path, r.user), r.also
+				if g.userDefault {
+					d.Name = l.homeName(r.path)
+				} else {
+					d.Name = l.rootName(r.path, r.user)
+				}
+				d.Also = r.also
+				d.UserDefault = g.userDefault
 				set.Roots = append(set.Roots, d)
 			}
 		}
@@ -266,6 +287,16 @@ func (l *rulesLoader) rootName(p string, user bool) string {
 	return l.name(p)
 }
 
+// homeName is a path shown as ~/… when it is under the home directory.
+func (l *rulesLoader) homeName(p string) string {
+	if l.home != "" {
+		if r, err := filepath.Rel(l.home, p); err == nil && !outside(r) {
+			return "~/" + r
+		}
+	}
+	return l.name(p)
+}
+
 // loadRules is the session's rules: the user's files unless NoUserRules,
 // then the workspace's, then the files /rules add made root files. A child
 // has its parent's Config, so the same.
@@ -276,6 +307,11 @@ func (h *Harness) loadRules() rulesSet {
 // rulesRoots are the root files' names, each a list tried in order (the
 // first that exists is read).
 var rulesRoots = [][]string{{"AGENTS.md", "agents.md"}, {"CLAUDE.md"}}
+
+// userDefaultsRel is the user defaults file, relative to the home directory:
+// hand-edited, read after the workspace's rules, as defaults the user's and
+// project's rules override.
+const userDefaultsRel = ".dun/AGENTS.md"
 
 // userRulesRoots are the user files' names, relative to the home directory,
 // as rulesRoots (USER 2026-11-10): the same names as the project's, and
@@ -331,6 +367,12 @@ func rulesSearch(workspace string, user bool) []string {
 	}
 	out = append(out, "looked for in "+workspace+":")
 	look(workspace, "", rulesRoots)
+	if user {
+		if home, _ := userHomeDir(); home != "" {
+			out = append(out, "user defaults, after the project's rules:")
+			look(home, "~/", [][]string{{userDefaultsRel}})
+		}
+	}
 	out = append(out,
 		fmt.Sprintf("imports: @path in a file read (relative to that file, ~ is home), %d deep at most", rulesImportDepth),
 		fmt.Sprintf("caps: %d KiB a file; %d KiB for the user files, %d KiB for the project's · not read: subdirectories, the workspace's .dun/ and .claude/ (import one with @path)", rulesFileMax>>10, rulesUserMax>>10, rulesTotalMax>>10),
@@ -644,10 +686,10 @@ func (s rulesSet) render(mode, summary string) string {
 		return s.offSection() // every root switched off: only their names
 	}
 	var b strings.Builder
-	section := func(user bool, title, intro string) {
+	section := func(user, userDefault bool, title, intro string) {
 		var roots []rulesDoc
 		for _, d := range s.Roots {
-			if d.User == user {
+			if d.User == user && d.UserDefault == userDefault {
 				roots = append(roots, d)
 			}
 		}
@@ -682,10 +724,13 @@ func (s rulesSet) render(mode, summary string) string {
 			}
 		}
 	}
-	section(true, "User rules", "These are the user's own rules, read in every project. "+
+	section(true, false, "User rules", "These are the user's own rules, read in every project. "+
 		"Project rules, when there are any, come after them and refine them: where the two disagree, follow the project's.")
-	section(false, "Project rules", "These rules apply to this workspace. Nested directories may have their "+
+	section(false, false, "Project rules", "These rules apply to this workspace. Nested directories may have their "+
 		"own AGENTS.md.")
+	section(false, true, "User defaults", "These are the user's defaults from ~/.dun/AGENTS.md, read after the "+
+		"workspace's rules. The user's and the project's rules, above, override them: where they disagree, "+
+		"follow the user's or the project's rules, not these.")
 	list := func() {
 		for _, d := range s.Imports {
 			b.WriteString("\n- " + d.Name)
@@ -1051,7 +1096,13 @@ func (h *Harness) userRulesLine() string {
 			}
 		}
 	}
-	return "\n  user files (every project, before the project's): " + strings.Join(parts, " · ")
+	line := "\n  user files (every project, before the project's): " + strings.Join(parts, " · ")
+	if st, err := os.Stat(filepath.Join(home, userDefaultsRel)); err == nil {
+		line += "\n  user defaults (after the project's rules, overridden by them): ~/" + userDefaultsRel + " " + numfmt.HumanBytes(st.Size())
+	} else {
+		line += "\n  user defaults (after the project's rules, overridden by them): ~/" + userDefaultsRel + " not there"
+	}
+	return line
 }
 
 // SetRulesMode carries out /rules full|summary|index and returns the line
