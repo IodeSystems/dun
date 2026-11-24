@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/iodesystems/dun/internal/dunhome"
@@ -197,10 +198,7 @@ func Ensure(dir string) (*Project, error) {
 // registry missing the other's entry, and a lost entry is a project whose
 // worktrees and settings are silently orphaned on the next start.
 func registerProject(source string) (id string, minted bool, err error) {
-	if err := os.MkdirAll(dunHome(), 0o700); err != nil {
-		return "", false, fmt.Errorf("dun: create %s: %w", dunHome(), err)
-	}
-	unlock, err := fsutil.LockFile(registryFile() + ".lock")
+	unlock, err := lockedRegistry()
 	if err != nil {
 		return "", false, err
 	}
@@ -236,6 +234,121 @@ func idTaken(reg *registry, id string) bool {
 		}
 	}
 	return false
+}
+
+// Entry is one registry row: an id and the source directory it is
+// registered for.
+type Entry struct {
+	ID     string
+	Source string
+}
+
+// List is every registry entry, sorted by id. It reads the registry and
+// creates nothing.
+func List() ([]Entry, error) {
+	reg, err := readRegistry()
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]Entry, 0, len(reg.Projects))
+	for source, id := range reg.Projects {
+		entries = append(entries, Entry{ID: id, Source: source})
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
+	return entries, nil
+}
+
+// Find is the entry registered under id, or nil when no such id exists.
+func Find(id string) *Entry {
+	reg, err := readRegistry()
+	if err != nil {
+		return nil
+	}
+	for source, got := range reg.Projects {
+		if got == id {
+			return &Entry{ID: id, Source: source}
+		}
+	}
+	return nil
+}
+
+// Forget removes id's registry entry. The project's state directory —
+// sessions, memory, worktrees — is left in place: the id is what files are
+// named after, and deleting it would make them unfindable. It is a no-op
+// error when no such id exists.
+func Forget(id string) error {
+	if id == "" {
+		return fmt.Errorf("dun: a project id is required")
+	}
+	unlock, err := lockedRegistry()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	reg, err := readRegistry()
+	if err != nil {
+		return err
+	}
+	for source, got := range reg.Projects {
+		if got == id {
+			delete(reg.Projects, source)
+			return fsutil.WriteAtomic(registryFile(), mustJSON(reg), 0o600)
+		}
+	}
+	return fmt.Errorf("dun: no project %q in the registry", id)
+}
+
+// Repoint moves id's entry from its registered source to newSource: the id,
+// and everything filed under it, follows the directory. newSource must not
+// already be registered to a different id — that directory is somebody
+// else's project. The old source is removed from the registry; its state is
+// the same state, so nothing is copied.
+func Repoint(id, newSource string) error {
+	if id == "" {
+		return fmt.Errorf("dun: a project id is required")
+	}
+	if newSource == "" {
+		return fmt.Errorf("dun: a new source directory is required")
+	}
+	newSource = RealPath(newSource)
+	unlock, err := lockedRegistry()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	reg, err := readRegistry()
+	if err != nil {
+		return err
+	}
+	oldSource := ""
+	for source, got := range reg.Projects {
+		if got == id {
+			oldSource = source
+			break
+		}
+	}
+	if oldSource == "" {
+		return fmt.Errorf("dun: no project %q in the registry", id)
+	}
+	if other, taken := reg.Projects[newSource]; taken && other != id {
+		return fmt.Errorf("dun: %s is already registered to project %q", newSource, other)
+	}
+	delete(reg.Projects, oldSource)
+	reg.Projects[newSource] = id
+	return fsutil.WriteAtomic(registryFile(), mustJSON(reg), 0o600)
+}
+
+// lockedRegistry takes the registry's exclusive lock and MkdirAll's
+// DUN_HOME, and returns the unlock.
+func lockedRegistry() (func(), error) {
+	if err := os.MkdirAll(dunHome(), 0o700); err != nil {
+		return nil, fmt.Errorf("dun: create %s: %w", dunHome(), err)
+	}
+	unlock, err := fsutil.LockFile(registryFile() + ".lock")
+	if err != nil {
+		return nil, err
+	}
+	return unlock, nil
 }
 
 func readRegistry() (*registry, error) {

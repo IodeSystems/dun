@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -88,5 +89,175 @@ func TestProject_RegistryConcurrentMint(t *testing.T) {
 	left, _ := filepath.Glob(filepath.Join(dunHome(), ".projects.json.tmp-*"))
 	if len(left) != 0 {
 		t.Errorf("temp files left behind: %v", left)
+	}
+}
+
+// List returns every registry entry, sorted by id, and creates nothing.
+func TestProject_List(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	base := t.TempDir()
+	var want []string
+	for _, name := range []string{"zeta", "alpha", "mid"} {
+		dir := filepath.Join(base, name)
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		p, err := Ensure(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want = append(want, p.ID)
+	}
+	entries, err := List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != len(want) {
+		t.Fatalf("List = %d entries, want %d", len(entries), len(want))
+	}
+	for i, e := range entries {
+		if e.ID == "" || e.Source == "" {
+			t.Errorf("entry %d has an empty field: %+v", i, e)
+		}
+	}
+	ids := make([]string, len(entries))
+	for i, e := range entries {
+		ids[i] = e.ID
+	}
+	if !sort.StringsAreSorted(ids) {
+		t.Errorf("entries not sorted by id: %v", ids)
+	}
+	for _, id := range want {
+		if Find(id) == nil {
+			t.Errorf("Find(%q) = nil", id)
+		}
+	}
+	if Find("no-such-id") != nil {
+		t.Error("Find(no-such-id) should be nil")
+	}
+}
+
+// Forget removes id's registry entry and leaves the project's state
+// directory — sessions, memory, worktrees — in place.
+func TestProject_Forget(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	dir := filepath.Join(t.TempDir(), "My Repo")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p, err := Ensure(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Session state and memory state live under the project's state dir.
+	sessionFile := filepath.Join(p.StateDir, "session-abc.json")
+	memoryFile := filepath.Join(p.StateDir, "memory", "note.md")
+	if err := os.MkdirAll(filepath.Dir(memoryFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{sessionFile, memoryFile} {
+		if err := os.WriteFile(f, []byte("state"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := Forget(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if r := Resolve(dir); r != nil {
+		t.Fatalf("Resolve after Forget = %+v, want nil", r)
+	}
+	if Find(p.ID) != nil {
+		t.Error("registry entry still present after Forget")
+	}
+	var reg registry
+	b, _ := os.ReadFile(registryFile())
+	if err := json.Unmarshal(b, &reg); err != nil {
+		t.Fatal(err)
+	}
+	if len(reg.Projects) != 0 {
+		t.Errorf("registry after Forget has %d entries, want 0", len(reg.Projects))
+	}
+	// The state — sessions and memory — is untouched.
+	if _, err := os.Stat(sessionFile); err != nil {
+		t.Errorf("session state removed by Forget: %v", err)
+	}
+	if _, err := os.Stat(memoryFile); err != nil {
+		t.Errorf("memory state removed by Forget: %v", err)
+	}
+	if _, err := os.Stat(p.StateDir); err != nil {
+		t.Errorf("state dir removed by Forget: %v", err)
+	}
+	// Forgetting an unknown id is an error, not a silent no-op.
+	if err := Forget(p.ID); err == nil {
+		t.Error("second Forget should fail: no such project")
+	}
+	if err := Forget("no-such-id"); err == nil {
+		t.Error("Forget(no-such-id) should fail")
+	}
+	if err := Forget(""); err == nil {
+		t.Error("Forget(\"\") should fail")
+	}
+}
+
+// Repoint moves an entry to a new source directory: the id and everything
+// filed under it follow, the old source is unregistered, and a source that
+// is already somebody else's project is refused.
+func TestProject_Repoint(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	base := t.TempDir()
+	here := filepath.Join(base, "here")
+	there := filepath.Join(base, "there")
+	other := filepath.Join(base, "other")
+	for _, d := range []string{here, there, other} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p, err := Ensure(here)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherP, err := Ensure(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Repoint(p.ID, there); err != nil {
+		t.Fatal(err)
+	}
+	// The id now resolves from the new source, not the old.
+	if r := Resolve(there); r == nil || r.ID != p.ID {
+		t.Fatalf("Resolve(new) = %+v, want id %q", r, p.ID)
+	}
+	if r := Resolve(here); r != nil {
+		t.Fatalf("Resolve(old) = %+v, want nil", r)
+	}
+	if e := Find(p.ID); e == nil || e.Source != RealPath(there) {
+		t.Errorf("Find = %+v, want source %q", e, RealPath(there))
+	}
+
+	// The new source being already registered to a DIFFERENT project is
+	// refused, and nothing changes.
+	if err := Repoint(p.ID, other); err == nil {
+		t.Fatal("Repoint onto another project's source should fail")
+	}
+	if r := Resolve(there); r == nil || r.ID != p.ID {
+		t.Fatalf("a refused Repoint changed the registry: %+v", r)
+	}
+	if Find(otherP.ID) == nil {
+		t.Error("the other project was disturbed by a refused Repoint")
+	}
+
+	// A Repoint of the new source onto itself is allowed and a no-op.
+	if err := Repoint(p.ID, there); err != nil {
+		t.Errorf("Repoint onto its own current source: %v", err)
+	}
+
+	// Missing ids and sources are refused.
+	if err := Repoint("no-such-id", there); err == nil {
+		t.Error("Repoint of an unknown id should fail")
+	}
+	if err := Repoint(p.ID, ""); err == nil {
+		t.Error("Repoint to an empty source should fail")
 	}
 }
