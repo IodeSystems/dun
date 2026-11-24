@@ -22,6 +22,7 @@ var subcommands = []subcommand{
 	{"tools", "the tools against the versions this dun pins"},
 	{"tmux", "the tmux.conf lines that show dun's state"},
 	{"mcp", "dun's sessions as an MCP server on stdio"},
+	{"acp", "dun as an Agent Client Protocol agent, for editors"},
 	{"watch", "a line each time a session ends a turn or asks"},
 	{"msg", "message dun sessions from a shell"},
 	{"session", "what dun is in a session, as JSON"},
