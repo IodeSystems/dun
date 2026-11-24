@@ -47,6 +47,65 @@ func TestAskReplay_RefusedAndUnanswered(t *testing.T) {
 	}
 }
 
+// A restored question (dund restart) is drawn at its transcript position —
+// after the user message that started the turn — not at the top of the
+// replayed history. dund appends it at the end of the log (showRestored), so
+// its position is fixed by the transcript; the TUI must not float it above
+// the first message. Pinned by askEntry: the question is the row after the
+// user row, at index 1, not index 0.
+func TestAskReplay_RestoredQuestionAtTranscriptPosition(t *testing.T) {
+	ask := map[string]any{"ask_id": "k1", "call_id": "c1", "question": "which one?", "options": []any{"red", "blue"}}
+	snap := evMsg{"type": "snapshot", "items": []any{
+		map[string]any{"kind": "user", "id": "u1", "content": "go"},
+		map[string]any{"kind": "tool_call", "tool": "ask_user", "call_id": "c1", "args": ask},
+	}, "state": []any{map[string]any{"type": "turn_state", "phase": "waiting_answer", "queued": []any{}, "ask": ask, "replayed": true}}}
+
+	// Fresh client: the snapshot replays the transcript in order, so the
+	// question lands after the user row.
+	m := newTUIModel(&dunProc{}, "/ws")
+	m = resized(m, 100, 30)
+	m = m.handleEvent(snap)
+	if !m.asking || m.askEntry() != 1 {
+		t.Fatalf("fresh: asking %v question at %d (want 1, after the user row):\n%s", m.asking, m.askEntry(), convoText(m))
+	}
+	// A reconnect past the replay window rebuilds from the snapshot: the row
+	// is still at its transcript position, not floated to the top.
+	m.skipHistory = true
+	m = m.handleEvent(snap)
+	if !m.asking || m.askEntry() != 1 {
+		t.Fatalf("reconnect: asking %v question at %d (want 1, after the user row):\n%s", m.asking, m.askEntry(), convoText(m))
+	}
+}
+
+// A restored question's row settles when the question is dismissed: the
+// interruption ends the shown turn (done, reason interrupted) and the turn
+// goes idle, so no open question remains. Pinned by askEntry: -1 after the
+// dismissal, not the stale open row.
+func TestAskReplay_DismissedQuestionSettles(t *testing.T) {
+	ask := map[string]any{"ask_id": "k1", "call_id": "c1", "question": "which one?", "options": []any{"red", "blue"}}
+	snap := evMsg{"type": "snapshot", "items": []any{
+		map[string]any{"kind": "user", "id": "u1", "content": "go"},
+		map[string]any{"kind": "tool_call", "tool": "ask_user", "call_id": "c1", "args": ask},
+	}, "state": []any{map[string]any{"type": "turn_state", "phase": "waiting_answer", "queued": []any{}, "ask": ask, "replayed": true}}}
+
+	m := newTUIModel(&dunProc{}, "/ws")
+	m = resized(m, 100, 30)
+	m = m.handleEvent(snap)
+	if !m.asking || m.askEntry() < 0 {
+		t.Fatalf("setup: question not open:\n%s", convoText(m))
+	}
+	// The dismissal: dund ends the shown turn with an interrupted done and an
+	// idle turn (restoredReply's interrupt path), then a quiet notice.
+	m = m.handleEvent(evMsg{"type": "done", "reason": "interrupted", "detail": "question dismissed"})
+	m = m.handleEvent(evMsg{"type": "turn_state", "phase": "idle", "queued": []any{}})
+	if m.asking {
+		t.Errorf("still asking after dismissal:\n%s", convoText(m))
+	}
+	if m.askEntry() >= 0 {
+		t.Errorf("the question row is still open after dismissal (want it settled, no open question):\n%s", convoText(m))
+	}
+}
+
 // A snapshot with the question still open: history draws its row, the
 // state opens it, and it is one row.
 func TestAskReplay_OpenQuestionIsOneRow(t *testing.T) {
