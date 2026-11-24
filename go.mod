@@ -1,6 +1,6 @@
 module github.com/iodesystems/dun
 
-go 1.26.7
+go 1.26.10
 
 toolchain go1.26.11
 
@@ -16,7 +16,7 @@ require (
 	github.com/charmbracelet/x/cellbuf v0.0.15
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/creack/pty v1.1.24
-	github.com/danielgtaylor/huma/v2 v2.40.0
+	github.com/danielgtaylor/huma/v2 v2.41.0
 	github.com/go-chi/chi/v5 v5.5.0
 	github.com/go-jose/go-jose/v4 v4.1.9
 	github.com/google/uuid v1.6.0
@@ -26,7 +26,7 @@ require (
 	github.com/iodesystems/gwag/v2 v2.11.0
 	github.com/iodesystems/openai-claude-api-shim v0.6.0
 	github.com/iodesystems/poly-lsp-mcp v0.5.5
-	github.com/iodesystems/raglit v0.10.0
+	github.com/iodesystems/raglit v0.11.0
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/spf13/cobra v1.10.2
 	go.starlark.net v0.0.0-20261021141710-4f4267fb140d
@@ -85,7 +85,7 @@ require (
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
 	go.yaml.in/yaml/v3 v3.0.6 // indirect
 	go.yaml.in/yaml/v4 v4.0.0 // indirect
-	golang.org/x/net v0.62.0 // indirect
+	golang.org/x/net v0.63.0 // indirect
 	golang.org/x/sync v0.25.0 // indirect
 	golang.org/x/text v0.44.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261110000943-09e21b237f2c // indirect
@@ -94,5 +94,5 @@ require (
 	modernc.org/libc v1.80.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
-	modernc.org/sqlite v1.62.0 // indirect
+	modernc.org/sqlite v1.63.0 // indirect
 )

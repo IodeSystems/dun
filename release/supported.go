@@ -193,8 +193,12 @@ var Supported = []Tool{
 	// read, which dun ps reads (internal/procps/raglit.go). v0.9.0 has no
 	// --all flag; dun ps then shows "needs raglit >= v0.10.0" under the daemon
 	// row and nothing else breaks, so Min stays.
+	// Recommended v0.11.0 (2026-11-24), tarballs in deps.json: Models.Configure
+	// hook (library; dun does not use it yet), field query API, coverage,
+	// activity feed, search facets, ingest --explain/--analyze, identity-job
+	// cancel, OCR figure gate. No dun-facing break; Min stays.
 	{Name: "raglit", Module: "github.com/iodesystems/raglit/cmd/raglit",
-		Min: "v0.0.0-20261024184452-5d24299365a3", Recommended: "v0.10.0"},
+		Min: "v0.0.0-20261024184452-5d24299365a3", Recommended: "v0.11.0"},
 }
 
 // Tool is one Supported entry.
