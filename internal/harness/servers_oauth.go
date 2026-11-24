@@ -77,6 +77,8 @@ func (h *Harness) authState(s mcpserver.Server) string {
 		return ""
 	case s.OAuth != nil:
 		return h.oauthFor(s).Status().String()
+	case s.TokenCmd != "":
+		return "token cmd"
 	case s.Bearer != "":
 		return "static bearer"
 	}

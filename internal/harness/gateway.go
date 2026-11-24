@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -36,14 +37,15 @@ import (
 // and the timeout. Two sessions that resolve a server the same share one
 // upstream; any difference is another one.
 type ShareSpec struct {
-	ID      string            `json:"id"`
-	Command string            `json:"command,omitempty"`
-	Args    []string          `json:"args,omitempty"`
-	Env     []string          `json:"env,omitempty"`
-	URL     string            `json:"url,omitempty"`
-	Headers map[string]string `json:"headers,omitempty"`
-	OAuth   *oauth.Spec       `json:"oauth,omitempty"`
-	Timeout int               `json:"timeout,omitempty"`
+	ID       string            `json:"id"`
+	Command  string            `json:"command,omitempty"`
+	Args     []string          `json:"args,omitempty"`
+	Env      []string          `json:"env,omitempty"`
+	URL      string            `json:"url,omitempty"`
+	Headers  map[string]string `json:"headers,omitempty"`
+	OAuth    *oauth.Spec       `json:"oauth,omitempty"`
+	TokenCmd string            `json:"token_cmd,omitempty"`
+	Timeout  int               `json:"timeout,omitempty"`
 }
 
 // ShareRequest is an engine's ask for an endpoint: the spec, its instance,
@@ -287,6 +289,40 @@ func (g *Gateway) start(up *gwUpstream) {
 		})
 		err = src.Ensure(ctx)
 		cfg.Authorization, cfg.OnUnauthorized = src.Authorization, src.OnUnauthorized
+	}
+	if s.TokenCmd != "" && s.URL != "" && err == nil {
+		var (
+			mu    sync.Mutex
+			token string
+		)
+		runCmd := func(ctx context.Context) (string, error) {
+			out, err := exec.CommandContext(ctx, "sh", "-c", s.TokenCmd).Output()
+			if err != nil {
+				return "", fmt.Errorf("token command: %w", err)
+			}
+			return strings.TrimSpace(string(out)), nil
+		}
+		tok, err2 := runCmd(ctx)
+		if err2 != nil {
+			err = err2
+		} else {
+			token = tok
+			cfg.Authorization = func(ctx context.Context) (string, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				return "Bearer " + token, nil
+			}
+			cfg.OnUnauthorized = func(ctx context.Context, wwwAuthenticate string) error {
+				fresh, e := runCmd(ctx)
+				if e != nil {
+					return e
+				}
+				mu.Lock()
+				token = fresh
+				mu.Unlock()
+				return nil
+			}
+		}
 	}
 	if err == nil {
 		err = g.mgr.StartServer(ctx, cfg)

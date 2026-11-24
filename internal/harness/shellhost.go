@@ -116,6 +116,9 @@ func mcpshellConfig(hosted []mcpserver.Server, oauthCmd func(mcpserver.Server) s
 			if s.OAuth != nil && oauthCmd != nil {
 				delete(headers, "Authorization")
 				e.AuthCmd = oauthCmd(s)
+			} else if s.TokenCmd != "" {
+				delete(headers, "Authorization")
+				e.AuthCmd = s.TokenCmd
 			} else if m := mcpserver.EnvRef.FindStringSubmatch(s.Bearer); m != nil {
 				name := m[1] + m[2]
 				delete(headers, "Authorization")

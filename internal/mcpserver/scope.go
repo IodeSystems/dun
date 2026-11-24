@@ -183,7 +183,7 @@ type catalogEntry struct {
 func specOf(s Server) Spec {
 	auto := s.Autostart
 	return Spec{ID: s.ID, Command: s.Command, Args: s.Args, URL: s.URL, Headers: s.Headers, Bearer: s.Bearer,
-		Env: s.Env, Timeout: s.Timeout, Autostart: &auto, Disable: s.Disable, Via: s.Via, Instance: s.Instance, Shell: s.Shell, OAuth: s.OAuth}
+		TokenCmd: s.TokenCmd, Env: s.Env, Timeout: s.Timeout, Autostart: &auto, Disable: s.Disable, Via: s.Via, Instance: s.Instance, Shell: s.Shell, OAuth: s.OAuth}
 }
 
 // loadCatalog merges base (the built-ins, or a caller's Go-level servers),
@@ -237,7 +237,7 @@ func loadCatalog(dir string, base []Server) ([]catalogEntry, error) {
 // one — that is a server someone forgot to define.
 func switchesOnly(s Spec) bool {
 	return s.Command == "" && s.URL == "" && s.Args == nil && s.Env == nil && s.Headers == nil &&
-		s.Bearer == "" && s.OAuth == nil && s.Timeout == 0 &&
+		s.Bearer == "" && s.TokenCmd == "" && s.OAuth == nil && s.Timeout == 0 &&
 		(s.Wake || s.Autostart != nil || s.Via != "" || s.Instance != "" || s.Disable != nil || s.Tools != nil || s.Attach != nil || s.Detach != nil || s.Exclude != nil || s.IndexBudget != "" || s.IndexAnyway ||
 			s.LSPRoots != "")
 }
@@ -309,6 +309,9 @@ func (e catalogEntry) resolve(sess SessionServer, flag *bool, workspace, raglitH
 	if err := CheckOAuth(s, via); err != nil {
 		return Server{}, false, fmt.Errorf("dun: server %q: %w", s.ID, err)
 	}
+	if err := CheckTokenCmd(s, via); err != nil {
+		return Server{}, false, fmt.Errorf("dun: server %q: %w", s.ID, err)
+	}
 	var on bool
 	switch {
 	case sess.On != nil:
@@ -338,6 +341,7 @@ func (e catalogEntry) resolve(sess SessionServer, flag *bool, workspace, raglitH
 		PerWorkspace:   workspaceKeyed(s),
 		Shell:          s.Shell,
 		Bearer:         s.Bearer,
+		TokenCmd:       s.TokenCmd,
 		OAuth:          s.OAuth,
 		Scopes:         sc,
 		Attach:         effectiveIndexes(sc, true),

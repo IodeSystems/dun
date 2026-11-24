@@ -53,6 +53,7 @@ func shareSpec(s mcpserver.Server, command string, args, env []string, timeout t
 			o.ClientSecret = oauth.ClientSecret(o) // read here, where the env is
 			sp.OAuth = &o
 		}
+		sp.TokenCmd = s.TokenCmd
 		return sp
 	}
 	sp.Command, sp.Args, sp.Env = command, slices.Clone(args), slices.Clone(env)

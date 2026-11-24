@@ -58,6 +58,9 @@ type Server struct {
 	// shell-hosted server can read the variable when it connects instead of
 	// dun writing the token into a file. Headers carries the resolved value.
 	Bearer string
+	// TokenCmd is a shell command that prints a bearer token on stdout
+	// (Spec.TokenCmd). The harness runs it on connect and after a 401.
+	TokenCmd string
 	// OAuth, when set, logs in to the server and sends the token it gets
 	// (internal/oauth/mcpoauth.go) instead of a fixed Bearer.
 	OAuth *oauth.Spec

@@ -144,6 +144,11 @@ type Spec struct {
 	// the token is obtained in the browser, kept in $DUN_HOME/oauth/<id>.json
 	// and refreshed (see internal/oauth/mcpoauth.go). Not with Bearer, and not in the shell.
 	OAuth *oauth.Spec `json:"oauth,omitempty"`
+	// TokenCmd is a shell command that prints a bearer token on stdout.
+	// Dun runs it when it connects to the server, sends the output as the
+	// Authorization bearer value, and re-runs it after a 401 to retry with
+	// a fresh value. Mutually exclusive with Bearer and OAuth.
+	TokenCmd string `json:"token_cmd,omitempty"`
 	// Attach names indexes the server's search role reads ("project:index")
 	// and Detach ones it does not, at this scope; the nearest scope that
 	// names an index decides it (harness/attach.go).
@@ -244,6 +249,23 @@ func CheckOAuth(s Spec, via string) error {
 		return fmt.Errorf("oauth send %q: want %q or %q", o.Send, oauth.SendAccessToken, oauth.SendIDToken)
 	case o.RedirectPort < 0 || o.RedirectPort > 65535:
 		return fmt.Errorf("oauth redirect_port %d is not a port", o.RedirectPort)
+	}
+	return nil
+}
+
+// CheckTokenCmd validates a server spec that names a token command: it must
+// be a remote server (a url) and mutually exclusive with Bearer and OAuth.
+func CheckTokenCmd(s Spec, via string) error {
+	if s.TokenCmd == "" {
+		return nil
+	}
+	switch {
+	case s.URL == "":
+		return fmt.Errorf("token_cmd is for a remote server (a url), not a command")
+	case s.Bearer != "":
+		return fmt.Errorf("has both bearer and token_cmd — keep one")
+	case s.OAuth != nil:
+		return fmt.Errorf("has both oauth and token_cmd — keep one")
 	}
 	return nil
 }
@@ -594,6 +616,9 @@ func mergeSpec(prev, next Spec) Spec {
 	if next.Bearer != "" {
 		out.Bearer = next.Bearer
 	}
+	if next.TokenCmd != "" {
+		out.TokenCmd = next.TokenCmd
+	}
 	if next.Headers != nil {
 		out.Headers = next.Headers
 	}
@@ -666,7 +691,7 @@ func mergeSpec(prev, next Spec) Spec {
 // requestHeaders resolves a remote server's headers: Headers, plus
 // Authorization from Bearer with any $NAME read from the environment.
 func requestHeaders(s Spec) map[string]string {
-	if s.URL == "" || (s.Bearer == "" && len(s.Headers) == 0) {
+	if s.URL == "" || (s.Bearer == "" && len(s.Headers) == 0 && s.TokenCmd == "") {
 		return nil
 	}
 	out := map[string]string{}
@@ -676,6 +701,9 @@ func requestHeaders(s Spec) map[string]string {
 	if tok := os.ExpandEnv(s.Bearer); tok != "" {
 		out["Authorization"] = "Bearer " + tok
 	}
+	// TokenCmd: the bearer is dynamic (run on connect, re-run on 401), so
+	// no static Authorization header is resolved here. The harness sets
+	// mcfg.Authorization to a hook that runs the command.
 	return out
 }
 

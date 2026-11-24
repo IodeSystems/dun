@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -554,6 +555,47 @@ func (h *Harness) startServer(ctx context.Context, s mcpserver.Server) error {
 		h.noteServer(s.ID, "OAuth: checking the login")
 		err = oc.Ensure(ctx)
 		mcfg.Authorization, mcfg.OnUnauthorized = oc.Authorization, oc.OnUnauthorized
+	}
+	// A TokenCmd server runs its command to get a bearer token: on connect,
+	// and again after a 401, when the token is stale. The command's stdout
+	// is the token; a fresh run gives a fresh value.
+	if s.TokenCmd != "" && err == nil && !shared {
+		phase.set("running the token command")
+		h.noteServer(s.ID, "token_cmd: running")
+		var (
+			mu    sync.Mutex
+			token string
+		)
+		runTokenCmd := func(ctx context.Context) (string, error) {
+			cmd := exec.CommandContext(ctx, "sh", "-c", s.TokenCmd)
+			out, err := cmd.Output()
+			if err != nil {
+				return "", fmt.Errorf("token command: %w", err)
+			}
+			return strings.TrimSpace(string(out)), nil
+		}
+		tok, err2 := runTokenCmd(ctx)
+		if err2 != nil {
+			err = err2
+		} else {
+			token = tok
+			mcfg.Authorization = func(ctx context.Context) (string, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				return "Bearer " + token, nil
+			}
+			mcfg.OnUnauthorized = func(ctx context.Context, wwwAuthenticate string) error {
+				fresh, err := runTokenCmd(ctx)
+				if err != nil {
+					return err
+				}
+				mu.Lock()
+				token = fresh
+				mu.Unlock()
+				h.noteServer(s.ID, "token_cmd: refreshed after a 401")
+				return nil
+			}
+		}
 	}
 	if err == nil {
 		phase.set("waiting for the handshake")
