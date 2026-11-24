@@ -929,7 +929,8 @@ func main() {
 		}
 		cfg.OnToolEnd = func(r harness.ToolEnd) {
 			em.emit(&proto.ToolResult{CallID: r.CallID, Tool: r.Tool, Result: r.Result,
-				IsError: r.IsError, ElapsedMS: r.Elapsed.Milliseconds(), Agent: r.Agent})
+				IsError: r.IsError, ElapsedMS: r.Elapsed.Milliseconds(), Agent: r.Agent,
+				Edits: editsProto(r.Edits)})
 		}
 		cfg.OnNotify = func(text string) { em.emit(&proto.Notification{Text: text, Agent: harness.NoticeAgent(text)}) }
 		cfg.OnDelivered = func(d harness.Delivery) {

@@ -2019,3 +2019,27 @@ rescue), and agentkit's capability record on the wire. Code:
   disk; only a pruned worktree's overlay dir is removed, as before.
   `host_hooks` is still accepted in a manifest as a deprecated field and
   ignored, because installed and published poly-lsp manifests still carry it.
+
+## File edits on tool results (USER 2026-11-24)
+
+- **A tool result carries the files it changed, whole texts before and after**
+  (`tool_result.edits[]`, docs/event-protocol.md "File edits"), for an ACP
+  bridge's `diff` content and any client. The engine reads the files around
+  the call (`withEdits`, fileedits.go) rather than the tools reporting them:
+  agentkit's file tools and poly-lsp's node_edit answer with text or JSON
+  that has no file text, and reading the disk is one rule for both. The model
+  is not sent the texts; its result is unchanged.
+- **Only tools whose arguments name every file they change.** exec and
+  mcpshell's eval (a command or script changes anything), node_refactor and
+  node_rename_file (importers across the workspace) are not read: a list of
+  edits that misses files would tell an ACP client a wrong story. A
+  workspace diff per call would cover them but cost a tree walk per call.
+- **Caps: 1 MiB a file, 2 MiB a call, 8 MiB a history replay.** dund keeps
+  20,000 events in memory per session; with no cap, a session editing a big
+  file would hold every version. A file past a cap, binary, a directory or a
+  symlink is named with `skipped` and no texts.
+- **Persisted in a sidecar, not the transcript** (`<id>.edits.jsonl`, texts
+  over 8 KiB as blobs). The transcript is agentkit's Entry, which has no field
+  for it, and what the model reads. Size: one line per editing call, plus one
+  blob per file version over 8 KiB (content-addressed, so an edit's old text
+  is the previous edit's new text, kept once). `/clear` removes it.
