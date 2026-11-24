@@ -112,8 +112,9 @@ func diffStat(s string) string {
 }
 
 func init() {
-	// Code edits return unified diffs (+ diagnostics) — always colorize.
-	registerRenderer("node_edit", rendererFunc(diffRender))
+	// node_edit answers JSON (note, byte counts, diagnostics); a result with
+	// a diff field, or that is not JSON, falls back to diffRender.
+	registerRenderer("node_edit", rendererFunc(nodeEditRender))
 	// These commonly return JSON payloads; pretty-print, else generic.
 	// docs_search is raglit's search; "search" (dund's) answers text, which
 	// jsonRender shows as it is, and is raglit's in transcripts from before
