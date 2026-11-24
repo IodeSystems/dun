@@ -161,3 +161,30 @@ func TestMemory_FailedVoidWritesNoVerdict(t *testing.T) {
 		t.Errorf("a failed void must change nothing: %v %v", paths, ReadAttest(paths[0]))
 	}
 }
+
+// A "remember I want X" is a note, not a rule: when the user's defaults file
+// is present, the save reply points to it for preferences that apply every
+// turn; when it is absent, the reply does not.
+func TestMemory_AddPointsToTheUserDefaultsFile(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	m, _, _ := testMemory(t)
+	add := toolArgs{Action: "add", Content: "I want terse answers.", Question: "How do I want answers?"}
+	out, err := m.apply(add, NoteMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, defaultsNote) {
+		t.Errorf("no defaults file: the reply must not point to one: %q", out)
+	}
+	home := os.Getenv("DUN_HOME")
+	if err := os.WriteFile(filepath.Join(home, "AGENTS.md"), []byte("defaults\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err = m.apply(add, NoteMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, defaultsNote) {
+		t.Errorf("defaults file present: the reply must point to it: %q", out)
+	}
+}
