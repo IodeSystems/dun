@@ -79,7 +79,15 @@ func clearRigAck(t *testing.T, exec, ack bool) (*engineRig, *clearRunner) {
 	t.Helper()
 	r := &clearRunner{exec: exec, ack: ack}
 	g := newEngineRig(t, r, func(c *harness.Config) { c.Exec = &harness.HostShell{Dir: c.Workspace} })
-	t.Cleanup(func() { g.h.KillAllJobs("user") })
+	// Stop the kept job muted: its completion notice would wake a turn that
+	// writes into the TempDir while it is removed. Cleanups run LIFO, so
+	// this runs before the engine closes and the TempDir goes.
+	t.Cleanup(func() {
+		g.h.StopJobsForClear("user")
+		for end := time.Now().Add(5 * time.Second); len(g.h.RunningJobs()) > 0 && time.Now().Before(end); {
+			time.Sleep(10 * time.Millisecond)
+		}
+	})
 	g.waitFor("ready", isType("ready"))
 	g.send(&proto.User{Content: "the old task"})
 	g.waitFor("the turn's done", isType("done"))
