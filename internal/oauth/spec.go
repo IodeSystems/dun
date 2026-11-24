@@ -36,6 +36,12 @@ type Spec struct {
 	// RedirectPort is the loopback port of the redirect URI; 0 is
 	// DefaultRedirectPort. It is fixed so it can be registered exactly.
 	RedirectPort int `json:"redirect_port,omitempty"`
+	// Relay is the public callback base for a login completed on a remote
+	// browser, e.g. "https://dun.iodesystems.com". Empty is today's
+	// loopback mode. Set, the redirect URI is Relay + "/mcp/oauth/callback"
+	// and no loopback listener is started: the host serving the callback
+	// checks the state and calls Client.Deliver with the code.
+	Relay string `json:"relay,omitempty"`
 	// AuthParams are extra authorize-request parameters, e.g. Google's
 	// access_type=offline and prompt=consent, without which it issues no
 	// refresh token.

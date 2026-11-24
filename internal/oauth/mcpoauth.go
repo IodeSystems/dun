@@ -160,11 +160,29 @@ type Client struct {
 
 	loginMu   sync.Mutex  // one interactive login at a time
 	loggingIn atomic.Bool // a login is waiting on the person
+	// relay is this login's relay slot, set in relay mode (Spec.Relay):
+	// the state the authorize URL carries and the channel Deliver pushes
+	// the callback's result onto. loginMu guards it; Login clears it.
+	relay      *relayLogin
+	relayState string
 	// Ended, when set, hears how a login whose URL was shown ended (nil
 	// err: it went through): the mcp_login that closes the started one.
 	// loginShown is this login's URL was shown; both under loginMu.
 	Ended      func(id string, err error)
 	loginShown bool
+}
+
+// callbackResult is what a login's redirect carried: the code, or the
+// identity provider's refusal.
+type callbackResult struct {
+	code string
+	err  error
+}
+
+// relayLogin is the in-flight login in relay mode (Spec.Relay): the channel
+// Deliver pushes the callback's result onto.
+type relayLogin struct {
+	got chan callbackResult
 }
 
 // NewClient is server id's login, at url, with its oauth block.
@@ -476,23 +494,46 @@ func (c *Client) Login(ctx context.Context, wwwAuthenticate string) (err error) 
 	if md.AuthorizationEndpoint == "" || md.TokenEndpoint == "" {
 		return fmt.Errorf("%s: its metadata has no authorization or token endpoint", md.Issuer)
 	}
+	// Relay mode (Spec.Relay): the redirect goes to the host serving this
+	// session, which checks the state and calls Deliver; no loopback
+	// listener here.
+	relay := c.spec.Relay != ""
 	port := c.redirectPort()
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
-	if err != nil {
-		return c.waitOtherLogin(ctx, port, err)
+	var ln net.Listener
+	var redirect string
+	if relay {
+		redirect = strings.TrimSuffix(c.spec.Relay, "/") + "/mcp/oauth/callback"
+	} else {
+		var err error
+		ln, err = net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+		if err != nil {
+			return c.waitOtherLogin(ctx, port, err)
+		}
+		redirect = fmt.Sprintf("http://127.0.0.1:%d/oauth/callback", port)
 	}
-	redirect := fmt.Sprintf("http://127.0.0.1:%d/oauth/callback", port)
 	if c.spec.ClientID == "" {
 		ac, err := c.chooseClient(ctx, md, redirect, port)
 		if err != nil {
-			ln.Close()
+			if ln != nil {
+				ln.Close()
+			}
 			return err
 		}
 		c.mu.Lock()
 		c.auto = ac
 		c.mu.Unlock()
 	}
+	// c.loginMu is held (released in relay mode across the wait for the
+	// callback); the relay slot lives under it, so this is this login's own
+	// state.
 	verifier, state := randomToken(32), randomToken(16)
+	if relay {
+		c.relay = &relayLogin{got: make(chan callbackResult, 1)}
+		c.relayState = state
+	} else {
+		c.relay = nil
+		c.relayState = ""
+	}
 	nonce := ""
 	if slices.Contains(as.scopes, "openid") {
 		nonce = randomToken(16)
@@ -527,44 +568,46 @@ func (c *Client) Login(ctx context.Context, wwwAuthenticate string) (err error) 
 	}
 	authURL := md.AuthorizationEndpoint + sep + q.Encode()
 
-	type result struct {
-		code string
-		err  error
+	var got chan callbackResult
+	var srv *http.Server
+	if relay {
+		got = c.relay.got
+	} else {
+		got = make(chan callbackResult, 1)
+		srv = &http.Server{ReadHeaderTimeout: 10 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/oauth/callback" {
+				http.NotFound(w, r)
+				return
+			}
+			p := r.URL.Query()
+			if p.Get("state") != state {
+				// Not this login's redirect: answer it, and keep waiting.
+				http.Error(w, "dun: this login link is stale — use the newest one", http.StatusBadRequest)
+				return
+			}
+			var res callbackResult
+			switch {
+			case p.Get("error") != "":
+				res.err = fmt.Errorf("the identity provider refused the login: %s %s", p.Get("error"), p.Get("error_description"))
+			case p.Get("code") == "":
+				res.err = fmt.Errorf("the identity provider redirected back without a code")
+			default:
+				res.code = p.Get("code")
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			msg := "Logged in to " + c.id + ". You can close this tab."
+			if res.err != nil {
+				msg = "Login to " + c.id + " failed: " + res.err.Error()
+			}
+			fmt.Fprintf(w, "<!doctype html><title>dun</title><p>%s</p>", html.EscapeString(msg))
+			select {
+			case got <- res:
+			default:
+			}
+		})}
+		go srv.Serve(ln)
+		defer srv.Close()
 	}
-	got := make(chan result, 1)
-	srv := &http.Server{ReadHeaderTimeout: 10 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/oauth/callback" {
-			http.NotFound(w, r)
-			return
-		}
-		p := r.URL.Query()
-		if p.Get("state") != state {
-			// Not this login's redirect: answer it, and keep waiting.
-			http.Error(w, "dun: this login link is stale — use the newest one", http.StatusBadRequest)
-			return
-		}
-		var res result
-		switch {
-		case p.Get("error") != "":
-			res.err = fmt.Errorf("the identity provider refused the login: %s %s", p.Get("error"), p.Get("error_description"))
-		case p.Get("code") == "":
-			res.err = fmt.Errorf("the identity provider redirected back without a code")
-		default:
-			res.code = p.Get("code")
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		msg := "Logged in to " + c.id + ". You can close this tab."
-		if res.err != nil {
-			msg = "Login to " + c.id + " failed: " + res.err.Error()
-		}
-		fmt.Fprintf(w, "<!doctype html><title>dun</title><p>%s</p>", html.EscapeString(msg))
-		select {
-		case got <- res:
-		default:
-		}
-	})}
-	go srv.Serve(ln)
-	defer srv.Close()
 
 	if c.notify != nil {
 		c.notify(c.id, authURL)
@@ -573,11 +616,23 @@ func (c *Client) Login(ctx context.Context, wwwAuthenticate string) (err error) 
 	if c.open != nil {
 		_ = c.open(authURL) // best effort: the notified URL is the way that always works
 	}
-	var res result
+	// In relay mode the result comes from Deliver, which needs loginMu — so
+	// release it across the wait, or the two would deadlock (Login holds it
+	// on the channel; Deliver wants it to feed the channel).
+	if relay {
+		c.loginMu.Unlock()
+	}
+	var res callbackResult
 	select {
 	case res = <-got:
 	case <-ctx.Done():
+		if relay {
+			c.loginMu.Lock()
+		}
 		return fmt.Errorf("login to %s not finished within %s — /mcp login %s to try again", c.id, oauthLoginTimeout, c.id)
+	}
+	if relay {
+		c.loginMu.Lock()
 	}
 	if res.err != nil {
 		return res.err
@@ -616,8 +671,53 @@ func (c *Client) Login(ctx context.Context, wwwAuthenticate string) (err error) 
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if relay {
+		// The slot is this login's: clear it, so a late callback finds no
+		// login in flight.
+		c.relay, c.relayState = nil, ""
+	}
 	c.deadRefresh, c.lastLogin = "", c.now()
 	return c.save(t)
+}
+
+// Deliver hands the OAuth callback's result to the in-flight login in relay
+// mode. state is the callback's state parameter; it must be this login's —
+// the host serving the callback checks it against its own record, and this
+// is the engine's check. A state that is not this login's (a stale link, a
+// login to another server) is refused: false. With no login in flight, it
+// is refused too. The code and the identity provider's error are relayed to
+// Login, which does the token exchange.
+func (c *Client) Deliver(state, code, errCode, errDesc string) bool {
+	// Copy the channel out under a short lock, and send without holding it:
+	// Login releases loginMu across its wait on the channel, but a lock held
+	// across the send would be needless, and it is the pattern that closed
+	// the deadlock.
+	c.loginMu.Lock()
+	var got chan callbackResult
+	match := c.relay != nil && state != "" && state == c.relayState
+	if match {
+		got = c.relay.got
+	}
+	c.loginMu.Unlock()
+	if !match {
+		return false
+	}
+	res := callbackResult{code: code}
+	if errCode != "" {
+		msg := errCode
+		if errDesc != "" {
+			msg += " " + errDesc
+		}
+		res.err = fmt.Errorf("the identity provider refused the login: %s", msg)
+	}
+	select {
+	case got <- res:
+	default:
+		// Login has already received a result; a second callback is a
+		// duplicate, not this login's.
+		return false
+	}
+	return true
 }
 
 // waitOtherLogin: the callback port is taken — most likely another session
