@@ -1902,6 +1902,25 @@ rescue), and agentkit's capability record on the wire. Code:
   2026-10-27 "children come back idle, not re-run" for children a restart
   cut; a child idle at the stop still comes back idle. Open `ask_user`
   is unchanged.
+- **A build that passes `--check` can still die at start; the previous build
+  is kept and restored (2026-11-24).** `serve --check` runs beside the live
+  dund, out of its way (no pidfile, no HTTP bind, no registry), so a failure
+  it does not see is the one that needs the live dund gone. `installHandover`
+  now keeps the service's previous build as `<exe>.prev` before the final
+  rename (handover.go). A guard at the top of `serve` (service-managed dunds
+  only, after the pidfile is claimed) counts consecutive starts that die
+  before serving, in `<home>/dund/failed-starts`; at the second such
+  failure it restores `.prev` over the binary, clears the counter, and writes
+  `upgrade-refused.txt` beside the binary. `canHandOver` consults the marker,
+  so no upgrade is accepted while it is there. The marker and the counter are
+  removed once a dund is actually serving (`rollbackClear`, after the
+  listener is up), so the refusal ends when a good build serves. Two
+  failures, not one: a single failed start after a handover can be the
+  manager racing the rename. The counter is per-home (DUN_HOME), not per
+  binary: the binary may be the rolled-back build by the time the next start
+  reads it. A corrupt binary that dies before reaching `serve` is not caught
+  here; only the manager's start limits catch it. (rollback.go,
+  rollback_test.go.)
 
 ## Sessions, supervision and diagnosis
 

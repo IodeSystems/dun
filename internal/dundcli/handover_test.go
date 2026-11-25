@@ -42,15 +42,19 @@ func read(t *testing.T, p string) string {
 	return string(b)
 }
 
-// leftovers are the temp files a handover left beside the service's binary.
+// leftovers are the files a handover left beside the service's binary,
+// excluding <exe>.prev: the previous build kept for rollback (rollback.go)
+// is expected to stay, and the upgrade-refused marker, while set, is too.
 func leftovers(t *testing.T, dir string) []string {
 	t.Helper()
 	ents, _ := os.ReadDir(dir)
 	var out []string
 	for _, e := range ents {
-		if strings.HasPrefix(e.Name(), ".") {
-			out = append(out, e.Name())
+		n := e.Name()
+		if !strings.HasPrefix(n, ".") || n == "dun.prev" || n == "dun.upgrade-refused" {
+			continue
 		}
+		out = append(out, n)
 	}
 	return out
 }

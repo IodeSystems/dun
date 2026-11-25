@@ -253,6 +253,9 @@ func serve(ctx context.Context, l *loader, bin, httpAddr string, o dundapi.Optio
 	defer signal.Stop(sigc)
 	errc := make(chan error, 2)
 	self, _ := os.Executable() // now: after a rebuild it names the deleted file
+	if underServiceManager() {
+		rollbackGuard(l.home, self) // counts this start; rolls back at the Nth failure
+	}
 	dundapi.Version = Version
 	srv := dund.NewServer(svc, dund.UnixPeer)
 	serveArgs := slices.Clone(os.Args[1:]) // the service's flags, for the new build's check
@@ -320,6 +323,9 @@ func serve(ctx context.Context, l *loader, bin, httpAddr string, o dundapi.Optio
 	go func() { errc <- srv.Serve(ln) }()
 	go watchSelf(ctx, svc, self)
 	fmt.Fprintf(os.Stderr, "dund: serving %s (engines: %s)\n", sock, bin)
+	if underServiceManager() {
+		rollbackClear(l.home, self) // a build that serves ends the refusal
+	}
 	reexec, detached := false, false
 	select {
 	case sig := <-sigc:

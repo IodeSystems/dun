@@ -52,6 +52,10 @@ func canHandOver(self string) error {
 	if !st.Mode().IsRegular() || !ownedByMe(st) {
 		return fmt.Errorf("its binary %s is not a regular file of this user", self)
 	}
+	if _, err := os.Stat(upgradeRefusedPath(self)); err == nil {
+		return fmt.Errorf("upgrades are refused while %s says the last build did not serve; a build that serves clears it", upgradeRefusedPath(self))
+	}
+
 	f, err := os.CreateTemp(filepath.Dir(self), "."+filepath.Base(self)+".probe-*")
 	if err != nil {
 		return fmt.Errorf("this user cannot write in %s, where its binary is", filepath.Dir(self))
@@ -138,6 +142,11 @@ func installHandover(self, exe, version string, serveArgs []string) error {
 	}
 	if err := serveCheck(tmp.Name(), serveArgs); err != nil {
 		return err
+	}
+	// The previous build, kept for a rollback: a build that passes --check
+	// can still die at start, and the rename destroys it (rollback.go).
+	if err := os.Rename(self, prevBuildPath(self)); err != nil {
+		return fmt.Errorf("upgrade: keep the previous build at %s: %w", prevBuildPath(self), err)
 	}
 	if err := os.Rename(tmp.Name(), self); err != nil {
 		return fmt.Errorf("upgrade: put the new build at %s: %w", self, err)
