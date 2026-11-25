@@ -122,7 +122,7 @@ func (a *Agent) Initialize(ctx context.Context, p sdk.InitializeRequest) (sdk.In
 		AgentCapabilities: sdk.AgentCapabilities{
 			LoadSession:         true,
 			SessionCapabilities: sdk.SessionCapabilities{Close: &sdk.SessionCloseCapabilities{}},
-			PromptCapabilities:  sdk.PromptCapabilities{EmbeddedContext: true},
+			PromptCapabilities:  sdk.PromptCapabilities{EmbeddedContext: true, Image: true},
 		},
 		AuthMethods: []sdk.AuthMethod{{Agent: &sdk.AuthMethodAgent{
 			Id:          authMethodID,
@@ -258,12 +258,12 @@ func (a *Agent) Prompt(_ context.Context, p sdk.PromptRequest) (sdk.PromptRespon
 	if err != nil {
 		return sdk.PromptResponse{}, err
 	}
-	text := promptText(p.Prompt)
+	text, imgs := s.promptParts(p.Prompt)
 	if text == "" {
 		return sdk.PromptResponse{}, sdk.NewInvalidParams(map[string]any{"error": "the prompt has no text"})
 	}
 	s.resendPlan()
-	pr, err := s.submit(text)
+	pr, err := s.submit(text, imgs...)
 	if err != nil {
 		return sdk.PromptResponse{}, err
 	}

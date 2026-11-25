@@ -29,6 +29,7 @@ type peer interface {
 type session struct {
 	id   string
 	cwd  string
+	imgN int // images numbered so far (images.go); under mu
 	ctx  context.Context // ends with the ACP connection
 	peer peer
 	caps caps // what the editor can take (caps.go)
@@ -276,7 +277,7 @@ func (s *session) handle(ev proto.Event) {
 			s.update(sdk.UpdateAgentThoughtText(p.Text + "\n"))
 		}
 	case *proto.ImageRefused:
-		s.text(p.Message)
+		s.onImageRefused(p)
 	case *proto.Until:
 		s.onUntil(p)
 	case *proto.ControlEvent:
