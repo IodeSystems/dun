@@ -542,6 +542,8 @@ func (m tuiModel) drawView() string {
 	case m.planTelling != nil:
 		status = stNote.Render("tell "+m.planTelling.who+" about node "+m.planTelling.id) +
 			StDim.Render("  ·  it changes the plan to match · enter send · esc back to /plan")
+	case m.planBack != nil:
+		status = StDim.Render("/plan: enter send · esc back to /plan")
 	case m.starting:
 		status = m.spin.View() + StDim.Render(" "+m.startingWhat()+m.startingElapsed()+m.startQueuedHint())
 	case m.confirm.q != "":

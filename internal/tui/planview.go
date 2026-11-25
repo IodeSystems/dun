@@ -553,6 +553,7 @@ func (m tuiModel) notePlan(ev evMsg) tuiModel {
 	m.paging = true
 	m.scr = planScreen()
 	m.syncPager()
+	m.placePlan(v)
 	return m
 }
 
@@ -630,7 +631,10 @@ func (planListPane) key(m *tuiModel, msg tea.KeyPressMsg) bool {
 			line = "/plan edit " + r.id + " details " + r.details
 		}
 		// The composer, filled in: the screen goes down and the person
-		// changes the text and sends it.
+		// changes the text and sends it. Sending it, or esc, brings /plan
+		// back on the same place (planBack), as a tell does: dropping five
+		// nodes is d, enter five times, not five reopens and walks back.
+		m.planBack = &planBackTo{key: v.keys[m.pg.cur], cur: m.pg.cur, view: v.view}
 		m.popScreen()
 		m.input.SetValue(line)
 		m.input.CursorEnd()
@@ -686,6 +690,53 @@ func (m *tuiModel) startPlanTell(r planRow, v *planView) {
 	m.input.placeholder = fmt.Sprintf("tell %s about node %s · %s…", who, r.id, r.title)
 	m.setFocus(focusInput)
 	m.refresh()
+}
+
+// planBackTo is where /plan was when e, m or d lent it the composer: the
+// selected node's key, its row and the view.
+type planBackTo struct {
+	key  string
+	cur  int
+	view int
+}
+
+// endPlanBack opens /plan again where planBack says, once the composer's
+// line is sent (sent: what enter submitted) or put aside with esc. A line
+// changed into something other than a /plan command is the person's own: it
+// goes as typed and /plan stays down.
+func (m *tuiModel) endPlanBack(sent string) {
+	b := m.planBack
+	if b == nil {
+		return
+	}
+	m.planBack = nil
+	if sent != "" && !strings.HasPrefix(sent, "/plan ") {
+		return
+	}
+	m.planAt = b
+	m.openPlan()
+}
+
+// placePlan puts a /plan just opened where planAt says: the same view, the
+// same node, or the row it was on when that node moved (a drop that
+// finished its tree folds it into the finished row).
+func (m *tuiModel) placePlan(v *planView) {
+	b := m.planAt
+	m.planAt = nil
+	if b == nil {
+		return
+	}
+	if b.view != v.view {
+		v.view = b.view
+		m.syncPager()
+	}
+	if i := slices.Index(v.keys, b.key); i >= 0 {
+		m.pg.cur = i
+	} else if len(v.keys) > 0 {
+		m.pg.cur = min(b.cur, len(v.keys)-1)
+	}
+	m.syncPager()
+	m.pg.showCur()
 }
 
 // endPlanTell gives the composer back and opens /plan again; text, when not
