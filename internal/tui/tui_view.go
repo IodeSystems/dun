@@ -616,7 +616,7 @@ func (m tuiModel) drawView() string {
 		if m.activeTool != "" {
 			what = " " + m.activeTool
 		}
-		status = m.spin.View() + " " + m.spendStatus(time.Now()) + StDim.Render("working…"+what+m.busyElapsed()+m.queuedHint()+" · "+m.busyHint())
+		status = m.spin.View() + " " + m.spendStatus(time.Now()) + StDim.Render("working…"+what+m.busyElapsed()+m.untilTail()+m.queuedHint()+" · "+m.busyHint())
 	case m.focus == focusActivity && m.actLevel == actCollapsed:
 		status = StDim.Render("activity  ·  → open · tab input · " + m.exitHint())
 	case m.focus == focusActivity:
@@ -672,7 +672,7 @@ func (m tuiModel) drawView() string {
 		}
 		// Four hints at most: the rest are in /help. The way out is never
 		// the one a narrow row drops (fitHints).
-		status = m.spendStatus(time.Now()) + StDim.Render(m.readyWord()+m.serversStartingTail()+"  ·  "+m.composeHint()+m.exitHint())
+		status = m.spendStatus(time.Now()) + StDim.Render(m.readyWord()+m.untilTail()+m.serversStartingTail()+"  ·  "+m.composeHint()+m.exitHint())
 	}
 	// The header row shows the off-screen user message when scrolled up, or the
 	// normal dun title bar when at the bottom — convoHeight() budgeted for it.

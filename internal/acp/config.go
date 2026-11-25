@@ -41,6 +41,10 @@ type config struct {
 	effort    *proto.CommandSpec
 	providers []proto.ModelProvider
 	models    bool // a models event came
+	// The stop conditions (until.go): the engine's, and a goal chosen
+	// here that waits for its prompt's text.
+	until       *proto.Until
+	goalPending *pendingGoal
 }
 
 // modelRef is what a model value switches to (dund's switch_model).
@@ -164,7 +168,8 @@ func (c config) options() []sdk.SessionConfigOption {
 	if o, _ := c.effortOption(); o != nil {
 		out = append(out, *o)
 	}
-	return out
+	cp, _ := c.capOption()
+	return append(out, c.modeOption(), cp)
 }
 
 func optionsKey(opts []sdk.SessionConfigOption) string {
@@ -280,6 +285,14 @@ func (s *session) setConfig(ctx context.Context, id, value string) ([]sdk.Sessio
 			return s.liveConfig(), nil
 		}
 		cmd = &proto.ControlCmd{ID: "effort", Action: value}
+	case optMode, optTurnCap:
+		var err error
+		if cmd, done, err = s.setUntil(id, value); err != nil {
+			return nil, err
+		}
+		if cmd == nil { // in force already, or a goal that waits for its prompt
+			return s.liveConfig(), nil
+		}
 	default:
 		return nil, sdk.NewInvalidParams(map[string]any{"error": "no such config option", "configId": id})
 	}
