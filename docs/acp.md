@@ -129,11 +129,12 @@ window) and at each turn's end (`usage`: `used` = `active`, the context now;
 until a window size is known.
 
 `cost` is `usage.spend.session_cost`, the session's cumulative spend. It is
-sent only when dun has one in `USD` and not mixed with another currency
-(dun's "credits" are not an ISO 4217 code). It is a sum of the costs the
-gateway reported per response, so an estimate where the gateway prices by
-its own rate card; ACP has no exact/estimate flag. A client that wants
-"exact" must not assume it. Rounds from before the cost was reported, or a
+sent only when dun has one in `USD` or `USD estimate` and not mixed with
+another currency (other currencies, such as old "credits", are not ISO 4217
+codes and are not sent). Both go out as `USD`; for `USD estimate` (a price
+dun computed itself) the cost's `_meta` is `{"estimate": true}`, since ACP's
+Cost has no estimate flag. It is a sum of the costs the gateway reported per
+response. A client that wants "exact" must not assume it. Rounds from before the cost was reported, or a
 provider that reports none, are not in it.
 
 The prompt response carries `usage` (ACP's unstable field, SDK v0.20.0):

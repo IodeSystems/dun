@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	sdk "github.com/coder/acp-go-sdk"
+	"github.com/iodesystems/agentkit/llm"
 
 	"github.com/iodesystems/dun/proto"
 )
@@ -84,6 +85,18 @@ func TestUsageNoCost(t *testing.T) {
 	}
 	if ups := usageUpdates(r.ed.take()); len(ups) != 1 || ups[0].Cost != nil || ups[0].Used != 500 {
 		t.Errorf("updates %+v", ups)
+	}
+}
+
+// "USD estimate" is sent as USD, marked in _meta.
+func TestUsageEstimate(t *testing.T) {
+	c := 0.5
+	got := usageCost(&proto.Spend{Currency: llm.CurrencyUSDEstimate, Session: &c})
+	if got == nil || got.Amount != 0.5 || got.Currency != "USD" || string(got.Meta["estimate"]) != "true" {
+		t.Errorf("cost %+v", got)
+	}
+	if got := usageCost(&proto.Spend{Currency: llm.CurrencyUSD, Session: &c}); got == nil || got.Meta != nil {
+		t.Errorf("exact cost %+v", got)
 	}
 }
 
