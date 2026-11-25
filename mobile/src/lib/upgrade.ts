@@ -3,15 +3,24 @@
 // renders these lines as a banner.
 
 export type UpgradeWait = { session: string; what: string; id?: number; detail?: string; hint?: string };
-export type Upgrade = { state: 'pending' | 'restarting'; version: string; deadline: number; waiting: UpgradeWait[] };
+export type Upgrade = {
+  state: 'pending' | 'restarting' | 'failed';
+  version: string;
+  deadline: number;
+  waiting: UpgradeWait[];
+  /** failed: why the new build did not go in (dund runs on its own build). */
+  error?: string;
+};
 
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
 
-/** The upgrade event as state; null for anything else. */
+/** The upgrade event as state; null for anything that is not an upgrade event. */
 export function parseUpgrade(ev: Record<string, unknown>): Upgrade | null {
+  if (ev.type !== 'upgrade') return null;
   // 'failed': a service's dund could not put the new build in place and runs
-  // on with nothing pending — the banner goes.
-  if (ev.type !== 'upgrade' || ev.state === 'failed') return null;
+  // on with nothing pending — the banner shows the failure, not a clear.
+  if (ev.state === 'failed')
+    return { state: 'failed', version: str(ev.version), deadline: 0, waiting: [], error: str(ev.error) };
   const waiting = Array.isArray(ev.waiting) ? (ev.waiting as Record<string, unknown>[]) : [];
   return {
     state: ev.state === 'restarting' ? 'restarting' : 'pending',
@@ -54,6 +63,8 @@ function waitLine(w: UpgradeWait, session: string): string {
 /** The banner's lines: the headline, then what dund waits for. */
 export function upgradeLines(u: Upgrade | null, session: string): string[] {
   if (!u) return [];
+  if (u.state === 'failed')
+    return [`✗ dund could not upgrade to ${build(u.version)} and runs on its own build${u.error ? ': ' + u.error : ''}`];
   if (u.state === 'restarting') return [`⟳ dund is restarting into ${build(u.version)}… this reconnects`];
   if (!u.waiting.length) return [`⟳ dund is upgrading to ${build(u.version)} — restarting`];
   const head =

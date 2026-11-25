@@ -26,6 +26,22 @@ test('the upgrade event sets the banner; the lines name each wait and how to end
   expect(waitsOnTurnHere(v.upgrade, 'other2')).toBe(false);
 });
 
+test('a failed upgrade shows the failure in the banner, not a clear', () => {
+  const v = apply(empty, {
+    type: 'upgrade',
+    state: 'failed',
+    version: 'd80fc66',
+    error: 'upgrade: the new build fails `serve --check` with the service\'s flags: exit status 1: bad flag',
+  });
+  // The banner is set (not nulled out): the failure is what it shows.
+  expect(v.upgrade?.state).toBe('failed');
+  expect(upgradeLines(v.upgrade, 'here')).toEqual([
+    "✗ dund could not upgrade to d80fc66 and runs on its own build: upgrade: the new build fails `serve --check` with the service's flags: exit status 1: bad flag",
+  ]);
+  // Nothing to wait on and nothing to restart now.
+  expect(waitsOnTurnHere(v.upgrade, 'here')).toBe(false);
+});
+
 test('restarting replaces the list; a snapshot from the new dund clears the banner', () => {
   const v = apply(apply(empty, pending), { type: 'upgrade', state: 'restarting', version: 'd80fc66' });
   expect(upgradeLines(v.upgrade, 'here')).toEqual(['⟳ dund is restarting into d80fc66… this reconnects']);
