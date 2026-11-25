@@ -106,6 +106,9 @@ type bgJob struct {
 	// pgid is the process group the command runs in, once a host backend
 	// reported it (notePGID); 0 unknown (docker). usage reads it.
 	pgid int
+	// pgidCh is closed, once, by the same notePGID sink: a test that needs
+	// the group waits on it with an absolute cap, rather than polling info().
+	pgidCh chan struct{}
 	// outAt is when the command last printed anything; zero before it has.
 	outAt time.Time
 
@@ -695,11 +698,17 @@ func (h *Harness) newJob(command string) *bgJob {
 	j := &bgJob{
 		command: command, started: time.Now(), h: h, hb: heartbeat.New(),
 		promoteCh: make(chan struct{}), doneCh: make(chan struct{}),
+		pgidCh: make(chan struct{}),
 		cancel: cancel,
 	}
 	j.ctx = withPGIDSink(ctx, func(pgid int) {
 		j.mu.Lock()
 		j.pgid = pgid
+		select {
+		case <-j.pgidCh:
+		default:
+			close(j.pgidCh)
+		}
 		j.mu.Unlock()
 	})
 	h.bgMu.Lock()

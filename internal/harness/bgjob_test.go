@@ -595,11 +595,12 @@ func TestJobs_ReplyCarriesProcessUsage(t *testing.T) {
 	t.Cleanup(be.Close)
 	j := h.newJobStarted(be, "sleep 30")
 	t.Cleanup(func() { j.killAndWait("test") })
-	deadline := time.Now().Add(3 * time.Second)
-	for j.info().PGID == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if j.info().PGID == 0 {
+	// The group is reported by the exec backend once it exists (notePGID);
+	// wait on that signal. The cap is absolute, so a backend that never
+	// reports fails loudly instead of the test waiting forever.
+	select {
+	case <-j.pgidCh:
+	case <-time.After(30 * time.Second):
 		t.Fatal("the job never learned its process group")
 	}
 	// The shell may still fork the sleep after the first sample, and a
@@ -614,11 +615,22 @@ func TestJobs_ReplyCarriesProcessUsage(t *testing.T) {
 		}
 		prev = len(u.Procs)
 	}
-	out := jobReport(j)
-	if !strings.Contains(out, "processes: cpu 0%") || !strings.Contains(out, "fds") || !strings.Contains(out, "idle") {
-		t.Fatalf("no usage in the reply:\n%s", out)
+	// The settled reading of a sleep group is cpu 0% and an idle verdict.
+	// Trusting the first sample is the flake: under load its first tick can
+	// read nonzero utime, so the line says "cpu N%". Sample within a window
+	// and require the settled reading to APPEAR (TestSample_BusyAndIdle does
+	// the same for the live read).
+	var last string
+	for end := time.Now().Add(5 * time.Second); time.Now().Before(end); time.Sleep(100 * time.Millisecond) {
+		last = jobReport(j)
+		if strings.Contains(last, "processes: cpu 0%") && strings.Contains(last, "fds") && strings.Contains(last, "idle") {
+			break
+		}
 	}
-	t.Log(out)
+	if !strings.Contains(last, "processes: cpu 0%") || !strings.Contains(last, "fds") || !strings.Contains(last, "idle") {
+		t.Fatalf("no usage in the reply:\n%s", last)
+	}
+	t.Log(last)
 }
 
 // The handoff says ending the turn is safe (every driver — root and

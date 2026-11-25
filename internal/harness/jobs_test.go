@@ -311,9 +311,12 @@ func TestJobs_NoJobNamesTheRunningOnes(t *testing.T) {
 	<-done.doneCh
 	j := h.newJobStarted(be, "sleep 30")
 	t.Cleanup(func() { j.killAndWait("test") })
-	deadline := time.Now().Add(3 * time.Second)
-	for j.info().PGID == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond) // processes are read once the job knows its group
+	// The group is reported by the exec backend once it exists (notePGID);
+	// wait on that signal, capped absolutely so a silent backend fails loudly.
+	select {
+	case <-j.pgidCh:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the job never learned its process group")
 	}
 
 	out := jobsCall(t, h, "jobs", `{"kill":true}`)
