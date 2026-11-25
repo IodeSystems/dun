@@ -177,6 +177,25 @@ names a message only when it takes it. The SDK cancels a prompt's context
 when a newer prompt of the session arrives; the bridge ignores that
 context, so the earlier prompt still waits for its turn.
 
+### Steering (`_session/steering`)
+
+JetBrains Air sends a message typed while a turn runs as the extension
+request `_session/steering`, not as a second `session/prompt`. dun takes
+it as it takes a mid-turn prompt (above): a queued user message delivered
+into the turn's next tool result, or the next turn's input. The request is
+answered at once with `{"status": "queued"}`; nothing waits for a turn's
+end. Any other `_` method is -32601; an unknown session -32002; params with
+no text -32602. Code: `steer.go`.
+
+**Inferred, not published:** an Air debug bundle (2026-11-24, keys
+pseudonymised, values redacted) shows the params as `{sessionId, <string>,
+<array of objects of two strings>}`, read as an id and content blocks
+(`{type, text}`), and the response as an object of one string member whose
+key is unknown. So the bridge takes the text from the first array that
+reads as content blocks; else a string under `text`, `message`, `content`,
+`prompt`, `steering` or `input`; else the params' one string. Params with
+several strings and none of these are refused. Not yet run against Air.
+
 ### Stop reasons
 
 `done` is `end_turn`; `done {reason: interrupted}`, or any turn end after
