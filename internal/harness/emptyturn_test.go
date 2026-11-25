@@ -118,12 +118,14 @@ func TestEmptyReply_NoticeAndErrorsEntry(t *testing.T) {
 			t.Errorf("request %d did not carry the repair note: %q", i, last)
 		}
 	}
-	// The ledger: three repairs, then the empty-reply end.
+	// The ledger: three repairs, their outcome (failed: the turn ended in
+	// the empty reply), then the empty-reply end.
 	b, err := os.ReadFile(filepath.Join(filepath.Dir(h.cfg.SessionFile), "stats", "rounds-"+time.Now().UTC().Format("2006-01")+".jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := strings.Count(string(b), `"kind":"malformed_call_repair"`); n != 3 || strings.Count(string(b), `"kind":"empty_reply"`) != 1 {
+	if n := strings.Count(string(b), `"kind":"repair",`); n != 3 || strings.Count(string(b), `"kind":"empty_reply"`) != 1 ||
+		!strings.Contains(string(b), `"attempt":3,"cause":"malformed-call","outcome":"failed"`) {
 		t.Errorf("ledger:\n%s", b)
 	}
 }

@@ -199,6 +199,15 @@ func (h *Harness) finishInterrupt(ctx context.Context, res agent.TurnResult, err
 		return res, err
 	}
 	h.recordInterrupt(ctx)
+	h.intMu.Lock()
+	reason := h.intReason
+	h.intMu.Unlock()
+	var b BudgetCut
+	budget := reason == "" && errors.As(context.Cause(ctx), &b)
+	if reason == "" {
+		reason = interruptReason(ctx)
+	}
+	h.noteCancel(reason, budget)
 	return res, ErrInterrupted
 }
 

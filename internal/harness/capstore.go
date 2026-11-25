@@ -152,6 +152,7 @@ func TrackCaps(c *llm.Client, effortOff string) {
 	// A translation changes what goes on the wire; it is never silent. An
 	// effort one changes the role table's effective level.
 	c.OnTranslate = func(t llm.Translation) {
+		noteCapClamp(snap.Endpoint, snap.Model, t) // the rounds ledger (repairs.go)
 		if t.Reason != "" {
 			log.Printf("dun: capabilities: sent %s=%q (asked %q): %s", t.Key, t.Sent, t.Wanted, t.Reason)
 		} else {

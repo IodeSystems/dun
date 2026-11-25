@@ -19,6 +19,7 @@ import (
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/repairs"
 	"github.com/iodesystems/dun/internal/sesslist"
 )
 
@@ -477,6 +478,11 @@ type tuiModel struct {
 	tracePrevYOff        int      // last recorded YOffset (avoid duplicates)
 	// Context stats (for /context)
 	ctxStats contextStats
+	// The Repairs and Perf tabs' ledger report (statsview.go): the last
+	// read, when it was taken, and a read wanted or under way.
+	repairsRep                  *repairs.Report
+	repairsAt                   time.Time
+	repairsWant, repairsReading bool
 
 	// What the window or tab shows (tmux.go, iterm.go): the last state sent,
 	// a turn that ended unseen, and the terminal's focus report (1 in, -1
@@ -538,7 +544,34 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	kind := msgKind(msg)
 	m.evlog.add(start, kind, msg) // for /repaint (repaint.go)
+	cmdTimes.update(start)        // a command's time starts at its key (cmdtime.go)
+	screenBefore := m.screenName()
 	nm, cmd := m.update(msg)
+	seen := msg
+	if pm, ok := msg.(procMsg); ok {
+		seen = pm.msg // an engine event, tagged with its connection
+	}
+	switch ev := seen.(type) {
+	case evMsg:
+		if t, ok := ev["type"].(string); ok {
+			cmdTimes.event(t)
+		}
+	case tea.KeyPressMsg:
+		// A key that opened a screen is timed as the screen, unless it ran
+		// a command (timed as the command).
+		if t, ok := nm.(tuiModel); ok {
+			if s := t.screenName(); s != "" && s != screenBefore && !cmdTimes.busy() {
+				cmdTimes.begin("screen " + s)
+			}
+		}
+	}
+	if t, ok := nm.(tuiModel); ok && t.repairsWant && !t.repairsReading {
+		// The Repairs and Perf tabs' ledger read, off the UI's goroutine
+		// (statsview.go readRepairs).
+		t.repairsWant, t.repairsReading = false, true
+		cmd = tea.Batch(cmd, readRepairs)
+		nm = t
+	}
 	if frames.observeMsg(stageUpdate, time.Since(start), kind) {
 		// Noticed its own stutter. Say it once, in the conversation, where the
 		// person having the problem is actually looking.

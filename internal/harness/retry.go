@@ -340,7 +340,7 @@ func (h *Harness) runTurn(ctx context.Context, turn func(context.Context) (agent
 		res, err := turn(ctx)
 		if err == nil {
 			if attempt > 1 {
-				h.retry(RetryNote{Scope: "turn", Kind: "recovered", Attempt: attempt,
+				h.retryTurn(RetryNote{Scope: "turn", Kind: "recovered", Attempt: attempt,
 					Elapsed: time.Since(start), Budget: budget,
 					Reason: fmt.Sprintf("recovered on attempt %d", attempt)})
 			}
@@ -358,13 +358,13 @@ func (h *Harness) runTurn(ctx context.Context, turn func(context.Context) (agent
 			return res, err
 		}
 		if time.Now().Add(backoff).After(deadline) {
-			h.retry(RetryNote{Scope: "turn", Kind: "giveup", Attempt: attempt,
+			h.retryTurn(RetryNote{Scope: "turn", Kind: "giveup", Attempt: attempt,
 				Elapsed: time.Since(start), Budget: budget,
 				Reason: fmt.Sprintf("gave up after %s and %d attempts: %v",
 					time.Since(start).Round(time.Second), attempt, err)})
 			return res, err
 		}
-		h.retry(RetryNote{Scope: "turn", Kind: "interrupted", Attempt: attempt,
+		h.retryTurn(RetryNote{Scope: "turn", Kind: "interrupted", Attempt: attempt,
 			Delay: backoff, Elapsed: time.Since(start), Budget: budget,
 			Reason: fmt.Sprintf("the turn was interrupted — %s", transientReason(err)),
 			Detail: err.Error()})
@@ -394,6 +394,13 @@ func transientReason(err error) string {
 
 // retry delivers a note to the UI hook (nil-safe).
 func (h *Harness) retry(n RetryNote) { h.noteRetry(n) }
+
+// retryTurn is retry for runTurn's own retries, which are also ledger
+// lines (repairs.go noteRetryEvent).
+func (h *Harness) retryTurn(n RetryNote) {
+	h.noteRetryEvent(n)
+	h.retry(n)
+}
 
 // turnRetrySleep is the wait between turn attempts. A var so a test can exercise
 // the loop without sitting out the real schedule; production never replaces it.

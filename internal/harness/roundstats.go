@@ -86,6 +86,10 @@ type RoundStat struct {
 	// When a session first recaps, and at what size (USER 2026-10-27: keep
 	// stats about the first recap). Main-session rounds only.
 	Recaps int `json:"recaps,omitempty"`
+	// Repair is set when the round was a resend or a repair round: what
+	// caused it (a RoundEvent's kind or cause: provider_fail, empty-reply,
+	// length_cut, a retry's kind, …). What the repairs cost (repairs.go).
+	Repair string `json:"repair,omitempty"`
 }
 
 // PrefixProcessed reports whether this round processed its prefix rather than
@@ -199,6 +203,10 @@ type roundStats struct {
 	agents int // the session's sub-agent count at the turn's start
 	speeds []float64
 	ledger *StatsLedger
+	// nextRepair is the cause of the last resend or repair: the next round
+	// is that repair's round (RoundStat.Repair). Under mu. Rounds are not
+	// told apart by who asked, so a sub-agent's round can take it.
+	nextRepair string
 	// prevMainPrompt is each session's last main round's prompt tokens: the
 	// baseline a shrink event's "before" is measured against. Under mu.
 	prevMainPrompt map[string]int
@@ -245,6 +253,7 @@ func (h *Harness) noteRound(src spendmeter.Source, u llm.Usage) {
 	}
 	rs := &h.rounds
 	rs.mu.Lock()
+	r.Repair, rs.nextRepair = rs.nextRepair, ""
 	rs.add(r)
 	l := rs.ledger
 	rs.mu.Unlock()
@@ -475,10 +484,11 @@ func (l *StatsLedger) AppendShrink(e ShrinkEvent) error {
 	return err
 }
 
-// RoundEvent is what happened to a round besides its usage: the provider
-// ended it with a failure finish and agentkit resent it ("provider_fail_retry"),
-// or the turn ended on an empty reply ("empty_reply"). Finish and
-// NativeFinish are the provider's words, verbatim.
+// RoundEvent is what happened to a round besides its usage: a repair, a
+// resend, a retry, a fold, a cut, a cancel, a tool error, a command's time.
+// The kinds and their fields are listed in docs/providers-and-cost.md
+// ("Repairs in the stats ledger"). Finish and NativeFinish are the
+// provider's words, verbatim.
 type RoundEvent struct {
 	Kind         string    `json:"kind"`
 	Time         time.Time `json:"t"`
@@ -491,6 +501,30 @@ type RoundEvent struct {
 	Max          int       `json:"max,omitempty"`
 	WaitMS       int64     `json:"wait_ms,omitempty"`
 	Trace        string    `json:"trace,omitempty"`
+	// Cause is what the event is of: a repair's notice tag, a retry's kind,
+	// a fold's cause, who cancelled a turn, a tool error's class.
+	Cause string `json:"cause,omitempty"`
+	// Outcome: repaired|failed (repair_outcome), recovered|gave_up (a retry's
+	// end), restarted|restart_failed|gave_up (server_restart).
+	Outcome string `json:"outcome,omitempty"`
+	Scope   string `json:"scope,omitempty"`  // retry: request|turn
+	Status  int    `json:"status,omitempty"` // retry: the HTTP status
+	Tool    string `json:"tool,omitempty"`   // tool_error
+	Server  string `json:"server,omitempty"` // server_restart
+	// cap_clamp: the field the client changed, what it sent and what was
+	// asked; Reason its reason (also a fold_failed's or a cancel's text).
+	Key    string `json:"key,omitempty"`
+	Sent   string `json:"sent,omitempty"`
+	Wanted string `json:"wanted,omitempty"`
+	Reason string `json:"reason,omitempty"`
+	// fold: the prompt's tokens before and after.
+	Before int `json:"before,omitempty"`
+	After  int `json:"after,omitempty"`
+	// cmd_time: the command, how long it took, and where it was measured
+	// (tui: keypress to the first frame that shows it; engine: handling).
+	Cmd     string `json:"cmd,omitempty"`
+	MS      int64  `json:"ms,omitempty"`
+	Surface string `json:"surface,omitempty"`
 }
 
 // AppendEvent writes e as one line, the same file and append rule as Append.
@@ -516,13 +550,26 @@ func (l *StatsLedger) AppendEvent(e RoundEvent) error {
 	return err
 }
 
-// noteRoundEvent files an event for the session's ledger; nil-safe.
+// noteRoundEvent files an event for the session's ledger; nil-safe. A
+// sub-agent's go to its root's ledger, under its own session, provider and
+// model: a repair a sub-agent's model needed is that model's repair.
 func (h *Harness) noteRoundEvent(e RoundEvent) {
-	if h.rounds.ledger == nil {
+	root := h
+	for root.parent != nil {
+		root = root.parent
+	}
+	h.repairs.note(e)
+	if c := repairRoundCause(e); c != "" {
+		root.rounds.mu.Lock()
+		root.rounds.nextRepair = c
+		root.rounds.mu.Unlock()
+	}
+	l := root.rounds.ledger
+	if l == nil {
 		return
 	}
 	e.Session, e.Provider, e.Model = h.sessionName(), h.cfg.Provider, h.cfg.Endpoint.Model
-	_ = h.rounds.ledger.AppendEvent(e)
+	_ = l.AppendEvent(e)
 }
 
 // AppendOutcome writes a turn outcome as one line, the same file and the

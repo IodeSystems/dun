@@ -17,6 +17,7 @@ import (
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/internal/numfmt"
+	"github.com/iodesystems/dun/internal/repairs"
 )
 
 // `dun --usage`: what dun has used, read from the stats ledger
@@ -286,9 +287,23 @@ func usageCmd(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	asJSON := fs.Bool("json", false, "print JSON")
 	noNet := fs.Bool("no-net", false, "do not ask the provider what is left")
+	repairsOnly := fs.Bool("repairs", false, "this month's repairs, retries and tool errors by kind and model, what they cost, and command times (internal/repairs)")
 	if err := fs.Parse(args); err != nil || fs.NArg() > 0 {
-		fmt.Fprintln(stderr, "usage: dun --usage [--json] [--no-net]")
+		fmt.Fprintln(stderr, "usage: dun --usage [--json] [--no-net] [--repairs]")
 		return 2
+	}
+	if *repairsOnly {
+		rep := repairs.Read(harness.DefaultStatsDir(), usageNow())
+		if *asJSON {
+			enc := json.NewEncoder(stdout)
+			enc.SetIndent("", "  ")
+			_ = enc.Encode(rep)
+			return 0
+		}
+		io.WriteString(stdout, "dun usage --repairs\n\n"+repairs.RenderRepairs(rep, repairs.Plain)+
+			"\n\n  round latency by model, this month\n"+repairs.RenderLatency(rep.Latency, repairs.Plain)+
+			"\n\n  command times, this month (! over "+repairs.SlowCmd.String()+")\n"+repairs.RenderCmds(rep.Cmds, repairs.Plain)+"\n")
+		return 0
 	}
 	rep := readUsage(harness.DefaultStatsDir(), usageNow())
 	rep.Budget = readBudget(*noNet)

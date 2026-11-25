@@ -8,6 +8,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/iodesystems/dun/internal/numfmt"
+	"github.com/iodesystems/dun/internal/repairs"
 )
 
 // Perf instrumentation, added after a session spent so long rendering that it
@@ -100,6 +103,7 @@ type frameStats struct {
 	worst     time.Duration
 	worstKind string
 	slowKinds map[string]int
+	dump      string // the slow-frame dump's path, once written
 }
 
 var frames frameStats
@@ -174,6 +178,33 @@ func (f *frameStats) report() string {
 	return b.String()
 }
 
+// table is the stats for the Perf tab: per stage, and the slow frames'
+// cause and dump.
+func (f *frameStats) table() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var rows [][]string
+	for i := range f.st {
+		s := &f.st[i]
+		if s.n == 0 {
+			continue
+		}
+		rows = append(rows, []string{stageName[i], numfmt.Short(s.n), round(s.pct(50)).String(), round(s.pct(95)).String(),
+			round(s.max).String(), numfmt.Short(s.slow)})
+	}
+	if len(rows) == 0 {
+		return "    " + StDim.Render("nothing rendered yet")
+	}
+	out := repairs.Table("    ", []string{"stage", "n", "p50", "p95", "max", "slow ≥" + slowFrame.String()}, rows)
+	if f.worstKind != "" {
+		out += "\n    " + StDim.Render(fmt.Sprintf("slowest message: %s (%s)", f.worstKind, round(f.worst)))
+	}
+	if f.dump != "" {
+		out += "\n    " + StDim.Render("slow-frame dump: "+f.dump)
+	}
+	return out
+}
+
 // slowWarning is what the user sees when dun notices its own stutter, and the
 // path of the dump written alongside it. Emitted ONCE per session: a warning
 // that repeats while the UI is already struggling is just more work.
@@ -183,6 +214,9 @@ func (f *frameStats) slowWarning() string {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		return "⚠ rendering is stuttering"
 	}
+	f.mu.Lock()
+	f.dump = path
+	f.mu.Unlock()
 	return "⚠ rendering is stuttering and may be dropping input, details in " + path
 }
 
