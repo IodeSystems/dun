@@ -14,6 +14,7 @@ import (
 
 	"github.com/iodesystems/dun/internal/dund"
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/memory"
 	"github.com/iodesystems/dun/internal/ragd"
 	"github.com/iodesystems/dun/proto"
 )
@@ -143,14 +144,15 @@ func TestMemoryNotesGoToDund(t *testing.T) {
 	if !strings.HasSuffix(out, "(global)") {
 		t.Fatalf("global add: %q", out)
 	}
-	d.find("harbor", "zebra", "how-do-deploys")
+	proj := memory.KeyFor(ws)
+	d.find(proj, "zebra", "how-do-deploys")
 	d.find("", "zebra", "@global")
 	// Scope: each index holds its own notes only.
-	d.find("harbor", "zebra", "how-do-deploys", "deploy")
-	d.none("harbor", "fragments")
+	d.find(proj, "zebra", "how-do-deploys", "deploy")
+	d.none(proj, "fragments")
 	d.none("", "cluster")
 	// Tags: whole-tag AND.
-	d.none("harbor", "zebra", "deploy", "absent")
+	d.none(proj, "zebra", "deploy", "absent")
 
 	// dund down: the note is kept, and said not indexed.
 	d.down()
@@ -165,11 +167,11 @@ func TestMemoryNotesGoToDund(t *testing.T) {
 	// Back: the first call that reaches dund syncs the notes.
 	d.up()
 	memoryCall(t, h, map[string]any{"action": "add", "content": "The otter build is slow on Mondays."})
-	d.find("harbor", "narwhal", "narwhal")
-	d.find("harbor", "otter", "otter")
+	d.find(proj, "narwhal", "narwhal")
+	d.find(proj, "otter", "otter")
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		r, _ := d.host.Search(context.Background(), proto.RagSearch{Project: "harbor", Index: "memories", Query: "zebra", Mode: "fts"})
+		r, _ := d.host.Search(context.Background(), proto.RagSearch{Project: proj, Index: "memories", Query: "zebra", Mode: "fts"})
 		if len(r.Hits) == 0 {
 			break
 		}
@@ -203,9 +205,10 @@ func TestStrategiesGoToDund(t *testing.T) {
 	if _, err := h.MemoriesCommand("add constraint global no-wombat Never touch the wombat config."); err != nil {
 		t.Fatal(err)
 	}
-	d.findIn("strategies", "harbor", "quokka", "strategy-bisect-quokka")
+	proj := memory.KeyFor(ws)
+	d.findIn("strategies", proj, "quokka", "strategy-bisect-quokka")
 	d.findIn("strategies", "", "wombat", "constraint-no-wombat")
-	d.none("harbor", "quokka")
+	d.none(proj, "quokka")
 	var tc llm.ToolCall
 	tc.Function.Name, tc.Function.Arguments = "file_read", `{"path":"constraint:no-wombat"}`
 	if out, _ := h.Session.Dispatch(context.Background(), tc); !strings.Contains(out, "wombat config") {

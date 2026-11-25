@@ -21,14 +21,20 @@ import (
 	"github.com/iodesystems/agentkit/llm"
 	"github.com/iodesystems/dun/internal/dunhome"
 	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/dun/internal/project"
 )
 
 // Memory — notes a later session on this project needs and cannot get from the
 // code, the git history or the docs (plan item 9).
 //
-// A note is one markdown file in ~/.dun/memory/<project>/ (scope project) or
-// ~/.dun/memory/@global/ (scope global), put into dund's memories index of
-// that project or of the global set (docs/rag.md, slice 5). That index is the
+// A note is one markdown file in ~/.dun/memory/<project id>/ (scope project)
+// or ~/.dun/memory/@global/ (scope global), put into dund's memories index
+// of that project or of the global set (docs/rag.md, slice 5). The key is
+// the project's registry id (internal/project), not the directory's name:
+// two clones of different repos that share a checkout name keep separate
+// notes, and a repo that is moved keeps the notes filed under its id. The
+// notes of a workspace first seen before the id existed are copied in from
+// the old, directory-name-keyed directory (migrateFrom). That index is the
 // reason a note is worth writing: the proactive search (docsPreparer, through
 // recall.go) brings a note back into a later conversation unasked, inlined
 // whole, when that conversation is about it (M0: right note on 10 of 11
@@ -72,6 +78,62 @@ const memoryMaxChars = 1200
 // for sessions.
 func memoryDir(project string) string {
 	return filepath.Join(dunhome.Dir(), "memory", project)
+}
+
+// projectKey is the workspace's registry id, which keys the notes'
+// directory: a linked worktree takes its source repo's id, two clones of
+// different repos that share a checkout name keep separate ids, and a repo
+// that is moved keeps its id. When the registry cannot be read (a corrupt
+// projects.json) it falls back to the directory name the notes used to be
+// keyed by, so memory degrades to the old behaviour rather than being lost.
+func projectKey(workspace string) string {
+	if p, err := project.Ensure(workspace); err == nil && p != nil {
+		return p.ID
+	}
+	return mcpserver.RaglitProject(workspace)
+}
+
+// KeyFor is the key a workspace's notes and their index are stored under:
+// its registry id, so the directory and the dund index agree. The harness
+// builds its link with this, and NotesFor keys the directory with it.
+func KeyFor(workspace string) string { return projectKey(workspace) }
+
+// migrateFrom copies the files old held (notes and the histories beside
+// them) into new, without overwriting what is already there. It is a copy,
+// not a move: the old directory is what a session that falls back to the
+// name key would still read. old == new, or an old that is not there, is
+// the nothing to do.
+func migrateFrom(old, new string) {
+	if old == new {
+		return
+	}
+	ents, err := os.ReadDir(old)
+	if err != nil {
+		return
+	}
+	// The id's directory may not exist yet (a fresh home). Create it before
+	// the first note lands, so the copy has somewhere to go.
+	if err := os.MkdirAll(new, 0o755); err != nil {
+		log.Printf("dun: memory: migrating to %s: %v", new, err)
+		return
+	}
+	for _, e := range ents {
+		if e.IsDir() {
+			continue
+		}
+		to := filepath.Join(new, e.Name())
+		if _, err := os.Stat(to); err == nil {
+			continue // the note is already in its new home
+		}
+		b, err := os.ReadFile(filepath.Join(old, e.Name()))
+		if err != nil {
+			log.Printf("dun: memory: migrating %s: %v", e.Name(), err)
+			continue
+		}
+		if err := os.WriteFile(to, b, 0o644); err != nil {
+			log.Printf("dun: memory: migrating %s: %v", e.Name(), err)
+		}
+	}
 }
 
 func ToolDef() llm.ToolDef {
@@ -146,6 +208,10 @@ type NoteMeta struct {
 // and the index catches up (recall.go).
 type Store struct {
 	dir    string
+	// legacy is where the notes used to live, before the directory was keyed
+	// by the project's id. sync sends it as gone, so the index holds each
+	// note once, at its new path, not at both.
+	legacy string
 	global string // "" when there is no global scope
 	// index is the dund index the files go into ("" is memories), kinds
 	// the kinds kept here (nil is memory only), groups the surfacing groups
@@ -544,8 +610,17 @@ func scanNote(content, question string) error {
 // global ones, indexed into dund's memories indexes through link. A nil link
 // keeps the files and indexes nothing.
 func NotesFor(link *Link, workspace string) *Store {
-	m := &Store{dir: memoryDir(mcpserver.RaglitProject(workspace)), global: memoryDir(globalMemoryDir), now: time.Now,
+	id := projectKey(workspace)
+	legacy := mcpserver.RaglitProject(workspace)
+	m := &Store{dir: memoryDir(id), global: memoryDir(globalMemoryDir), now: time.Now,
 		index: NotesIndex, kinds: []string{KindMemory}, groups: [2]string{GroupMemory, GroupMemoryGlobal}}
+	// The notes used to be keyed by the directory's name: copy them into
+	// the id's directory so a moved repo, and a clone that shares its name
+	// with a different repo, each keep their own.
+	if legacy != id {
+		m.legacy = memoryDir(legacy)
+		migrateFrom(m.legacy, m.dir)
+	}
 	if link == nil {
 		return m
 	}

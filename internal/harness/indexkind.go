@@ -237,7 +237,7 @@ func (h *Harness) projectIndexRow() SwitchState {
 func (h *Harness) ragUp() bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	_, err := h.cfg.Rag.Search(ctx, proto.RagSearch{Project: mcpserver.RaglitProject(h.cfg.Workspace), Index: memory.NotesIndex,
+	_, err := h.cfg.Rag.Search(ctx, proto.RagSearch{Project: memory.KeyFor(h.cfg.Workspace), Index: memory.NotesIndex,
 		Query: "dun", Limit: 1, Mode: "fts"})
 	return !errors.Is(err, ErrRagDown) && ctx.Err() == nil
 }

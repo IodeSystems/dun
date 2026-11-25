@@ -8,7 +8,6 @@ import (
 
 	"github.com/iodesystems/agentkit/agent"
 
-	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/memory"
 	"github.com/iodesystems/dun/internal/project"
 	"github.com/iodesystems/dun/internal/raglit"
@@ -132,14 +131,20 @@ func (h *Harness) newStoreLink(parent func(*Harness) *memory.Link, store func(*m
 		}
 	}
 	reg := h.cfg.RaglitReg
+	// The link's dund index is keyed by the workspace's registry id, the
+	// same key NotesFor keys the notes' directory by — the directory and
+	// the index must agree, or a note is filed under one and searched under
+	// the other. (The raglit layer it also uploads to is keyed by the
+	// registration's own name, not this.)
+	proj := memory.KeyFor(h.cfg.Workspace)
 	var l *memory.Link
 	if reg.Private != "" {
 		// A registered remote project: notes upload to their layer on
 		// write (internal/memory), raglit.New reading $RAGLIT_TOKEN per
 		// request (the /rag login keeps it there).
-		l = memory.NewLinkWithRaglit(h.cfg.Rag, mcpserver.RaglitProject(h.cfg.Workspace), notice, raglit.New(""), reg)
+		l = memory.NewLinkWithRaglit(h.cfg.Rag, proj, notice, raglit.New(""), reg)
 	} else {
-		l = memory.NewLink(h.cfg.Rag, mcpserver.RaglitProject(h.cfg.Workspace), notice)
+		l = memory.NewLink(h.cfg.Rag, proj, notice)
 	}
 	// The first contact: files written while no dund was there get
 	// indexed now, or the session learns it is degraded.

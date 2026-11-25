@@ -338,6 +338,17 @@ func (l *Link) syncOnce(m *Store) bool {
 		for _, p := range voided {
 			q.Gone = append(q.Gone, strings.TrimSuffix(p, voidSuffix))
 		}
+		// The legacy directory (the notes' home before the project id keyed
+		// it) is gone too, so the index holds each note at its new path,
+		// not at both. A voided note is its file with .void on it.
+		if sc.project != "" && m.legacy != "" {
+			for _, pat := range []string{"*.md", "*.md" + voidSuffix} {
+				old, _ := filepath.Glob(filepath.Join(m.legacy, pat))
+				for _, p := range old {
+					q.Gone = append(q.Gone, strings.TrimSuffix(p, voidSuffix))
+				}
+			}
+		}
 		if len(q.Files) == 0 && len(q.Gone) == 0 {
 			continue
 		}

@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/iodesystems/dun/internal/dunhome"
-	"github.com/iodesystems/dun/internal/mcpserver"
 	"github.com/iodesystems/dun/internal/memory"
 	"github.com/iodesystems/dun/proto"
 )
@@ -65,7 +64,7 @@ func TestStrategies_ScopeAndIndexAreSeparate(t *testing.T) {
 	if len(in) != 3 {
 		t.Fatalf("ingests %+v", in)
 	}
-	proj := mcpserver.RaglitProject(ws)
+	proj := memory.KeyFor(ws)
 	s, c, m := in[0], in[1], in[2]
 	if s.Index != "strategies" || s.Project != proj || filepath.Dir(s.Path) != filepath.Join(dunhome.Dir(), "strategies", proj) || s.Title != "strategy:bisect-flaky-tests" {
 		t.Errorf("strategy ingest %+v", s)
@@ -140,7 +139,7 @@ func TestStrategies_ImportantAlwaysShown(t *testing.T) {
 	// Listed: not surfaced by retrieval as well.
 	path := h.strategyStore().Named(memory.KindConstraint, "no-push")
 	f.mu.Lock()
-	f.hits = map[string][]proto.RagHit{mcpserver.RaglitProject(ws): {{Path: "file://" + path, Title: "constraint:no-push", Text: "x", Score: 1, Matched: 2, Terms: 2}}}
+	f.hits = map[string][]proto.RagHit{memory.KeyFor(ws): {{Path: "file://" + path, Title: "constraint:no-push", Text: "x", Score: 1, Matched: 2, Terms: 2}}}
 	f.mu.Unlock()
 	if aside := surfaceOnce(t, h, "push unless"); strings.Contains(aside, "no-push") {
 		t.Errorf("a listed item surfaced again:\n%s", aside)
@@ -181,8 +180,8 @@ func TestStrategies_NonImportantIsRetrieved(t *testing.T) {
 	sp, cp := s.Named(memory.KindStrategy, "bisect-flaky"), s.Named(memory.KindConstraint, "frozen-api")
 	f.mu.Lock()
 	f.hits = map[string][]proto.RagHit{
-		mcpserver.RaglitProject(ws): {{Path: "file://" + sp, Title: "strategy:bisect-flaky", Text: "x", Score: 1, Matched: 2, Terms: 2}},
-		"":                          {{Path: "file://" + cp, Title: "constraint:frozen-api", Text: "x", Score: 9, Matched: 2, Terms: 2}},
+		memory.KeyFor(ws): {{Path: "file://" + sp, Title: "strategy:bisect-flaky", Text: "x", Score: 1, Matched: 2, Terms: 2}},
+		"":                 {{Path: "file://" + cp, Title: "constraint:frozen-api", Text: "x", Score: 9, Matched: 2, Terms: 2}},
 	}
 	f.mu.Unlock()
 	aside := surfaceOnce(t, h, "flaky test")
@@ -240,7 +239,7 @@ func TestStrategies_DundDownDegrades(t *testing.T) {
 // no store, no standing list even with an important file on disk.
 func TestStrategies_OffWithoutARagLink(t *testing.T) {
 	h, ws := itemHarness(t, nil)
-	dir := filepath.Join(dunhome.Dir(), "strategies", mcpserver.RaglitProject(ws))
+	dir := filepath.Join(dunhome.Dir(), "strategies", memory.KeyFor(ws))
 	writeRule(t, filepath.Join(dir, "constraint-x.md"), "---\nname: x\nkind: constraint\nimportant: true\n---\nX.\n")
 	h2, err := Start(context.Background(), Config{Workspace: ws})
 	if err != nil {

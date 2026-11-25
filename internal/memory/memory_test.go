@@ -1,13 +1,40 @@
 package memory
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/dun/internal/project"
 )
+
+// notesStore is the id-keyed store (no index: files only) of a workspace
+// under home as its DUN_HOME, as a session there would get one.
+func notesStore(t *testing.T, home, ws string) *Store {
+	t.Helper()
+	t.Setenv("DUN_HOME", home)
+	return storeFor(t, ws)
+}
+
+func exists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+// storeFor registers ws and returns its id-keyed store. DUN_HOME is set by
+// the caller: t.Setenv allows it once per test.
+func storeFor(t *testing.T, ws string) *Store {
+	t.Helper()
+	if _, err := project.Ensure(ws); err != nil {
+		t.Fatal(err)
+	}
+	return NotesFor(nil, ws)
+}
 
 func testMemory(t *testing.T) (*Store, *[]string, *[]string) {
 	t.Helper()
@@ -190,5 +217,125 @@ func TestMemory_AddPointsToTheUserDefaultsFile(t *testing.T) {
 	// The note must name the actual DUN_HOME path, not a hardcoded ~.
 	if !strings.Contains(out, home+"/AGENTS.md") {
 		t.Errorf("reply must point to the DUN_HOME path %s/AGENTS.md, got: %q", home, out)
+	}
+}
+
+// RM: two clones of two different repos whose checkout directory names are
+// identical must not share memory: each note goes under its own project id,
+// and a search in one finds nothing of the other's.
+func TestNotes_SameDirNameClonesDoNotShareMemory(t *testing.T) {
+	home := t.TempDir()
+	a := notesStore(t, home, filepath.Join(t.TempDir(), "app"))
+	b := storeFor(t, filepath.Join(t.TempDir(), "app"))
+	if a.dir == b.dir {
+		t.Fatalf("the two clones share one directory %s; want two id-keyed ones", a.dir)
+	}
+	if _, err := a.apply(toolArgs{Action: "add", Content: "Builds need CGO off."}, NoteMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.apply(toolArgs{Action: "add", Content: "Deploys go through the yak cluster."}, NoteMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	// Each clone's note is under its own id, not the other's.
+	la, lb := a.List(), b.List()
+	if len(la) != 1 || !exists(filepath.Join(a.dir, la[0].File)) {
+		t.Errorf("clone a's note is not in its own directory: %+v", la)
+	}
+	if len(lb) != 1 || !exists(filepath.Join(b.dir, lb[0].File)) {
+		t.Errorf("clone b's note is not in its own directory: %+v", lb)
+	}
+	// A search in one clone, dund down, finds only its own note.
+	down := &fakeRag{}
+	down.setDown(true)
+	fa := &Finder{l: NewLink(down, "p", nil), m: a}
+	hits, err := fa.Find(context.Background(), []string{"builds need cgo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range hits {
+		if strings.Contains(h.DocID, b.dir) {
+			t.Errorf("clone a retrieved clone b's note: %v", hits)
+		}
+	}
+	if len(hits) != 1 {
+		t.Errorf("want clone a's one note, got %+v", hits)
+	}
+}
+
+// RM: notes a repo kept under its old, directory-name key are copied into the
+// project-id-keyed location the first time a session runs after the keying
+// change; the old files stay (copy, not move), and the notes are retrievable
+// from the new location.
+func TestNotes_LegacyDirNameNotesAreCopiedToTheIdKey(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("DUN_HOME", home)
+	ws := t.TempDir()
+	// The legacy directory is the notes' old home, keyed by the directory's
+	// name the way RaglitProject derived it before the id keyed it.
+	legacy := memoryDir(mcpserver.RaglitProject(ws))
+	if err := os.MkdirAll(legacy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacyNote := "2026-10-01-builds-need-cgo-off-abc.md"
+	if err := os.WriteFile(filepath.Join(legacy, legacyNote),
+		[]byte("---\nname: builds\nkind: memory\nquestion: how to build?\n---\nBuilds need CGO off.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := NotesFor(nil, ws)
+	if m.dir == legacy {
+		t.Fatalf("store is still keyed by the directory name: %s", m.dir)
+	}
+	if m.legacy != legacy {
+		t.Errorf("legacy = %q, want %q", m.legacy, legacy)
+	}
+	migrated := filepath.Join(m.dir, legacyNote)
+	if _, err := os.Stat(migrated); err != nil {
+		t.Fatalf("the note was not copied into the id directory: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(legacy, legacyNote)); err != nil {
+		t.Error("the old note must remain (copy, not move)")
+	}
+	// The note is retrievable from the new location: a dund-down search finds it.
+	down := &fakeRag{}
+	down.setDown(true)
+	f := &Finder{l: NewLink(down, "p", nil), m: m}
+	hits, err := f.Find(context.Background(), []string{"cgo off"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].DocID != migrated {
+		t.Errorf("want the migrated note, got %+v", hits)
+	}
+}
+
+// RM: a repo whose checkout path changed but whose registry id did not keeps
+// its memory: after the move the store is the id's directory, with the
+// notes it held under the id before.
+func TestNotes_MovedRepoKeepsItsMemory(t *testing.T) {
+	home := t.TempDir()
+	ws1 := t.TempDir()
+	m1 := notesStore(t, home, ws1)
+	p, err := project.Ensure(ws1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m1.apply(toolArgs{Action: "add", Content: "Deploys go through the yak cluster."}, NoteMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(m1.List()) != 1 {
+		t.Fatalf("want the note before the move: %+v", m1.List())
+	}
+	// The checkout moves to a new path; the registry entry moves with it.
+	ws2 := t.TempDir()
+	if err := project.Repoint(p.ID, ws2); err != nil {
+		t.Fatal(err)
+	}
+	m2 := storeFor(t, ws2)
+	if m2.dir != m1.dir {
+		t.Fatalf("after the move the store is %s, want the id's %s", m2.dir, m1.dir)
+	}
+	ls := m2.List()
+	if len(ls) != 1 {
+		t.Fatalf("the moved repo lost its memory: %+v", ls)
 	}
 }

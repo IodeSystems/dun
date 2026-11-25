@@ -84,10 +84,18 @@ func strategiesDir(project string) string {
 }
 
 // StrategiesFor is the strategies and constraints store of a workspace's
-// project and the global set, indexed through link (nil: files only).
+// project and the global set, indexed through link (nil: files only). The
+// directory is keyed by the registry id, as NotesFor keys memory, so a
+// moved repo and same-named clones keep their own; the old name-keyed set is
+// copied in once.
 func StrategiesFor(link *Link, workspace string) *Store {
-	m := &Store{dir: strategiesDir(mcpserver.RaglitProject(workspace)), global: strategiesDir(globalMemoryDir), now: time.Now,
+	id := projectKey(workspace)
+	m := &Store{dir: strategiesDir(id), global: strategiesDir(globalMemoryDir), now: time.Now,
 		index: StrategiesIndex, kinds: []string{KindStrategy, KindConstraint}, groups: [2]string{GroupStrategy, GroupStrategyGlobal}}
+	if legacy := mcpserver.RaglitProject(workspace); legacy != id {
+		m.legacy = strategiesDir(legacy)
+		migrateFrom(m.legacy, m.dir)
+	}
 	if link == nil {
 		return m
 	}

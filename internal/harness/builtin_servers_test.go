@@ -23,6 +23,7 @@ import (
 	"github.com/iodesystems/agentkit/llm"
 
 	"github.com/iodesystems/dun/internal/mcpserver"
+	"github.com/iodesystems/dun/internal/memory"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -183,7 +184,7 @@ func TestRaglit_SurfacesMemorySkillMCPAndWorkspaceHitsBeforeATurn(t *testing.T) 
 	writeRule(t, wsDoc, "zebra notes from the workspace")
 	writeHits(t, hits, skillMD, mcpDoc, wsDoc)
 	rag.mu.Lock()
-	rag.hits = map[string][]proto.RagHit{mcpserver.RaglitProject(ws): {{Path: "file://" + note, Title: "zebra.md",
+	rag.hits = map[string][]proto.RagHit{memory.KeyFor(ws): {{Path: "file://" + note, Title: "zebra.md",
 		Text: "Zebra deploys need --frostbite.", Score: 3, Matched: 2, Terms: 2}}}
 	rag.mu.Unlock()
 
