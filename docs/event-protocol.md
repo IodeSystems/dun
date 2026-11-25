@@ -20,10 +20,10 @@ The engine emits events as line-delimited JSON objects. Each has a `"type"` fiel
 | `message` | Turn reply finalized | `role`, `content`, `id` (the reply's history item id) |
 | `suggestions` | Predicted next messages | `items[]` |
 | `notification` | Proactive notification (RAG, background) | `kind`, `text` |
-| `ask` | Agent waiting on user input | `question`, `options[]`, `multi`, `recommended_all[]`, `no_custom` (answer must be an option) |
+| `ask` | Agent waiting on user input | `ask_id`, `call_id` (the ask_user or file call asking), `question`, `options[]`, `multi`, `recommended_all[]`, `no_custom` (answer must be an option). Sent again, same `ask_id` and `call_id`, by the next engine when the last one stopped with it open (see Questions across a restart) |
 | `queued` | Message buffered mid-turn | `text`, `count` |
 | `usage` | Token accounting | `total`, `active`, `cached`, `processed`, `generated`, `turns` |
-| `done` | Turn completed | `reason` (`interrupted` when the user stopped it) |
+| `done` | Turn completed | `reason` (`interrupted` when the user stopped it; `suspended` when the engine's stop cut an open question, which the next engine asks again) |
 | `until` | The stop conditions (`/until`) or their run changed; kept as state | `conds[]` (`kind` turns/goal/plan, `n`, `goal`, `check`, `progress`), `cap`, `turn`, `running`, `paused` (with `running`: a question to the person is open; the run goes on when it is answered), `stopped` (why the last run stopped), `line` (one line for a status bar, idle too: `until: plan · turns 15`, `until: turn 3/15 · plan 4 open, 2 ready`, `until: paused (question) · turn 3/15`). A run's stop is also a `notification` of `kind` `until` |
 | `error` | Turn failed | `error`, `fatal` |
 | `retry` | Provider outage, retrying | `note`, `due`, `seen` |
@@ -102,6 +102,20 @@ conversation, where it already was (`internal/tui/tui_scroll.go` drawOrder).
 A message sent while a turn is running is **not** queued behind the turn. The
 engine calls `Harness.Say()` which buffers it into the next tool result via
 `liftQueued()`. Multiple messages batch without limit.
+
+### Questions across a restart
+
+A question open when the engine stops (a kill, a crash, dund's restart, a
+model switch, `stop`) is not lost (harness `replay.go`, docs/decisions.md
+"Questions survive a restart"). On `stop` the engine ends the turn with
+`done` `{"reason":"suspended"}` and sends no `tool_result` for the call;
+a kill sends nothing. The next engine, after `history`, opens a turn
+(`turn` `{"kind":"continue"}`), sends `tool_call` for the same `call_id`
+and the `ask` again with the same `ask_id`. An `answer` to it is that
+call's result (`tool_result`), and the turn goes on. An `interrupt`
+cancels it: the result says the user cancelled it, and the turn ends
+(`done` `interrupted`). A client that matched the first `ask` by
+`ask_id` shows the second as the same question.
 
 ### Interrupting a turn
 

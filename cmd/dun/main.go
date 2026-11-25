@@ -1025,9 +1025,18 @@ func main() {
 			// working, and a question left open should never be what kills the
 			// turn that asked it.
 			return withoutClock(func() (string, error) {
-				ask := newAskEvent(em.turn.callID(), q, opts, multi, noCustom, rec)
+				callID := em.turn.callID()
+				if tc := harness.CallFrom(actx); tc != nil {
+					callID = tc.ID // a replayed call has no tool_call event of this engine's
+				}
+				ask := newAskEvent(callID, q, opts, multi, noCustom, rec)
+				if id := harness.AskIDFrom(actx); id != "" {
+					ask.AskID = id // asked again after a restart: the same question
+				}
 				em.emit(ask)
-				a, err := awaitAnswer(actx, in.answers, ask.AskID)
+				// A stop while it is open suspends it: the next engine asks it
+				// again (harness replay.go).
+				a, err := awaitAnswerOrStop(actx, in.answers, in.quit, ask.AskID)
 				if err != nil {
 					return "", err
 				}

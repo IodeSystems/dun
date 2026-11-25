@@ -180,7 +180,7 @@ func TestPrepareTurnHealsOrphanCallAndLiftsMessage(t *testing.T) {
 	if last.ToolCallID != "call_1" {
 		t.Errorf("ToolCallID = %q; want call_1, or the pair is still broken", last.ToolCallID)
 	}
-	if !strings.Contains(last.Content, "INTERRUPTED") {
+	if !strings.Contains(last.Content, "cut off by a restart") || !strings.Contains(last.Content, "Try it again") {
 		t.Errorf("healed result does not say what happened: %q", last.Content)
 	}
 	if strings.Contains(last.Content, "connection dropped") {

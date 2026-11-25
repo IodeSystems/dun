@@ -266,22 +266,25 @@ func (h *Harness) prepare(ctx context.Context, first bool) {
 }
 
 // healOrphanToolCalls answers every persisted tool call that has no result with
-// one that says the call was interrupted, and returns how many it wrote.
+// one that says a restart cut it off, and returns how many it wrote. A
+// replayable call with its question pending is replayed before this runs
+// (Harness.Replay), so it has its result by then.
 //
-// The result is deliberately explicit about what is NOT known: an interrupted
-// exec or edit may well have taken effect, so the model is told to CHECK rather
-// than to assume either way. Anything buffered is lifted into the last result, so
+// The result tells the model to try again, and to CHECK first when the call
+// changes something: an interrupted exec or edit may well have taken effect. Anything buffered is lifted into the last result, so
 // the model reads the interruption and the user's follow-up in the same breath.
 func (h *Harness) healOrphanToolCalls(ctx context.Context) int {
-	return h.healOrphans(ctx, droppedCall, false)
+	return h.healOrphans(ctx, restartedCall, false)
 }
 
-// droppedCall is a result for a call the connection cut.
-func droppedCall(name string) string {
+// restartedCall is the failed result of a call that was in flight when the
+// engine stopped (a crash, a kill, a restart) and is not replayable
+// (replay.go): agentkit answers every call while the engine runs, so an
+// unanswered one is always a stop's.
+func restartedCall(name string) string {
 	return fmt.Sprintf(
-		"ERROR: this %s call was INTERRUPTED — the connection to the model dropped before "+
-			"the result was recorded. Whether it took effect is unknown: verify the current "+
-			"state (re-read the file, re-run the check) before repeating it.", name)
+		"ERROR: this %s call was cut off by a restart of dun's engine before its result was "+
+			"recorded. Try it again; if it changes something, check first whether it already took effect.", name)
 }
 
 // healOrphans answers every unanswered call with result(name).

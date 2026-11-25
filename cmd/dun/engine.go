@@ -734,6 +734,13 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 			clk.Mark("stopping " + waited)
 			clearNow(h, em, clk, c)
 		}
+		// A question the last engine left open: asked again, and the turn
+		// goes on with its answer (harness replay.go). Before /until: a
+		// paused run waits on it.
+		if ran, ok := replayStep(ctx, h, em); ran {
+			autoContinue = ok
+			continue
+		}
 		// A stop condition's run (/until): its next turn, or why it stopped.
 		if ran, ok := untilStep(ctx, h, em); ran {
 			autoContinue = ok
@@ -848,10 +855,20 @@ func continueTurn(ctx context.Context, h *harness.Harness, em *emitter) bool {
 	h.Gate().Begin()
 	res, err := h.Continue(tctx)
 	h.Gate().End()
+	return endContinue(ctx, tctx, h, em, res, err)
+}
+
+// endContinue ends a turn that had no new user message (continueTurn,
+// replayStep).
+func endContinue(ctx, tctx context.Context, h *harness.Harness, em *emitter, res agent.TurnResult, err error) bool {
 	if errors.Is(err, harness.ErrTurnHeld) {
 		// No ask open, the hour's automatic turns used: the news is a note
 		// (turn_state's notes_waiting), and no turn ran.
 		em.emit(&proto.Done{Reason: "held"})
+		return true
+	}
+	if errors.Is(err, harness.ErrSuspended) { // the stop cut a question: the next engine asks it
+		em.emit(&proto.Done{Reason: "suspended"})
 		return true
 	}
 	// turnErr first: a budget cut arrives as an interrupt, and is an error.
@@ -871,6 +888,27 @@ func continueTurn(ctx context.Context, h *harness.Harness, em *emitter) bool {
 	em.emit(usageEvent(h, res.Usage))
 	em.emit(&proto.Done{})
 	return true
+}
+
+// replayStep runs the turn a question the last engine left open continues
+// (harness replay.go): asked again, its answer the call's result, the turn
+// going on from there. ran false: no such question.
+func replayStep(ctx context.Context, h *harness.Harness, em *emitter) (ran, ok bool) {
+	if h.PendingReplay() == nil {
+		return false, false
+	}
+	em.emit(&proto.Turn{Kind: "continue"})
+	h.BeginTurnStats()
+	tctx, end := beginTurn(ctx)
+	defer end()
+	h.Gate().Begin()
+	res, ran, err := h.Replay(tctx)
+	h.Gate().End()
+	if !ran { // gone since the check (answered, cleared): end the turn opened
+		em.emit(&proto.Done{})
+		return true, true
+	}
+	return true, endContinue(ctx, tctx, h, em, res, err)
 }
 
 // suggestEnabled mirrors --no-suggest (inverted); the `suggest` control command emits next-message
@@ -1037,6 +1075,10 @@ func turn(ctx context.Context, h *harness.Harness, em *emitter, task string, img
 func endTurn(ctx, tctx context.Context, h *harness.Harness, em *emitter, res agent.TurnResult, err error) bool {
 	if errors.Is(err, harness.ErrTurnHeld) { // an automatic message, held (continueTurn)
 		em.emit(&proto.Done{Reason: "held"})
+		return true
+	}
+	if errors.Is(err, harness.ErrSuspended) { // the stop cut a question: the next engine asks it
+		em.emit(&proto.Done{Reason: "suspended"})
 		return true
 	}
 	// turnErr first: a budget cut arrives as an interrupt, and is an error.

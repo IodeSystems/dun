@@ -30,7 +30,11 @@ import (
 //
 // An open ask_user question does not hold it (Carl 2026-11-10): the turn
 // around it waits on the person, not on work, and the question survives
-// the restart. The stop interrupts that turn and saves the question (its
+// the restart. An engine that keeps its question (harness replay.go,
+// Carl 2026-11-24: questionPending) is not interrupted and nothing is
+// saved: its stop suspends the question, the next dund starts it (reask)
+// and it asks the question again, the answer being the call's result.
+// For an older engine: the stop interrupts that turn and saves the question (its
 // proto.Ask, whole) in the registry; the next dund shows it again to every
 // client as an open question in a turn (showRestored) and does not wake
 // the agent. The person's answer wakes it with a user message, `[automatic]
@@ -568,8 +572,12 @@ func (s *Service) prepareStop(why string, adopt bool) error {
 // A turn that was itself dund's automatic continue gets no second one
 // (resumeQuiet).
 func (s *session) recordStop(why string) {
+	// An engine that keeps its question (harness replay.go) asks it again
+	// when it starts: nothing to save, only the engine to start.
+	durable := questionPending(s.workspace, s.id)
 	s.actMu.Lock()
 	defer s.actMu.Unlock()
+	s.reask = false
 	turn := s.inTurn || s.asking
 	jobs, agents := slices.Clone(s.jobs), slices.Clone(s.agents)
 	calls := make([]string, 0, len(s.calls))
@@ -592,6 +600,11 @@ func (s *session) recordStop(why string) {
 			}
 		}
 		s.restored, s.restoredEvs, s.resume = s.ask, nil, note
+		if durable {
+			// Not saved: the engine asks it again. The note (what else the
+			// stop cut) wakes it while it asks, and rides the answer.
+			s.restored, s.reask = nil, true
+		}
 		return
 	}
 	s.resume = resumeMessage(why, turn, jobs, agents, calls)
@@ -659,8 +672,11 @@ var errRestarting = errors.New("dund is restarting: send the message again in a 
 func (s *session) interruptForStop(why string) {
 	s.actMu.Lock()
 	turn := s.inTurn || s.asking
+	kept := s.asking && s.reask
 	s.actMu.Unlock()
-	if !turn {
+	// A question the engine keeps is not interrupted: an interrupt is the
+	// person cancelling it. The stop suspends it (harness replay.go).
+	if !turn || kept {
 		return
 	}
 	if err := s.send(proto.NewCommand("", &proto.Interrupt{Reason: why + " while this turn was running"})); err != nil {
@@ -828,6 +844,13 @@ const agentContinue = resumePrefix + "dund restarted while you were working, and
 const notContinued = " This was not continued automatically, and no sub-agent was resumed: the turn dun continued after " +
 	"the last restart was cut too. Carry on when the next message comes."
 
+// questionPending reports whether a session's engine stopped, or is
+// stopping, with a question it keeps open (harness replay.go): its next
+// engine asks it again (a variable, as crashedMidTurn is).
+var questionPending = func(workspace, id string) bool {
+	return harness.QuestionPending(harness.SessionFile(workspace, id))
+}
+
 // crashedMidTurn reports whether a session's transcript was cut mid-turn
 // recently (a variable: the tests' fake engine writes no transcript).
 var crashedMidTurn = func(workspace, id string) bool {
@@ -857,6 +880,16 @@ func (s *Service) resumeFlagged() {
 		if ses.restoredAsk() != nil {
 			ses.showRestored()
 			msg = "" // it goes with the answer (restoredReply)
+		}
+		ses.actMu.Lock()
+		reask := ses.reask
+		ses.reask = false
+		ses.actMu.Unlock()
+		if reask && msg == "" {
+			// Its engine asks its question again (harness replay.go).
+			if err := ses.ensureRunning(); err != nil {
+				log.Printf("dund: could not start %s to ask its question again: %v", ses.id, err)
+			}
 		}
 		if msg != "" {
 			var err error

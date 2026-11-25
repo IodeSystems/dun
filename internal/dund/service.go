@@ -136,6 +136,12 @@ func New(dir string, spawner Spawner) (*Service, error) {
 	// working when dund last died (a crash records nothing): woken the same
 	// way, and said so.
 	for _, ses := range s.sessions {
+		// A question the stopped engine kept: its next engine asks it again,
+		// and the turn goes on from the answer (harness replay.go).
+		if !adopted[ses.id] && ses.restored == nil && questionPending(ses.workspace, ses.id) {
+			ses.reask = true
+			continue
+		}
 		if !adopted[ses.id] && ses.resume == "" && ses.restored == nil && crashedMidTurn(ses.workspace, ses.id) {
 			ses.resume = resumeMessage("dund stopped unexpectedly (a crash, or it was killed)", true, nil, nil, nil)
 			// The turn that crashed it was dund's own continue: not again.

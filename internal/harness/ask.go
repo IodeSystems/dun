@@ -94,6 +94,9 @@ func withAsk(inner agent.ToolDispatcher, ask AskFunc, onCall func(string, map[st
 			return "ERROR: " + msg, nil
 		}
 		ans, err := ask(ctx, args.Question, args.Options, args.Multi, false, rec)
+		if err != nil && interrupted(ctx) {
+			return questionCancelled("ask_user"), nil
+		}
 		if err != nil {
 			// Feed the failure back to the model rather than aborting the turn.
 			return "ERROR: could not get an answer: " + err.Error(), nil

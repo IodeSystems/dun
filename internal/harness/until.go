@@ -140,7 +140,8 @@ func (h *Harness) untilSave(u *untilState) {
 }
 
 // untilResume reads the sidecar at start. A run under way when the engine
-// stopped is owed its next turn; a paused one waits for the person's.
+// stopped is owed its next turn; a paused one stays paused: its question
+// is asked again (replay.go), and the answer goes on with the run.
 func (h *Harness) untilResume() {
 	if h.cfg.SessionFile == "" || h.isChild() {
 		return
@@ -170,9 +171,25 @@ func (h *Harness) untilWrapAsk() {
 	}
 	h.cfg.Ask = func(ctx context.Context, q string, opts []string, multi, noCustom bool, rec []string) (string, error) {
 		h.untilAsking(1)
-		defer h.untilAsking(-1)
-		return ask(ctx, q, opts, multi, noCustom, rec)
+		ans, err := ask(ctx, q, opts, multi, noCustom, rec)
+		// Suspended by the engine's stop: the question is open still, in
+		// the next engine (replay.go), so the sidecar keeps the run paused.
+		h.untilAskEnd(errors.Is(err, ErrSuspended))
+		return ans, err
 	}
+}
+
+// untilAskEnd notes a question closed; suspended (the engine's stop cut it)
+// leaves the run paused, as the sidecar says.
+func (h *Harness) untilAskEnd(suspended bool) {
+	if !suspended {
+		h.untilAsking(-1)
+		return
+	}
+	u := &h.until
+	u.mu.Lock()
+	u.asking--
+	u.mu.Unlock()
 }
 
 // untilAsking notes a question opened (+1) or closed (-1): a run is paused
@@ -241,7 +258,9 @@ func (h *Harness) untilTurnBegin() {
 	}
 	u.turn++
 	u.owed = false
-	u.paused = u.asking > 0 // a question an engine that stopped left open: this turn answers it
+	// A replay (replay.go) asks the stopped engine's question again: paused
+	// still until it is answered.
+	u.paused = u.asking > 0 || h.pending.replaying.Load()
 	h.untilSave(u)
 	u.mu.Unlock()
 	h.untilChanged()
