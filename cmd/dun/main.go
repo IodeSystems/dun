@@ -147,6 +147,11 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "tools" {
 		os.Exit(toolsCmd(os.Args[2:], os.Stdout, os.Stderr))
 	}
+	// `dun projects`: the project registry: list, forget, re-point
+	// (projectscmd.go).
+	if len(os.Args) > 1 && os.Args[1] == "projects" {
+		os.Exit(projectsCmd(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	// `dun msg`: message sessions and listen for messages from a shell (msgcmd.go).
 	if len(os.Args) > 1 && os.Args[1] == "msg" {
 		os.Exit(msgCmd(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))

@@ -30,6 +30,7 @@ var subcommands = []subcommand{
 	{"errors", "the turn errors dun kept, for a report"},
 	{"trace", "find a request by its trace id"},
 	{"ps", "every process dun runs, by session: CPU, memory, IO"},
+	{"projects", "the project registry: list, forget, re-point"},
 	{"oauth", "an OAuth MCP server's bearer token"},
 	{"dund", "the session service"},
 	{"completion", "the shell completion script: bash, zsh or fish"},
