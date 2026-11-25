@@ -10,8 +10,8 @@ in agentkit: settle before close.
 Settled. The reordering landed as agentkit commit b30c4066 "fix(mcpmgr): read a
 refused server's stderr before closing its pipe", on agentkit main at
 mcpmgr/manager.go:456-457 (`tail.settle()` then `mc.close()`), and it is
-verified directly in the version dun pins: go.mod pins agentkit v0.38.0
-(go.sum:108), and the v0.38.0 module cache source shows the same
+verified directly in the version dun pins: go.mod pins agentkit v0.41.2
+(go.sum:110), and the v0.41.2 module cache source shows the same
 settle-before-close order in the failed-handshake path
-(manager.go:471-472, comment "Settle BEFORE close: close shuts the stderr
+(manager.go:472-473, comment "Settle BEFORE close: close shuts the stderr
 pipe...").
