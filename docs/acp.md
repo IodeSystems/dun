@@ -94,7 +94,21 @@ shows the editor's default icon. No change to `internal/acp` helps.
   request before `initialize` is `-32600`.
 - A lost dund connection (dund restarting into a new build) is redialed
   for 2 minutes and resubscribed after the last event seen; a prompt
-  waiting meanwhile is answered when its turn ends.
+  waiting meanwhile is answered when its turn ends. A restarted dund's
+  log is a new epoch whose seqs start again: it answers with a snapshot,
+  and the bridge takes the snapshot's epoch and seq whatever the seq. The
+  turn's `done` may be lost in the gap, so after any snapshot that stands
+  in for missed events, the engine shown idle (`turn_state` idle, nothing
+  queued, no question) answers the prompts that were in a turn
+  `end_turn`: from the snapshot, or from a `turn_state` that comes later.
+  A snapshot with no `turn_state` shows the engine idle (an engine says
+  one when a turn starts), unless its engine state is an engine the new
+  dund adopted (`docs/engine-adoption.md`), which may be mid-turn: its
+  next `turn_state` or `done` says. A turn that starts first answers them
+  with its own end. Not while a question the restart suspended waits to
+  be asked again, nor while a stop condition's run goes on (see "Stop
+  reasons", "Config options"). Code: `session.go` (`afterGap`,
+  `gapIdle`).
 
 ## Updates
 
@@ -215,15 +229,22 @@ request) is raised again, and an `ask` for another id is a new question.
 The reply is sent as the `answer` with that `ask_id`; the continuation
 turn (no new user message) ends the prompt with its stop reason and the
 usage of both turns added up. A snapshot that shows the session idle while
-suspended does not end the prompt either. Code: `turns.go` (`onDone`),
-`ask.go` (`onAsk`).
+suspended does not end the prompt either, unless its history holds the
+result of the question's call: it was answered while the bridge was away,
+and nothing asks it again. Code: `turns.go` (`onDone`), `ask.go`
+(`onAsk`), `session.go` (`afterGap`).
 
 ### session/cancel
 
 Prompts dun has not taken yet are answered `cancelled` at once. Queued ones
 are taken back (control `unqueue`; it takes back every queued message of
 the session, another client's too) and the turn is interrupted; its `done`
-answers the rest `cancelled`. A cancel with no prompt of the editor's in a
+answers the rest `cancelled`. A cancel never hangs: the rest are answered
+`cancelled` at once when the engine replies that no turn runs ("nothing to
+interrupt": an idle engine, or a turn whose end the bridge missed) or the
+interrupt cannot be sent, and 3 s after the interrupt when no `done` came
+(`cancelWait`). A question suspended by a restart is cancelled the same
+way. A cancel with no prompt of the editor's in a
 turn sends nothing: another client's turn is not stopped. Race left open:
 a prompt sent but not yet echoed when the cancel comes is answered
 `cancelled`, but dun may still take it and run a turn for it.
