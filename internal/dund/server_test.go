@@ -116,6 +116,15 @@ func TestServerOverAUnixSocket(t *testing.T) {
 		t.Fatalf("ui get: %+v", ev)
 	}
 
+	// A model switch over the socket restarts the engine on it.
+	a.send("c6b", id, &proto.SwitchModel{URL: "http://new", Model: "m2"})
+	if p := a.until(ackOf("c6b")).Payload.(*proto.Ack); p.Error != "" {
+		t.Fatalf("switch_model: %+v", p)
+	}
+	if ses, _ := svc.Get("unix:"+strconv.Itoa(os.Getuid()), id); flagOf(ses.args, "--model") != "m2" || flagOf(ses.args, "--url") != "http://new" {
+		t.Fatalf("switch_model args: %v", ses.args)
+	}
+
 	a.send("c7", "", &proto.ListSessions{})
 	if ev := a.until(typed("sessions")); len(ev.Payload.(*proto.SessionList).Items) != 1 {
 		t.Fatalf("sessions: %+v", ev.Payload)
