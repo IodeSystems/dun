@@ -81,8 +81,6 @@ type TuiOpts struct {
 }
 
 // RunTUI launches the Bubble Tea app against a re-exec'd `dun --engine` subprocess.
-// lc (may be nil) is the launcher registration — its reload channel drives the
-// "update ready" indicator + /reload.
 func RunTUI(o TuiOpts) error {
 	// Before the program starts, so the terminal query cannot block the input
 	// loop or race the key reader for the reply bytes. See initMarkdownStyle.
