@@ -1110,7 +1110,7 @@ func (h *Harness) AskAs(ctx context.Context, id, task string) (agent.TurnResult,
 	// intake with the message on it (asks.go).
 	h.intakeAdd(task)
 	h.prepareTurn(ctx)
-	h.ledgerBegin(origin)
+	h.ledgerBegin()
 	h.store.publish(agent.Entry{
 		ID: id, Kind: agent.KindUser, Content: task, CreatedAt: time.Now().UnixNano(),
 	})

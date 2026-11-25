@@ -199,7 +199,7 @@ func (h *Harness) Continue(ctx context.Context) (agent.TurnResult, error) {
 		h.netWaitCancel() // the person's message, typed mid-turn or by dun msg
 	}
 	h.turnBegin(origin)
-	h.ledgerBegin(origin)
+	h.ledgerBegin()
 	res, err := h.turnThenTriggers(ctx)
 	h.settleEnd(false, st, err)
 	res, err = h.finishInterrupt(ctx, res, err)

@@ -623,7 +623,7 @@ func TestFoldTask_RecordFacts(t *testing.T) {
 
 	// Open a turn and record: a file edit, a write, a test command, a commit.
 	// The turn stays open so the facts are in h.ledger.facts.
-	h.ledgerBegin(originPerson)
+	h.ledgerBegin()
 	h.ledgerNote(h, "file_edit", "edit", "core/x.go", "", nil, "edited core/x.go: +5 -2", false, &ledgerCall{}, time.Millisecond)
 	h.ledgerNote(h, "file_write", "write", "core/x_test.go", "", nil, "wrote core/x_test.go (30 lines, new)", false, &ledgerCall{}, time.Millisecond)
 	h.ledgerNote(h, "exec", "", "", "go test ./core/...", nil, "ok  core/x  0.2s", false, &ledgerCall{set: true, exit: 0}, time.Second)

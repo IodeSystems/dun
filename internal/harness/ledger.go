@@ -341,7 +341,6 @@ type ledgerState struct {
 	open    bool
 	turn    int // the session's turn number (asks.go counts them)
 	start   time.Time
-	origin  turnOrigin // the turn's origin (turn.go, autoturn.go): the outcome line is the PERSON's
 	stats0  TurnStats         // the round stats as the turn began
 	heads   map[string]string // workspace → HEAD as the turn began
 	facts   LedgerFacts
@@ -572,8 +571,7 @@ func (h *Harness) ledgerTouched(cs []taskgraph.Change) {
 // ── the turn ────────────────────────────────────────────────────────────
 
 // ledgerBegin opens the turn: HEADs, round stats, the asks open now.
-// o is the turn's origin (autoturn.go): the outcome line is the person's.
-func (h *Harness) ledgerBegin(o turnOrigin) {
+func (h *Harness) ledgerBegin() {
 	if h.isChild() {
 		return
 	}
@@ -587,7 +585,6 @@ func (h *Harness) ledgerBegin(o turnOrigin) {
 	h.ledger.turn = turn
 	h.ledger.open, h.ledger.start, h.ledger.stats0, h.ledger.heads = true, time.Now(), s0, heads
 	h.ledger.touched, h.ledger.asked = nil, open
-	h.ledger.origin = o
 	h.ledger.mu.Unlock()
 }
 
