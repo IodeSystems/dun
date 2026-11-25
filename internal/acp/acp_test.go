@@ -233,6 +233,7 @@ func TestTextQuestion(t *testing.T) {
 	r.d.next()
 	r.d.emit(&proto.UserEcho{ID: "m1", Content: "pick"}, &proto.Turn{Kind: "user"},
 		&proto.Ask{AskID: "a1", Question: "which ones?", Options: []string{"x", "y"}, Multi: true})
+	said := r.ed.waitSaid(t, "Your next message is the answer.")
 	second := r.prompt(sid, "x and y")
 	c := r.d.next()
 	if a, ok := c.Payload.(*proto.Answer); !ok || a.Value != "x and y" || a.AskID != "a1" {
@@ -242,12 +243,6 @@ func TestTextQuestion(t *testing.T) {
 	for _, ch := range []chan promptResult{first, second} {
 		if res := waitPrompt(t, ch); res.stop != sdk.StopReasonEndTurn {
 			t.Fatalf("prompt: %+v", res)
-		}
-	}
-	var said string
-	for _, u := range r.ed.take() {
-		if u.AgentMessageChunk != nil {
-			said += u.AgentMessageChunk.Content.Text.Text
 		}
 	}
 	if !strings.Contains(said, "which ones?") || !strings.Contains(said, "- y") {

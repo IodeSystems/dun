@@ -213,6 +213,32 @@ outside the workspace, `harness/fileaccess.go`):
   the `answer`, not as a message, and is answered with the turn it
   continues.
 
+An editor that advertises `clientCapabilities.elicitation.form` gets every
+question as an `elicitation/create` form instead (`elicit.go`), scoped to
+the session and the tool call that asked. The form's message is the
+question; its fields:
+
+- `answer`: the options as a string `enum` (one answer) or an `array` of
+  the enum (multiple choice), the recommended option(s) as its `default`;
+  with no options, a required text field.
+- `other`: a text field for the person's own words, when the question has
+  options and takes other answers (an `ask_user`; not the file-access
+  question). Its `_meta` is `{"_askUserQuestionCustomAnswer": true,
+  "jetbrains": {"air": {"customAnswer": true}}}`, the keys JetBrains Air's
+  own agent puts on its custom-answer field (seen in an Air debug bundle,
+  2026-11-24; the spec names no such field). With it neither field is
+  required; without it `answer` is.
+
+`accept` sends the answer: `other` when filled, else the pick; for
+multiple choice the checked options and `other`, joined ", " as the TUI
+joins them. `decline` sends the question's "no" option when it has one
+(the file-access question). `cancel`, `decline` with no "no", or an
+`accept` with no usable value leaves the question open as text, the next
+prompt its answer (the TUI's esc parks a question the same way). A
+question answered elsewhere cancels the request (the SDK sends
+`$/cancel_request`; the spec has no withdraw) and a late reply is not
+read. An editor that fails `elicitation/create` is asked as above.
+
 ## Config options
 
 session/new and session/load answer with `configOptions` (ACP session

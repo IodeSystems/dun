@@ -15,10 +15,11 @@ import (
 )
 
 // peer is what a session says to the editor: the ACP connection's agent
-// side (a test's fake has the same two methods).
+// side.
 type peer interface {
 	SessionUpdate(ctx context.Context, n sdk.SessionNotification) error
 	RequestPermission(ctx context.Context, r sdk.RequestPermissionRequest) (sdk.RequestPermissionResponse, error)
+	CreateElicitation(ctx context.Context, r sdk.CreateElicitationRequest) (sdk.CreateElicitationResponse, error)
 }
 
 // session is one ACP session: a dund session the bridge follows over its

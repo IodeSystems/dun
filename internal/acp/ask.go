@@ -15,7 +15,8 @@ import (
 // with one answer — is a session/request_permission: an option per answer,
 // the chosen one sent back as the answer. A multiple-choice question, one
 // with no options, or one the editor could not ask, is shown as the agent's
-// text, and the next prompt is its answer.
+// text, and the next prompt is its answer. An editor that advertises
+// elicitation.form gets every question as a form instead (elicit.go).
 
 // onAsk asks a question once (the ask event and turn_state both carry it).
 func (s *session) onAsk(a *proto.Ask) {
@@ -25,8 +26,9 @@ func (s *session) onAsk(a *proto.Ask) {
 		return
 	}
 	s.lastAsk = a.AskID
+	form := s.caps.form
 	s.mu.Unlock()
-	if a.Multi || len(a.Options) == 0 {
+	if !form && (a.Multi || len(a.Options) == 0) {
 		s.askText(a)
 		return
 	}
@@ -34,6 +36,10 @@ func (s *session) onAsk(a *proto.Ask) {
 	s.mu.Lock()
 	s.perm, s.permStop = a.AskID, stop
 	s.mu.Unlock()
+	if form {
+		go s.elicit(ctx, stop, a)
+		return
+	}
 	go s.permission(ctx, stop, a)
 }
 
@@ -116,7 +122,7 @@ func (s *session) askText(a *proto.Ask) {
 }
 
 // onAnswered: the question was answered, here or by another client: a
-// permission request still open for it is withdrawn.
+// permission request or form still open for it is withdrawn.
 func (s *session) onAnswered(a *proto.Answered) {
 	s.mu.Lock()
 	var stop context.CancelFunc
