@@ -64,6 +64,7 @@ func init() {
 	event[Extensions]("extensions")
 	event[Plan]("plan")
 	event[Journal]("journal")
+	event[Until]("until")
 	// The protocol's own.
 	event[Ack]("ack")
 	event[Snapshot]("snapshot")
@@ -1325,6 +1326,31 @@ type Plan struct {
 	// yet acknowledged (nil with none): the clients' ask list.
 	Asks   []PlanAsk   `json:"asks,omitempty"`
 	Intake *PlanIntake `json:"intake,omitempty"`
+}
+
+// Until is the session's stop conditions and their run (/until;
+// harness/until.go), sent whenever either changes. No conditions: one turn
+// per message. Running: the engine starts the next turn itself until a
+// condition or a safety stop fires; Stopped then says why the last run
+// stopped. Line is the whole of it in one short line, for a status bar.
+type Until struct {
+	Conds   []UntilCond `json:"conds,omitempty"`
+	Cap     int         `json:"cap,omitempty"` // the run's turn cap
+	Turn    int         `json:"turn,omitempty"`
+	Running bool        `json:"running,omitempty"`
+	Stopped string      `json:"stopped,omitempty"`
+	Line    string      `json:"line,omitempty"`
+}
+
+// UntilCond is one stop condition: kind turns (N), goal (Goal, and Check:
+// a command whose exit 0 is "met"), or plan (drained). Progress is its
+// state in words ("3/10", "4 open, 2 ready", "not met: …").
+type UntilCond struct {
+	Kind     string `json:"kind"`
+	N        int    `json:"n,omitempty"`
+	Goal     string `json:"goal,omitempty"`
+	Check    string `json:"check,omitempty"`
+	Progress string `json:"progress,omitempty"`
 }
 
 // PlanNode is one row of a Plan.
