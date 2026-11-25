@@ -104,7 +104,7 @@ shows the editor's default icon. No change to `internal/acp` helps.
 | `reasoning` | `agent_thought_chunk` |
 | `tool_call` | `tool_call`, `in_progress`, kind from the table below, `title` the tool and its main argument, `locations` the files its arguments name, `rawInput` the arguments |
 | `tool_result` | `tool_call_update`, `completed` or `failed` (`is_error`); content: the result text, then a `diff` per `edits[]` file (`oldText` absent for a created file); a `skipped` edit is a text line naming the file and why |
-| `plan` | `plan`: the tree in order, a repeat row once, dropped rows left out; todo and blocked are `pending` (ACP has no blocked), doing `in_progress`, done `completed`; a ready todo is priority `high`, the rest `medium` |
+| `plan` | `plan`: the tree in order, a repeat row once, dropped rows left out; todo and blocked are `pending` (ACP has no blocked), doing `in_progress`, done `completed`; a ready todo is priority `high`, the rest `medium`. An editor that advertises `clientCapabilities.plan` (or JetBrains Air's `planContentDelta` or `planFile` in `_meta.jetbrains.air.capabilities`) gets the same entries as the unstable `plan_update` instead (`plan.type` `items`, `planId` `dun`: a session has one plan), as the plan-operations RFD says to |
 | `commands` | `available_commands_update`; a command's usage (or its choices) is the input hint |
 | `user` (another client's) | `user_message_chunk` |
 | `request` (done) and `usage` | `usage_update`, see "Usage, context and cost" |

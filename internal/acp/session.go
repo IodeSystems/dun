@@ -30,6 +30,7 @@ type session struct {
 	cwd  string
 	ctx  context.Context // ends with the ACP connection
 	peer peer
+	caps caps // what the editor can take (caps.go)
 	log  *slog.Logger
 	dial func() (net.Conn, error)
 
@@ -202,7 +203,7 @@ func (s *session) handle(ev proto.Event) {
 			s.update(endCall(p))
 		}
 	case *proto.Plan:
-		s.update(sdk.UpdatePlan(planEntries(p)...))
+		s.update(planUpdate(s.caps, planEntries(p)))
 		s.slashReply(p.Message)
 	case *proto.Commands:
 		s.onCommands(p)
@@ -304,7 +305,7 @@ func (s *session) onSnapshot(ev proto.Event, sn *proto.Snapshot) {
 		case *proto.Usage:
 			s.loadUsage(p, replay)
 		case *proto.Plan:
-			s.update(sdk.UpdatePlan(planEntries(p)...))
+			s.update(planUpdate(s.caps, planEntries(p)))
 		case *proto.Until:
 			s.onConfig(func(c *config) { c.until = p })
 		case *proto.TurnState:
