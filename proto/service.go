@@ -19,6 +19,7 @@ func init() {
 	command[UIPut]("ui_put")
 	command[Restart]("restart")
 	command[MoveEngine]("move_engine")
+	command[SwitchModel]("switch_model")
 	command[Forget]("forget")
 	command[Persist]("persist")
 	command[Leave]("leave")
@@ -172,6 +173,15 @@ type Create struct {
 // allowlist as create) on the same conversation: a model switch.
 type Restart struct {
 	Args []string `json:"args"`
+}
+
+// SwitchModel restarts the envelope's session's engine on another model and
+// provider URL, its other flags kept: the HTTP API's switchModel, for a
+// socket client that does not know the session's flags (dun acp). URL and
+// Model come from the models event. Answered with an ack.
+type SwitchModel struct {
+	URL   string `json:"url"`
+	Model string `json:"model"`
 }
 
 // MoveEngine restarts the envelope's session's engine, same flags, same

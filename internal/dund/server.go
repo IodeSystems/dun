@@ -360,6 +360,8 @@ func (c *conn) handle(cmd proto.Command) {
 		}
 	case *proto.Restart:
 		go func() { c.ack(cmd, cmd.Session, svc.Restart(c.who, cmd.Session, p.Args)) }()
+	case *proto.SwitchModel:
+		go func() { c.ack(cmd, cmd.Session, svc.SwitchModel(c.who, cmd.Session, p.URL, p.Model)) }()
 	case *proto.MoveEngine:
 		go func() { c.ack(cmd, cmd.Session, svc.MoveEngine(c.who, cmd.Session, p.Force)) }()
 	case *proto.Forget:

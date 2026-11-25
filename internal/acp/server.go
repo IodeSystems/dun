@@ -138,7 +138,7 @@ func (a *Agent) NewSession(ctx context.Context, p sdk.NewSessionRequest) (sdk.Ne
 	if err != nil {
 		return sdk.NewSessionResponse{}, err
 	}
-	return sdk.NewSessionResponse{SessionId: sdk.SessionId(s.id)}, nil
+	return sdk.NewSessionResponse{SessionId: sdk.SessionId(s.id), ConfigOptions: s.liveConfig()}, nil
 }
 
 // LoadSession attaches to a dun session (a dund id, as session/new gave)
@@ -150,10 +150,11 @@ func (a *Agent) LoadSession(ctx context.Context, p sdk.LoadSessionRequest) (sdk.
 	if p.SessionId == "" {
 		return sdk.LoadSessionResponse{}, sdk.NewInvalidParams(map[string]any{"error": "sessionId is required"})
 	}
-	if _, err := a.open(ctx, p.Cwd, string(p.SessionId), len(p.McpServers)); err != nil {
+	s, err := a.open(ctx, p.Cwd, string(p.SessionId), len(p.McpServers))
+	if err != nil {
 		return sdk.LoadSessionResponse{}, err
 	}
-	return sdk.LoadSessionResponse{}, nil
+	return sdk.LoadSessionResponse{ConfigOptions: s.liveConfig()}, nil
 }
 
 // readyWait bounds the wait for a session's first snapshot.
@@ -223,6 +224,10 @@ func (a *Agent) open(ctx context.Context, cwd, resume string, mcpServers int) (*
 	go s.run(l)
 	select {
 	case <-s.ready:
+		// The model list, for the model option: the engine asks each saved
+		// provider (control "models", as the web app's picker).
+		_ = s.send("", &proto.ControlCmd{ID: "models"})
+		s.awaitConfig(ctx)
 		return s, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -313,8 +318,21 @@ func (a *Agent) ResumeSession(ctx context.Context, p sdk.ResumeSessionRequest) (
 	return sdk.ResumeSessionResponse{}, sdk.NewMethodNotFound(sdk.AgentMethodSessionResume)
 }
 
+// SetSessionConfigOption sets the model or the thinking level (config.go)
+// and answers with every option as the engine then reports it.
 func (a *Agent) SetSessionConfigOption(ctx context.Context, p sdk.SetSessionConfigOptionRequest) (sdk.SetSessionConfigOptionResponse, error) {
-	return sdk.SetSessionConfigOptionResponse{}, sdk.NewMethodNotFound(sdk.AgentMethodSessionSetConfigOption)
+	if p.ValueId == nil {
+		return sdk.SetSessionConfigOptionResponse{}, sdk.NewInvalidParams(map[string]any{"error": "dun's options are selects: value is a value id"})
+	}
+	s, err := a.session(p.ValueId.SessionId)
+	if err != nil {
+		return sdk.SetSessionConfigOptionResponse{}, err
+	}
+	opts, err := s.setConfig(ctx, string(p.ValueId.ConfigId), string(p.ValueId.Value))
+	if err != nil {
+		return sdk.SetSessionConfigOptionResponse{}, err
+	}
+	return sdk.SetSessionConfigOptionResponse{ConfigOptions: opts}, nil
 }
 
 func (a *Agent) SetSessionMode(ctx context.Context, p sdk.SetSessionModeRequest) (sdk.SetSessionModeResponse, error) {
