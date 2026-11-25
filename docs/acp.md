@@ -51,6 +51,27 @@ Not run in any JetBrains product yet.
 adapter config; give it the command `dun` and the args `["acp"]`.
 **Unverified.**
 
+## Icon
+
+Files in `release/acp/`:
+
+- `icon.svg`: the ACP registry icon. A hard hat, 16x16 viewBox, one
+  colour (`currentColor`), no hardcoded colours. Meets the registry's
+  validation (FORMAT.md, CONTRIBUTING.md "Icon Validation"). Use this one.
+- `icon-mascot.svg`: the foreman (`internal/tui/mascot.go`, 13x11 pixel
+  grid) as a one-colour pixel silhouette, same rules. Candidate; the hat
+  reads better at 16 px.
+- `icon-color.svg`: the hard hat in yellow, hardcoded colours. For places
+  that allow colour (site, org console). Not valid for the registry.
+
+How an icon reaches an editor: only through the registry. A registry
+`agent.json` has `"icon": "<url of icon.svg>"` and the registry repo holds
+`<agent-id>/icon.svg`. The ACP schema's `initialize` response carries no
+icon (`agentInfo` is name, title, version, `_meta`). JetBrains
+`~/.jetbrains/acp.json` and Zed `agent_servers` document no `icon` field
+(checked against their docs, 2026-11-24), so a locally configured agent
+shows the editor's default icon. No change to `internal/acp` helps.
+
 ## What an ACP session is
 
 - `session/new` creates a dund session in `cwd`, **in place**: no
