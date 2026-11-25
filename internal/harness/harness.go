@@ -853,9 +853,18 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// Every response the engine's clients get reaches the root session's
 	// round stats, and its stats ledger (roundstats.go). A child shares the
 	// parent's meter and leaves the hook to it.
-	if cfg.Parent == nil && cfg.Spend != nil {
+	if cfg.Parent == nil {
 		h.rounds.ledger = cfg.StatsLedger
-		cfg.Spend.SetRoundHook(h.noteRound)
+		if cfg.Spend != nil {
+			cfg.Spend.SetRoundHook(h.noteRound)
+		}
+		// A malformed-call repair note is one ledger line (agentkit
+		// v0.41.1: a MALFORMED_FUNCTION_CALL round with no text or call).
+		store.setOnEntry(func(e agent.Entry, _ uint64) {
+			if e.Kind == agent.KindNotification && e.Tag == agent.MalformedCallTag {
+				h.noteRoundEvent(RoundEvent{Kind: "malformed_call_repair", NativeFinish: "MALFORMED_FUNCTION_CALL", Trace: h.trace.Last()})
+			}
+		})
 	}
 
 	// Server→client push. Only the OWNER registers: a child shares its
