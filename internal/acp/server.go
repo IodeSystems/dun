@@ -103,6 +103,13 @@ func (a *Agent) closeAll() {
 	}
 }
 
+// dun has no per-editor sign-in. One agent auth method exists because
+// editors (JetBrains Air) wait for one and the ACP registry requires one;
+// authenticate checks nothing, and sessions do not need it.
+const authMethodID = "dun"
+
+var authDescription = "Uses the providers configured in dun. Run the dun TUI and /login to change them."
+
 func (a *Agent) Initialize(ctx context.Context, p sdk.InitializeRequest) (sdk.InitializeResponse, error) {
 	a.mu.Lock()
 	a.initialized = true
@@ -115,7 +122,11 @@ func (a *Agent) Initialize(ctx context.Context, p sdk.InitializeRequest) (sdk.In
 			SessionCapabilities: sdk.SessionCapabilities{Close: &sdk.SessionCloseCapabilities{}},
 			PromptCapabilities:  sdk.PromptCapabilities{EmbeddedContext: true},
 		},
-		AuthMethods: []sdk.AuthMethod{},
+		AuthMethods: []sdk.AuthMethod{{Agent: &sdk.AuthMethodAgent{
+			Id:          authMethodID,
+			Name:        "dun",
+			Description: &authDescription,
+		}}},
 	}, nil
 }
 
@@ -275,11 +286,16 @@ func (a *Agent) CloseSession(ctx context.Context, p sdk.CloseSessionRequest) (sd
 	return sdk.CloseSessionResponse{}, nil
 }
 
-// Not offered (docs/acp.md, "Not supported").
-
+// Authenticate accepts the one method, "dun", with no check: model access
+// is dun's and dund's own configuration.
 func (a *Agent) Authenticate(ctx context.Context, p sdk.AuthenticateRequest) (sdk.AuthenticateResponse, error) {
-	return sdk.AuthenticateResponse{}, sdk.NewMethodNotFound(sdk.AgentMethodAuthenticate)
+	if p.MethodId != authMethodID {
+		return sdk.AuthenticateResponse{}, sdk.NewInvalidParams(map[string]any{"error": "unknown auth method", "methodId": string(p.MethodId)})
+	}
+	return sdk.AuthenticateResponse{}, nil
 }
+
+// Not offered (docs/acp.md, "Not supported").
 
 func (a *Agent) Logout(ctx context.Context, p sdk.LogoutRequest) (sdk.LogoutResponse, error) {
 	return sdk.LogoutResponse{}, sdk.NewMethodNotFound(sdk.AgentMethodLogout)
