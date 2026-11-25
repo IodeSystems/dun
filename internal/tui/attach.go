@@ -36,8 +36,11 @@ const (
 	ackWait      = 4 * time.Minute // a create waits for a new engine to name its session
 )
 
-// dialDund connects to the service, starting it when nothing listens.
-func dialDund() (net.Conn, error) {
+// dialDund connects to the service, starting it when nothing listens. key is
+// the provider key (o.Key) to hand the service it starts, via DUN_LLM_KEY; it
+// is off the engine's argv, so it must reach the engine through the service's
+// environment, which the engine inherits.
+func dialDund(key string) (net.Conn, error) {
 	sock := dundcli.Socket(dunconfig.DunHome())
 	if c, err := net.Dial("unix", sock); err == nil {
 		return c, nil
@@ -45,7 +48,7 @@ func dialDund() (net.Conn, error) {
 	if err := waitDundStopped(); err != nil {
 		return nil, err
 	}
-	if err := startDund(); err != nil {
+	if err := startDund(key); err != nil {
 		return nil, err
 	}
 	deadline := time.Now().Add(dundStartWait)
@@ -91,7 +94,7 @@ func waitDundStopped() error {
 // apply; else `dun dund serve` from this binary, in its own session so it
 // outlives the TUI, output to dund.log. Either way the web listener is what
 // <home>/dund/web.json says (`dun dund enable web`).
-func startDund() error {
+func startDund(key string) error {
 	if dundcli.ServiceServes(dundcli.ServiceUnit, dunconfig.DunHome()) {
 		return dundcli.StartService(dundcli.ServiceUnit)
 	}
@@ -110,7 +113,7 @@ func startDund() error {
 	cmd := exec.Command(exe, "dund", "serve", "--dun", exe)
 	cmd.Stdout, cmd.Stderr = logf, logf
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	cmd.Env = append(os.Environ(), "DUN_CHILD=1")
+	cmd.Env = dundServeEnv(key)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start dund: %w", err)
 	}
@@ -118,15 +121,48 @@ func startDund() error {
 	return nil
 }
 
+// dundServeEnv is the environment a self-started dund runs in: this process's,
+// with the provider key as DUN_LLM_KEY when it is not already carried: a key
+// in the environment wins over one passed on the CLI, and a present-but-empty
+// value is not a key, so the passed one fills it. The engine dund spawns
+// inherits it, which is how the key reaches the engine off its argv.
+func dundServeEnv(key string) []string {
+	if key != "" && getenv("DUN_LLM_KEY", os.Environ()) == "" {
+		// Replace an existing empty entry rather than appending a second
+		// DUN_LLM_KEY that would read as the empty one.
+		env := make([]string, 0, len(os.Environ())+1)
+		for _, kv := range os.Environ() {
+			if k, _, ok := strings.Cut(kv, "="); ok && k == "DUN_LLM_KEY" {
+				env = append(env, "DUN_LLM_KEY="+key)
+				continue
+			}
+			env = append(env, kv)
+		}
+		return append(env, "DUN_CHILD=1")
+	}
+	return append(os.Environ(), "DUN_CHILD=1")
+}
+
+// getenv reads name from env ("K=V" pairs), the empty string when absent.
+func getenv(name string, env []string) string {
+	for _, kv := range env {
+		if k, v, ok := strings.Cut(kv, "="); ok && k == name {
+			return v
+		}
+	}
+	return ""
+}
+
 // engineArgs are the engine flags a session is created with: procArgs less
-// what the service sets itself (workspace, resume, continue) and what it
-// refuses (the key — the engine reads the saved one).
+// what the service sets itself (workspace, resume, continue). The key was
+// never forwarded: dund's allowedFlags rejects it, and the engine reads the
+// saved one (DUN_LLM_KEY env or config).
 func engineArgs(o TuiOpts) []string {
 	all := ProcArgs(o, "--engine")[3:] // drop --engine --workspace <ws>
 	var out []string
 	for i := 0; i < len(all); i++ {
 		switch all[i] {
-		case "--key", "--resume":
+		case "--resume":
 			i++
 		case "--continue", "--disable-exit", "--new":
 		default:
@@ -150,7 +186,7 @@ type resumeAt struct {
 func attachSession(o TuiOpts, after resumeAt) (*dunProc, error) {
 	attachNow.Store(&attachWait{}) // dund first (checkDundBuild says the rest)
 	defer attachNow.Store(nil)
-	c, err := dialDund()
+	c, err := dialDund(o.Key)
 	if err != nil {
 		return nil, err
 	}
@@ -488,5 +524,7 @@ func (p *dunProc) jobUsage(id int) bool {
 	return json.NewEncoder(p.stdin).Encode(map[string]any{"type": "job_usage", "job": id}) == nil
 }
 
-// DialDund is dialDund for the other clients in this binary (dun mcp).
-func DialDund() (net.Conn, error) { return dialDund() }
+// DialDund is dialDund for the other clients in this binary (dun msg): they
+// carry no provider key of their own, so the service they start gets only the
+// environment's.
+func DialDund() (net.Conn, error) { return dialDund("") }

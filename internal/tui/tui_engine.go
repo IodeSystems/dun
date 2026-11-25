@@ -241,9 +241,6 @@ func ProcArgs(o TuiOpts, mode string) []string {
 	if o.Url != "" {
 		args = append(args, "--url", o.Url)
 	}
-	if o.Key != "" {
-		args = append(args, "--key", o.Key)
-	}
 	if o.Docker != "" {
 		args = append(args, "--docker", o.Docker)
 	}
