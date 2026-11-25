@@ -239,6 +239,12 @@ func (s *session) handle(ev proto.Event) {
 		s.onDone(p)
 	case *proto.Error:
 		s.onError(p)
+	case *proto.Retry:
+		// A wait on the provider shows as a thought: the editor has no
+		// banner, and a silent wait of minutes looks like a hang.
+		if p.Text != "" {
+			s.update(sdk.UpdateAgentThoughtText(p.Text + "\n"))
+		}
 	case *proto.ImageRefused:
 		s.text(p.Message)
 	case *proto.Until:
