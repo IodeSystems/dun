@@ -94,8 +94,13 @@ var Supported = []Tool{
 	// Changed: an absolute path outside every root (the workspace, the
 	// overflow dir) is Access denied; before, /etc/x resolved to
 	// <workspace>/etc/x. No flag dun passes changed; Min stays.
+	// Recommended v0.16.0 (2026-11-25), tarballs in deps.json: eval's schema
+	// is Gemini-safe: vars is {type:string} holding a JSON-encoded object,
+	// limits.memory is {type:string} like "64MB"; no additionalProperties, no
+	// type arrays. Old inputs (vars as an object, memory as an integer) are
+	// still accepted. New: mcpshell repl. No breaking change; Min stays.
 	{Name: "mcpshell", Module: "github.com/iodesystems/mcpshell/cmd/mcpshell",
-		Min: "v0.2.0", Recommended: "v0.15.0"},
+		Min: "v0.2.0", Recommended: "v0.16.0"},
 	// Min 46caee4 (main, 2026-10-24): the first pushed commit with the index
 	// protocol (--exclude, --index-budget), doctor --json, and the pure-Go
 	// tree-sitter, so go install needs Go alone. v0.1.0 (6dab491), its first

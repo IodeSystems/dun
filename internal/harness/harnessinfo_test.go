@@ -262,6 +262,18 @@ func TestHarnessInfo_EvalCarriesLiveDun(t *testing.T) {
 	if got["vars"].(map[string]any)["x"] != 1.0 || mine["dun"] != "mine" {
 		t.Errorf("the model's vars were not kept, or its map was written: %v", got["vars"])
 	}
+	// mcpshell v0.16.0: vars is a JSON-encoded object in a string.
+	call(map[string]any{"code": "1", "vars": `{"dun":"mine","y":2}`})
+	if got["vars"].(map[string]any)["y"] != 2.0 {
+		t.Errorf("string vars not decoded: %v", got["vars"])
+	}
+	if d := call(map[string]any{"code": "1", "vars": ""}); d["harness"] != "dun" {
+		t.Errorf("empty string vars: %v", d)
+	}
+	got = nil
+	if _, err := c.CallTool(context.Background(), "shell", "eval", map[string]any{"code": "1", "vars": "[1]"}); err == nil || got != nil {
+		t.Errorf("string vars holding a non-object: err %v, forwarded %v", err, got)
+	}
 	// vars that is not an object is an error, not replaced.
 	got = nil
 	if _, err := c.CallTool(context.Background(), "shell", "eval", map[string]any{"code": "1", "vars": []any{1.0}}); err == nil || got != nil {
