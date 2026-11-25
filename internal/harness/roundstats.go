@@ -127,6 +127,52 @@ type TurnStats struct {
 // SIBLING of the round stat that carries the drop, written to the same file
 // just before it, so a reader pairing lines by order sees the drop and its
 // attribution together.
+// TurnOutcome is one line in the rounds ledger: a finished turn's outcome —
+// the commits it made and its last test verdict — and the user's reaction to
+// it, at the next user message (correction or acceptance). Written when that
+// message arrives: the reaction is unknowable before it, and a reader pairing
+// lines by order sees the outcome and the reaction together. The line is a
+// SIBLING of the round stats in the same file, the way a ShrinkEvent is.
+type TurnOutcome struct {
+	Kind    string `json:"kind"` // "outcome"
+	Time    time.Time `json:"t"`
+	Session string `json:"session,omitempty"`
+	Turn    int    `json:"turn,omitempty"` // the ask turn the outcome is of
+	// Commits are the turn's commit hashes, short; NCommits counts them past
+	// the cap, and NFiles / TestVerdict the rest of the turn's outcome.
+	Commits     []string `json:"commits,omitempty"`
+	NCommits    int      `json:"n_commits,omitempty"`
+	NFiles      int      `json:"n_files,omitempty"`
+	TestVerdict string   `json:"test,omitempty"` // lastTestVerdict: "", "pass", "fail (…)"
+	// Reaction is the next user message, labeled: "correction" (it says the
+	// work was wrong) or "acceptance" (it moves on). Empty when the line was
+	// written by a non-person turn (the reaction is left to the person's).
+	Reaction string `json:"reaction,omitempty"`
+	Message  string `json:"message,omitempty"` // its text, one line, capped
+}
+
+// TurnOutcomeCommits is how many commit hashes a TurnOutcome line carries;
+// past it the line keeps the count (NCommits) and drops the names.
+const TurnOutcomeCommits = 10
+
+// TurnOutcomeMessageCap caps the reaction's message text in a line.
+const TurnOutcomeMessageCap = 300
+
+// reactionLabel labels a user message that follows a finished turn: a
+// correction says the work was wrong (and names it), acceptance moves on.
+// The label is mechanical — the user's words, not a model's read of them —
+// so it is stable for a reader that counts corrections per turn.
+func reactionLabel(text string) string {
+	s := strings.ToLower(strings.TrimSpace(text))
+	s = strings.TrimLeft(s, "!. \t-")
+	for _, w := range []string{"no", "not ", "nope", "wrong", "that's not", "thats not", "didn't", "didnt", "doesn't", "doesnt", "isn't", "isnt", "wasn't", "wasnt", "it broke", "breaks", "fails", "failing", "still fails", "still broken"} {
+		if strings.HasPrefix(s, w) {
+			return "correction"
+		}
+	}
+	return "acceptance"
+}
+
 type ShrinkEvent struct {
 	Kind       string `json:"kind"` // "shrink"
 	Time       time.Time `json:"t"`
@@ -418,6 +464,32 @@ func (l *StatsLedger) AppendShrink(e ShrinkEvent) error {
 		return err
 	}
 	f, err := os.OpenFile(filepath.Join(l.dir, "rounds-"+e.Time.UTC().Format("2006-01")+".jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(append(b, '\n'))
+	return err
+}
+
+// AppendOutcome writes a turn outcome as one line, the same file and the
+// same append rule as AppendShrink: the readers glob rounds-*.jsonl and skip
+// what does not parse as a round stat, and "kind":"outcome" is how a reader
+// that DOES look for it picks the line out.
+func (l *StatsLedger) AppendOutcome(o TurnOutcome) error {
+	if o.Time.IsZero() {
+		o.Time = time.Now()
+	}
+	b, err := json.Marshal(o)
+	if err != nil || len(b)+1 > statsLineMax {
+		return err
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if err := os.MkdirAll(l.dir, 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(filepath.Join(l.dir, "rounds-"+o.Time.UTC().Format("2006-01")+".jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return err
 	}

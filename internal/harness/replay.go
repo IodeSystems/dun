@@ -271,7 +271,7 @@ func (h *Harness) Replay(ctx context.Context) (res agent.TurnResult, ok bool, er
 	defer h.pending.replaying.Store(false)
 	st := h.settleBegin(false)
 	h.turnBegin(turnOrigin(p.Origin))
-	h.ledgerBegin()
+	h.ledgerBegin(turnOrigin(p.Origin))
 	res, err = h.replayRun(ctx, p)
 	h.settleEnd(false, st, err)
 	res, err = h.finishInterrupt(ctx, res, err)

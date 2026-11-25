@@ -221,3 +221,177 @@ func TestRoundStats_NoShrinkWithoutDrop(t *testing.T) {
 		t.Errorf("%d shrink lines:\n%s", got, b)
 	}
 }
+
+// reactionLabel classifies a user message that follows a finished turn.
+func TestReactionLabel(t *testing.T) {
+	cases := []struct {
+		text string
+		want string
+	}{
+		{"No, that's wrong", "correction"},
+		{"not quite", "correction"},
+		{"nope", "correction"},
+		{"Wrong, it should be X", "correction"},
+		{"That's not what I asked", "correction"},
+		{"It broke the build", "correction"},
+		{"Still fails on CI", "correction"},
+		{"Looks good, merge it", "acceptance"},
+		{"thanks, that works", "acceptance"},
+		{"ok", "acceptance"},
+		{"", "acceptance"}, // empty is the default
+	}
+	for _, c := range cases {
+		if got := reactionLabel(c.text); got != c.want {
+			t.Errorf("reactionLabel(%q) = %q, want %q", c.text, got, c.want)
+		}
+	}
+}
+
+// A finished turn stashes its outcome (commits, test verdict, files) and the
+// next person turn writes it to the rounds ledger with the reaction.
+func TestRoundStats_TurnOutcome(t *testing.T) {
+	dir := t.TempDir()
+	h := &Harness{cfg: Config{SessionFile: "/x/20261024-4.jsonl"}}
+	h.rounds.ledger = NewStatsLedger(dir)
+
+	// Stash: a turn that made 2 commits, touched 3 files, last test passed.
+	f := LedgerFacts{
+		Commits:  []LedgerCommit{{Hash: "abcdef1234567890", Subject: "fix: thing"}, {Hash: "0987654321abcdef", Subject: "test: add"}},
+		NCommits: 2, NFiles: 3,
+		Cmds:     []LedgerCmd{{Command: "make test", Verdict: "pass", Exit: 0}},
+	}
+	h.noteTurnOutcome(f, 1)
+
+	// The next person message triggers the write, with a correction.
+	h.appendTurnOutcome("No, that's not right — the test should check X")
+
+	b, err := os.ReadFile(filepath.Join(dir, "rounds-"+time.Now().UTC().Format("2006-01")+".jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("ledger: %d lines\n%s", len(lines), b)
+	}
+	var o TurnOutcome
+	if err := json.Unmarshal([]byte(lines[0]), &o); err != nil {
+		t.Fatal(err)
+	}
+	if o.Kind != "outcome" || o.Session != "20261024-4" || o.Turn != 1 {
+		t.Errorf("header: %+v", o)
+	}
+	if len(o.Commits) != 2 || o.Commits[0] != "abcdef12" || o.Commits[1] != "09876543" {
+		t.Errorf("commits: %v", o.Commits)
+	}
+	if o.NCommits != 2 || o.NFiles != 3 {
+		t.Errorf("counts: n_commits=%d n_files=%d", o.NCommits, o.NFiles)
+	}
+	if o.TestVerdict != "pass" {
+		t.Errorf("test verdict: %q", o.TestVerdict)
+	}
+	if o.Reaction != "correction" {
+		t.Errorf("reaction: %q", o.Reaction)
+	}
+	if !strings.Contains(o.Message, "not right") {
+		t.Errorf("message: %q", o.Message)
+	}
+}
+
+// A non-person turn writes the outcome without a reaction; the pending slot
+// is cleared so a later person turn does not re-write it.
+func TestRoundStats_TurnOutcomeNoReaction(t *testing.T) {
+	dir := t.TempDir()
+	h := &Harness{cfg: Config{SessionFile: "/x/20261024-5.jsonl"}}
+	h.rounds.ledger = NewStatsLedger(dir)
+
+	f := LedgerFacts{
+		Commits:  []LedgerCommit{{Hash: "aaaabbbbccccdddd", Subject: "feat: x"}},
+		NCommits: 1, NFiles: 1,
+		Cmds:     []LedgerCmd{{Command: "make test", Verdict: "2 failed", Failed: true, Exit: 1}},
+	}
+	h.noteTurnOutcome(f, 2)
+
+	// A non-person turn: empty text, no reaction.
+	h.appendTurnOutcome("")
+
+	b, err := os.ReadFile(filepath.Join(dir, "rounds-"+time.Now().UTC().Format("2006-01")+".jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("ledger: %d lines\n%s", len(lines), b)
+	}
+	var o TurnOutcome
+	if err := json.Unmarshal([]byte(lines[0]), &o); err != nil {
+		t.Fatal(err)
+	}
+	if o.Reaction != "" || o.Message != "" {
+		t.Errorf("should have no reaction: %+v", o)
+	}
+	if o.TestVerdict != "fail (2 failed)" {
+		t.Errorf("verdict: %q", o.TestVerdict)
+	}
+	// Pending is cleared: a second append writes nothing.
+	h.appendTurnOutcome("thanks")
+	b2, _ := os.ReadFile(filepath.Join(dir, "rounds-"+time.Now().UTC().Format("2006-01")+".jsonl"))
+	if n := len(strings.Split(strings.TrimSpace(string(b2)), "\n")); n != 1 {
+		t.Errorf("second append wrote a line: %d total", n)
+	}
+}
+
+// Commits past the cap: the line carries the count, not the names.
+func TestRoundStats_TurnOutcomeCommitCap(t *testing.T) {
+	dir := t.TempDir()
+	h := &Harness{cfg: Config{SessionFile: "/x/20261024-6.jsonl"}}
+	h.rounds.ledger = NewStatsLedger(dir)
+
+	// 15 commits; the line keeps 10 hashes and the count.
+	commits := make([]LedgerCommit, 15)
+	for i := range commits {
+		commits[i] = LedgerCommit{Hash: "0123456789abcdef", Subject: "commit"}
+	}
+	f := LedgerFacts{Commits: commits, NCommits: 15, NFiles: 5}
+	h.noteTurnOutcome(f, 3)
+	h.appendTurnOutcome("ok")
+
+	b, err := os.ReadFile(filepath.Join(dir, "rounds-"+time.Now().UTC().Format("2006-01")+".jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var o TurnOutcome
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(b))), &o); err != nil {
+		t.Fatal(err)
+	}
+	if len(o.Commits) != TurnOutcomeCommits {
+		t.Errorf("carries %d commits, want %d", len(o.Commits), TurnOutcomeCommits)
+	}
+	if o.NCommits != 15 {
+		t.Errorf("n_commits=%d, want 15", o.NCommits)
+	}
+}
+
+// The reaction message is capped at TurnOutcomeMessageCap.
+func TestRoundStats_TurnOutcomeMessageCap(t *testing.T) {
+	dir := t.TempDir()
+	h := &Harness{cfg: Config{SessionFile: "/x/20261024-7.jsonl"}}
+	h.rounds.ledger = NewStatsLedger(dir)
+
+	h.noteTurnOutcome(LedgerFacts{NCommits: 0, NFiles: 0}, 1)
+	long := strings.Repeat("a", TurnOutcomeMessageCap+100)
+	h.appendTurnOutcome(long)
+
+	b, err := os.ReadFile(filepath.Join(dir, "rounds-"+time.Now().UTC().Format("2006-01")+".jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var o TurnOutcome
+	if err := json.Unmarshal([]byte(strings.TrimSpace(string(b))), &o); err != nil {
+		t.Fatal(err)
+	}
+	// ClipRune cuts at n runes and appends "…" (3 bytes), so len in bytes is
+	// at most cap + 3.
+	if len(o.Message) > TurnOutcomeMessageCap+3 {
+		t.Errorf("message is %d bytes, cap+3 is %d", len(o.Message), TurnOutcomeMessageCap+3)
+	}
+}

@@ -203,17 +203,17 @@ func (h *Harness) notePresence() {
 	h.auto.mu.Unlock()
 }
 
-// queuedPerson reports whether the buffer holds a message the person wrote
-// (typed mid-turn, or a `dun msg` from a shell).
-func (h *Harness) queuedPerson() bool {
+// queuedPersonText returns the first message the person wrote in the buffer
+// (typed mid-turn, or a `dun msg` from a shell), and true if one exists.
+func (h *Harness) queuedPersonText() (string, bool) {
 	h.noteMu.Lock()
 	defer h.noteMu.Unlock()
 	for _, q := range h.queue {
 		if q.kind == queuedUser && PersonText(q.text) || q.person {
-			return true
+			return q.text, true
 		}
 	}
-	return false
+	return "", false
 }
 
 // holdPending writes what is pending into the conversation without a turn:

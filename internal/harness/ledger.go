@@ -341,6 +341,7 @@ type ledgerState struct {
 	open    bool
 	turn    int // the session's turn number (asks.go counts them)
 	start   time.Time
+	origin  turnOrigin // the turn's origin (turn.go, autoturn.go): the outcome line is the PERSON's
 	stats0  TurnStats         // the round stats as the turn began
 	heads   map[string]string // workspace → HEAD as the turn began
 	facts   LedgerFacts
@@ -348,6 +349,11 @@ type ledgerState struct {
 	// asked are the asks open during the turn: open at its start, or opened
 	// in it (asks.go).
 	asked []int
+	// pendingOutcome is a finished turn's outcome, not yet written to the
+	// rounds ledger: it is written when the NEXT user message arrives, which
+	// is also when the user's correction or acceptance is recorded (the
+	// reaction is unknowable before the message).
+	pendingOutcome *TurnOutcome
 }
 
 // ledgerCallKey carries a call's ledgerCall to exec, which fills it.
@@ -566,7 +572,8 @@ func (h *Harness) ledgerTouched(cs []taskgraph.Change) {
 // ── the turn ────────────────────────────────────────────────────────────
 
 // ledgerBegin opens the turn: HEADs, round stats, the asks open now.
-func (h *Harness) ledgerBegin() {
+// o is the turn's origin (autoturn.go): the outcome line is the person's.
+func (h *Harness) ledgerBegin(o turnOrigin) {
 	if h.isChild() {
 		return
 	}
@@ -580,6 +587,7 @@ func (h *Harness) ledgerBegin() {
 	h.ledger.turn = turn
 	h.ledger.open, h.ledger.start, h.ledger.stats0, h.ledger.heads = true, time.Now(), s0, heads
 	h.ledger.touched, h.ledger.asked = nil, open
+	h.ledger.origin = o
 	h.ledger.mu.Unlock()
 }
 
@@ -627,7 +635,10 @@ func (h *Harness) ledgerTake(err error, interrupted bool) (f LedgerFacts, start 
 }
 
 // ledgerEnd closes the turn and files its facts: to the asks open during
-// it, or, with none and a tool call made, as a turn entry (asks.go).
+// it, or, with none and a tool call made, as a turn entry (asks.go). The
+// turn's outcome (commits, last test verdict) is stashed as pending for the
+// rounds ledger: it is written when the NEXT user message arrives, which is
+// also when the user's correction or acceptance is recorded.
 func (h *Harness) ledgerEnd(ctx context.Context, err error) {
 	if h.isChild() {
 		return
@@ -637,7 +648,57 @@ func (h *Harness) ledgerEnd(ctx context.Context, err error) {
 	if !ok {
 		return
 	}
+	h.noteTurnOutcome(f, turn)
 	h.asksFile(ctx, f, start, turn, touched, asked)
+}
+
+// noteTurnOutcome stashes a finished turn's outcome for the rounds ledger.
+// It is written (appendTurnOutcome) when the next person-origin turn begins,
+// carrying that turn's first user message as the reaction; a non-person turn
+// in between writes the line without a reaction, so the person's message
+// later does not overwrite it.
+func (h *Harness) noteTurnOutcome(f LedgerFacts, turn int) {
+	if h.rounds.ledger == nil {
+		return
+	}
+	var commits []string
+	for _, c := range f.Commits {
+		hh := c.Hash
+		if len(hh) > 8 {
+			hh = hh[:8]
+		}
+		if len(commits) < TurnOutcomeCommits {
+			commits = append(commits, hh)
+		}
+	}
+	o := &TurnOutcome{
+		Kind: "outcome", Time: time.Now(), Session: h.sessionName(),
+		Turn: turn, Commits: commits, NCommits: f.NCommits,
+		TestVerdict: lastTestVerdict(f.Cmds),
+	}
+	o.NFiles = f.NFiles
+	h.ledger.mu.Lock()
+	h.ledger.pendingOutcome = o
+	h.ledger.mu.Unlock()
+}
+
+// appendTurnOutcome writes the stashed turn outcome to the rounds ledger.
+// text is the reaction message (the person's next message) and o the turn's
+// origin; an empty text leaves Reaction empty. It is a no-op with nothing
+// stashed.
+func (h *Harness) appendTurnOutcome(text string) {
+	h.ledger.mu.Lock()
+	o := h.ledger.pendingOutcome
+	h.ledger.pendingOutcome = nil
+	h.ledger.mu.Unlock()
+	if o == nil || h.rounds.ledger == nil {
+		return
+	}
+	if text != "" {
+		o.Reaction = reactionLabel(text)
+		o.Message = headLine(text, TurnOutcomeMessageCap)
+	}
+	_ = h.rounds.ledger.AppendOutcome(*o)
 }
 
 // ── git ─────────────────────────────────────────────────────────────────

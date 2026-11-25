@@ -173,7 +173,7 @@ func TestLedger_TurnEntries(t *testing.T) {
 		t.Errorf("row %q", row)
 	}
 	// Interrupted: the turn's facts are kept and flagged.
-	h.ledgerBegin()
+	h.ledgerBegin(originPerson)
 	h.ledgerNote(h, "exec", "", "", "sleep 9", nil, "", false, &ledgerCall{set: true, verdict: "killed", failed: true, exit: -1}, time.Second)
 	h.ledgerEnd(context.Background(), ErrInterrupted)
 	ts = journalOf(h, JournalTurn)
@@ -274,12 +274,12 @@ func TestAsks_AttributionDropAndSessionEnd(t *testing.T) {
 	planCall(t, h, "plan_add", `{"title":"write the page","done_when":"written"}`)
 	h.asksCall(`{"asks":[{"id":2,"nodes":["1"]}]}`)
 	// Turn 1: a change to that node, and an edit: ask 2's only.
-	h.ledgerBegin()
+	h.ledgerBegin(originPerson)
 	planCall(t, h, "plan_update", `{"id":"1","details":"the docs page"}`)
 	edit("docs/a.md")
 	h.ledgerEnd(context.Background(), nil)
 	// Turn 2: no plan change: both asks', shared.
-	h.ledgerBegin()
+	h.ledgerBegin(originPerson)
 	edit("x.go")
 	h.ledgerEnd(context.Background(), nil)
 
@@ -299,7 +299,7 @@ func TestAsks_AttributionDropAndSessionEnd(t *testing.T) {
 	}
 	// Drop ask 1; the next turn's end writes its entry.
 	h.asksCall(`{"asks":[{"id":1,"state":"done","note":"cannot reproduce"}]}`)
-	h.ledgerBegin()
+	h.ledgerBegin(originPerson)
 	h.ledgerEnd(context.Background(), nil)
 	kept := h.journalLocked()
 	if len(kept) != 1 || kept[0].Ask == nil || kept[0].Ask.Outcome != "done" || kept[0].Ask.Note != "cannot reproduce" {
@@ -325,7 +325,7 @@ func TestAsks_Indexed(t *testing.T) {
 	h := startLedger(t, &nudgeRunner{}, dir, sf, func(c *Config) { c.Rag = &fakeRag{} })
 	t.Cleanup(h.Close)
 	h.askOpen("fix the flaky test")
-	h.ledgerBegin()
+	h.ledgerBegin(originPerson)
 	h.ledgerNote(h, "file_edit", "edit", "t.go", "", nil, "edited t.go: +1 -1", false, &ledgerCall{}, time.Millisecond)
 	h.asksCall(`{"asks":[{"id":1,"state":"done","note":"retry added"}]}`)
 	h.ledgerEnd(context.Background(), nil)

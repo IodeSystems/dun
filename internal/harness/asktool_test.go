@@ -67,7 +67,7 @@ func TestAsks_IntakeSplitMergeMarkAndRestart(t *testing.T) {
 	if asks, _ := asksBy(h); len(asks) != 1 || asks[1].Title != "test the login flow" || len(h.Plan().Rows) != 0 {
 		t.Fatalf("asks %+v rows %+v", asks, h.Plan().Rows)
 	}
-	h.ledgerBegin()
+	h.ledgerBegin(originPerson)
 	h.intakeAdd("Add plan items:\n1. locate tow yards\n2. vds: port 18020 is in use\n3. vehicle telemetry")
 	h.SayAs(NewMessageID(), "retry")
 	h.SayAs(NewMessageID(), "[automatic] resume after the upgrade")
@@ -157,7 +157,7 @@ func TestAsks_MergeReopensDone(t *testing.T) {
 	t.Cleanup(h.Close)
 	h.askOpen("fix the flaky test")
 	h.asksCall(`{"asks":[{"id":1,"state":"done","note":"retry added"}]}`)
-	h.ledgerBegin()
+	h.ledgerBegin(originPerson)
 	h.ledgerEnd(context.Background(), nil)
 	if a := askRecOf(t, h, 1); a.Outcome != "done" || len(journalOf(h, JournalAsk)) != 1 {
 		t.Fatalf("not done: %+v", a)
@@ -184,7 +184,7 @@ func TestAsks_TurnEndCheckListsOnlyWhatIsLeft(t *testing.T) {
 	h.askOpen("fix the flaky test")
 	h.askOpen("update the docs")
 	h.turnBegin(originPerson)
-	h.ledgerBegin()
+	h.ledgerBegin(originPerson)
 	if a := h.idleAsks(); a != "" {
 		t.Errorf("nothing touched, yet: %q", a)
 	}
@@ -217,14 +217,14 @@ func TestAsks_TurnEndCheckListsOnlyWhatIsLeft(t *testing.T) {
 	}
 	for range askStaleTurns {
 		h.turnBegin(originPerson)
-		h.ledgerBegin()
+		h.ledgerBegin(originPerson)
 		h.ledgerEnd(context.Background(), nil)
 	}
 	if h.asksLiftBudget() {
 		t.Error("an ask untouched for 5 turns still lifts the budget")
 	}
 	h.turnBegin(originPerson)
-	h.ledgerBegin()
+	h.ledgerBegin(originPerson)
 	if a := h.idleAsks(); !strings.Contains(a, "- still open: 2 update the docs") || !strings.Contains(a, "keep it (state open)") {
 		t.Errorf("stale check %q", a)
 	}
@@ -233,7 +233,7 @@ func TestAsks_TurnEndCheckListsOnlyWhatIsLeft(t *testing.T) {
 	}
 	h.ledgerEnd(context.Background(), nil)
 	h.turnBegin(originAuto)
-	h.ledgerBegin()
+	h.ledgerBegin(originAuto)
 	h.intakeAdd("as if typed")
 	if a := h.idleAsks(); a != "" {
 		t.Errorf("automatic turn: %q", a)
@@ -381,7 +381,7 @@ func TestAsks_MigrateFromPlanNodes(t *testing.T) {
 	if len(rows) != 1 || rows[0].ID != "3" || len(rows[0].Needs) != 0 || rows[0].Ask != 2 {
 		t.Errorf("plan after the move %+v", rows)
 	}
-	h.ledgerBegin()
+	h.ledgerBegin(originPerson)
 	h.ledgerEnd(context.Background(), nil)
 	if n := len(h.journalLocked()); n != 0 {
 		t.Errorf("a migrated closed ask got another entry: %d", n)

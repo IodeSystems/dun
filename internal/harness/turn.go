@@ -172,8 +172,9 @@ func (h *Harness) Continue(ctx context.Context) (agent.TurnResult, error) {
 	if h.untilTakeNext() { // a stop condition's run (until.go): the person set it
 		origin = originUserSet
 	}
-	if h.queuedPerson() {
+	if t, ok := h.queuedPersonText(); ok {
 		origin = originPerson
+		h.appendTurnOutcome(t) // the previous turn's outcome, with this message as the reaction
 	}
 	st := h.settleBegin(false)
 	// Publish anything a tool result did not already carry (and pair off any
@@ -198,7 +199,7 @@ func (h *Harness) Continue(ctx context.Context) (agent.TurnResult, error) {
 		h.netWaitCancel() // the person's message, typed mid-turn or by dun msg
 	}
 	h.turnBegin(origin)
-	h.ledgerBegin()
+	h.ledgerBegin(origin)
 	res, err := h.turnThenTriggers(ctx)
 	h.settleEnd(false, st, err)
 	res, err = h.finishInterrupt(ctx, res, err)

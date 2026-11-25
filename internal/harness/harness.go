@@ -1100,6 +1100,9 @@ func (h *Harness) AskAs(ctx context.Context, id, task string) (agent.TurnResult,
 		h.personMsgs.Add(1)
 		h.netWaitCancel() // their message runs; it is not waited on (netwait.go)
 	}
+	if person {
+		h.appendTurnOutcome(task) // the previous turn's outcome, with this message as the reaction
+	}
 	st := h.settleBegin(person)
 	h.turnBegin(origin)
 	h.planAutoArchive(ctx)
@@ -1107,7 +1110,7 @@ func (h *Harness) AskAs(ctx context.Context, id, task string) (agent.TurnResult,
 	// intake with the message on it (asks.go).
 	h.intakeAdd(task)
 	h.prepareTurn(ctx)
-	h.ledgerBegin()
+	h.ledgerBegin(origin)
 	h.store.publish(agent.Entry{
 		ID: id, Kind: agent.KindUser, Content: task, CreatedAt: time.Now().UnixNano(),
 	})
