@@ -33,7 +33,7 @@ func (s *session) onAsk(a *proto.Ask) {
 		s.mu.Unlock()
 		return
 	}
-	s.lastAsk = a.AskID
+	s.lastAsk, s.askCall = a.AskID, a.CallID
 	form := s.caps.form
 	s.mu.Unlock()
 	if !form && (a.Multi || len(a.Options) == 0) {

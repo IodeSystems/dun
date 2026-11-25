@@ -31,6 +31,9 @@ type fakeDund struct {
 	state   []any               // the snapshot's state events
 	missing bool                // subscribe answers "no such session" until a create
 	models  *proto.Models       // control "models" answers with it (none: an empty list)
+	epoch   string              // the log's epoch, on every event (restart sets a new one)
+	// subscribes gets each subscribe the bridge sends, when set.
+	subscribes chan proto.Subscribe
 }
 
 // The tests that do not set the config's events wait for them briefly.
@@ -82,13 +85,16 @@ func (f *fakeDund) serve(c net.Conn) {
 				f.mu.Unlock()
 				continue
 			}
+			if f.subscribes != nil {
+				f.subscribes <- *p
+			}
 			f.write(c, ack)
 			sn := &proto.Snapshot{After: f.seq, Items: f.items}
 			for _, st := range f.state {
 				sn.State = append(sn.State, proto.NewEvent(st))
 			}
 			ev := proto.NewEvent(sn)
-			ev.Session = "s1"
+			ev.Session, ev.Epoch = "s1", f.epoch
 			f.write(c, ev)
 			f.subs = append(f.subs, c)
 			f.mu.Unlock()
@@ -115,11 +121,24 @@ func (f *fakeDund) emit(payloads ...any) {
 	for _, p := range payloads {
 		f.seq++
 		ev := proto.NewEvent(p)
-		ev.Session, ev.Seq = "s1", f.seq
+		ev.Session, ev.Seq, ev.Epoch = "s1", f.seq, f.epoch
 		for _, c := range f.subs {
 			f.write(c, ev)
 		}
 	}
+}
+
+// restart is dund restarting: every link drops, and the next subscribe
+// gets a snapshot of a new log (epoch, seqs from 1) with this history and
+// state.
+func (f *fakeDund) restart(epoch string, items []proto.HistoryItem, state ...any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.epoch, f.seq, f.items, f.state = epoch, 0, items, state
+	for _, c := range f.subs {
+		_ = c.Close()
+	}
+	f.subs = nil
 }
 
 // next is the next command the bridge sent, of any type but detach.

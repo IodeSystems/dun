@@ -46,6 +46,7 @@ type session struct {
 	// the prompt it holds is not over, the next engine asks again.
 	suspended bool
 	lastAsk   string // the ask id handled last (ask and turn_state both carry it)
+	askCall   string // that ask's call id: its result in the history closes it
 	perm      string // the ask id a permission request is open for
 	permStop  context.CancelFunc
 	seq       uint64 // the last event seen, to resubscribe after
@@ -74,6 +75,11 @@ type session struct {
 	// prompts wait for the run's end (until.go).
 	untilSent int
 	untilHeld bool
+
+	// gap: a snapshot stood in for events the link missed (dund restarted,
+	// or dropped the link), and the prompts in a turn may have lost their
+	// turn's done. The engine's idle state ends them (gapIdle).
+	gap bool
 }
 
 func newSession(ctx context.Context, id, cwd string, p peer, log *slog.Logger, dial func() (net.Conn, error), replay bool) *session {
@@ -246,6 +252,7 @@ func (s *session) handle(ev proto.Event) {
 		if p.Phase == proto.PhaseWaitingAnswer && p.Ask != nil {
 			s.onAsk(p.Ask)
 		}
+		s.gapIdle(p)
 	case *proto.UserEcho:
 		s.onEcho(p)
 	case *proto.Delivered:
@@ -274,6 +281,9 @@ func (s *session) handle(ev proto.Event) {
 		s.onUntil(p)
 	case *proto.ControlEvent:
 		if p.ID == "until" && s.ownUntilReply() {
+			break
+		}
+		if p.ID == "interrupt" && s.cancelIdle() {
 			break
 		}
 		s.slashReply(p.Message)
@@ -313,13 +323,16 @@ func (s *session) onAck(re string, a *proto.Ack) {
 
 // onSnapshot: the first one is the session as it is when the bridge
 // subscribes (it asks for one); session/load streams its history. A later
-// one stands in for events the link missed: its state is applied and a
-// turn it shows over ends the prompts it held.
+// one stands in for events the link missed (a gap): its state is applied,
+// and an engine it shows idle ends the prompts held (gapIdle). A snapshot
+// of another epoch is a new log (dund restarted): its seqs start again, so
+// seq and epoch are taken from it whatever the seq.
 func (s *session) onSnapshot(ev proto.Event, sn *proto.Snapshot) {
 	s.mu.Lock()
 	first := !s.snapped
 	s.snapped = true
-	if sn.After > s.seq {
+	newLog := ev.Epoch != s.epoch
+	if newLog || sn.After > s.seq {
 		s.seq, s.epoch = sn.After, ev.Epoch
 	}
 	replay := first && s.replay
@@ -329,6 +342,9 @@ func (s *session) onSnapshot(ev proto.Event, sn *proto.Snapshot) {
 			s.update(u)
 		}
 	}
+	var turn *proto.TurnState
+	var engine *proto.EngineState
+	until := false
 	for _, st := range sn.State {
 		switch p := st.Payload.(type) {
 		case *proto.Commands:
@@ -340,18 +356,90 @@ func (s *session) onSnapshot(ev proto.Event, sn *proto.Snapshot) {
 		case *proto.Plan:
 			s.sendPlan(p)
 		case *proto.Until:
+			until = true
 			s.onConfig(func(c *config) { c.until = p })
+		case *proto.EngineState:
+			engine = p
 		case *proto.TurnState:
+			turn = p
 			if p.Phase == proto.PhaseWaitingAnswer && p.Ask != nil {
 				s.onAsk(p.Ask)
-			}
-			if !first && p.Phase == proto.PhaseIdle && len(p.Queued) == 0 && !s.isSuspended() {
-				s.endTurn(sdk.StopReasonEndTurn, nil)
 			}
 		}
 	}
 	if first {
 		close(s.ready)
+		return
+	}
+	s.afterGap(sn, turn, engine, newLog, until)
+}
+
+// afterGap: a later snapshot. The prompts in a turn are marked as held by
+// the gap, and the engine's state says whether that turn is over. An
+// engine a new dund adopted (docs/engine-adoption.md) may be in a turn the
+// new log has no turn_state for yet: its next turn_state or done says.
+// Any other engine with none is idle: an engine says turn_state when a
+// turn starts, and one that starts is idle (a new dund's log, an engine
+// started since).
+func (s *session) afterGap(sn *proto.Snapshot, turn *proto.TurnState, engine *proto.EngineState, newLog, until bool) {
+	adopted := engine != nil && engine.State == "started" && engine.Reason == "adopted"
+	if newLog && !until && !adopted {
+		// A new engine and no until event: the run that held prompts
+		// (untilHeld) ended with the old one.
+		s.onConfig(func(c *config) {
+			if c.until != nil && c.until.Running {
+				u := *c.until
+				u.Running = false
+				c.until = &u
+			}
+		})
+	}
+	s.mu.Lock()
+	// A question the restart suspended whose call has its result in the
+	// history was answered while the bridge was away: no engine asks it
+	// again.
+	if s.suspended && s.askCall != "" && resultIn(sn.Items, s.askCall) {
+		s.suspended = false
+	}
+	for _, p := range s.prompts {
+		if p.inTurn {
+			p.gap, s.gap = true, true
+		}
+	}
+	s.mu.Unlock()
+	if turn == nil && !adopted {
+		turn = &proto.TurnState{Phase: proto.PhaseIdle}
+	}
+	if turn != nil {
+		s.gapIdle(turn)
+	}
+}
+
+// resultIn reports whether the history holds call's result.
+func resultIn(items []proto.HistoryItem, call string) bool {
+	for _, it := range items {
+		if it.Kind == "tool_result" && it.CallID == call {
+			return true
+		}
+	}
+	return false
+}
+
+// gapIdle: after a gap, the engine idle with nothing queued and no
+// question open ends the prompts the gap held (end_turn), from the
+// snapshot or from a turn_state that comes later. Not while a question the
+// restart suspended waits for the next engine to ask it again, nor while a
+// stop condition's run goes on (its until event answers them). A turn
+// started since the gap ends them with its done instead (onTurn).
+func (s *session) gapIdle(ts *proto.TurnState) {
+	if ts.Phase != proto.PhaseIdle || len(ts.Queued) > 0 || ts.Ask != nil || ts.Mount != nil {
+		return
+	}
+	s.mu.Lock()
+	ok := s.gap && !s.suspended && !(s.untilHeld && s.untilRunning())
+	s.mu.Unlock()
+	if ok {
+		s.endPrompts(outcome{stop: sdk.StopReasonEndTurn}, func(p *prompt) bool { return p.gap })
 	}
 }
 

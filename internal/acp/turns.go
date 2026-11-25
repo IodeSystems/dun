@@ -36,6 +36,7 @@ type prompt struct {
 	echoed bool
 	inTurn bool // the model has it: the running turn's end answers it
 	slash  bool // a command: its reply answers it
+	gap    bool // in a turn when a snapshot stood in for missed events (gapIdle)
 	done   chan outcome
 }
 
@@ -55,6 +56,10 @@ func (p *prompt) resolve(o outcome) {
 // slashWait is how long a command with no reply is waited for: some
 // change a setting and say nothing.
 const slashWait = 3 * time.Second
+
+// cancelWait is how long a session/cancel waits for the interrupted turn's
+// done before it answers the prompts itself: a cancel never hangs.
+var cancelWait = 3 * time.Second
 
 // submit sends a prompt's text: a slash command, the answer to the open
 // question, or a user message. It returns the prompt to wait on.
@@ -195,12 +200,14 @@ func (s *session) onWithdrawn(ids []string) {
 	s.finish(outcome{stop: sdk.StopReasonCancelled}, func(p *prompt) bool { return p.id != "" && slices.Contains(ids, p.id) })
 }
 
-// onTurn: a turn started. A command that started it is answered by its end.
+// onTurn: a turn started. A command that started it is answered by its end;
+// so are the prompts a gap held (gapIdle): the events are followed again.
 func (s *session) onTurn() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.streamed = false
+	s.streamed, s.gap = false, false
 	for _, p := range s.prompts {
+		p.gap = false
 		if p.slash {
 			p.slash, p.inTurn = false, true
 		}
@@ -246,15 +253,22 @@ func (s *session) onError(e *proto.Error) {
 
 // endTurn answers the prompts the turn held and closes its question.
 func (s *session) endTurn(stop sdk.StopReason, err error) {
+	s.endPrompts(outcome{stop: stop, err: err}, func(p *prompt) bool { return p.inTurn })
+}
+
+// endPrompts ends the turn for the prompts take takes: the turn's state is
+// reset, its question closed, and they get o with the turn's usage.
+func (s *session) endPrompts(o outcome, take func(*prompt) bool) {
 	s.mu.Lock()
-	s.cancel, s.streamed, s.ask, s.untilHeld, s.suspended = false, false, nil, false, false
+	s.cancel, s.streamed, s.ask, s.untilHeld, s.suspended, s.gap = false, false, nil, false, false, false
 	stopPerm := s.permStop
 	s.mu.Unlock()
 	if stopPerm != nil {
 		stopPerm()
 	}
 	s.resendPlan()
-	s.finish(outcome{stop: stop, err: err, usage: s.takeTurnUsage()}, func(p *prompt) bool { return p.inTurn })
+	o.usage = s.takeTurnUsage()
+	s.finish(o, take)
 }
 
 // failAll answers every prompt with err: the session is gone.
@@ -302,17 +316,22 @@ func (s *session) slashDone(p *prompt) {
 
 // stop is session/cancel: queued messages of the turn are taken back, the
 // turn is interrupted, and every prompt is answered cancelled — at once
-// for those dun has not taken, at the turn's end for the rest.
+// for those dun has not taken, at the turn's end for the rest. That end
+// is not waited for past cancelWait, nor when the engine says no turn runs
+// (cancelIdle), nor when the interrupt cannot be sent: a cancel never
+// hangs, whatever the bridge missed.
 func (s *session) stop() {
 	s.mu.Lock()
 	s.cancel = true
-	queued, running := false, false
+	queued := false
+	var held []*prompt
 	for _, p := range s.prompts {
 		switch {
 		case p.inTurn:
-			running = true
+			held = append(held, p)
 		case p.echoed:
 			queued = true
+			held = append(held, p)
 		}
 	}
 	s.mu.Unlock()
@@ -320,19 +339,42 @@ func (s *session) stop() {
 	if queued {
 		_ = s.send("", &proto.ControlCmd{ID: "unqueue"})
 	}
-	if running || queued {
-		_ = s.send("", &proto.Interrupt{})
+	if len(held) == 0 {
+		s.mu.Lock()
+		s.cancel = false // no turn of ours to end
+		s.mu.Unlock()
 		return
 	}
-	s.mu.Lock()
-	s.cancel = false // no turn of ours to end
-	s.mu.Unlock()
+	if err := s.send("", &proto.Interrupt{}); err != nil {
+		s.cancelHeld(held)
+		return
+	}
+	time.AfterFunc(cancelWait, func() { s.cancelHeld(held) })
 }
 
-func (s *session) isSuspended() bool {
+// cancelHeld answers cancelled those of held a session/cancel left waiting
+// and still waiting.
+func (s *session) cancelHeld(held []*prompt) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.suspended
+	left := slices.ContainsFunc(s.prompts, func(p *prompt) bool { return slices.Contains(held, p) })
+	s.mu.Unlock()
+	if left {
+		s.endPrompts(outcome{stop: sdk.StopReasonCancelled}, func(p *prompt) bool { return slices.Contains(held, p) })
+	}
+}
+
+// cancelIdle: the engine's reply to an interrupt when no turn runs. With a
+// session/cancel waiting, its prompts are answered cancelled now (no done
+// will come) and the reply is not shown.
+func (s *session) cancelIdle() bool {
+	s.mu.Lock()
+	cancel := s.cancel
+	s.mu.Unlock()
+	if !cancel {
+		return false
+	}
+	s.endPrompts(outcome{stop: sdk.StopReasonCancelled}, func(p *prompt) bool { return p.inTurn || p.echoed })
+	return true
 }
 
 // questionOnly: the session's prompts all wait on a question the engine
