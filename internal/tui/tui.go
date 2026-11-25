@@ -287,6 +287,8 @@ type tuiModel struct {
 	psGen        int                            // /ps's openings, so a stale reading is dropped (psscreen.go)
 	psSample     func() (dundcli.PSView, error) // /ps's reading; nil: dundcli.PSSampler (tests set it)
 	planTelling  *planTellTo                    // the composer is telling a plan node's owner (planview.go)
+	planBack     *planBackTo                    // the composer holds a /plan edit|drop line from /plan (planview.go)
+	planAt       *planBackTo                    // where /plan opens, nil the top (planview.go)
 	ctxSettings  map[string]any                 // /context config's settings in force, from the settings event
 	effort       string                         // /effort's level, from the settings event
 	effortWords  string                         // what that level does, from the settings event (the server's default, when it says)

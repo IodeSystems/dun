@@ -574,6 +574,68 @@ func TestPlanScreen_EveryOccurrenceNamesAllBlockersAndParents(t *testing.T) {
 	}
 }
 
+// d, e and m lend the composer and /plan comes back where it was once the
+// line is sent, or put aside with esc: dropping several nodes is d, enter
+// for each, not a reopen and a walk back to the node each time.
+func TestPlanScreen_DropComesBackToTheNode(t *testing.T) {
+	m, rec := ownedPlanModel(t)
+	nm, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown}) // node 4
+	m = planKey(nm.(tuiModel), "d")
+	if m.activeScreen() != nil || m.input.Value() != "/plan drop 4 " {
+		t.Fatalf("d: screen up %v, composer %q", m.activeScreen() != nil, m.input.Value())
+	}
+	if plain := ansi.Strip(m.drawView()); !strings.Contains(plain, "esc back to /plan") {
+		t.Errorf("the status does not say esc goes back:\n%s", plain)
+	}
+	rec.Reset()
+	nm, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = nm.(tuiModel)
+	sent := rec.String()
+	if !strings.Contains(sent, `"plan drop 4"`) || !strings.Contains(sent, `"view"`) || strings.Index(sent, `"view"`) < strings.Index(sent, "plan drop 4") {
+		t.Fatalf("enter must send the drop, then ask for /plan: %s", sent)
+	}
+	ev := ownedPlan()
+	ev["rows"].([]any)[3].(map[string]any)["status"] = "dropped"
+	m = m.notePlan(ev)
+	v := m.planPaging()
+	if v == nil || v.view != planOrder || v.keys[m.pg.cur] != "4#1" {
+		t.Fatalf("/plan did not come back on node 4: open %v", v != nil)
+	}
+
+	// The node's tree finished: it folds away, and the row it was on stays
+	// selected.
+	nm, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown}) // node 5
+	m = planKey(nm.(tuiModel), "d")
+	nm, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = nm.(tuiModel)
+	ev["rows"].([]any)[4].(map[string]any)["status"] = "dropped"
+	m = m.notePlan(ev)
+	if v := m.planPaging(); v == nil || m.pg.cur != 2 {
+		t.Fatalf("/plan did not come back on the row: open %v, cur %d", v != nil, m.pg.cur)
+	}
+
+	// esc: nothing sent, /plan back.
+	m, rec = ownedPlanModel(t)
+	m = planKey(m, "d")
+	rec.Reset()
+	nm, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = nm.(tuiModel)
+	if m.planBack != nil || !m.planWant || m.input.Value() != "" || strings.Contains(rec.String(), "drop") {
+		t.Errorf("esc must send nothing and go back to /plan: %s", rec.String())
+	}
+
+	// The line made into a message: it goes, and /plan stays down.
+	m, rec = ownedPlanModel(t)
+	m = planKey(m, "d")
+	m.input.SetValue("never mind")
+	rec.Reset()
+	nm, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = nm.(tuiModel)
+	if m.planBack != nil || m.planWant || strings.Contains(rec.String(), `"view"`) {
+		t.Errorf("a message reopened /plan: %s", rec.String())
+	}
+}
+
 func TestPlanScreen_FlatNamesParentsToo(t *testing.T) {
 	m := sharedPlanModel(t, 100, 30)
 	m.planPaging().view = planFlat

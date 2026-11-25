@@ -250,6 +250,11 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.endPlanTell("")
 				return m, nil
 			}
+			if m.planBack != nil { // the /plan line not sent: back to /plan
+				m.input.Reset()
+				m.endPlanBack("")
+				return m, nil
+			}
 			if m.searchActive { // leave match-scroll mode, back to free selection
 				m.searchActive = false
 				m.matches = nil
@@ -419,8 +424,11 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.history = append(m.history, v)
 				}
 				m.histIdx = len(m.history)
-				return m, m.runPaletteEnter(v)
+				cmd := m.runPaletteEnter(v)
+				m.endPlanBack(v) // a /plan edit|drop line from /plan: the screen comes back
+				return m, cmd
 			}
+			m.planBack = nil // the line is a message now, not the /plan one
 			// Bare "exit" (no slash) is a hidden command: exits silently.
 			if v == "exit" {
 				return m, m.exit()

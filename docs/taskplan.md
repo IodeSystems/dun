@@ -95,7 +95,9 @@ row sends `/plan clear`. The views are client-side: `PlanNode` carries `needs`, 
 and `repeat` stay the graph's order view for other clients. From it a person can approve the plan, edit
 a node's title or details, or drop a node. Re-ordering is not built: order is the edges,
 and the screen does not edit them (not built). `e`, `m` and `d` fill the composer with
-`/plan edit|drop …` to finish, so a drop is typed, not a keystroke. What the person
+`/plan edit|drop …` to finish, so a drop is typed, not a keystroke; sending the line,
+or esc, brings the screen back on the same node (or its row, when the node folded
+away), so several drops are `d`, enter each. What the person
 changes reaches the model as a note: an approval as a notification that wakes it,
 the rest as asides that ride its next turn. The engine sends the graph as a `plan`
 event (control `plan` `view`, then again on every change by anyone); the screen
