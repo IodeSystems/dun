@@ -95,8 +95,13 @@ type session struct {
 	// agent as a message (upgrade.go restoredReply).
 	restored    *proto.Ask
 	restoredEvs []proto.Event
-	jobs        []proto.JobInfo   // the running ones
-	agents      []proto.AgentInfo // the running ones
+	// reask: the engine keeps its open question (harness replay.go): a
+	// stop does not interrupt it, and the next start starts the engine,
+	// which asks it again. Not in the registry: the next dund reads it from
+	// the session's files (questionPending).
+	reask  bool
+	jobs   []proto.JobInfo   // the running ones
+	agents []proto.AgentInfo // the running ones
 	// agentDirs are the live (running or idle) sub-agents that work in a
 	// tree of their own or run on a model tier, for dun ps (procs.go).
 	agentDirs []proto.ProcAgent
