@@ -40,8 +40,9 @@ type prompt struct {
 }
 
 type outcome struct {
-	stop sdk.StopReason
-	err  error
+	stop  sdk.StopReason
+	err   error
+	usage *sdk.Usage // the turn's totals, when dun said
 }
 
 func (p *prompt) resolve(o outcome) {
@@ -109,7 +110,7 @@ func (s *session) wait(ctx context.Context, p *prompt) (sdk.PromptResponse, erro
 		if o.err != nil {
 			return sdk.PromptResponse{}, o.err
 		}
-		return sdk.PromptResponse{StopReason: o.stop}, nil
+		return sdk.PromptResponse{StopReason: o.stop, Usage: o.usage}, nil
 	case <-s.ctx.Done():
 		return sdk.PromptResponse{StopReason: sdk.StopReasonCancelled}, nil
 	}
@@ -225,7 +226,7 @@ func (s *session) endTurn(stop sdk.StopReason, err error) {
 	if stopPerm != nil {
 		stopPerm()
 	}
-	s.finish(outcome{stop: stop, err: err}, func(p *prompt) bool { return p.inTurn })
+	s.finish(outcome{stop: stop, err: err, usage: s.takeTurnUsage()}, func(p *prompt) bool { return p.inTurn })
 }
 
 // failAll answers every prompt with err: the session is gone.

@@ -59,6 +59,8 @@ type session struct {
 	setting int
 	cfgAcks map[string]chan string
 	cfgWake chan struct{}
+
+	usage usageState // usage.go
 }
 
 func newSession(ctx context.Context, id, cwd string, p peer, log *slog.Logger, dial func() (net.Conn, error), replay bool) *session {
@@ -216,6 +218,10 @@ func (s *session) handle(ev proto.Event) {
 		s.onDelivered(p.IDs)
 	case *proto.Withdrawn:
 		s.onWithdrawn(p.IDs)
+	case *proto.Request:
+		s.onRound(p)
+	case *proto.Usage:
+		s.onUsage(p)
 	case *proto.Turn:
 		s.onTurn()
 	case *proto.Done:
@@ -284,6 +290,8 @@ func (s *session) onSnapshot(ev proto.Event, sn *proto.Snapshot) {
 			s.onCommands(p)
 		case *proto.Settings:
 			s.onConfig(func(c *config) { c.settings = p })
+		case *proto.Usage:
+			s.loadUsage(p, replay)
 		case *proto.Plan:
 			s.update(sdk.UpdatePlan(planEntries(p)...))
 		case *proto.TurnState:
