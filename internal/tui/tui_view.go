@@ -601,7 +601,7 @@ func (m tuiModel) drawView() string {
 		}
 		status = StDim.Render(what + "  ·  ↑/↓ select · enter run · tab complete · esc close")
 	case m.askParked && m.focus != focusConvo:
-		status = stAsk.Render("❓ a question is waiting") + StDim.Render(" · tab, select it, enter to answer · "+m.exitHint())
+		status = stAsk.Render("❓ a question is waiting") + StDim.Render(m.untilTail()+" · tab, select it, enter to answer · "+m.exitHint())
 	case m.retry != "":
 		// The countdown first: a row too wide for the window loses its end.
 		cd := strings.TrimPrefix(m.retryCountdown(), " · ")

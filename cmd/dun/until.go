@@ -11,7 +11,7 @@ import (
 // harness/until.go).
 func untilEvent(h *harness.Harness) *proto.Until {
 	s := h.Until()
-	ev := &proto.Until{Cap: s.Cap, Turn: s.Turn, Running: s.Running, Stopped: s.Stopped, Line: s.Line}
+	ev := &proto.Until{Cap: s.Cap, Turn: s.Turn, Running: s.Running, Paused: s.Paused, Stopped: s.Stopped, Line: s.Line}
 	for i, c := range s.Conds {
 		pc := proto.UntilCond{Kind: c.Kind, N: c.N, Goal: c.Goal, Check: c.Check}
 		if i < len(s.Progress) {

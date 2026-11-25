@@ -233,3 +233,16 @@ test('an agent view follows its own history and entries, not another agent’s',
   expect(v.items).toHaveLength(0);
   expect(unwatchAgent(v).agentView).toBeNull();
 });
+
+test('the stop conditions (until event) stay shown idle, running and paused, and through a reset', () => {
+  const conds = [{ kind: 'plan' }, { kind: 'turns', n: 15 }];
+  const idle = { type: 'until', conds, cap: 15, line: 'until: plan · turns 15' };
+  let v = run([idle]);
+  expect(v.bg.until).toEqual({ line: 'until: plan · turns 15', running: false, paused: false, turn: 0, cap: 15 });
+  v = run([{ ...idle, running: true, turn: 3, line: 'until: turn 3/15 · plan 4 open, 2 ready' }], v);
+  expect(v.bg.until).toMatchObject({ running: true, paused: false, turn: 3 });
+  v = run([{ ...idle, running: true, paused: true, turn: 3, line: 'until: paused (question) · turn 3/15' }], v);
+  expect(v.bg.until).toMatchObject({ paused: true, line: 'until: paused (question) · turn 3/15' });
+  expect(run([{ type: 'reset' }], v).bg.until?.paused).toBe(true);
+  expect(run([{ type: 'until' }], v).bg.until).toBeNull();
+});

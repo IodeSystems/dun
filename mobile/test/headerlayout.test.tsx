@@ -61,3 +61,25 @@ test('hiding the header changes no layout, only the transform', () => {
   // The whole header is out of flow too: it overlays the transcript.
   expect(shown.find((e) => e.style.position)?.style.position).toBe('absolute');
 });
+
+test('the header shows the stop conditions, idle too', () => {
+  const root = createRoot();
+  const view = {
+    ...empty,
+    bg: { ...empty.bg, until: { line: 'until: plan · turns 15', running: false, paused: false, turn: 0, cap: 15 } },
+  };
+  act(() => {
+    root.render(
+      <SessionHeader
+        view={view}
+        stats={noStats}
+        hidden={false}
+        panel={false}
+        onShow={noop}
+        onHeight={noop}
+        act={act5}
+      />,
+    );
+  });
+  expect(els(root.container).some((e) => e.label === 'until: plan · turns 15')).toBe(true);
+});

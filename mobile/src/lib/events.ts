@@ -585,6 +585,8 @@ function applyNew(v: View, ev: Ev): View {
         models: v.models,
         settings: v.settings,
         upgrade: v.upgrade,
+        // The stop conditions outlive a /clear (dun harness/until.go).
+        bg: { ...noBackground, until: v.bg.until },
         n: v.n,
       };
     case 'engine':

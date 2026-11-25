@@ -2096,13 +2096,23 @@ rest below are assumptions he can overturn.
   turns. `/until off` clears them; bare `/until` shows each condition's
   progress. The name: no command, flag or tool was called until.
 - **Safety stops, always** (USER): the person interrupted (a turn, or an
-  interrupt between turns while the goal is judged); the turn failed; a
-  question was put to the person in the turn (ask_user, or a file-access
-  question: the permission prompt); two turns in a row with no progress.
-  Progress: a plan node changed state (with plan), or the turn made a tool
-  call (with goal or turns). Assumption: a question stops the run even
-  though ask_user waits for its answer inside the turn: a model that needs
-  the person should not be pushed on.
+  interrupt between turns while the goal is judged); the turn failed; two
+  turns in a row with no progress. Progress: a plan node changed state
+  (with plan), or the turn made a tool call (with goal or turns).
+- **A question pauses the run, the answer resumes it** (USER 2026-11-24;
+  it stopped the run before). While a question to the person is open
+  (ask_user, or a file-access question: the permission prompt; both are
+  `Config.Ask`, which waits inside the turn), the `until` event says
+  `paused` and its line `until: paused (question) · turn 3/15`. Whatever
+  answers the ask (the TUI, the web client, ACP's request_permission)
+  ends the pause: the turn goes on, and the run with it, turn and stall
+  counts kept. An interrupt while paused cancels the ask and the turn: the
+  run stops (`interrupted`). `/until off` while paused ends the run; the
+  question stays open and the turn ends as usual. Paused is in the
+  sidecar: an engine that stopped with a question open lost the question,
+  so the new engine owes the run no turn (unlike a plain cut) and the next
+  turn that begins, the person's message (the answer, in their words), is
+  the run's next turn.
 - **Engine-owned, persisted** (USER: dund and the engine own semantics,
   clients dumb). The conditions and the run are in `<session>.until.json`
   and in a `until` state event (event-protocol.md) with a one-line summary
@@ -2115,8 +2125,11 @@ rest below are assumptions he can overturn.
   conditions.
 - **A turn is any turn the session runs** while conditions are set: the
   person's message is turn 1 (or the turn running when /until is given).
-  Assumption: the conditions stay after a run stops, so the next message
-  starts a new run (a mode, as the ACP option reads). Messages typed during
+  The conditions stay after a run stops (USER 2026-11-24), so the next
+  message starts a new run (a mode, as the ACP option reads). They are on
+  show at all times: the event's line is set idle too (`until: plan ·
+  turns 15`), on the TUI's status line (ready, working, and a parked
+  question's line) and in the web client's session header. Messages typed during
   a run are queued and delivered as always; they do not stop it.
 - **The next turn is a user-set turn**, started with a `[until]`
   notification that says the turn number, the cap, the goal's last
@@ -2141,6 +2154,6 @@ rest below are assumptions he can overturn.
   running one's). A prompt is answered when its run stops. Details:
   acp.md "Stop conditions".
 - **Not done**: no `--max` flag (turns N is the cap; one way to say it);
-  no web or phone view of the run beyond the `until` event and the
-  notification; the judge does not see tool results, only the reply and
+  the web client shows the event's line in its header, and nothing else of
+  the run (no way to set conditions there but the `/until` command); the judge does not see tool results, only the reply and
   the call count.

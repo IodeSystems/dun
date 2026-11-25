@@ -10,6 +10,13 @@ import { parsePlan, type Plan } from './plan';
 import { evTime } from './thinking';
 import { callText } from './tooltext';
 
+/**
+ * The stop conditions and their run (proto.Until, dun's /until): line is the
+ * engine's one line for a status bar, idle too ("until: plan · turns 15",
+ * "until: turn 3/15 · plan 4 open, 2 ready", "until: paused (question) · turn 3/15").
+ */
+export type Until = { line: string; running: boolean; paused: boolean; turn: number; cap: number };
+
 export type Background = {
   agents: Agent[];
   jobs: Job[];
@@ -24,6 +31,8 @@ export type Background = {
   busySince: number;
   /** The provider wait the turn is in (turn_state retry); '' when none. */
   retry: string;
+  /** Null when no stop condition is set (one turn per message). */
+  until: Until | null;
 };
 
 export const noBackground: Background = {
@@ -35,6 +44,7 @@ export const noBackground: Background = {
   activeTool: '',
   busySince: 0,
   retry: '',
+  until: null,
 };
 
 type Ev = Record<string, unknown>;
@@ -57,6 +67,8 @@ function noteWork(b: Background, ev: Ev): Background {
       const p = parsePlan(ev);
       return { ...b, plan: p.rows.length || p.mode ? p : null };
     }
+    case 'until':
+      return { ...b, until: parseUntil(ev) };
     case 'usage':
     case 'context_cost':
     case 'spend':
@@ -79,4 +91,17 @@ function noteWork(b: Background, ev: Ev): Background {
       return { ...b, activeTool: '' };
   }
   return b;
+}
+
+/** The until event (proto.Until), null with no conditions. */
+export function parseUntil(ev: Ev): Until | null {
+  const conds = Array.isArray(ev.conds) ? ev.conds : [];
+  if (!conds.length) return null;
+  return {
+    line: str(ev.line),
+    running: ev.running === true,
+    paused: ev.paused === true,
+    turn: Number(ev.turn ?? 0) || 0,
+    cap: Number(ev.cap ?? 0) || 0,
+  };
 }
