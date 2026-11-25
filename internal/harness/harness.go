@@ -442,6 +442,7 @@ type Harness struct {
 	learn      learnState   // resolved churn waiting for its lesson (learn.go)
 	settle     settleState  // the delayed end-of-turn report (settle.go)
 	until      untilState   // the stop conditions and their run (until.go)
+	pending    pendingState // the question a restart asks again (replay.go)
 	auto       autoState    // turn origins and the automatic-turn budget (autoturn.go)
 	netWait    netWaitState // waiting for the network after a turn gave up (netwait.go)
 	gate       TurnGate     // how a message enters while a turn runs (turngate.go)
@@ -846,6 +847,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	h.settleResume() // a settle owed when the session stopped (settle.go)
 	h.untilResume()  // stop conditions, and a run under way (until.go)
 	h.untilWrapAsk()
+	h.pendingWrapAsk() // a question asked again after a restart (replay.go)
 	// Saved output readable by path again, after a reboot wiped /tmp (isotmp.go).
 	h.restoreIsoTmp()
 	// Every response the engine's clients get reaches the root session's
@@ -1122,6 +1124,11 @@ func (h *Harness) AskAs(ctx context.Context, id, task string) (agent.TurnResult,
 // let go of turnMu — the memory triggers over what it added.
 func (h *Harness) turnThenTriggers(ctx context.Context) (agent.TurnResult, error) {
 	res, err := h.runTurnWithRescue(ctx, h.Session.Turn)
+	if h.store.anySuspended() {
+		// The engine's stop cut a question: the call waits for the next
+		// engine with no result, so nothing may fold or follow (replay.go).
+		return res, ErrSuspended
+	}
 	err = h.describeTurnError(err) // an empty reply or a stall, said plainly (turnerrors.go)
 	h.noteTurnError(ctx, err)      // <session>.errors.jsonl, for dun errors (turnerrors.go)
 	// Held churn episodes become candidate lessons once the task verifies

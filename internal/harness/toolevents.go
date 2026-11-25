@@ -140,7 +140,9 @@ func withToolEvents(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher
 		if err != nil && shown == "" {
 			shown = "ERROR: " + err.Error()
 		}
-		if end != nil {
+		// A question the engine's stop suspended has not ended: the next
+		// engine asks it again (replay.go).
+		if end != nil && !h.store.isSuspended(tc.ID) {
 			end(ToolEnd{CallID: tc.ID, Tool: name, Result: shown,
 				IsError: failed || ToolFailed(name, shown), Elapsed: time.Since(t0), Agent: agentNum,
 				Edits: edits})

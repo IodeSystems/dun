@@ -4,12 +4,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"sync"
 
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -290,6 +292,25 @@ func newInputStreamFrom(r io.Reader) *inputStream {
 		close(s.users) // EOF: runProgrammatic drains background jobs before exiting
 	}()
 	return s
+}
+
+// awaitAnswerOrStop is awaitAnswer that returns harness.ErrSuspended when
+// the engine is told to stop (quit) first.
+func awaitAnswerOrStop(ctx context.Context, answers <-chan proto.Answer, quit <-chan struct{}, id string) (proto.Answer, error) {
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	go func() {
+		select {
+		case <-quit:
+			cancel(harness.ErrSuspended)
+		case <-ctx.Done():
+		}
+	}()
+	a, err := awaitAnswer(ctx, answers, id)
+	if err != nil && errors.Is(context.Cause(ctx), harness.ErrSuspended) {
+		return a, harness.ErrSuspended
+	}
+	return a, err
 }
 
 // awaitAnswer takes the answer to question id: one naming another question

@@ -1005,6 +1005,9 @@ func (h *Harness) rebuildTools() {
 	dispatch = withToolEvents(dispatch, h)
 	// Outside that: the turn ledger hears every call (ledger.go).
 	dispatch = withLedger(dispatch, h)
+	// Outside all: the call rides ctx, and a question the engine's stop
+	// suspended ends the turn with no result (replay.go).
+	dispatch = withCallInfo(dispatch, h)
 
 	h.Session.Tools = toolDefs
 	names := make([]string, len(toolDefs))

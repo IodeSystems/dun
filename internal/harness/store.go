@@ -51,7 +51,10 @@ type sessionStore struct {
 	// store forwards them to a person watching it (subagent.go, watch).
 	// Called outside mu.
 	onEntry func(e agent.Entry, seq uint64)
-	seq     uint64 // entries appended since open; never goes back
+	// suspended are the calls whose question the engine's stop cut: they
+	// get no result in this process (replay.go).
+	suspended map[string]bool
+	seq       uint64 // entries appended since open; never goes back
 	// onToolResult sees each tool result once it is stored, outside mu:
 	// what records the messages it carried after it (delivery.go).
 	onToolResult func(agent.Entry)
@@ -342,6 +345,12 @@ func (s *sessionStore) ClaimPending(_ context.Context, _ string, _ int64) (int, 
 
 func (s *sessionStore) Append(_ context.Context, _ string, e agent.Entry) error {
 	s.mu.Lock()
+	if e.Kind == agent.KindToolResult && s.suspended[e.ToolCallID] {
+		// The call's question waits for the next engine (replay.go): its
+		// result is that question's answer, not this one.
+		s.mu.Unlock()
+		return nil
+	}
 	s.entries = append(s.entries, e)
 	if e.Kind == agent.KindToolCall {
 		s.toolCalls++
@@ -748,4 +757,33 @@ func salvageTail(args string) string {
 		payload = "…" + payload[len(payload)-salvageTailChars:]
 	}
 	return payload
+}
+
+// suspend marks call id's question as cut by the engine's stop: its result
+// is not recorded (replay.go).
+func (s *sessionStore) suspend(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.suspended == nil {
+		s.suspended = map[string]bool{}
+	}
+	s.suspended[id] = true
+}
+
+func (s *sessionStore) anySuspended() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.suspended) > 0
+}
+
+func (s *sessionStore) isSuspended(id string) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.suspended[id]
 }
