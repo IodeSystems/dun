@@ -11,10 +11,20 @@ import (
 
 // promptText is an ACP prompt as the text of one dun user message. Text is
 // kept as typed; a resource link names its file (the model reads it with
-// its tools); an embedded resource is quoted with its URI. dun advertises
-// no image or audio input, so a client should send none; one that does gets
-// a placeholder rather than a refusal.
+// its tools); an embedded resource is quoted with its URI. An image gets a
+// note here: a steering message carries none (promptParts has the images of
+// a prompt). Audio is dropped with a note.
 func promptText(blocks []sdk.ContentBlock) string {
+	text, _ := promptParts(blocks, "", nil)
+	return text
+}
+
+// promptParts is promptText and the images of the prompt: with a counter,
+// each usable image block becomes its label in the text and an image to
+// send (images.go). n counts the session's images, so labels do not repeat
+// across prompts. With n nil, images are not taken and a note stands.
+func promptParts(blocks []sdk.ContentBlock, cwd string, n *int) (string, []proto.Image) {
+	var imgs []proto.Image
 	var parts []string
 	for _, b := range blocks {
 		switch {
@@ -32,12 +42,20 @@ func promptText(blocks []sdk.ContentBlock) string {
 				parts = append(parts, "["+uriPath(r.BlobResourceContents.Uri)+": binary, not included]")
 			}
 		case b.Image != nil:
-			parts = append(parts, "[an image was attached; dun's ACP bridge does not pass images]")
+			if n == nil {
+				parts = append(parts, "[an image was attached; a steering message cannot carry images]")
+				break
+			}
+			t, img := imageBlock(b.Image, cwd, n)
+			parts = append(parts, t)
+			if img != nil {
+				imgs = append(imgs, *img)
+			}
 		case b.Audio != nil:
 			parts = append(parts, "[audio was attached; dun's ACP bridge does not pass audio]")
 		}
 	}
-	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+	return strings.TrimSpace(strings.Join(parts, "\n\n")), imgs
 }
 
 // uriPath is a file: URI's path, any other URI as it is.

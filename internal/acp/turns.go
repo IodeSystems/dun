@@ -63,7 +63,7 @@ var cancelWait = 3 * time.Second
 
 // submit sends a prompt's text: a slash command, the answer to the open
 // question, or a user message. It returns the prompt to wait on.
-func (s *session) submit(text string) (*prompt, error) {
+func (s *session) submit(text string, imgs ...proto.Image) (*prompt, error) {
 	p := &prompt{done: make(chan outcome, 1)}
 	isCmd := s.isCommand(text)
 	s.mu.Lock()
@@ -85,7 +85,7 @@ func (s *session) submit(text string) (*prompt, error) {
 		cmd = &proto.Answer{Value: text, AskID: ask.AskID}
 	default:
 		p.text = text
-		cmd = &proto.User{Content: text}
+		cmd = &proto.User{Content: text, Images: imgs}
 		// A goal chosen in the editor is this prompt's text: the /until
 		// line goes first, so the turn it starts is the run's first.
 		s.mu.Lock()
@@ -159,6 +159,34 @@ func (s *session) finish(o outcome, take func(*prompt) bool) {
 	s.mu.Unlock()
 	for _, p := range done {
 		p.resolve(o)
+	}
+}
+
+// promptParts is the prompt's text and images, its images numbered after
+// the session's earlier ones.
+func (s *session) promptParts(blocks []sdk.ContentBlock) (string, []proto.Image) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return promptParts(blocks, s.cwd, &s.imgN)
+}
+
+// onImageRefused: dun did not send a message because of its images (no
+// vision and no describer, or an unreadable file). The reason is shown as
+// the agent's text, and the prompt that sent the message ends with it: no
+// turn runs for it, so nothing else would answer it.
+func (s *session) onImageRefused(r *proto.ImageRefused) {
+	s.text(r.Message)
+	s.mu.Lock()
+	var mine *prompt
+	for _, p := range s.prompts {
+		if !p.echoed && !p.slash && p.text != "" && strings.TrimSpace(p.text) == strings.TrimSpace(r.Content) {
+			mine = p
+			break
+		}
+	}
+	s.mu.Unlock()
+	if mine != nil {
+		s.finish(outcome{stop: sdk.StopReasonEndTurn}, func(p *prompt) bool { return p == mine })
 	}
 }
 

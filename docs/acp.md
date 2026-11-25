@@ -165,7 +165,22 @@ gets the same totals.
 
 A prompt's text blocks are the message; a `resource_link` is
 `[file: <path>]` (the model reads it with its tools); an embedded text
-resource is quoted with its path. dun advertises no image or audio input.
+resource is quoted with its path. dun advertises `promptCapabilities.image`
+and no audio; an audio block is dropped with a note.
+
+An `image` block is passed as the TUI passes a pasted image: its bytes are
+written to `$DUN_HOME/images/<sha256>.<ext>`, the text gets a label where
+the block was (`[image 1: shot.png 1920×1080]`, numbered across the
+session; the name is the uri's last element, else `image.<ext>`), and the
+`user` message carries `images: [{path, label}]`. A `file://` uri with no
+data, inside the session's cwd, is used in place. Types are png, jpeg, gif
+and webp (checked by decoding, not by `mimeType`); the limit is 20 MiB. Bad
+base64, another type, too large, a file outside the cwd, and an `http(s)`
+uri (dun does not fetch) each leave a note in the text, `[name was not
+attached: why]`, and no image. Whether the model reads the image, has it
+described by the configured vision model, or refuses the message is the
+engine's: a refusal (`image_refused`) is shown as the agent's text and
+ends the prompt with `end_turn`. A steering message carries no images.
 A prompt that starts with `/` and names one of dun's commands is run as
 that command (control `slash`): its reply is the agent's text, and the
 prompt ends with it, or after 3 s for a command that says nothing, or with
@@ -377,7 +392,7 @@ changes until approval; it is not a run type and is not shown.
   (`/login` in the TUI); the bridge is the user's own process and dund
   checks the socket's peer. `agentCapabilities.auth` is the SDK's zero
   value (`{}`), not set by dun.
-- Images and audio in prompts; usage and cost updates.
+- Audio in prompts; usage and cost updates.
 
 ## Verified
 
