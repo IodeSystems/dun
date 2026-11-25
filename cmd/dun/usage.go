@@ -160,7 +160,7 @@ func readUsage(dir string, now time.Time) usageReport {
 		}
 		for _, line := range strings.Split(string(b), "\n") {
 			var r harness.RoundStat
-			if line == "" || json.Unmarshal([]byte(line), &r) != nil || r.Time.IsZero() {
+			if line == "" || json.Unmarshal([]byte(line), &r) != nil || r.Kind != "" || r.Time.IsZero() {
 				continue
 			}
 			pa.add(r)

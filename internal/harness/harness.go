@@ -1017,7 +1017,11 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		OnIdle: h.onIdle,
 		// A round the provider ended with a failure finish_reason is resent;
 		// each resend shows as a retry line (retry.go providerFailNote).
-		OnProviderFailRetry: func(r agent.ProviderFailRetry) { h.retry(providerFailNote(r)) },
+		OnProviderFailRetry: func(r agent.ProviderFailRetry) {
+			h.noteRoundEvent(RoundEvent{Kind: "provider_fail_retry", Finish: r.FinishReason, NativeFinish: r.NativeFinishReason,
+				Attempt: r.Attempt, Max: r.Max, WaitMS: r.Wait.Milliseconds(), Trace: h.trace.Last()})
+			h.retry(providerFailNote(r))
+		},
 	}
 	// $DUN_HARNESS in exec's environment, and the file it names written
 	// before the first request (harnessinfo.go).
@@ -1136,6 +1140,7 @@ func (h *Harness) turnThenTriggers(ctx context.Context) (agent.TurnResult, error
 		return res, ErrSuspended
 	}
 	err = h.describeTurnError(err) // an empty reply or a stall, said plainly (turnerrors.go)
+	h.noteEmptyReply(err)
 	h.noteTurnError(ctx, err)      // <session>.errors.jsonl, for dun errors (turnerrors.go)
 	// Held churn episodes become candidate lessons once the task verifies
 	// (learn.go): after the turn, so no request of the turn waits on it.
