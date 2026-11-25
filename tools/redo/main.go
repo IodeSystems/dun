@@ -97,7 +97,9 @@ func main() {
 		sessions[r.Session] = s
 	}
 	for session, cs := range calls {
-		sessions[session].calls = cs
+		s := sessions[session]
+		s.calls = cs
+		sessions[session] = s
 	}
 
 	// Aggregate over all sessions.
