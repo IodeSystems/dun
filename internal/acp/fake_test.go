@@ -28,6 +28,7 @@ type fakeDund struct {
 	creates chan proto.Create
 	items   []proto.HistoryItem // the snapshot's history
 	state   []any               // the snapshot's state events
+	missing bool                // subscribe answers "no such session" until a create
 }
 
 func newFakeDund(t *testing.T) *fakeDund {
@@ -64,10 +65,18 @@ func (f *fakeDund) serve(c net.Conn) {
 		case *proto.Create:
 			f.creates <- *p
 			f.mu.Lock()
+			f.missing = false
 			f.write(c, ack)
 			f.mu.Unlock()
 		case *proto.Subscribe:
 			f.mu.Lock()
+			if f.missing {
+				nack := proto.NewEvent(&proto.Ack{Error: "no such session"})
+				nack.Re = cmd.CID
+				f.write(c, nack)
+				f.mu.Unlock()
+				continue
+			}
 			f.write(c, ack)
 			sn := &proto.Snapshot{After: f.seq, Items: f.items}
 			for _, st := range f.state {
