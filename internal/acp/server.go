@@ -40,6 +40,7 @@ type Agent struct {
 	mu          sync.Mutex
 	sessions    map[string]*session
 	initialized bool
+	caps        caps // the editor's, from initialize
 }
 
 // sessionFileExists says whether dun has a session file for id in the
@@ -113,6 +114,7 @@ var authDescription = "Uses the providers configured in dun. Run the dun TUI and
 func (a *Agent) Initialize(ctx context.Context, p sdk.InitializeRequest) (sdk.InitializeResponse, error) {
 	a.mu.Lock()
 	a.initialized = true
+	a.caps = readCaps(p.ClientCapabilities)
 	a.mu.Unlock()
 	return sdk.InitializeResponse{
 		ProtocolVersion: sdk.ProtocolVersionNumber,
@@ -216,6 +218,7 @@ func (a *Agent) open(ctx context.Context, cwd, resume string, mcpServers int) (*
 	s := newSession(a.ctx, id, cwd, a.peer, a.log, a.dial, resume != "")
 	s.link = l
 	a.mu.Lock()
+	s.caps = a.caps
 	if old := a.sessions[id]; old != nil {
 		old.close()
 	}

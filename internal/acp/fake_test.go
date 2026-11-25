@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -144,6 +145,11 @@ type fakeEditor struct {
 	updates []sdk.SessionUpdate
 	perm    func(sdk.RequestPermissionRequest) sdk.RequestPermissionResponse
 	asked   chan sdk.RequestPermissionRequest
+	// elicit answers elicitation/create; with none, a request blocks until
+	// withdrawn when elicited is set, and is method-not-found when not.
+	elicit    func(sdk.CreateElicitationRequest) sdk.CreateElicitationResponse
+	elicited  chan sdk.CreateElicitationRequest
+	withdrawn chan struct{} // closed when a blocked request is withdrawn
 }
 
 func (e *fakeEditor) SessionUpdate(ctx context.Context, n sdk.SessionNotification) error {
@@ -164,6 +170,24 @@ func (e *fakeEditor) RequestPermission(ctx context.Context, r sdk.RequestPermiss
 	return e.perm(r), nil
 }
 
+// waitSaid waits until the agent's text so far holds sub, and returns it.
+func (e *fakeEditor) waitSaid(t *testing.T, sub string) string {
+	t.Helper()
+	var said string
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		for _, u := range e.take() {
+			if u.AgentMessageChunk != nil && u.AgentMessageChunk.Content.Text != nil {
+				said += u.AgentMessageChunk.Content.Text.Text
+			}
+		}
+		if strings.Contains(said, sub) {
+			return said
+		}
+	}
+	t.Fatalf("the agent did not say %q: %q", sub, said)
+	return said
+}
+
 // take returns the updates so far and forgets them.
 func (e *fakeEditor) take() []sdk.SessionUpdate {
 	e.mu.Lock()
@@ -176,7 +200,20 @@ func (e *fakeEditor) take() []sdk.SessionUpdate {
 func (e *fakeEditor) CompleteElicitation(context.Context, sdk.CompleteElicitationNotification) error {
 	return nil
 }
-func (e *fakeEditor) CreateElicitation(context.Context, sdk.CreateElicitationRequest) (sdk.CreateElicitationResponse, error) {
+func (e *fakeEditor) CreateElicitation(ctx context.Context, r sdk.CreateElicitationRequest) (sdk.CreateElicitationResponse, error) {
+	if e.elicited != nil {
+		e.elicited <- r
+	}
+	switch {
+	case e.elicit != nil:
+		return e.elicit(r), nil
+	case e.elicited != nil:
+		<-ctx.Done()
+		if e.withdrawn != nil {
+			close(e.withdrawn)
+		}
+		return sdk.CreateElicitationResponse{}, ctx.Err()
+	}
 	return sdk.CreateElicitationResponse{}, sdk.NewMethodNotFound("elicitation/create")
 }
 func (e *fakeEditor) ReadTextFile(context.Context, sdk.ReadTextFileRequest) (sdk.ReadTextFileResponse, error) {
@@ -212,6 +249,12 @@ type rig struct {
 
 func newRig(t *testing.T) *rig {
 	t.Helper()
+	return newRigCaps(t, sdk.ClientCapabilities{})
+}
+
+// newRigCaps is a rig whose editor advertises caps at initialize.
+func newRigCaps(t *testing.T, caps sdk.ClientCapabilities) *rig {
+	t.Helper()
 	r := &rig{t: t, d: newFakeDund(t), ed: &fakeEditor{}, cwd: t.TempDir()}
 	agentIn, editorOut := io.Pipe()
 	editorIn, agentOut := io.Pipe()
@@ -227,7 +270,7 @@ func newRig(t *testing.T) *rig {
 		agentOut.Close()
 		<-done
 	})
-	if _, err := r.cc.Initialize(context.Background(), sdk.InitializeRequest{ProtocolVersion: sdk.ProtocolVersionNumber}); err != nil {
+	if _, err := r.cc.Initialize(context.Background(), sdk.InitializeRequest{ProtocolVersion: sdk.ProtocolVersionNumber, ClientCapabilities: caps}); err != nil {
 		t.Fatal(err)
 	}
 	return r

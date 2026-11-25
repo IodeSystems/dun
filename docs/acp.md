@@ -104,7 +104,7 @@ shows the editor's default icon. No change to `internal/acp` helps.
 | `reasoning` | `agent_thought_chunk` |
 | `tool_call` | `tool_call`, `in_progress`, kind from the table below, `title` the tool and its main argument, `locations` the files its arguments name, `rawInput` the arguments |
 | `tool_result` | `tool_call_update`, `completed` or `failed` (`is_error`); content: the result text, then a `diff` per `edits[]` file (`oldText` absent for a created file); a `skipped` edit is a text line naming the file and why |
-| `plan` | `plan`: the tree in order, a repeat row once, dropped rows left out; todo and blocked are `pending` (ACP has no blocked), doing `in_progress`, done `completed`; a ready todo is priority `high`, the rest `medium` |
+| `plan` | `plan`: the tree in order, a repeat row once, dropped rows left out; todo and blocked are `pending` (ACP has no blocked), doing `in_progress`, done `completed`; a ready todo is priority `high`, the rest `medium`. An editor that advertises `clientCapabilities.plan` (or JetBrains Air's `planContentDelta` or `planFile` in `_meta.jetbrains.air.capabilities`) gets the same entries as the unstable `plan_update` instead (`plan.type` `items`, `planId` `dun`: a session has one plan), as the plan-operations RFD says to |
 | `commands` | `available_commands_update`; a command's usage (or its choices) is the input hint |
 | `user` (another client's) | `user_message_chunk` |
 | `request` (done) and `usage` | `usage_update`, see "Usage, context and cost" |
@@ -177,6 +177,25 @@ names a message only when it takes it. The SDK cancels a prompt's context
 when a newer prompt of the session arrives; the bridge ignores that
 context, so the earlier prompt still waits for its turn.
 
+### Steering (`_session/steering`)
+
+JetBrains Air sends a message typed while a turn runs as the extension
+request `_session/steering`, not as a second `session/prompt`. dun takes
+it as it takes a mid-turn prompt (above): a queued user message delivered
+into the turn's next tool result, or the next turn's input. The request is
+answered at once with `{"status": "queued"}`; nothing waits for a turn's
+end. Any other `_` method is -32601; an unknown session -32002; params with
+no text -32602. Code: `steer.go`.
+
+**Inferred, not published:** an Air debug bundle (2026-11-24, keys
+pseudonymised, values redacted) shows the params as `{sessionId, <string>,
+<array of objects of two strings>}`, read as an id and content blocks
+(`{type, text}`), and the response as an object of one string member whose
+key is unknown. So the bridge takes the text from the first array that
+reads as content blocks; else a string under `text`, `message`, `content`,
+`prompt`, `steering` or `input`; else the params' one string. Params with
+several strings and none of these are refused. Not yet run against Air.
+
 ### Stop reasons
 
 `done` is `end_turn`; `done {reason: interrupted}`, or any turn end after
@@ -212,6 +231,32 @@ outside the workspace, `harness/fileaccess.go`):
   question and its options as the agent's text; the next prompt is sent as
   the `answer`, not as a message, and is answered with the turn it
   continues.
+
+An editor that advertises `clientCapabilities.elicitation.form` gets every
+question as an `elicitation/create` form instead (`elicit.go`), scoped to
+the session and the tool call that asked. The form's message is the
+question; its fields:
+
+- `answer`: the options as a string `enum` (one answer) or an `array` of
+  the enum (multiple choice), the recommended option(s) as its `default`;
+  with no options, a required text field.
+- `other`: a text field for the person's own words, when the question has
+  options and takes other answers (an `ask_user`; not the file-access
+  question). Its `_meta` is `{"_askUserQuestionCustomAnswer": true,
+  "jetbrains": {"air": {"customAnswer": true}}}`, the keys JetBrains Air's
+  own agent puts on its custom-answer field (seen in an Air debug bundle,
+  2026-11-24; the spec names no such field). With it neither field is
+  required; without it `answer` is.
+
+`accept` sends the answer: `other` when filled, else the pick; for
+multiple choice the checked options and `other`, joined ", " as the TUI
+joins them. `decline` sends the question's "no" option when it has one
+(the file-access question). `cancel`, `decline` with no "no", or an
+`accept` with no usable value leaves the question open as text, the next
+prompt its answer (the TUI's esc parks a question the same way). A
+question answered elsewhere cancels the request (the SDK sends
+`$/cancel_request`; the spec has no withdraw) and a late reply is not
+read. An editor that fails `elicitation/create` is asked as above.
 
 ## Config options
 
@@ -302,7 +347,11 @@ changes until approval; it is not a run type and is not shown.
   and a fake dund (initialize, new, prompt with a diff, cancel, queued
   prompts, load replay, permission, text question, slash command, config
   options: listed, set, refused, changed elsewhere; stop conditions: mode,
-  turn_cap, a goal from the next prompt, a prompt held to its run's stop).
+  turn_cap, a goal from the next prompt, a prompt held to its run's stop;
+  for an editor that advertises them: plan_update, elicitation forms
+  (select, multiple choice, text, custom answer, decline, cancel,
+  withdrawn, fallback); `_session/steering`). Forms, plan_update and
+  steering are not yet run in any editor.
 - Live (2026-11-24, against a running dund): initialize, session/new, a
   prompt streamed to `end_turn`, session/load of that session replaying it.
   Not yet live: cancel, queued prompts, permission requests, any editor.
@@ -325,9 +374,9 @@ clone of the kit:
     uv run acp-tck --agent-cwd $D/wd --timeout 60 --test-timeout 180 -- $D/agent.sh
 
 Stop the private dund (kill the PID in `$D/home/.dun/dund.pid`; dund has no stop command)
-and the stub afterwards. Result 2026-11-24: 0 mandatory failures. Two
-advisory failures remain, both out of scope: ACP-PLAN-002 (the bridge sends
-the baseline `plan` update, not the unstable `plan_update`, when the client
-advertises `plan`) and ACP-SESSION-004 (the editor's MCP servers are not
-started). Many capability tests skip: modes, config options, list, resume,
-delete, images, subagents.
+and the stub afterwards. Result 2026-11-24 (after plan_update, forms and
+steering): 75 passed, 1 failed, 74 skipped; 0 mandatory failures.
+ACP-PLAN-002 (plan_update when the client advertises `plan`) now passes.
+One advisory failure remains, out of scope: ACP-SESSION-004 (the editor's
+MCP servers are not started). Many capability tests skip: modes, config
+options, list, resume, delete, images, subagents.
