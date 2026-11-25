@@ -54,6 +54,9 @@ func TestRenderLaunchAgent(t *testing.T) {
 		"<key>SuccessfulExit</key>\n\t\t<false/>",
 		// Engines outlive a relaunch (docs/engine-adoption.md).
 		"<key>AbandonProcessGroup</key>\n\t<true/>",
+		// The handover's exit (handoverExit, 75) is not a successful exit, so
+		// launchd relaunches after ThrottleInterval (handover.go).
+		"<key>ThrottleInterval</key>\n\t<integer>3</integer>",
 		"<key>StandardErrorPath</key><string>/Users/me/.dun/dund.log</string>",
 	} {
 		if !strings.Contains(p, want) {

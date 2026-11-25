@@ -32,7 +32,7 @@ func TestAdoptAcrossDundReexec(t *testing.T) {
 		t.Skip("builds dun twice and runs a dund")
 	}
 	t.Parallel() // its own processes and env: it overlaps the other builds (testDun)
-	adoptAcrossRestart(t, false)
+	adoptAcrossRestart(t, "")
 }
 
 // The same through a real systemd user manager: dund runs as a transient
@@ -47,15 +47,33 @@ func TestAdoptAcrossSystemdHandover(t *testing.T) {
 	if _, err := exec.LookPath("systemd-run"); err != nil {
 		t.Skip("no systemd-run")
 	}
-	adoptAcrossRestart(t, true)
+	adoptAcrossRestart(t, "systemd")
 }
 
-func adoptAcrossRestart(t *testing.T, viaSystemd bool) {
+// The handover under launchd (handover.go): dund runs as a LaunchAgent —
+// its label in XPC_SERVICE_NAME, so underServiceManager and the
+// handover's install-and-exit-75 path are the launchd ones — under a
+// manager with launchd's relaunch semantics: the rendered agent's
+// KeepAlive.SuccessfulExit=false (a clean stop stays stopped, every other
+// exit — the handover's 75 among them — relaunches, service_launchd.go).
+// The restart completes as under systemd: the turn's tokens cross it, none
+// lost and none twice, and the engine is adopted on the new build. The real
+// launchd relaunch runs on a Mac (the ops plan); this is the same flow it
+// will run, with the manager replaced by its documented behaviour. Opt-in
+// (DUN_TEST_LAUNCHD=1).
+func TestAdoptAcrossLaunchdHandover(t *testing.T) {
+	if os.Getenv("DUN_TEST_LAUNCHD") != "1" {
+		t.Skip("DUN_TEST_LAUNCHD=1 runs it under a launchd-semantics manager")
+	}
+	adoptAcrossRestart(t, "launchd")
+}
+
+func adoptAcrossRestart(t *testing.T, viaManager string) {
 	const words = 30
 	// A handover checks the new build (serve --check) before it exits: the
 	// turn must outlast that, race builds being slower.
 	wordGap := 100 * time.Millisecond
-	if viaSystemd {
+	if viaManager != "" {
 		wordGap = 400 * time.Millisecond
 	}
 	bins := t.TempDir()
@@ -131,7 +149,8 @@ func adoptAcrossRestart(t *testing.T, viaSystemd bool) {
 	defer logf.Close()
 	argv := []string{v1, "dund", "--home", home, "--socket", sock, "serve"}
 	var stopDund func()
-	if viaSystemd {
+	var stopCh chan struct{}
+	if viaManager == "systemd" {
 		// The unit as `dund service install` writes it, in what matters
 		// here: restart on 75, output to a file.
 		unit := fmt.Sprintf("dun-adopt-test-%d", os.Getpid())
@@ -154,10 +173,70 @@ func adoptAcrossRestart(t *testing.T, viaSystemd bool) {
 			_ = mgr("systemctl", "--user", "stop", unit).Run()
 			_ = mgr("systemctl", "--user", "reset-failed", unit).Run()
 		}
+	} else if viaManager == "launchd" {
+		// The manager, as the rendered agent says it is (service_launchd.go):
+		// the dund's label in XPC_SERVICE_NAME, KeepAlive.SuccessfulExit=false
+		// — a clean stop stays stopped, every other exit (the handover's 75
+		// among them) relaunches — and the agent's PATH the engines need.
+		stopCh = make(chan struct{})
+		var mu sync.Mutex
+		proc := func() *exec.Cmd {
+			c := exec.Command(argv[0], argv[1:]...)
+			c.Env = append(os.Environ(), append(env, "XDG_RUNTIME_DIR="+home,
+				"INVOCATION_ID=", "XPC_SERVICE_NAME=com.iodesystems.dund", "PATH=/opt/homebrew/bin:/usr/bin:/bin")...)
+			c.Stdout, c.Stderr = logf, logf
+			return c
+		}
+		var running *exec.Cmd
+		mu.Lock()
+		running = proc()
+		if err := running.Start(); err != nil {
+			t.Fatal(err)
+		}
+		mu.Unlock()
+		go func() {
+			for {
+				_ = running.Wait()
+				select {
+				case <-stopCh:
+					return
+				default:
+				}
+				// A non-successful exit relaunches (SuccessfulExit=false),
+				// after ThrottleInterval (3 in the agent).
+				time.Sleep(3 * time.Second)
+				select {
+				case <-stopCh:
+					return
+				default:
+				}
+				mu.Lock()
+				running = proc()
+				if err := running.Start(); err != nil {
+					t.Errorf("relaunch: %v", err)
+					mu.Unlock()
+					return
+				}
+				mu.Unlock()
+			}
+		}()
+		stopDund = func() {
+			// launchctl kill SIGTERM: dund exits 0, and the agent stays stopped.
+			close(stopCh)
+			mu.Lock()
+			p := running
+			mu.Unlock()
+			if p != nil && p.Process != nil {
+				_ = p.Process.Signal(syscall.SIGTERM)
+				// The manager's goroutine owns p.Wait() and stops relaunching
+				// once stopCh is closed; give it a bounded moment to end, the
+				// leftover engines are killed by pid in the deferred cleanup.
+				<-time.After(500 * time.Millisecond)
+			}
+		}
 	} else {
+		// No manager: dund runs directly, no handover, no scopes.
 		dund := exec.Command(argv[0], argv[1:]...)
-		// Not a service: no handover, no scopes; XDG_RUNTIME_DIR off the
-		// user's own.
 		dund.Env = append(os.Environ(), append(env, "XDG_RUNTIME_DIR="+home, "INVOCATION_ID=", "XPC_SERVICE_NAME=")...)
 		dund.Stdout, dund.Stderr = logf, logf
 		if err := dund.Start(); err != nil {
@@ -212,7 +291,7 @@ func adoptAcrossRestart(t *testing.T, viaSystemd bool) {
 		t.Fatalf("engines: %+v", infos)
 	}
 	enginePid := engineInfos(engines)[0].Pid
-	if viaSystemd {
+	if viaManager == "systemd" {
 		// In a scope of its own, not in the service's cgroup.
 		cg, _ := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", enginePid))
 		if !strings.Contains(string(cg), ".scope") || strings.Contains(string(cg), "dun-adopt-test-") {
@@ -319,7 +398,7 @@ func adoptAcrossRestart(t *testing.T, viaSystemd bool) {
 	}
 	b, _ := os.ReadFile(logPath)
 	want = []string{"restarting into " + v2, "adopted engine"}
-	if viaSystemd {
+	if viaManager != "" {
 		want[0] = "exiting 75 for the service manager"
 	}
 	for _, w := range want {
