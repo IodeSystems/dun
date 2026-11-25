@@ -30,7 +30,11 @@ import (
 //
 // An open ask_user question does not hold it (Carl 2026-11-10): the turn
 // around it waits on the person, not on work, and the question survives
-// the restart. The stop interrupts that turn and saves the question (its
+// the restart. An engine that keeps its question (harness replay.go,
+// Carl 2026-11-24: questionPending) is not interrupted and nothing is
+// saved: its stop suspends the question, the next dund starts it (reask)
+// and it asks the question again, the answer being the call's result.
+// For an older engine: the stop interrupts that turn and saves the question (its
 // proto.Ask, whole) in the registry; the next dund shows it again to every
 // client as an open question in a turn (showRestored) and does not wake
 // the agent. The person's answer wakes it with a user message, `[automatic]

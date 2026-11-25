@@ -115,8 +115,17 @@ build must not cut work short, and no one should have to coordinate it.
 - A sub-agent running at the stop is told to continue its task after the
   restart (restarted from its transcript first if it came back stopped);
   the parent's message says so.
-- An open `ask_user` question does not hold the upgrade (Carl 2026-11-10).
-  The stop interrupts its turn and saves the question (the whole `Ask`) in
+- An open question does not hold the upgrade (Carl 2026-11-10). An
+  engine that keeps it (Carl 2026-11-24, harness `replay.go`: the session
+  has `<session>.pending.json` and the call has no result) is not
+  interrupted, since an interrupt is the person cancelling the question:
+  the engine's stop suspends it. Nothing is saved for dund to show; the
+  next dund starts that engine (`reask`), which asks the question again
+  with the same ids, and its answer is the call's result. No crash
+  resume message for such a session; what else the stop cut goes as
+  before, as a message that rides the answer. A model switch
+  (`Restart`) and an engine crash take the same path. For an older
+  engine, as before: the stop interrupts its turn and saves the question (the whole `Ask`) in
   the registry record (`ask`). The next dund shows it again as an open
   question in a turn — appended to the session's log, and in the snapshot
   a reconnecting client gets — and does not wake the agent. The answer

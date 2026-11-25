@@ -2109,10 +2109,10 @@ rest below are assumptions he can overturn.
   counts kept. An interrupt while paused cancels the ask and the turn: the
   run stops (`interrupted`). `/until off` while paused ends the run; the
   question stays open and the turn ends as usual. Paused is in the
-  sidecar: an engine that stopped with a question open lost the question,
-  so the new engine owes the run no turn (unlike a plain cut) and the next
-  turn that begins, the person's message (the answer, in their words), is
-  the run's next turn.
+  sidecar, and survives the engine (2026-11-24, "Questions survive a
+  restart"): the new engine owes the run no turn, asks the question again
+  (the run paused all the while), and the answer goes on with the turn and
+  the run. The continuation counts as the run's next turn.
 - **Engine-owned, persisted** (USER: dund and the engine own semantics,
   clients dumb). The conditions and the run are in `<session>.until.json`
   and in a `until` state event (event-protocol.md) with a one-line summary
@@ -2157,3 +2157,80 @@ rest below are assumptions he can overturn.
   the web client shows the event's line in its header, and nothing else of
   the run (no way to set conditions there but the `/until` command); the judge does not see tool results, only the reply and
   the call count.
+
+## Questions survive a restart; in-flight calls are optionally replayable (USER 2026-11-24)
+
+Carl: "we shouldn't lose questions? are they not tool calls that expect a
+response?" A question is a tool call waiting for its result. Before, an
+engine that stopped while ask_user or the file-access question waited
+lost it: the next turn's heal answered the call "INTERRUPTED — the
+connection to the model dropped" (wrong, too), dund's planned stops showed
+a saved copy and sent the answer as a new `[automatic]` message, and a
+model switch or a crash dropped it with no trace.
+
+- **The rule** (Carl): in-flight tool calls are optionally replayable. A
+  tool that declares itself replayable survives a restart: its pending
+  call is restored and replayed on engine start. A call of any other tool
+  that was in flight gets a failed result that says it was cut off by a
+  restart and tells the model to try again (`restartedCall`, turn.go;
+  before: "the connection to the model dropped"). An unanswered call can
+  only be a stop's: agentkit answers every call while the engine runs.
+- **Replayable is the tool's** (`Harness.replayable`, replay.go): ask_user,
+  and the file tools while they wait on the access question, which runs
+  before the call does anything. Replay means the call is dispatched again
+  from its arguments, through the whole dispatcher (tool events, guards,
+  the lift of queued messages), so it asks again and the answer becomes
+  its result as on the first run. exec, MCP tools, the agent tool and the
+  rest are not. Candidates not turned on: the pure reads (file_read,
+  search, plan_show, session_search) could replay with no question, but
+  that starts a turn on engine start with nobody asking for it, and dund
+  already wakes a crashed session with a resume message. MCP tools: the
+  spec's annotations (`readOnlyHint`, `idempotentHint`) would say which
+  are safe, but agentkit's MCP client does not read them (none in v0.40.0),
+  so none is replayable.
+- **Kept**: a replayable call's question goes in
+  `<session>.pending.json` when it opens (ask id, call id, tool, the
+  arguments, the question, options, multi, no_custom, recommended, the
+  turn's origin) and is removed when it is answered or cancelled. A
+  record whose call has a result or is gone (a /clear) is dropped.
+- **Stop**: a `stop` while the question is open (dund's restart, a model
+  switch: `Restart`, /exit) SUSPENDS it (`ErrSuspended`): the call gets no
+  result (the store drops agentkit's), the turn ends (`done` `suspended`,
+  no fold, no further round) and the engine exits at once instead of after
+  dund's 10 s kill. A kill or a crash leaves the same state with no help.
+- **Start**: before anything else in the engine loop (before /until), a
+  pending question is replayed (`Harness.Replay`, `replayStep`): a turn
+  of the origin the asking turn had, the call dispatched again, the same
+  `ask` event (same `ask_id`, `call_id`) to every client. The answer is
+  the call's result and the turn goes on: the next round reads it last,
+  as after any call, with no new user message and no asks or plan block
+  after it ("The person's message ends the prompt"). Not a true mid-turn
+  resume (the round's other calls, after the question, were never run and
+  get `restartedCall`), but what the model reads is the same.
+- **Interrupt** of the asked-again question: its result says the user
+  cancelled it (`questionCancelled`; the live ask_user's interrupt says the
+  same now), the turn ends interrupted, no model round.
+- **A message instead of an answer**: as for any open question (the replay
+  is a turn, behind the same gate), a `user` message is queued mid-turn
+  and rides the call's result once the question is answered; only an
+  `answer` answers it.
+- **dund** (internal/dund): an engine that keeps its question
+  (`questionPending`: the sidecar, and its call unanswered) is not
+  interrupted by a planned stop (an interrupt is the person cancelling),
+  no question is saved in the registry, and the next dund starts that
+  engine (`reask`) with no crash resume message. A crashed engine dund
+  restarts asks again by itself. An older engine keeps the restored path
+  (the saved question, the answer as a message).
+- **/until**: a run paused on the question stays paused across the
+  restart and goes on with the answer (until.go, Stop conditions above).
+- **Lost still**: a running exec or background job (killed with the
+  engine; the call gets `restartedCall`, the job dund's resume note), a
+  sub-agent's question (children have no sidecar; the child is resumed
+  with its task), a mount question, and the terminal (non-engine) mode's
+  question, which nothing replays.
+- Tests: replay_test.go (ask again and continue, cancel, file access,
+  other calls fail, /until, stale record), dund reask_test.go,
+  cmd/dun askstop_test.go. Live 2026-11-24 (a private dund and `ux llm`):
+  engine killed by PID mid-question, and a `switch_model` mid-question:
+  each time the same ask id and call id came again, the answer was the
+  call's one result, and the turn replied.
