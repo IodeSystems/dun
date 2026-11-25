@@ -852,6 +852,17 @@ func CheckRegistry(dir string) error {
 	return err
 }
 
+// NoSpawner is a Spawner that starts no engine: it lets New run so the
+// registry loads and its side effects run (the drop of empty sessions, the
+// crash-marking, the save) without spawning, adopting or waking anything. A
+// check run beside a live dund uses it (dundcli's serve --check); it is not
+// an Adopter, so New's adoptAll is skipped too.
+type NoSpawner struct{}
+
+func (NoSpawner) Spawn(workspace string, args []string) (Engine, error) {
+	return nil, errors.New("dund: check spawner starts no engine")
+}
+
 func (s *Service) loadRegistry() ([]record, error) {
 	b, err := os.ReadFile(s.registryPath())
 	if errors.Is(err, os.ErrNotExist) {

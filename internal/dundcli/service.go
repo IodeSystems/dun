@@ -3,12 +3,14 @@ package dundcli
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -394,16 +396,32 @@ WantedBy=default.target
 // usable, the registry loads, the engine binary is executable, no other dund
 // owns this home, and the HTTP address can be bound. handoverFrom (a pid, 0
 // for none) is the live dund this build is to replace (serveCheck): it owns
-// the pidfile and the HTTP port, so those are not held against the check,
-// and the registry is read without New's changes to it.
+// the pidfile and the HTTP port, so those are held out of its way — the port
+// is bound for real and address-in-use is taken as the live dund's, and the
+// registry is New's on a copy, so the live one's file is not written — and
+// the check otherwise binds and loads like the plain one.
 func check(l *loader, bin, httpAddr, webRoot string, handoverFrom int) error {
 	if err := os.MkdirAll(l.home, 0o700); err != nil {
 		return fmt.Errorf("home %s: %w", l.home, err)
 	}
 	if handoverFrom > 0 {
-		if err := dund.CheckRegistry(filepath.Join(l.home, "dund")); err != nil {
+		// The live dund owns the registry: New's side effects (the drop of
+		// empty sessions, the crash-marking, the save) would write the file
+		// it is serving. Run the real New on a copy, with a spawner that
+		// starts no engine, so the same load-and-transform the plain check
+		// runs is exercised without touching the live file and without
+		// spawning or adopting engines. A registry the new build cannot
+		// load is one it cannot serve.
+		tmp, err := copyDirForCheck(filepath.Join(l.home, "dund"))
+		if err != nil {
 			return err
 		}
+		defer os.RemoveAll(tmp)
+		svc, err := dund.New(tmp, dund.NoSpawner{})
+		if err != nil {
+			return err
+		}
+		svc.Close()
 	} else {
 		svc, err := dund.New(filepath.Join(l.home, "dund"), dund.ExecSpawner{Bin: bin})
 		if err != nil {
@@ -433,8 +451,19 @@ func check(l *loader, bin, httpAddr, webRoot string, handoverFrom int) error {
 		httpAddr = web.Addr
 	}
 	if httpAddr != "" && handoverFrom > 0 {
-		if _, err := net.ResolveTCPAddr("tcp", httpAddr); err != nil {
-			return fmt.Errorf("HTTP address %s: %w", httpAddr, err)
+		// The live dund holds the port: bind for real, and take
+		// address-in-use as the live one's. That proves the address is
+		// servable and that this user can bind it — more than
+		// ResolveTCPAddr, which only read the string. Any other failure is
+		// one the new build would hit at start: it does not serve on that
+		// endpoint.
+		ln, err := net.Listen("tcp", httpAddr)
+		if err != nil {
+			if !errors.Is(err, syscall.EADDRINUSE) {
+				return fmt.Errorf("cannot bind %s: %w", httpAddr, err)
+			}
+		} else {
+			ln.Close()
 		}
 	} else if httpAddr != "" {
 		ln, err := net.Listen("tcp", httpAddr)
@@ -457,4 +486,53 @@ func check(l *loader, bin, httpAddr, webRoot string, handoverFrom int) error {
 	}
 	fmt.Fprintln(os.Stderr, ")")
 	return nil
+}
+
+// copyDirForCheck copies dir to a fresh temp directory: the registry a
+// handover's --check runs New's on, so New's side effects (the save after a
+// drop) write the copy, not the live dund's registry. The copy is best
+// effort on the parts a check does not read: a missing dir is copied as an
+// empty one (New makes it), and the engine sockets, pid files and logs (the
+// engines dir) and any non-file entry are skipped.
+func copyDirForCheck(dir string) (string, error) {
+	tmp, err := os.MkdirTemp("", "dund-check-*")
+	if err != nil {
+		return "", fmt.Errorf("check: temp dir for the registry: %w", err)
+	}
+	st, statErr := os.Stat(dir)
+	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		os.RemoveAll(tmp)
+		return "", fmt.Errorf("check: the registry dir %s: %w", dir, statErr)
+	}
+	if statErr == nil && st.IsDir() {
+		err = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			rel, _ := filepath.Rel(dir, p)
+			dest := filepath.Join(tmp, rel)
+			if d.IsDir() {
+				if rel == "engines" {
+					return filepath.SkipDir // sockets, pid files, engine logs
+				}
+				if err := os.MkdirAll(dest, 0o700); err != nil {
+					return err
+				}
+				return nil
+			}
+			if d.Type()&fs.ModeType != 0 {
+				return nil // a socket or fifo: not a file to copy
+			}
+			b, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			return os.WriteFile(dest, b, d.Type().Perm())
+		})
+	}
+	if err != nil {
+		os.RemoveAll(tmp)
+		return "", fmt.Errorf("check: copy the registry: %w", err)
+	}
+	return tmp, nil
 }

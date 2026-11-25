@@ -189,4 +189,21 @@ func TestCheckBesideTheLiveDund(t *testing.T) {
 	if err := check(l, bin, "", "", 0); err == nil || !strings.Contains(err.Error(), "cannot bind") {
 		t.Fatalf("plain check with web.json's busy address: %v", err)
 	}
+
+	// A registry the new build cannot load: New fails, check fails.
+	regDir := filepath.Join(home, "dund")
+	if err := os.MkdirAll(regDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(regDir, "sessions.json"), []byte("{bad"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ln2, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln2.Close()
+	if err := check(l, bin, ln2.Addr().String(), "", live); err == nil {
+		t.Fatal("handover check passed with a corrupt registry")
+	}
 }
