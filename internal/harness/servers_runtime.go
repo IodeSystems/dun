@@ -679,7 +679,10 @@ func (h *Harness) rebuildTools() {
 		h.useNoTools()
 		return
 	}
-	tools := filterTools(h.mcpTools(), h.specs)
+	h.srvMu.Lock()
+	specs := h.specs // a reload swaps the slice under srvMu
+	h.srvMu.Unlock()
+	tools := filterTools(h.mcpTools(), specs)
 	hostedNS := h.hostedNamespaces()
 	moved := map[string]string{} // id → namespace, for servers now in the shell
 	if len(hostedNS) > 0 {
@@ -721,7 +724,7 @@ func (h *Harness) rebuildTools() {
 	// index read them too, and the search tool says which they are.
 	attached := h.attachSelectors(searchers, tools)
 	h.srvMu.Lock()
-	describeAttached(toolDefs, searchers, h.specs, attached)
+	describeAttached(toolDefs, searchers, specs, attached)
 	h.srvMu.Unlock()
 	dispatch = withAttached(dispatch, attachedTools(searchers, tools, attached))
 	// Code and docs search through dund (codesearch.go): the `search` tool,

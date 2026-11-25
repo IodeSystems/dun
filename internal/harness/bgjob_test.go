@@ -602,6 +602,18 @@ func TestJobs_ReplyCarriesProcessUsage(t *testing.T) {
 	if j.info().PGID == 0 {
 		t.Fatal("the job never learned its process group")
 	}
+	// The shell may still fork the sleep after the first sample, and a
+	// process with no earlier sample is unrated (no "cpu N%"). Sample until
+	// the group is rated with the same size as the sample before, so the
+	// report's own samples are rated too.
+	prev := -1
+	for end := time.Now().Add(5 * time.Second); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
+		u := h.procs.Sample(j.info().PGID)
+		if u.Rated && len(u.Procs) == prev {
+			break
+		}
+		prev = len(u.Procs)
+	}
 	out := jobReport(j)
 	if !strings.Contains(out, "processes: cpu 0%") || !strings.Contains(out, "fds") || !strings.Contains(out, "idle") {
 		t.Fatalf("no usage in the reply:\n%s", out)
