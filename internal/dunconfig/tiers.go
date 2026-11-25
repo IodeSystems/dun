@@ -271,7 +271,7 @@ func (c DunConfig) pickOf(s string) Pick {
 // their noteSideCall kind. vision is not one of them: it has its facet.
 var SideCallKinds = []string{
 	"suggest", "fold", "remember", "rescue", "plan_summary", "journal",
-	"commit", "rephrase", "rules", "learn", "repaint",
+	"commit", "rephrase", "rules", "learn", "repaint", "until",
 }
 
 // WindowSideCalls are the side calls whose input is sized from the
@@ -285,7 +285,7 @@ var WindowSideCalls = []string{"suggest", "fold", "remember", "rescue"}
 
 // DefaultSideCalls is the tier of each side call no side_calls entry
 // names: the WindowSideCalls on the session's model, the ones that send a
-// prompt of their own on fast, but learn, which judges, and repaint on
+// prompt of their own on fast, but learn and until, which judge, and repaint on
 // work. A tier with no model is the session's model, as before tiers; a
 // tier call that fails is asked once more on the session's model.
 var DefaultSideCalls = map[string]string{
@@ -300,6 +300,7 @@ var DefaultSideCalls = map[string]string{
 	"rules":        TierFast,
 	"learn":        TierWork,
 	"repaint":      TierWork,
+	"until":        TierWork,
 }
 
 // IsSideCall says whether kind is a side call.

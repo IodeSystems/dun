@@ -61,6 +61,12 @@ type session struct {
 	cfgWake chan struct{}
 
 	usage usageState // usage.go
+
+	// untilSent counts the /until lines the bridge sent whose replies are
+	// not shown; untilHeld: a turn ended while its run goes on, and its
+	// prompts wait for the run's end (until.go).
+	untilSent int
+	untilHeld bool
 }
 
 func newSession(ctx context.Context, id, cwd string, p peer, log *slog.Logger, dial func() (net.Conn, error), replay bool) *session {
@@ -230,7 +236,12 @@ func (s *session) handle(ev proto.Event) {
 		s.onError(p)
 	case *proto.ImageRefused:
 		s.text(p.Message)
+	case *proto.Until:
+		s.onUntil(p)
 	case *proto.ControlEvent:
+		if p.ID == "until" && s.ownUntilReply() {
+			break
+		}
 		s.slashReply(p.Message)
 	case *proto.ServerEvent:
 		if !p.Background {
@@ -294,6 +305,8 @@ func (s *session) onSnapshot(ev proto.Event, sn *proto.Snapshot) {
 			s.loadUsage(p, replay)
 		case *proto.Plan:
 			s.update(sdk.UpdatePlan(planEntries(p)...))
+		case *proto.Until:
+			s.onConfig(func(c *config) { c.until = p })
 		case *proto.TurnState:
 			if p.Phase == proto.PhaseWaitingAnswer && p.Ask != nil {
 				s.onAsk(p.Ask)

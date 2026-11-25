@@ -360,7 +360,7 @@ func routeSlash(line string, r slashRoutes) {
 		r.control("close", "")
 	case "remember":
 		r.control(name, strings.Join(args, " "))
-	case "schedule", "loop":
+	case "schedule", "loop", "until":
 		// The rest of the line as typed: a message keeps its case, spacing
 		// and newlines. The engine parses it (schedule.go).
 		_, rest := textfmt.CutFields(strings.TrimPrefix(strings.TrimSpace(line), "/"), 1)

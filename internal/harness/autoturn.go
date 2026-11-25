@@ -180,6 +180,7 @@ func (h *Harness) turnBegin(o turnOrigin) {
 	if o == originPerson {
 		h.autoPersonReset()
 	}
+	h.untilTurnBegin()
 }
 
 // turnOriginNow is the running (or last) turn's origin and its tool calls

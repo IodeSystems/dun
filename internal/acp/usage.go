@@ -56,6 +56,36 @@ func turnUsage(t *proto.TurnStats) *sdk.Usage {
 	return u
 }
 
+// addUsage sums two turns' totals; either may be nil.
+func addUsage(a, b *sdk.Usage) *sdk.Usage {
+	if a == nil || b == nil {
+		if a == nil {
+			return b
+		}
+		return a
+	}
+	opt := func(x, y *int64) *int64 {
+		if x == nil && y == nil {
+			return nil
+		}
+		var v int64
+		if x != nil {
+			v += *x
+		}
+		if y != nil {
+			v += *y
+		}
+		return &v
+	}
+	return &sdk.Usage{
+		InputTokens:       a.InputTokens + b.InputTokens,
+		OutputTokens:      a.OutputTokens + b.OutputTokens,
+		TotalTokens:       a.TotalTokens + b.TotalTokens,
+		CachedReadTokens:  opt(a.CachedReadTokens, b.CachedReadTokens),
+		CachedWriteTokens: opt(a.CachedWriteTokens, b.CachedWriteTokens),
+	}
+}
+
 // setContext keeps the usage event's window, context and cost. Callers
 // hold s.mu.
 func (s *session) setContext(u *proto.Usage) {
@@ -69,10 +99,11 @@ func (s *session) setContext(u *proto.Usage) {
 }
 
 // onUsage: the turn's accounting. Sends the context and cost, and keeps the
-// turn's totals for the prompt response.
+// turn's totals for the prompt response. Totals not yet taken add up: a
+// /until run answers its prompts once, at the run's end, with every turn's.
 func (s *session) onUsage(u *proto.Usage) {
 	s.mu.Lock()
-	s.usage.turn = turnUsage(u.TurnStats)
+	s.usage.turn = addUsage(s.usage.turn, turnUsage(u.TurnStats))
 	s.setContext(u)
 	s.mu.Unlock()
 	s.sendUsage()

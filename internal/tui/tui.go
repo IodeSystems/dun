@@ -465,6 +465,7 @@ type tuiModel struct {
 	retrySeen         int       // retries this outage; the first one also lands in scrollback
 	queuedMsgs        int       // messages typed mid-turn, buffered for the running turn
 	notesWaiting      int       // news held while idle, no ask open (turn_state's notes_waiting)
+	untilLine         string    // the stop conditions and their run (the until event's line); "" with none
 	netSince, netNext time.Time // waiting for the network (turn_state's net_wait); zero: not
 	w, h              int
 	fatalErr          string

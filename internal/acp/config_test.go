@@ -63,7 +63,7 @@ func set(r *rig, sid sdk.SessionId, id, value string) (sdk.SetSessionConfigOptio
 func TestConfigOptionsOnNew(t *testing.T) {
 	_, res := configRig(t)
 	opts := res.ConfigOptions
-	if len(opts) != 2 || opts[0].Select == nil || opts[1].Select == nil {
+	if len(opts) != 4 || opts[0].Select == nil || opts[1].Select == nil {
 		t.Fatalf("options %+v", opts)
 	}
 	m, e := opts[0].Select, opts[1].Select
@@ -153,7 +153,7 @@ func TestConfigUpdateFromElsewhere(t *testing.T) {
 		got = append(got, configUpdates(r)...)
 		time.Sleep(10 * time.Millisecond)
 	}
-	if len(got) != 2 || current(got[0], optEffort) != "default" || current(got[1], optModel) != "a/org/m2" || len(got[1]) != 2 {
+	if len(got) != 2 || current(got[0], optEffort) != "default" || current(got[1], optModel) != "a/org/m2" || len(got[1]) != 4 {
 		t.Fatalf("updates %+v", got)
 	}
 }

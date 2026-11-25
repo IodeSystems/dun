@@ -399,8 +399,8 @@ func engineSlash(name string) func(m *tuiModel, args []string) tea.Cmd {
 			m.openMCPServers()
 		}
 		line := strings.TrimSpace(name + " " + strings.Join(args, " "))
-		// /schedule and /loop carry a message: the rest of the line as typed.
-		if name == "schedule" || name == "loop" {
+		// /schedule, /loop and /until carry a message: the rest of the line as typed.
+		if name == "schedule" || name == "loop" || name == "until" {
 			_, rest := textfmt.CutFields(strings.TrimPrefix(strings.TrimSpace(m.slashLine), "/"), 1)
 			line = name + " " + rest
 			if len(args) == 2 && strings.EqualFold(args[0], "edit") {

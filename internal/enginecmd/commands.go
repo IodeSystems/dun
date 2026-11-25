@@ -220,6 +220,15 @@ func OwnCommands(iso string) []proto.CommandSpec {
 			Help: "/loop 10m <prompt> runs <prompt> now and then every 10 minutes (1m to 24h), until stopped.\n" +
 				"/loop <prompt>, with no interval, lets the model pace it: while a loop runs it has a loop_ctl tool to set the next run or stop; a run that ends without it waits 20m.\n" +
 				"A run waits while the session is in a turn. /loop lists the loops, /loop stop [id] ends one; /schedule push|edit|cancel work on loops too."},
+		{Name: "until", Usage: `[turns <N>] [goal <text> [--check "<cmd>"]] [plan] | off`, Group: "session", Text: true,
+			Choices: choices("turns", "stop after N turns: turns 10", "goal", `stop when the goal is met: goal "the tests pass", judged by the model after each turn, or --check "make test" (exit 0 is met)`,
+				"plan", "stop when no plan node is ready or under way", "off", "one turn per message again"),
+			Description: "you're dun when…: dun keeps starting turns itself until a condition fires; alone, the conditions and the run",
+			Help: "/until sets stop conditions; while a run is under way dun starts the next turn itself, and stops at the first condition that fires.\n" +
+				"turns <N>: N turns have run. goal <text>: the model, asked after each turn, says the goal is met; with --check \"<cmd>\" the command decides (exit 0 is met; run in the session's exec, 10 minutes at most). plan: no plan node is ready or under way.\n" +
+				"Give several at once: /until plan turns 15, /until goal \"tests pass\" --check \"make test\" turns 10. goal or plan without turns stops at 20 turns.\n" +
+				"A run also stops when you interrupt, a turn fails, the model asks you a question, or two turns in a row make no progress. Your next message starts the run (or the turn running now is its first); the conditions stay for later messages until /until off.\n" +
+				"Messages you type during a run reach the model as usual. Quote a goal that holds the words turns, plan or goal."},
 		{Name: "interrupt", Group: "session", Description: "stop the running turn; what it wrote so far stays, and your next message continues from there"},
 		{Name: "clear", Usage: "[keep|drop] [jobs=keep|stop] [plan=keep|drop]", Group: "session",
 			Choices: choices("keep", "keep running jobs and open asks and plan items; the new conversation is told about them",

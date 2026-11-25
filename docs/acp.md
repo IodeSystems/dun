@@ -216,12 +216,14 @@ outside the workspace, `harness/fileaccess.go`):
 ## Config options
 
 session/new and session/load answer with `configOptions` (ACP session
-config options), both `select`, in this order:
+config options), all `select`, in this order:
 
 | id | category | values | current | set sends |
 |---|---|---|---|---|
 | `model` | `model` | every saved provider's models (control `models`, as the web app's picker): one group per provider when there are several, a provider whose list failed left out; value `<provider>/<model id>` | the `settings` event's model and URL, listed even when its provider's list did not come | dund `switch_model {url, model}`: the engine restarts on the same conversation with its other flags (the web app's switchModel; the TUI's /model without saving a default) |
 | `effort` | `thought_level` | the `effort` command's choices in the `commands` event (default, none, minimal … max; a level the model does not take says what is sent instead) | that command's state | control `effort <level>`: dun's /effort, which is saved for every session |
+| `mode` ("Run until") | `mode` | `off`, `goal`, `plan`, `goal+plan` | the `until` event's conditions | control `until <line>` (dun's /until), with the turn cap's condition kept; `goal` waits for its text (below) |
+| `turn_cap` | `_turn_cap` (custom) | `off`, `5`, `10`, `20`, `50`, and a cap set elsewhere (the TUI's `/until turns 15`) | the `until` event's `turns` condition | control `until <line>`, with the mode's conditions kept |
 
 session/new waits up to 5 s for the model list, the settings and the
 commands; an option whose events come later arrives as a
@@ -236,10 +238,37 @@ boolean value (`-32602`); a model switch while a prompt of the editor's
 waits (`-32600`: the restart would end the turn with no `done`); a switch
 dund refuses or a value the engine does not report in time (`-32603`).
 
-No `mode` option and no `modes`: dun has no per-session run type (a stop
-condition such as a turn cap, a goal, or a drained plan) to select.
-`session/set_mode` is method-not-found. Plan mode (`/plan mode on|off`)
-gates file changes until approval; it is not a run type and is not shown.
+### Stop conditions (mode, turn_cap)
+
+dun's `/until` (`decisions.md`, "Stop conditions") is a set of conditions;
+a select holds one value, so two options. `mode` is what the run waits
+for, `turn_cap` the most turns it takes:
+
+- mode `off`, turn_cap `off`: one turn per prompt (`/until off`).
+- mode `off`, turn_cap N: run N turns (`/until turns N`).
+- mode `goal`, `plan` or `goal+plan`: until the goal is met or the plan is
+  drained (no node ready or under way), whichever comes first; at most the
+  turn cap's turns, 20 with the cap off.
+- **A goal's text is a prompt's.** Chosen while a prompt of the editor's
+  runs, the goal is that prompt's text and is set at once. Otherwise the
+  set sends nothing, the option shows `goal` (pending), and the next
+  prompt sends `/until goal "<its text>" …` before itself, so the turn it
+  starts is the run's first. A `--check` command is not offered here; set
+  it with the `/until` command (a prompt that starts with `/until`).
+- The conditions stay for later prompts until changed. A goal stays the
+  first prompt's text: to give a new goal, choose `off`, then `goal` again.
+- **A prompt is answered when its run stops**, not when its first turn
+  ends: a `done` while the `until` event says `running` is held, and the
+  `until` event that stops the run answers it (`end_turn`, or `cancelled`
+  after session/cancel). An error answers it at once, as before.
+- Progress is agent text: `until: turn N of M` as each turn of the run
+  starts, and `until: stopped · <why>` when it stops.
+- session/cancel during a run interrupts the turn running, or, between
+  turns (the goal being judged), stops the run.
+
+No `modes`: `session/set_mode` is method-not-found; the stop conditions are
+the `mode` config option. Plan mode (`/plan mode on|off`) gates file
+changes until approval; it is not a run type and is not shown.
 
 ## Not supported
 
@@ -264,10 +293,14 @@ gates file changes until approval; it is not a run type and is not shown.
 - Unit: `internal/acp` tests drive the bridge with the SDK's client side
   and a fake dund (initialize, new, prompt with a diff, cancel, queued
   prompts, load replay, permission, text question, slash command, config
-  options: listed, set, refused, changed elsewhere).
+  options: listed, set, refused, changed elsewhere; stop conditions: mode,
+  turn_cap, a goal from the next prompt, a prompt held to its run's stop).
 - Live (2026-11-24, against a running dund): initialize, session/new, a
   prompt streamed to `end_turn`, session/load of that session replaying it.
   Not yet live: cancel, queued prompts, permission requests, any editor.
+- Live (2026-11-24, a private dund and `ux llm`): `/until turns 3`, then a
+  prompt: three turns ran, the progress notes and the stop reason came as
+  agent text, and the prompt was answered once, `end_turn`, at the stop.
 
 ## Conformance kit (manual)
 
@@ -283,8 +316,8 @@ clone of the kit:
 
     uv run acp-tck --agent-cwd $D/wd --timeout 60 --test-timeout 180 -- $D/agent.sh
 
-Stop the private dund (`DUN_HOME=$D/home/.dun $D/dun dund stop`, or kill by
-PID) and the stub afterwards. Result 2026-11-24: 0 mandatory failures. Two
+Stop the private dund (kill the PID in `$D/home/.dun/dund.pid`; dund has no stop command)
+and the stub afterwards. Result 2026-11-24: 0 mandatory failures. Two
 advisory failures remain, both out of scope: ACP-PLAN-002 (the bridge sends
 the baseline `plan` update, not the unstable `plan_update`, when the client
 advertises `plan`) and ACP-SESSION-004 (the editor's MCP servers are not

@@ -37,7 +37,7 @@ func ChildRole(t string) string { return "child:" + t }
 // does not read the config).
 var SideCallKinds = []string{
 	"suggest", "fold", "remember", "rescue", "plan_summary", "journal",
-	"commit", "rephrase", "rules", "learn", "repaint",
+	"commit", "rephrase", "rules", "learn", "repaint", "until",
 }
 
 // windowSideCalls send input sized from the session's window (the session's

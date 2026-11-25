@@ -99,3 +99,16 @@ func TestUsageLoad(t *testing.T) {
 		t.Fatalf("updates %+v", ups)
 	}
 }
+
+func TestAddUsageSumsHeldTurns(t *testing.T) {
+	two := int64(2)
+	a := &sdk.Usage{InputTokens: 10, OutputTokens: 1, TotalTokens: 11, CachedReadTokens: &two}
+	b := &sdk.Usage{InputTokens: 20, OutputTokens: 2, TotalTokens: 22}
+	got := addUsage(a, b)
+	if got.InputTokens != 30 || got.OutputTokens != 3 || got.TotalTokens != 33 || got.CachedReadTokens == nil || *got.CachedReadTokens != 2 || got.CachedWriteTokens != nil {
+		t.Fatalf("addUsage = %+v", got)
+	}
+	if addUsage(nil, b) != b || addUsage(a, nil) != a {
+		t.Fatal("nil side should return the other")
+	}
+}

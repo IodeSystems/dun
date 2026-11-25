@@ -38,6 +38,13 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 	// has seen ready can count on it.
 	interruptCmd := func(reason string) {
 		if !h.Interrupt(reason) {
+			// Between a run's turns (/until): the run stops.
+			if reason == "" {
+				if why := h.UntilInterrupt(); why != "" {
+					em.emit(&proto.Notification{Kind: "until", Text: "until: stopped · " + why})
+					return
+				}
+			}
 			em.emit(&proto.ControlEvent{ID: "interrupt", Message: "nothing to interrupt: no turn is running"})
 		} else if em.turn != nil {
 			em.turn.interrupting()
@@ -155,6 +162,16 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 		}
 		if id == "interrupt" {
 			interruptCmd("")
+			return
+		}
+		// /until: the stop conditions (harness/until.go). The until event
+		// follows from the harness (Config.OnUntil).
+		if id == "until" {
+			msg, err := h.UntilCmd(action)
+			if err != nil {
+				msg = "until: " + err.Error()
+			}
+			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 			return
 		}
 		// /schedule and /loop (schedule.go): dund keeps them, so the answer
@@ -701,6 +718,9 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 		turn(ctx, h, em, firstTask, nil)
 	}
 	users := in.users
+	if len(h.Until().Conds) > 0 { // kept from before a restart (until.go)
+		em.emit(untilEvent(h))
+	}
 	// A turn that fails must not end the session — the user is still sitting
 	// there and the conversation is still on disk. But the pending work that
 	// turn was going to claim is still pending, so retrying it immediately would
@@ -713,6 +733,11 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 		if clk, waited, c := clr.take(); clk != nil {
 			clk.Mark("stopping " + waited)
 			clearNow(h, em, clk, c)
+		}
+		// A stop condition's run (/until): its next turn, or why it stopped.
+		if ran, ok := untilStep(ctx, h, em); ran {
+			autoContinue = ok
+			continue
 		}
 		// A message with images held during the last turn starts the next.
 		if msg, ok := h.Gate().TakeHeld(); ok {

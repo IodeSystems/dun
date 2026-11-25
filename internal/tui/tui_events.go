@@ -205,6 +205,11 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		m = m.noteExtensions(ev)
 	case "plan":
 		m = m.notePlan(ev)
+	case "until":
+		m.untilLine = ""
+		if conds, _ := ev["conds"].([]any); len(conds) > 0 {
+			m.untilLine = str(ev["line"])
+		}
 	case "journal":
 		m = m.noteJournal(ev)
 	case "mcp_login":
@@ -469,6 +474,9 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 			// The turn budget ran out and the grace started: the machinery
 			// speaking, so dim, not a bell.
 			m.append(StDim.Render("⏱ " + textfmt.OneLine(str(ev["text"]))))
+		case "until":
+			// A stop condition's run ended (/until): the machinery, dim.
+			m.append(StDim.Render("⟳ " + textfmt.OneLine(str(ev["text"]))))
 		case "schedule":
 			// The scheduler speaking (a loop paced, or defaulted): dim, as
 			// the machinery is.
@@ -1078,6 +1086,15 @@ func (m tuiModel) queuedHint() string {
 		return " (1 message queued for this turn)"
 	}
 	return fmt.Sprintf(" (%d messages queued for this turn)", m.queuedMsgs)
+}
+
+// untilTail is the stop conditions and their run for the status line
+// (/until): " · until: turn 3/10 · plan 4 open, 2 ready", "" with none.
+func (m tuiModel) untilTail() string {
+	if m.untilLine == "" {
+		return ""
+	}
+	return " · " + m.untilLine
 }
 
 // readyWord is the idle status: "ready", or the news that came while idle

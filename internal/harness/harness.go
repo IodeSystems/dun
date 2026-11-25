@@ -167,6 +167,9 @@ type Config struct {
 	// OnPlanNote is OnPlan with a quiet line for the UI alone (auto-archive:
 	// "archived 2 trees"), never put in the model's context.
 	OnPlanNote func(msg string)
+	// OnUntil says the stop conditions or their run changed (until.go): a
+	// client reads them again with Until().
+	OnUntil func()
 	// OnServerSetup says a server's install hint (setupstate.go): one
 	// quiet line, at most once per session.
 	OnServerSetup func(id, msg string)
@@ -438,6 +441,7 @@ type Harness struct {
 	mid        midReply     // the reply a mid-turn message is owed (midreply.go)
 	learn      learnState   // resolved churn waiting for its lesson (learn.go)
 	settle     settleState  // the delayed end-of-turn report (settle.go)
+	until      untilState   // the stop conditions and their run (until.go)
 	auto       autoState    // turn origins and the automatic-turn budget (autoturn.go)
 	netWait    netWaitState // waiting for the network after a turn gave up (netwait.go)
 	gate       TurnGate     // how a message enters while a turn runs (turngate.go)
@@ -840,6 +844,8 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// memory triggers look only at what arrives from here on.
 	h.markTriggerScan()
 	h.settleResume() // a settle owed when the session stopped (settle.go)
+	h.untilResume()  // stop conditions, and a run under way (until.go)
+	h.untilWrapAsk()
 	// Saved output readable by path again, after a reboot wiped /tmp (isotmp.go).
 	h.restoreIsoTmp()
 	// Every response the engine's clients get reaches the root session's
@@ -1106,6 +1112,7 @@ func (h *Harness) AskAs(ctx context.Context, id, task string) (agent.TurnResult,
 	res, err := h.turnThenTriggers(ctx)
 	h.settleEnd(person, st, err)
 	res, err = h.finishInterrupt(ctx, res, err)
+	h.untilTurnEnd(res, err)
 	h.ledgerEnd(ctx, err)
 	h.netWaitAfter(err)
 	return res, err
@@ -1192,6 +1199,7 @@ func (h *Harness) managerFor() (*mcpmgr.Manager, bool) {
 // Reset clears the session store, starting a fresh conversation log.
 func (h *Harness) Reset() {
 	h.settleCancel() // a settle owed to the cleared conversation must not fire on the new one
+	h.untilStopReset()
 	h.store.Reset()
 	h.clearAsk() // the ask belonged to the conversation just cleared
 }

@@ -81,6 +81,16 @@ func (s *session) submit(text string) (*prompt, error) {
 	default:
 		p.text = text
 		cmd = &proto.User{Content: text}
+		// A goal chosen in the editor is this prompt's text: the /until
+		// line goes first, so the turn it starts is the run's first.
+		s.mu.Lock()
+		goal := s.goalPrompt(text)
+		s.mu.Unlock()
+		if goal != nil {
+			if err := s.send("", goal); err != nil {
+				return nil, err
+			}
+		}
 	}
 	p.cid = s.link0().nextCID("p")
 	s.mu.Lock()
@@ -208,6 +218,13 @@ func (s *session) onDone(d *proto.Done) {
 	if d.Reason == "interrupted" || s.cancel {
 		stop = sdk.StopReasonCancelled
 	}
+	// A stop condition's run goes on (until.go): its prompts are answered
+	// when it stops.
+	if hold := stop == sdk.StopReasonEndTurn && s.untilRunning(); hold {
+		s.untilHeld, s.streamed, s.ask = true, false, nil
+		s.mu.Unlock()
+		return
+	}
 	s.mu.Unlock()
 	s.endTurn(stop, nil)
 }
@@ -220,7 +237,7 @@ func (s *session) onError(e *proto.Error) {
 // endTurn answers the prompts the turn held and closes its question.
 func (s *session) endTurn(stop sdk.StopReason, err error) {
 	s.mu.Lock()
-	s.cancel, s.streamed, s.ask = false, false, nil
+	s.cancel, s.streamed, s.ask, s.untilHeld = false, false, nil, false
 	stopPerm := s.permStop
 	s.mu.Unlock()
 	if stopPerm != nil {
