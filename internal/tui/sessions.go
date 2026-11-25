@@ -8,10 +8,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/iodesystems/dun/internal/harness"
-	"github.com/iodesystems/dun/internal/numfmt"
+	"github.com/iodesystems/dun/internal/sesslist"
 	"github.com/iodesystems/dun/internal/textfmt"
-	"github.com/iodesystems/dun/proto"
 )
 
 // Switching sessions from inside the TUI.
@@ -37,8 +35,13 @@ func resumeSlash(m *tuiModel, args []string) tea.Cmd {
 	if len(args) > 0 {
 		return m.switchSession(args[0])
 	}
-	m.sessions = harness.ListSessionInfo(m.workspace)
-	m.addServiceSessions()
+	m.sessions, _, _ = sesslist.Collect(sesslist.Opts{WS: m.workspace, All: true, N: pickerListN, Dund: dundSessions})
+	m.sessWS = map[string]string{}
+	for _, s := range m.sessions {
+		if !s.Local {
+			m.sessWS[s.ID] = s.Workspace
+		}
+	}
 	if len(m.sessions) == 0 {
 		m.append(StDim.Render("no saved sessions yet"))
 		return nil
@@ -56,66 +59,6 @@ func resumeSlash(m *tuiModel, args []string) tea.Cmd {
 	m.input.Blur()
 	m.refresh()
 	return nil
-}
-
-// orderSessions sorts infos by the rule dund lists in (proto.SortSessions).
-// dund's own last-activity time wins over the file's where it has the session.
-func orderSessions(infos []harness.SessionInfo, live map[string]bool, list []proto.SessionSummary) []harness.SessionInfo {
-	active := map[string]string{}
-	for _, s := range list {
-		active[s.ID] = s.LastActive
-	}
-	byID := map[string]harness.SessionInfo{}
-	rows := make([]proto.SessionSummary, 0, len(infos))
-	for _, in := range infos {
-		byID[in.ID] = in
-		la := active[in.ID]
-		if la == "" && !in.ModTime.IsZero() {
-			la = in.ModTime.UTC().Format(time.RFC3339)
-		}
-		rows = append(rows, proto.SessionSummary{ID: in.ID, Running: live[in.ID], LastActive: la})
-	}
-	proto.SortSessions(rows)
-	out := make([]harness.SessionInfo, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, byID[r.ID])
-	}
-	return out
-}
-
-// addServiceSessions adds the sessions dund holds in OTHER workspaces, notes
-// which have a live engine, and orders the whole list by dund's rule:
-// running first, then last activity. A failure to reach dund leaves the list
-// as the files say (newest first).
-func (m *tuiModel) addServiceSessions() {
-	m.sessWS, m.sessLive = map[string]string{}, map[string]bool{}
-	list, err := dundSessions()
-	if err != nil {
-		return
-	}
-	have := map[string]bool{}
-	for _, s := range m.sessions {
-		have[s.ID] = true
-	}
-	infos := map[string][]harness.SessionInfo{} // per workspace, read once
-	for _, s := range list {
-		m.sessLive[s.ID] = s.Running
-		if have[s.ID] || s.Workspace == m.workspace {
-			continue
-		}
-		m.sessWS[s.ID] = s.Workspace
-		if _, ok := infos[s.Workspace]; !ok {
-			infos[s.Workspace] = harness.ListSessionInfo(s.Workspace)
-		}
-		info := harness.SessionInfo{ID: s.ID}
-		for _, in := range infos[s.Workspace] {
-			if in.ID == s.ID {
-				info = in
-			}
-		}
-		m.sessions = append(m.sessions, info)
-	}
-	m.sessions = orderSessions(m.sessions, m.sessLive, list)
 }
 
 // updatePicking owns the keys while the session list is open.
@@ -228,16 +171,18 @@ func newSlash(m *tuiModel, _ []string) tea.Cmd {
 	return restartEngine(m.opts, "", false, resumeAt{})
 }
 
-// sessionPanel renders the picker in the lower pane, newest first.
+// pickerListN bounds the rows /resume lists: the files behind the rest are
+// never opened, which is what keeps the picker quick.
+const pickerListN = 60
+
+// sessionPanel renders the picker in the lower pane: this workspace's
+// sessions first, then the others under a divider, one line each.
 func (m tuiModel) sessionPanel() string {
-	rows := make([]string, 0, len(m.sessions)+1)
+	rows := make([]string, 0, len(m.sessions)+2)
 	rows = append(rows, stHeader.Render("sessions")+StDim.Render("  ↑/↓ choose · enter resume · esc cancel"))
-	// A long history should not push the input off the screen; show a window
-	// around the selection: up to 8 sessions of up to three rows each, fewer
-	// on a short terminal.
-	window := 8
+	window := 12
 	if m.h > 0 {
-		window = min(8, max(3, (m.h-8)/3))
+		window = min(12, max(3, m.h-10))
 	}
 	lo := m.pickSel - window/2
 	if lo < 0 {
@@ -250,29 +195,37 @@ func (m tuiModel) sessionPanel() string {
 			lo = 0
 		}
 	}
+	now := time.Now()
 	for i := lo; i < hi; i++ {
 		s := m.sessions[i]
+		switch {
+		case i == 0 && s.Local:
+			rows = append(rows, StDim.Render("  this workspace"))
+		case !s.Local && (i == 0 || m.sessions[i-1].Local):
+			rows = append(rows, StDim.Render("  other workspaces"))
+		}
 		mark := "  "
 		if s.ID == m.sessionID {
 			mark = StTool.Render("• ") // where you are now
 		}
-		line := fmt.Sprintf("%s%s  %s  %s",
-			mark, s.ID, StDim.Render(textfmt.RelTime(s.ModTime)), StDim.Render(numfmt.Commaf("%d entries", s.Entries)))
-		if m.sessLive[s.ID] {
-			line += StTool.Render("  running")
-		}
-		if ws := m.sessWS[s.ID]; ws != "" {
-			line += StDim.Render("  " + ws)
-		}
-		if p := s.Preview; p != "" {
-			line += "\n     " + textfmt.Clip(p, max(20, m.w-12))
+		status := textfmt.Pad(s.Status, 7)
+		if s.Status == "running" {
+			status = StTool.Render(status)
 		} else {
-			line += "\n     " + StDim.Render("(no opening message — compacted or empty)")
+			status = StDim.Render(status)
 		}
-		// The latest ask under the opening one: what it was about by the end.
-		if l := s.Last; l != "" {
-			line += "\n     " + StDim.Render("last: ") + textfmt.Clip(l, max(20, m.w-18))
+		line := mark + s.ID + "  " + status + "  " + StDim.Render(textfmt.Pad(sesslist.Age(s.LastActive, now), 8)) + "  "
+		used := 2 + len(s.ID) + 2 + 7 + 2 + 8 + 2
+		if !s.Local {
+			const dirW = 24
+			line += StDim.Render(textfmt.Pad(sesslist.ClipLeft(sesslist.TildeDir(s.Workspace), dirW), dirW)) + "  "
+			used += dirW + 2
 		}
+		ask := textfmt.OneLine(s.Last)
+		if ask == "" {
+			ask = "(no request)"
+		}
+		line += textfmt.ClipRune(ask, max(10, m.w-used-5))
 		if i == m.pickSel {
 			rows = append(rows, addGutter(line, "▎ ", stSel))
 		} else {

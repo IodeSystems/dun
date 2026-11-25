@@ -174,7 +174,18 @@ func emptySessionIDs(root string, cutoff time.Time) []string {
 }
 
 func scanSessionIDs(root string) (ids []string, empty map[string]time.Time) {
-	entries, _ := os.ReadDir(RootDir(root))
+	return scanIDsIn(RootDir(root))
+}
+
+// SessionIDsIn is sessionIDs for a session directory already resolved
+// (RootDir, or project.SessionDir), so the caller pays for no lookup.
+func SessionIDsIn(dir string) []string {
+	ids, _ := scanIDsIn(dir)
+	return ids
+}
+
+func scanIDsIn(dir string) (ids []string, empty map[string]time.Time) {
+	entries, _ := os.ReadDir(dir)
 	empty = map[string]time.Time{}
 	for _, e := range entries {
 		n := e.Name()
@@ -204,10 +215,13 @@ func scanSessionIDs(root string) (ids []string, empty map[string]time.Time) {
 //
 // A file that cannot be read counts as asked: it is exactly the one to look
 // at. A transcript that does not exist does not. It never creates anything.
-func SessionAsked(root, id string) bool {
-	files := []string{SessionFile(root, id)}
+func SessionAsked(root, id string) bool { return SessionAskedIn(RootDir(root), id) }
+
+// SessionAskedIn is SessionAsked for a session directory already resolved.
+func SessionAskedIn(dir, id string) bool {
+	files := []string{filepath.Join(dir, id+".jsonl")}
 	for _, pat := range []string{".cleared.*.jsonl", ".recap*.jsonl"} {
-		m, _ := filepath.Glob(filepath.Join(RootDir(root), id+pat))
+		m, _ := filepath.Glob(filepath.Join(dir, id+pat))
 		files = append(files, m...)
 	}
 	for _, f := range files {
@@ -407,6 +421,11 @@ func lastUserMessage(path string) string {
 	}
 	return ""
 }
+
+// LastAsk is the latest user message of session id in session directory dir,
+// read from the end of its file, never the whole transcript. "" when the tail
+// holds none.
+func LastAsk(dir, id string) string { return lastUserMessage(filepath.Join(dir, id+".jsonl")) }
 
 // SessionMeta stores the worktree info alongside a session so that resume
 // can reuse the same worktree (preserving file edits).

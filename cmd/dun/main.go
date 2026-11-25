@@ -152,6 +152,11 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "projects" {
 		os.Exit(projectsCmd(os.Args[2:], os.Stdout, os.Stderr))
 	}
+	// `dun sessions`: the sessions of this workspace or all, with status
+	// and last request (sessionscmd.go).
+	if len(os.Args) > 1 && os.Args[1] == "sessions" {
+		os.Exit(sessionsCmd(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	// `dun msg`: message sessions and listen for messages from a shell (msgcmd.go).
 	if len(os.Args) > 1 && os.Args[1] == "msg" {
 		os.Exit(msgCmd(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
@@ -218,7 +223,7 @@ func main() {
 	persistFlag := flag.Bool("persist", false, "set by dund: the session persists, so resuming it restarts its running and idle sub-agents")
 	noDir := flag.Bool("no-dir", false, "a session attached to no directory: talk with dun, its skills and MCP tools; no project files, rules, code or document index (sessions live in $DUN_HOME/nodir)")
 	fresh := flag.Bool("new", false, "start a new session, even when this workspace has one no client is attached to (which plain dun resumes)")
-	listSessions := flag.Bool("sessions", false, "list saved sessions for this workspace and exit")
+	listSessions := flag.Bool("sessions", false, "list this workspace's sessions and exit (same as dun sessions)")
 	// -p is the headless run for a person or a script; --engine is the JSON
 	// protocol that dund and the TUI drive (USER 2026-11-17). headless and
 	// prog are the two; *prog below always means the engine.
@@ -502,14 +507,8 @@ func main() {
 	}
 
 	if *listSessions {
-		ids := harness.ListSessions(absWS)
-		if len(ids) == 0 {
-			fmt.Fprintln(os.Stderr, "dun: no saved sessions for this workspace")
-		}
-		for _, id := range ids {
-			fmt.Println(id)
-		}
-		return
+		// An alias of `dun sessions`; the id is still the first column.
+		os.Exit(sessionsRun(sessionsOpts{ws: absWS, n: sessionsDefaultN}, os.Stdout, os.Stderr))
 	}
 
 	// Replay: drive the TUI from a recorded trace instead of an engine. No LLM,

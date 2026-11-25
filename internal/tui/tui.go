@@ -19,6 +19,7 @@ import (
 	"github.com/iodesystems/dun/internal/dunconfig"
 	"github.com/iodesystems/dun/internal/dundcli"
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/sesslist"
 )
 
 // tuiOpts are the flags the TUI forwards to its `dun --engine` subprocess.
@@ -374,13 +375,12 @@ type tuiModel struct {
 	// reportDir is the capture a /repaint report is waiting on the model for.
 	reportDir string
 
-	renderDue   bool                  // streamed text arrived; a tick will draw it
-	tickPending bool                  // a render tick is already scheduled
-	picking     bool                  // the session picker owns the keys
-	sessions    []harness.SessionInfo // what it is listing
-	sessWS      map[string]string     // id → workspace, for sessions dund has elsewhere
-	sessLive    map[string]bool       // id → its engine is running in dund
-	pickSel     int                   // highlighted session
+	renderDue   bool              // streamed text arrived; a tick will draw it
+	tickPending bool              // a render tick is already scheduled
+	picking     bool              // the session picker owns the keys
+	sessions    []sesslist.Row    // what it is listing
+	sessWS      map[string]string // id → workspace, for sessions dund has elsewhere
+	pickSel     int               // highlighted session
 	// Model picker (/model): fetch available models, let the user switch.
 	modelPicking bool       // the model picker owns the keys
 	models       pickList   // its search box and highlighted row
