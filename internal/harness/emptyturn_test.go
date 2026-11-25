@@ -68,6 +68,10 @@ func startEmpty(t *testing.T, r *emptyRunner, notes *[]string) *Harness {
 		t.Fatal(err)
 	}
 	t.Cleanup(h.Close)
+	// agentkit v0.41 resends a failed round (native MALFORMED_FUNCTION_CALL)
+	// up to 10 times with a ~13 minute backoff before the empty-reply path;
+	// these tests exercise that path, not the resend.
+	h.Session.MaxProviderFailRetries = -1
 	return h
 }
 

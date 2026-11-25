@@ -32,7 +32,7 @@ import (
 // it current, take it down.
 type RetryNote struct {
 	Scope   string        `json:"scope"` // "request" | "turn"
-	Kind    string        `json:"kind"`  // transport|429|5xx|interrupted|recovered|giveup
+	Kind    string        `json:"kind"`  // transport|429|5xx|interrupted|provider_fail|recovered|giveup
 	Attempt int           `json:"attempt"`
 	Status  int           `json:"status,omitempty"`
 	Delay   time.Duration `json:"delay"`
@@ -59,6 +59,10 @@ func (n RetryNote) Retrying() bool { return n.Kind != "recovered" && n.Kind != "
 
 // String is the one-line form used for stderr and the TUI's scrollback.
 func (n RetryNote) String() string {
+	if n.Kind == "provider_fail" {
+		// Reason ends at the attempt count; the wait is the tail.
+		return fmt.Sprintf("%s in %s", n.Reason, n.Delay.Round(time.Second))
+	}
 	s := n.Reason
 	if n.Retrying() && n.Delay > 0 {
 		if n.ServerAsked {
@@ -71,6 +75,17 @@ func (n RetryNote) String() string {
 		s += ": " + n.Detail
 	}
 	return s
+}
+
+// providerFailNote converts agentkit's resend report (a round the provider
+// ended with a failure finish_reason) into the note the UIs already render.
+func providerFailNote(r agent.ProviderFailRetry) RetryNote {
+	native := r.NativeFinishReason
+	if native == "" {
+		native = r.FinishReason
+	}
+	return RetryNote{Scope: "provider", Kind: "provider_fail", Attempt: r.Attempt, Delay: r.Wait,
+		Reason: fmt.Sprintf("provider failed (native: %s), resending %d/%d", native, r.Attempt, r.Max)}
 }
 
 // noteFromEvent converts the client's own retry report into dun's shape.
