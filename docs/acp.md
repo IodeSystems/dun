@@ -171,8 +171,14 @@ outside the workspace, `harness/fileaccess.go`):
 - Client `fs/*` and `terminal/*`: dun reads and writes the disk and runs
   commands itself; the editor sees the files change on disk.
 - Session modes, config options, `session/list`, `session/resume`,
-  `session/delete`, authentication (none is needed: the bridge is the
-  user's own process and dund checks the socket's peer).
+  `session/delete`.
+- Sign-in: there is none. initialize advertises one `agent` auth method
+  (id `dun`) because editors such as JetBrains Air wait for one and the ACP
+  registry requires one. `authenticate` with `dun` succeeds with no check;
+  any other id is -32602. Sessions do not need it. Providers are set in dun
+  (`/login` in the TUI); the bridge is the user's own process and dund
+  checks the socket's peer. `agentCapabilities.auth` is the SDK's zero
+  value (`{}`), not set by dun.
 - Images and audio in prompts; usage and cost updates.
 
 ## Verified

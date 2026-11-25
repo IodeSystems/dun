@@ -85,3 +85,25 @@ func TestBeforeInitialize(t *testing.T) {
 		t.Errorf("want -32600, got %v", err)
 	}
 }
+
+// initialize advertises one agent auth method; authenticate accepts it and
+// rejects other ids; a session needs no authenticate.
+func TestAuthenticate(t *testing.T) {
+	r := newRig(t)
+	res, err := r.cc.Initialize(context.Background(), sdk.InitializeRequest{ProtocolVersion: sdk.ProtocolVersionNumber})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.AuthMethods) != 1 || res.AuthMethods[0].Agent == nil || res.AuthMethods[0].Agent.Id != "dun" || res.AuthMethods[0].Agent.Name != "dun" || res.AuthMethods[0].Agent.Description == nil {
+		t.Fatalf("authMethods: %+v", res.AuthMethods)
+	}
+	r.newSession()
+	if _, err := r.cc.Authenticate(context.Background(), sdk.AuthenticateRequest{MethodId: "dun"}); err != nil {
+		t.Errorf("authenticate dun: %v", err)
+	}
+	_, err = r.cc.Authenticate(context.Background(), sdk.AuthenticateRequest{MethodId: "nope"})
+	var re *sdk.RequestError
+	if !errors.As(err, &re) || re.Code != -32602 {
+		t.Errorf("unknown method: want -32602, got %v", err)
+	}
+}
