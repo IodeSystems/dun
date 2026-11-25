@@ -24,7 +24,7 @@ The engine emits events as line-delimited JSON objects. Each has a `"type"` fiel
 | `queued` | Message buffered mid-turn | `text`, `count` |
 | `usage` | Token accounting | `total`, `active`, `cached`, `processed`, `generated`, `turns` |
 | `done` | Turn completed | `reason` (`interrupted` when the user stopped it) |
-| `until` | The stop conditions (`/until`) or their run changed; kept as state | `conds[]` (`kind` turns/goal/plan, `n`, `goal`, `check`, `progress`), `cap`, `turn`, `running`, `stopped` (why the last run stopped), `line` (one line for a status bar). A run's stop is also a `notification` of `kind` `until` |
+| `until` | The stop conditions (`/until`) or their run changed; kept as state | `conds[]` (`kind` turns/goal/plan, `n`, `goal`, `check`, `progress`), `cap`, `turn`, `running`, `paused` (with `running`: a question to the person is open; the run goes on when it is answered), `stopped` (why the last run stopped), `line` (one line for a status bar, idle too: `until: plan · turns 15`, `until: turn 3/15 · plan 4 open, 2 ready`, `until: paused (question) · turn 3/15`). A run's stop is also a `notification` of `kind` `until` |
 | `error` | Turn failed | `error`, `fatal` |
 | `retry` | Provider outage, retrying | `note`, `due`, `seen` |
 | `clearing` | A `/clear` came while a turn ran: the turn is interrupted, and the clear waits for it to stop. A message sent meanwhile is queued for the cleared conversation. The `reset` that follows ends it | `waiting` (what the turn was doing: a tool, `the model's reply`) |

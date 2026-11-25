@@ -30,3 +30,31 @@ func TestUntilStatus(t *testing.T) {
 		t.Errorf("cleared: %q", m.untilTail())
 	}
 }
+
+// The marker idle (between runs), running and paused on a question; parked,
+// the question's status line keeps it.
+func TestUntilMarker(t *testing.T) {
+	m := newTUIModel(&dunProc{}, "/ws")
+	m = resized(m, 160, 30)
+	m = m.handleEvent(evMsg{"type": "ready", "tools": []any{"eval"}})
+	conds := []any{map[string]any{"kind": "plan"}, map[string]any{"kind": "turns", "n": float64(15)}}
+	for _, c := range []struct {
+		ev   evMsg
+		want string
+	}{
+		{evMsg{"line": "until: plan · turns 15"}, "until: plan · turns 15"},
+		{evMsg{"running": true, "turn": float64(3), "line": "until: turn 3/15 · plan 4 open, 2 ready"}, "until: turn 3/15 · plan 4 open, 2 ready"},
+		{evMsg{"running": true, "paused": true, "turn": float64(3), "line": "until: paused (question) · turn 3/15"}, "until: paused (question) · turn 3/15"},
+	} {
+		c.ev["type"], c.ev["conds"], c.ev["cap"] = "until", conds, float64(15)
+		m = m.handleEvent(c.ev)
+		if v := stripANSI(m.View().Content); !strings.Contains(v, "ready · "+c.want) {
+			t.Errorf("status lacks %q:\n%s", c.want, v)
+		}
+	}
+	m.askParked = true
+	m.focus = focusActivity
+	if v := stripANSI(m.View().Content); !strings.Contains(v, "a question is waiting · until: paused (question)") {
+		t.Errorf("parked question lacks the marker:\n%s", v)
+	}
+}

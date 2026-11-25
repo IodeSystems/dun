@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/iodesystems/agentkit/agent"
@@ -30,9 +29,15 @@ import (
 //     <text> [--check <cmd>] (the goal is met), plan (no plan node is ready
 //     or under way). The run stops at the first that fires. goal or plan
 //     without turns stops at untilDefaultCap turns.
-//   - Safety stops, always: the person interrupted, the turn failed, a
-//     question was put to the person in the turn (ask_user, a file-access
-//     question), and untilStallTurns turns in a row with no progress.
+//   - Safety stops, always: the person interrupted, the turn failed, and
+//     untilStallTurns turns in a row with no progress.
+//   - A question to the person (ask_user, a file-access question: Config.Ask)
+//     pauses the run while it is open (USER 2026-11-24): the snapshot says
+//     paused, and the run goes on when the answer comes, its counters
+//     kept. An interrupt or /until off while paused ends the run. Paused is
+//     kept in the sidecar: an engine that stopped with a question open (the
+//     question is gone with it) stays paused, and the next turn that begins
+//     (the person's message, the answer) is the run's next.
 //   - A run starts with the next turn that begins (the person's message is
 //     turn 1, or the turn running when /until was given). The conditions
 //     stay after a stop: the next turn starts a new run. /until off clears
@@ -92,12 +97,14 @@ type untilState struct {
 	endInt      bool // the person interrupted it
 	reply       string
 	calls0      uint64
-	asks0       int64
 	plan0       string
 	// next: the Continue about to run is the run's (UntilContinue).
 	next bool
-	// asks counts questions put to the person (Config.Ask).
-	asks atomic.Int64
+	// asking counts the questions open to the person (Config.Ask); paused:
+	// the run waits for an answer (asking, or a question an engine that
+	// stopped left open).
+	asking int
+	paused bool
 }
 
 // untilFile is the sidecar.
@@ -112,10 +119,14 @@ type untilDisk struct {
 	Stalls  int         `json:"stalls,omitempty"`
 	Stopped string      `json:"stopped,omitempty"`
 	Goal    string      `json:"goal_note,omitempty"`
+	Paused  bool        `json:"paused,omitempty"`
 }
 
 // untilSave writes the sidecar; u.mu is held.
 func (h *Harness) untilSave(u *untilState) {
+	if !u.running { // a run that stopped is not paused
+		u.paused = false
+	}
 	if h.cfg.SessionFile == "" || h.isChild() {
 		return
 	}
@@ -124,12 +135,12 @@ func (h *Harness) untilSave(u *untilState) {
 		_ = os.Remove(f)
 		return
 	}
-	b, _ := json.Marshal(untilDisk{Conds: u.conds, Running: u.running, Turn: u.turn, Stalls: u.stalls, Stopped: u.stopped, Goal: u.goalNote})
+	b, _ := json.Marshal(untilDisk{Conds: u.conds, Running: u.running, Turn: u.turn, Stalls: u.stalls, Stopped: u.stopped, Goal: u.goalNote, Paused: u.paused})
 	_ = fsutil.WriteAtomic(f, append(b, '\n'), 0o600)
 }
 
 // untilResume reads the sidecar at start. A run under way when the engine
-// stopped is owed its next turn.
+// stopped is owed its next turn; a paused one waits for the person's.
 func (h *Harness) untilResume() {
 	if h.cfg.SessionFile == "" || h.isChild() {
 		return
@@ -145,11 +156,12 @@ func (h *Harness) untilResume() {
 	u := &h.until
 	u.mu.Lock()
 	u.conds, u.running, u.turn, u.stalls, u.stopped, u.goalNote = d.Conds, d.Running && len(d.Conds) > 0, d.Turn, d.Stalls, d.Stopped, d.Goal
-	u.owed = u.running
+	u.paused = d.Paused && u.running
+	u.owed = u.running && !u.paused
 	u.mu.Unlock()
 }
 
-// untilWrapAsk counts the questions Config.Ask puts to the person. Called
+// untilWrapAsk pauses a run while Config.Ask's question is open. Called
 // once, in New, for the root session.
 func (h *Harness) untilWrapAsk() {
 	ask := h.cfg.Ask
@@ -157,9 +169,27 @@ func (h *Harness) untilWrapAsk() {
 		return
 	}
 	h.cfg.Ask = func(ctx context.Context, q string, opts []string, multi, noCustom bool, rec []string) (string, error) {
-		h.until.asks.Add(1)
+		h.untilAsking(1)
+		defer h.untilAsking(-1)
 		return ask(ctx, q, opts, multi, noCustom, rec)
 	}
+}
+
+// untilAsking notes a question opened (+1) or closed (-1): a run is paused
+// while one is open, and goes on when the last is answered.
+func (h *Harness) untilAsking(d int) {
+	u := &h.until
+	u.mu.Lock()
+	u.asking += d
+	paused := u.running && u.asking > 0
+	if paused == u.paused {
+		u.mu.Unlock()
+		return
+	}
+	u.paused = paused
+	h.untilSave(u)
+	u.mu.Unlock()
+	h.untilChanged()
 }
 
 func (h *Harness) untilChanged() {
@@ -201,7 +231,7 @@ func (h *Harness) untilTurnBegin() {
 	u := &h.until
 	u.mu.Lock()
 	u.inTurn, u.pendingEval = true, false
-	u.calls0, u.asks0, u.plan0 = calls, u.asks.Load(), plan
+	u.calls0, u.plan0 = calls, plan
 	if len(u.conds) == 0 {
 		u.mu.Unlock()
 		return
@@ -211,6 +241,7 @@ func (h *Harness) untilTurnBegin() {
 	}
 	u.turn++
 	u.owed = false
+	u.paused = u.asking > 0 // a question an engine that stopped left open: this turn answers it
 	h.untilSave(u)
 	u.mu.Unlock()
 	h.untilChanged()
@@ -320,7 +351,7 @@ func (h *Harness) UntilNext(ctx context.Context) UntilStep {
 	conds := append([]UntilCond(nil), u.conds...)
 	turn, capN := u.turn, untilCap(u.conds)
 	endErr, endCut, endInt, reply := u.endErr, u.endCut, u.endInt, u.reply
-	calls0, asks0, plan0 := u.calls0, u.asks0, u.plan0
+	calls0, plan0 := u.calls0, u.plan0
 	u.mu.Unlock()
 
 	if endCut { // a restart or a clear cut it: the run goes on when the engine does
@@ -336,8 +367,6 @@ func (h *Harness) UntilNext(ctx context.Context) UntilStep {
 		stop = "interrupted"
 	case endErr != "":
 		stop = "the turn failed: " + endErr
-	case u.asks.Load() > asks0:
-		stop = "a question was put to the user"
 	}
 	var calls uint64
 	if h.store != nil {
@@ -603,6 +632,7 @@ type UntilSnapshot struct {
 	Cap      int
 	Turn     int
 	Running  bool
+	Paused   bool // the run waits for the person's answer
 	Stopped  string
 	Line     string // the whole of it in one short line, for a status bar
 }
@@ -611,7 +641,7 @@ type UntilSnapshot struct {
 func (h *Harness) Until() UntilSnapshot {
 	u := &h.until
 	u.mu.Lock()
-	s := UntilSnapshot{Conds: append([]UntilCond(nil), u.conds...), Turn: u.turn, Running: u.running, Stopped: u.stopped}
+	s := UntilSnapshot{Conds: append([]UntilCond(nil), u.conds...), Turn: u.turn, Running: u.running, Paused: u.paused, Stopped: u.stopped}
 	goalNote, goalMet := u.goalNote, u.goalMet
 	u.mu.Unlock()
 	if len(s.Conds) == 0 {
@@ -642,12 +672,32 @@ func (h *Harness) Until() UntilSnapshot {
 		}
 		s.Progress = append(s.Progress, p)
 	}
-	if s.Running {
+	switch {
+	case s.Paused:
+		s.Line = fmt.Sprintf("until: paused (question) · turn %d/%d", s.Turn, s.Cap)
+	case s.Running:
 		s.Line = "until: " + strings.Join(parts, " · ")
-	} else {
-		s.Line = "until " + textfmt.ClipRune(untilWords(s.Conds), 60)
+	default:
+		s.Line = "until: " + untilIdle(s.Conds)
 	}
 	return s
+}
+
+// untilIdle is the conditions for a status bar between runs: "plan · turns
+// 15", "goal tests pass · turns 10".
+func untilIdle(conds []UntilCond) string {
+	var w []string
+	for _, c := range conds {
+		switch c.Kind {
+		case UntilTurns:
+			w = append(w, fmt.Sprintf("turns %d", c.N))
+		case UntilPlan:
+			w = append(w, "plan")
+		case UntilGoal:
+			w = append(w, "goal "+textfmt.ClipRune(textfmt.OneLine(c.Goal), 40))
+		}
+	}
+	return strings.Join(w, " · ")
 }
 
 // untilWords are the conditions as /until takes them (proto.UntilLine).
@@ -700,6 +750,7 @@ func (h *Harness) UntilCmd(action string) (string, error) {
 		u.stopped, u.goalNote, u.goalMet, u.stalls = "", "", false, 0
 		if u.inTurn { // the turn running is the run's first
 			u.running, u.turn = true, 1
+			u.paused = u.asking > 0
 		}
 	}
 	h.untilSave(u)
@@ -733,6 +784,8 @@ func (h *Harness) untilStatus() string {
 		lines = append(lines, "  "+c.Kind+": "+p)
 	}
 	switch {
+	case s.Paused:
+		lines = append(lines, fmt.Sprintf("  run: paused at turn %d of at most %d · waiting for your answer", s.Turn, s.Cap))
 	case s.Running:
 		lines = append(lines, fmt.Sprintf("  run: turn %d of at most %d", s.Turn, s.Cap))
 	case s.Stopped != "":

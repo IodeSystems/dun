@@ -226,30 +226,122 @@ func TestUntil_GoalCheck(t *testing.T) {
 	}
 }
 
-// ask_user in a run's turn stops it; the continue turns are user-set, so
-// it is not refused there.
-func TestUntil_AskStops(t *testing.T) {
+// ask_user in a run's turn pauses it while open, and the run goes on when
+// it is answered, its counters kept; the continue turns are user-set, so
+// ask_user is not refused there.
+func TestUntil_AskPauses(t *testing.T) {
 	t.Setenv("DUN_HOME", t.TempDir())
 	asked := 0
+	var h *Harness
+	var during UntilSnapshot
 	r := &untilRunner{act: func(k int) *llm.ToolCall {
 		if k == 2 {
 			return nudgeCall("q", "ask_user", `{"question":"which?","options":["a","b"],"recommended":"a"}`)
 		}
 		return untilExec(k, "true")
 	}}
-	h := startUntil(t, r, t.TempDir(), func(c *Config) {
+	h = startUntil(t, r, t.TempDir(), func(c *Config) {
 		c.Ask = func(context.Context, string, []string, bool, bool, []string) (string, error) {
 			asked++
+			during = h.Until()
 			return "a", nil
 		}
 	})
 	defer h.Close()
-	untilSet(t, h, "turns 5")
-	if got := drive(t, h); got != "a question was put to the user (turn 2 of 5)" {
+	untilSet(t, h, "turns 4")
+	if got := drive(t, h); got != "turn cap 4 reached (turn 4 of 4)" {
 		t.Fatalf("stopped %q", got)
 	}
-	if asked != 1 {
-		t.Errorf("asked %d", asked)
+	if asked != 1 || r.turnCount() != 4 {
+		t.Errorf("asked %d, turns %d", asked, r.turnCount())
+	}
+	if !during.Paused || !during.Running || during.Turn != 2 || during.Line != "until: paused (question) · turn 2/4" {
+		t.Errorf("while asking: %+v", during)
+	}
+	if s := h.Until(); s.Paused {
+		t.Errorf("paused after the run: %+v", s)
+	}
+}
+
+// An interrupt, or /until off, while the question is open ends the run.
+func TestUntil_InterruptWhilePaused(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	h := startUntil(t, &untilRunner{}, t.TempDir(), nil)
+	defer h.Close()
+	untilSet(t, h, "turns 5")
+	h.untilTurnBegin()
+	h.untilAsking(1)
+	if s := h.Until(); !s.Paused {
+		t.Fatalf("not paused: %+v", s)
+	}
+	h.untilAsking(-1) // the ask's context was cancelled
+	h.untilTurnEnd(agent.TurnResult{}, ErrInterrupted)
+	if st := h.UntilNext(context.Background()); st.Stopped != "interrupted (turn 1 of 5)" {
+		t.Errorf("step %+v", st)
+	}
+	if s := h.Until(); s.Running || s.Paused {
+		t.Errorf("after: %+v", s)
+	}
+	h.untilTurnBegin()
+	h.untilAsking(1)
+	if _, err := h.UntilCmd("off"); err != nil {
+		t.Fatal(err)
+	}
+	if s := h.Until(); s.Running || s.Paused {
+		t.Errorf("after off: %+v", s)
+	}
+	h.untilAsking(-1)
+	if s := h.Until(); s.Running || s.Paused {
+		t.Errorf("after the answer: %+v", s)
+	}
+}
+
+// Paused survives the engine: the question went with it, so the new engine
+// owes no turn; the person's next message (the answer) is the run's next
+// turn, its counters kept.
+func TestUntil_PausedPersists(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	dir := t.TempDir()
+	r := &untilRunner{act: func(k int) *llm.ToolCall { return untilExec(k, "true") }}
+	h := startUntil(t, r, dir, nil)
+	untilSet(t, h, "turns 5")
+	h.untilTurnBegin()
+	h.untilTurnEnd(agent.TurnResult{}, nil)
+	h.untilTurnBegin() // turn 2 asks, and the engine stops with it open
+	h.untilAsking(1)
+	h.Close()
+	h2 := startUntil(t, r, dir, nil)
+	defer h2.Close()
+	s := h2.Until()
+	if !s.Running || !s.Paused || s.Turn != 2 || s.Line != "until: paused (question) · turn 2/5" {
+		t.Fatalf("resumed %+v", s)
+	}
+	if st := h2.UntilNext(context.Background()); st.Continue || st.Stopped != "" {
+		t.Errorf("owed a turn while paused: %+v", st)
+	}
+	if _, err := h2.Ask(context.Background(), "go now: b"); err != nil {
+		t.Fatal(err)
+	}
+	if s := h2.Until(); s.Paused || !s.Running || s.Turn != 3 {
+		t.Errorf("after the answer: %+v", s)
+	}
+	if st := h2.UntilNext(context.Background()); !st.Continue {
+		t.Errorf("not going on: %+v", st)
+	}
+}
+
+// The line a status bar shows between runs.
+func TestUntil_Line(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	h := startUntil(t, &untilRunner{}, t.TempDir(), nil)
+	defer h.Close()
+	untilSet(t, h, `plan turns 15`)
+	if l := h.Until().Line; l != "until: plan · turns 15" {
+		t.Errorf("idle %q", l)
+	}
+	untilSet(t, h, `goal "tests pass" --check "make test" turns 10`)
+	if l := h.Until().Line; l != "until: goal tests pass · turns 10" {
+		t.Errorf("idle goal %q", l)
 	}
 }
 

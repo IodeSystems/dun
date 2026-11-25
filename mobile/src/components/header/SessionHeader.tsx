@@ -86,6 +86,7 @@ export function SessionHeader({
   const color = stateColor(c, st.state, phase);
   const tasks = badge(view.bg.agents, view.bg.jobs);
   const plan = view.bg.plan;
+  const until = view.bg.until;
   const last = lastUser(view);
 
   // Slide: a transform only (the native driver where there is one), never
@@ -172,6 +173,23 @@ export function SessionHeader({
               {last ? '› ' + last.replace(/\s+/g, ' ') : ' '}
             </Text>
             {chip(ctxText(stats, view.bg.ctx.active, view.bg.ctx.window), act.ctx, 'Context details')}
+            {until ? (
+              // The stop conditions (/until), idle too: shown, not pressed.
+              <Text
+                accessibilityLabel={until.line}
+                style={{
+                  flexShrink: 1,
+                  maxWidth: '45%',
+                  paddingHorizontal: space.sm,
+                  color: until.paused ? c.ask : until.running ? c.working : c.muted,
+                  fontSize: font.sm,
+                  fontVariant: ['tabular-nums'],
+                }}
+                numberOfLines={1}
+              >
+                {until.line.replace(/^until: /, '⟳ ')}
+              </Text>
+            ) : null}
             {plan ? chip(`☰ ${plan.done}/${plan.total}`, act.plan, `Plan, ${plan.done} of ${plan.total} done`) : null}
             {tasks
               ? chip(

@@ -1332,12 +1332,16 @@ type Plan struct {
 // harness/until.go), sent whenever either changes. No conditions: one turn
 // per message. Running: the engine starts the next turn itself until a
 // condition or a safety stop fires; Stopped then says why the last run
-// stopped. Line is the whole of it in one short line, for a status bar.
+// stopped. Paused (with Running): a question to the person is open, and
+// the run goes on when it is answered. Line is the whole of it in one short
+// line, for a status bar, idle too: "until: plan · turns 15", "until: turn
+// 3/15 · plan 4 open, 2 ready", "until: paused (question) · turn 3/15".
 type Until struct {
 	Conds   []UntilCond `json:"conds,omitempty"`
 	Cap     int         `json:"cap,omitempty"` // the run's turn cap
 	Turn    int         `json:"turn,omitempty"`
 	Running bool        `json:"running,omitempty"`
+	Paused  bool        `json:"paused,omitempty"`
 	Stopped string      `json:"stopped,omitempty"`
 	Line    string      `json:"line,omitempty"`
 }

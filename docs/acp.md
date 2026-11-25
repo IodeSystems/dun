@@ -265,6 +265,14 @@ for, `turn_cap` the most turns it takes:
   starts, and `until: stopped · <why>` when it stops.
 - session/cancel during a run interrupts the turn running, or, between
   turns (the goal being judged), stops the run.
+- **A question pauses the run** (the engine's `ask_user` or file-access
+  question, sent as session/request_permission): the `until` event says
+  `paused` and still `running`, so the held prompt stays held. The answer
+  resumes the run; session/cancel while paused cancels the request and
+  stops the run (the prompt is answered `cancelled`). An engine that
+  stopped with the question open comes back paused and owes no turn: the
+  prompt stays held until the next prompt (the answer) runs, or
+  session/cancel stops the run.
 
 No `modes`: `session/set_mode` is method-not-found; the stop conditions are
 the `mode` config option. Plan mode (`/plan mode on|off`) gates file
