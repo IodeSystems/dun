@@ -123,7 +123,7 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "rag" {
 		os.Exit(ragCmd(os.Args[2:], os.Stdout, os.Stderr))
 	}
-	// `dun --usage [--json] [--no-net]`: what dun has used, from the stats
+	// `dun --usage [--json] [--no-net] [--repairs]`: what dun has used, from the stats
 	// ledger, and what the provider says is left (usage.go). No session.
 	if len(os.Args) > 1 && (os.Args[1] == "--usage" || os.Args[1] == "-usage") {
 		os.Exit(usageCmd(os.Args[2:], os.Stdout, os.Stderr))
