@@ -258,9 +258,23 @@ func (c dunVarsCaller) CallTool(ctx context.Context, serverID, toolName string, 
 		}
 		vars := map[string]any{}
 		if raw, present := out["vars"]; present && raw != nil {
+			// mcpshell v0.16.0's schema: vars is a string holding a
+			// JSON-encoded object (Gemini-safe). An object is the older
+			// form, still accepted. Forwarded as an object, which every
+			// mcpshell since v0.2.0 takes.
+			if s, isStr := raw.(string); isStr {
+				raw = map[string]any{}
+				if strings.TrimSpace(s) != "" {
+					var dec any
+					if err := json.Unmarshal([]byte(s), &dec); err != nil {
+						return "", fmt.Errorf("eval: vars is a JSON-encoded object of name: value: %v", err)
+					}
+					raw = dec
+				}
+			}
 			old, ok := raw.(map[string]any)
 			if !ok {
-				return "", fmt.Errorf("eval: vars is an object of name: value; got %T", raw)
+				return "", fmt.Errorf("eval: vars is a JSON-encoded object of name: value; got %T", raw)
 			}
 			for k, v := range old {
 				vars[k] = v
