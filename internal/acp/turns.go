@@ -253,6 +253,7 @@ func (s *session) endTurn(stop sdk.StopReason, err error) {
 	if stopPerm != nil {
 		stopPerm()
 	}
+	s.resendPlan()
 	s.finish(outcome{stop: stop, err: err, usage: s.takeTurnUsage()}, func(p *prompt) bool { return p.inTurn })
 }
 

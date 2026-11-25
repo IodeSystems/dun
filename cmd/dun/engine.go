@@ -718,6 +718,11 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 		turn(ctx, h, em, firstTask, nil)
 	}
 	users := in.users
+	// The plan, when there is one (kept from before a restart too): a
+	// client that connects later reads it from the snapshot's state.
+	if ev := startPlan(h); ev != nil {
+		em.emit(ev)
+	}
 	if len(h.Until().Conds) > 0 { // kept from before a restart (until.go)
 		em.emit(untilEvent(h))
 	}

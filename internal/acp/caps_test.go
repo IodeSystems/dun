@@ -41,7 +41,7 @@ func TestPlanUpdate(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newRigCaps(t, tc.caps)
-			r.newSession()
+			sid := r.newSession()
 			r.ed.take()
 			r.d.emit(plan)
 			base, upd := planSent(t, r)
@@ -55,7 +55,7 @@ func TestPlanUpdate(t *testing.T) {
 				t.Fatalf("want plan_update items, got plan %+v plan_update %+v", base, upd)
 			}
 			it := upd.Plan.Items
-			if it.PlanId != planID || len(it.Entries) != 2 || it.Entries[0].Status != sdk.PlanEntryStatusInProgress {
+			if string(it.PlanId) != planID(string(sid)) || len(it.Entries) != 2 || it.Entries[0].Status != sdk.PlanEntryStatusInProgress {
 				t.Fatalf("plan_update %+v", it)
 			}
 			b, _ := json.Marshal(sdk.SessionUpdate{PlanUpdate: upd})
@@ -66,7 +66,7 @@ func TestPlanUpdate(t *testing.T) {
 					PlanID string `json:"planId"`
 				} `json:"plan"`
 			}
-			if json.Unmarshal(b, &w) != nil || w.SessionUpdate != "plan_update" || w.Plan.Type != "items" || w.Plan.PlanID != planID {
+			if json.Unmarshal(b, &w) != nil || w.SessionUpdate != "plan_update" || w.Plan.Type != "items" || w.Plan.PlanID != planID(string(sid)) {
 				t.Errorf("wire %s", b)
 			}
 		})
