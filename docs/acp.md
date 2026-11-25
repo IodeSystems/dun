@@ -107,6 +107,7 @@ shows the editor's default icon. No change to `internal/acp` helps.
 | `plan` | `plan`: the tree in order, a repeat row once, dropped rows left out; todo and blocked are `pending` (ACP has no blocked), doing `in_progress`, done `completed`; a ready todo is priority `high`, the rest `medium` |
 | `commands` | `available_commands_update`; a command's usage (or its choices) is the input hint |
 | `user` (another client's) | `user_message_chunk` |
+| `request` (done) and `usage` | `usage_update`, see "Usage, context and cost" |
 
 Tool kinds: `read` file_read, file_list, node_read; `edit` file_edit,
 file_write, node_edit, node_refactor; `delete` file_delete, node_delete;
@@ -117,6 +118,33 @@ tool (`<server>__<tool>`) is looked up by its own name. Only the tools
 `event-protocol.md` "File edits" lists carry diffs: exec, eval,
 node_refactor and node_rename_file change files the editor is not shown a
 diff for.
+
+### Usage, context and cost
+
+`usage_update {size, used, cost}` goes out after each model round
+(`request` `done`: `used` = its prompt + generated tokens, `size` its
+window) and at each turn's end (`usage`: `used` = `active`, the context now;
+`size` = `window`). An update equal to the last one is not sent.
+`session/load` sends one with the session's last `usage`. Nothing is sent
+until a window size is known.
+
+`cost` is `usage.spend.session_cost`, the session's cumulative spend. It is
+sent only when dun has one in `USD` and not mixed with another currency
+(dun's "credits" are not an ISO 4217 code). It is a sum of the costs the
+gateway reported per response, so an estimate where the gateway prices by
+its own rate card; ACP has no exact/estimate flag. A client that wants
+"exact" must not assume it. Rounds from before the cost was reported, or a
+provider that reports none, are not in it.
+
+The prompt response carries `usage` (ACP's unstable field, SDK v0.20.0):
+the turn's own totals from `usage.turn_stats`, sub-agents and side calls
+included. `inputTokens` = `prompt` (cached part included), `outputTokens` =
+`completion`, `cachedReadTokens` = `cached`, `cachedWriteTokens` =
+`cache_write` (both omitted when 0), `totalTokens` = input + output. dun
+does not count reasoning tokens apart, so `thoughtTokens` is never sent. A
+turn with no `turn_stats` (cut before its first round, or an older engine)
+has no `usage`. When one turn's end answers several queued prompts, each
+gets the same totals.
 
 ## Prompts
 
