@@ -234,7 +234,7 @@ func TestLedgerBlockModelTokens(t *testing.T) {
 	flat := strings.Join(strings.Fields(out), " ")
 	for _, want := range []string{
 		"requests cached processed generated",
-		"big 12 3,000 2,000 700",
+		"big 12 3.0k 2.0k 700",
 		"small 1 0 80 9",
 	} {
 		if !strings.Contains(flat, want) {
@@ -275,5 +275,31 @@ func TestModelTokensBlock_Closed(t *testing.T) {
 	}
 	if row := out[strings.LastIndex(out, "big"):]; !strings.HasSuffix(strings.TrimRight(row, " \n"), "3") {
 		t.Errorf("row %q does not end in the closed count", row)
+	}
+}
+
+// Values in the billions neither overflow nor run together: tokens are
+// humanized and every column keeps at least two spaces of separation.
+func TestModelTokensBlock_Huge(t *testing.T) {
+	out := stripANSI(modelTokensBlock([]proto.ModelTokens{
+		{Model: "~deepseek/deepseek-flash-long-name", Requests: 56117, Cached: 5497362718, Prompt: 5497362718 + 294047097, Completion: 37316924},
+		{Model: "google/gemini-4-hydro-long-name", Requests: 1851, Cached: 201887409, Prompt: 201887409 + 35892171, Completion: 689801},
+	}))
+	lines := strings.Split(out, "\n")
+	rows := lines[len(lines)-2:]
+	if got := strings.Fields(rows[0]); strings.Join(got[1:], " ") != "56,117 5.5B 294M 37.3M 0" {
+		t.Errorf("row 1: %q", rows[0])
+	}
+	if got := strings.Fields(rows[1]); strings.Join(got[1:], " ") != "1,851 202M 35.9M 689.8k 0" {
+		t.Errorf("row 2: %q", rows[1])
+	}
+	for _, r := range rows {
+		if strings.Contains(r, "56,1175") || len(strings.Fields(r)) != 6 {
+			t.Errorf("columns ran together: %q", r)
+		}
+	}
+	head := lines[len(lines)-3]
+	if len([]rune(strings.TrimRight(head, " "))) != len([]rune(rows[0])) {
+		t.Errorf("header %q and row %q differ in width", head, rows[0])
 	}
 }

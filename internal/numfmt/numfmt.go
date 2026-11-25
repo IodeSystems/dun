@@ -227,3 +227,28 @@ func TurnMoney(v float64, cur string) string {
 	}
 	return MoneyOf(v, cur)
 }
+
+// Short is a count in the short scale, for table cells that must stay narrow:
+// 940, 689.8k, 37.3M, 294M, 5.5B. Three significant digits above 99M, one
+// decimal below; a value that rounds up to the next unit moves to it.
+func Short(n int) string {
+	if n < 0 {
+		return "-" + Short(-n)
+	}
+	if n < 1000 {
+		return strconv.Itoa(n)
+	}
+	v, units := float64(n), []string{"k", "M", "B", "T"}
+	for i, u := range units {
+		v /= 1000
+		r := math.Round(v*10) / 10
+		if r >= 1000 && i < len(units)-1 {
+			continue
+		}
+		if r >= 100 && i > 0 {
+			return fmt.Sprintf("%.0f%s", v, u)
+		}
+		return fmt.Sprintf("%.1f%s", v, u)
+	}
+	return ""
+}

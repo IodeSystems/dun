@@ -60,3 +60,15 @@ func TestCommaf(t *testing.T) {
 		}
 	}
 }
+
+func TestShort(t *testing.T) {
+	for n, want := range map[int]string{
+		0: "0", 999: "999", 1000: "1.0k", 689_801: "689.8k", 999_950: "1.0M",
+		37_316_924: "37.3M", 294_047_097: "294M", 5_497_362_718: "5.5B",
+		1_234_000_000_000: "1.2T", -2500: "-2.5k",
+	} {
+		if got := Short(n); got != want {
+			t.Errorf("Short(%d) = %q, want %q", n, got, want)
+		}
+	}
+}

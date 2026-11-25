@@ -329,12 +329,27 @@ func rateText(t usageTotals) string {
 	return "-"
 }
 
-func usageRow(b *strings.Builder, w int, name string, t usageTotals) {
-	fmt.Fprintf(b, "  %-*s %8s %12s %11s %6s  %s\n", w, name, numfmt.Grouped(t.Requests), numfmt.Grouped(t.Prompt), numfmt.Grouped(t.Completion), rateText(t), costText(t))
+// usageCols are the widths of the numeric columns, from the widest cell of
+// every table, so a huge value cannot run into its neighbour.
+type usageCols [3]int
+
+func usageCells(t usageTotals) [3]string {
+	return [3]string{numfmt.Grouped(t.Requests), numfmt.Short(t.Prompt), numfmt.Short(t.Completion)}
 }
 
-func usageHead(b *strings.Builder, w int, first string) {
-	fmt.Fprintf(b, "  %-*s %8s %12s %11s %6s  %s\n", w, first, "requests", "processed", "generated", "cache", "cost")
+func (c *usageCols) fit(t usageTotals) {
+	for i, s := range usageCells(t) {
+		c[i] = max(c[i], len(s))
+	}
+}
+
+func usageRow(b *strings.Builder, w int, c usageCols, name string, t usageTotals) {
+	v := usageCells(t)
+	fmt.Fprintf(b, "  %-*s  %*s  %*s  %*s  %6s  %s\n", w, name, c[0], v[0], c[1], v[1], c[2], v[2], rateText(t), costText(t))
+}
+
+func usageHead(b *strings.Builder, w int, c usageCols, first string) {
+	fmt.Fprintf(b, "  %-*s  %*s  %*s  %*s  %6s  %s\n", w, first, c[0], "requests", c[1], "processed", c[2], "generated", "cache", "cost")
 }
 
 func renderUsage(r usageReport) string {
@@ -343,18 +358,28 @@ func renderUsage(r usageReport) string {
 	for k := range r.ByModel {
 		w = max(w, len(k))
 	}
+	cols := usageCols{len("requests"), len("processed"), len("generated")}
+	for _, p := range r.Periods {
+		cols.fit(p.usageTotals)
+	}
+	for _, t := range r.ByModel {
+		cols.fit(*t)
+	}
+	for _, t := range r.ByRole {
+		cols.fit(*t)
+	}
 	b.WriteString("dun usage")
 	if !r.Since.IsZero() {
 		b.WriteString(" (since " + r.Since.Local().Format("2006-01-02") + ")")
 	}
 	b.WriteString("\n\n")
-	usageHead(&b, w, "period")
+	usageHead(&b, w, cols, "period")
 	for _, p := range r.Periods {
-		usageRow(&b, w, p.Name, p.usageTotals)
+		usageRow(&b, w, cols, p.Name, p.usageTotals)
 	}
 	if len(r.ByModel) > 0 {
 		b.WriteString("\n")
-		usageHead(&b, w, "model")
+		usageHead(&b, w, cols, "model")
 		keys := make([]string, 0, len(r.ByModel))
 		for k := range r.ByModel {
 			keys = append(keys, k)
@@ -367,15 +392,15 @@ func renderUsage(r usageReport) string {
 			return keys[i] < keys[j]
 		})
 		for _, k := range keys {
-			usageRow(&b, w, k, *r.ByModel[k])
+			usageRow(&b, w, cols, k, *r.ByModel[k])
 		}
 	}
 	if len(r.ByRole) > 0 {
 		b.WriteString("\n")
-		usageHead(&b, w, "agent role")
+		usageHead(&b, w, cols, "agent role")
 		for _, k := range []string{"main", "model", "vision", "(unrecorded)"} {
 			if t := r.ByRole[k]; t != nil {
-				usageRow(&b, w, k, *t)
+				usageRow(&b, w, cols, k, *t)
 			}
 		}
 		for _, k := range []string{"main", "model", "vision"} {
