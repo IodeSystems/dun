@@ -117,14 +117,21 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 		}
 		clearNow(h, em, clk, c)
 	}
+	// Each command's time to its answer, in the rounds ledger (cmdtime.go).
+	clock := &cmdClock{note: func(cmd string, d time.Duration) { h.NoteCmdTime(cmd, "engine", d) }}
 	var ctrlCmd func(id, action string)
 	ctrlCmd = func(id, action string) {
 		// A slash line from a client that is not the TUI (web, phone): routed
 		// here, by the same handlers the TUI's commands reach. See commands.go.
 		if id == "slash" {
+			at := time.Now()
+			clock.start(ctrlCmdName(id, action), at, "slash")
 			exts, _ := engineExtensions(h.Extensions())
 			recordSlash(h, action)
-			routeSlash(action, slashRoutes{server: srvCmd, control: ctrlCmd, reset: resetCmd, exts: exts,
+			routeSlash(action, slashRoutes{
+				server:  func(alias, act string) { clock.also("srv:"+alias, at); srvCmd(alias, act) },
+				control: func(cid, act string) { clock.also(cid, at); ctrlCmd(cid, act) },
+				reset:   resetCmd, exts: exts,
 				reply: func(msg string) { em.emit(&proto.ControlEvent{ID: "slash", Action: action, Message: msg}) }})
 			return
 		}
@@ -644,7 +651,12 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 			em.emit(ev)
 		}
 	}
-	in.setCtrlCmd(ctrlCmd)
+	in.setCtrlCmd(func(id, action string) {
+		if id != "slash" { // a slash line starts its own clock (above)
+			clock.start(ctrlCmdName(id, action), time.Now(), id)
+		}
+		ctrlCmd(id, action)
+	})
 	in.setResetCb(func() { resetCmd(clearChoice{}) }) // a bare reset command: as bare /clear
 	// Agent scope: the human reading a child's conversation, or steering it.
 	// `view` sends the scrollback (a stopped child's too) and starts the
@@ -658,7 +670,8 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 	}
 	in.setPeerFn(peerIn(peers, h, em))
 	em.mu.Lock()
-	em.onReply = recordReplies(h) // the person's commands, kept in the session
+	keep := recordReplies(h) // the person's commands, kept in the session
+	em.onReply = func(p any) { keep(p); clock.answered(p) }
 	em.mu.Unlock()
 	in.setAgentFn(func(a proto.AgentCmd) {
 		n, err := strconv.Atoi(a.ID)

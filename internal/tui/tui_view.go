@@ -511,7 +511,10 @@ func mouseModeOf(mode string) tea.MouseMode {
 }
 func (m tuiModel) drawView() string {
 	start := time.Now()
-	defer func() { frames.observe(stageView, time.Since(start)) }()
+	defer func() {
+		frames.observe(stageView, time.Since(start))
+		cmdTimes.frame(time.Now()) // the frame that shows a command's result (cmdtime.go)
+	}()
 	// The inspector is a full-screen overlay — it replaces the normal layout.
 	if m.inspecting {
 		return m.insp.view(m.w, m.h)

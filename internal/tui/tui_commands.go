@@ -219,13 +219,21 @@ func init() {
 			m.openStats(statsContext)
 			return nil
 		}},
-		{"usage", "[spend [reconcile <usd> | budget <usd>|off | login]]", "this session's tokens, cache, cost and limits, this month's spend and budget, and tokens by model: a screen with tabs (tab moves, esc closes); spend: the Spend tab, reconcile takes the real figure off the Console, budget sets the monthly budget", func(m *tuiModel, args []string) tea.Cmd {
+		{"usage", "[spend [reconcile <usd> | budget <usd>|off | login] | repairs | perf]", "this session's tokens, cache, cost and limits, this month's spend and budget, and tokens by model: a screen with tabs (tab moves, esc closes); spend: the Spend tab, reconcile takes the real figure off the Console, budget sets the monthly budget; repairs: the month's repairs, retries and tool errors by model and what they cost; perf: frame and command times, and round latency by model", func(m *tuiModel, args []string) tea.Cmd {
 			if len(args) == 0 {
 				m.openStats(statsUsage)
 				return nil
 			}
+			switch strings.ToLower(args[0]) {
+			case "repairs":
+				m.openStats(statsRepairs)
+				return nil
+			case "perf":
+				m.openStats(statsPerf)
+				return nil
+			}
 			if !strings.EqualFold(args[0], "spend") {
-				m.append(StErr.Render("usage: /usage [spend [reconcile <usd> | budget <usd>|off]]"))
+				m.append(StErr.Render("usage: /usage [spend [reconcile <usd> | budget <usd>|off] | repairs | perf]"))
 				return nil
 			}
 			if len(args) > 1 {
@@ -394,7 +402,9 @@ func (m *tuiModel) runSlash(v string) tea.Cmd {
 	// slash line, which counts it there.
 	run := func(name string, f func() tea.Cmd) tea.Cmd {
 		m.slashForwarded = false
+		cmdTimes.begin("/" + name) // keypress to the frame that shows it (cmdtime.go)
 		cmd := f()
+		cmdTimes.ran()
 		if !m.slashForwarded {
 			cmdstats.Record(name, cmdstats.SurfaceTUI)
 		}

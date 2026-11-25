@@ -286,6 +286,7 @@ func (p *dunProc) controlCmd(id, action string) bool {
 	if p == nil {
 		return false
 	}
+	engineSends.Add(1) // a command that sent this waits for the answer (cmdtime.go)
 	return json.NewEncoder(p.stdin).Encode(map[string]string{"type": "control", "id": id, "action": action}) == nil
 }
 

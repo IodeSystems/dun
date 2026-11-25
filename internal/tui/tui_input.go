@@ -700,6 +700,10 @@ func (m tuiModel) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, nil
 
+	case repairsMsg:
+		m.repairsRep, m.repairsAt, m.repairsReading = &msg.rep, time.Now(), false
+		m.syncStats()
+		return m, nil
 	case updateNoteMsg:
 		// The release check's one line: a new build in place, or a refused one.
 		if msg != "" {
