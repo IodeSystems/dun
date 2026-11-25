@@ -499,6 +499,10 @@ func (m tuiModel) applyUI(v any) tuiModel {
 	return m
 }
 
+// DundSessions is dundSessions for the other clients in this binary
+// (dun sessions).
+func DundSessions() ([]proto.SessionSummary, error) { return dundSessions() }
+
 // dundSessions lists this user's sessions in dund, every workspace. It does
 // not start dund: no service means no sessions beyond the files.
 func dundSessions() ([]proto.SessionSummary, error) {

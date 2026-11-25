@@ -2253,3 +2253,20 @@ model switch or a crash dropped it with no trace.
   engine killed by PID mid-question, and a `switch_model` mid-question:
   each time the same ask id and call id came again, the answer was the
   call's one result, and the turn replied.
+
+## `dun sessions` and /resume share one listing (2026-11-25)
+
+- `internal/sesslist.Collect` builds the rows for `dun sessions [--all] [-n N]
+  [--json]` (`dun --sessions` is an alias) and for the TUI /resume picker.
+  This workspace sessions come first, then the others, each newest first.
+- Status is what the dund session list gives: running, stopped (dund knows
+  it, no engine) or saved (file only; all of them when dund is down). That
+  list does not say generating, asking or queued; that needs an attach per
+  session and is not done.
+- Speed: the last request is read from the last 512 KB of a transcript, only
+  for the rows returned. Session directories come from the registry
+  (`project.SessionDir`), not `harness.RootDir`, which runs a VCS command per
+  call. /resume went from about 520 ms (18 rows) to about 75 ms (60 rows, all
+  workspaces); `dun sessions --all` takes about 100 ms.
+- Not listed: the model (the transcript does not hold it), and legacy
+  path-keyed session directories that no registry entry points to.

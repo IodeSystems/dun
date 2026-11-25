@@ -7,10 +7,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/sesslist"
 )
 
-func pickerModel(t *testing.T, sessions ...harness.SessionInfo) tuiModel {
+func pickerModel(t *testing.T, sessions ...sesslist.Row) tuiModel {
 	t.Helper()
 	m := buildModel(2, 2)
 	m.sessions = sessions
@@ -22,26 +22,25 @@ func pickerModel(t *testing.T, sessions ...harness.SessionInfo) tuiModel {
 // the opening ask because that is how a conversation is recognised.
 func TestSessionPanel_ShowsWhatIdentifiesASession(t *testing.T) {
 	m := pickerModel(t,
-		harness.SessionInfo{ID: "20260730-153842", ModTime: time.Now().Add(-2 * time.Hour), Entries: 17, Preview: "why is compaction thrashing", Last: "ship the fix"},
-		harness.SessionInfo{ID: "20260729-195624", ModTime: time.Now().Add(-26 * time.Hour), Entries: 50},
+		sesslist.Row{ID: "20260730-153842", Local: true, Status: "running", LastActive: time.Now().Add(-2 * time.Hour), Last: "ship the fix"},
+		sesslist.Row{ID: "20260729-195624", Local: true, Status: "saved", LastActive: time.Now().Add(-26 * time.Hour)},
+		sesslist.Row{ID: "20260728-000000", Workspace: "/srv/elsewhere", Status: "stopped", LastActive: time.Now().Add(-50 * time.Hour), Last: "other ask"},
 	)
 	m.sessionID = "20260729-195624"
 	panel := stripANSI(m.sessionPanel())
-	for _, want := range []string{"20260730-153842", "2h ago", "17 entries", "why is compaction thrashing", "last: ship the fix"} {
+	for _, want := range []string{"this workspace", "other workspaces", "20260730-153842", "running", "2h ago", "ship the fix", "/srv/elsewhere", "stopped", "other ask", "(no request)"} {
 		if !strings.Contains(panel, want) {
 			t.Errorf("picker is missing %q:\n%s", want, panel)
 		}
 	}
-	// A session whose opening message was compacted away says so rather than
-	// showing a blank row.
-	if !strings.Contains(panel, "no opening message") {
-		t.Errorf("an empty preview should be explained:\n%s", panel)
+	if strings.Index(panel, "this workspace") > strings.Index(panel, "other workspaces") {
+		t.Errorf("local sessions must come first:\n%s", panel)
 	}
 }
 
 func TestSessionPicker_Navigation(t *testing.T) {
 	m := pickerModel(t,
-		harness.SessionInfo{ID: "a"}, harness.SessionInfo{ID: "b"}, harness.SessionInfo{ID: "c"},
+		sesslist.Row{ID: "a"}, sesslist.Row{ID: "b"}, sesslist.Row{ID: "c"},
 	)
 	down := tea.KeyPressMsg{Code: tea.KeyDown}
 	nm, _ := m.Update(down)
@@ -148,14 +147,14 @@ func TestStaleEOF_IsNotACrash(t *testing.T) {
 // --pick: the picker is open at start, no session is attached until it is
 // answered; esc starts a new session, enter resumes the chosen one.
 func TestPick_OpensPickerAtStart(t *testing.T) {
-	m := pickerModel(t, harness.SessionInfo{ID: "a"}, harness.SessionInfo{ID: "b"})
+	m := pickerModel(t, sesslist.Row{ID: "a"}, sesslist.Row{ID: "b"})
 	m.pickAtStart = true
 	nm, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = nm.(tuiModel)
 	if m.picking || m.pickAtStart || cmd == nil {
 		t.Errorf("esc should close the picker and attach a new session: picking=%v pickAtStart=%v cmd=%v", m.picking, m.pickAtStart, cmd != nil)
 	}
-	m = pickerModel(t, harness.SessionInfo{ID: "a"}, harness.SessionInfo{ID: "b"})
+	m = pickerModel(t, sesslist.Row{ID: "a"}, sesslist.Row{ID: "b"})
 	m.pickAtStart = true
 	nm, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = nm.(tuiModel)

@@ -40,6 +40,7 @@ var helpStart = [][2]string{
 	{"dun --continue", "reopen the most recent session for this workspace"},
 	{"dun doctor [--fix]", "check providers, tools, dund and the service; --fix runs what it can"},
 	{"dun tools [--upgrade]", "the tools against the versions this dun pins; --upgrade installs them (dun tools --help)"},
+	{"dun sessions [--all]", "the sessions of this workspace (--all: every one): id, directory, status, age, last request (dun sessions --help)"},
 	{"dun tmux", "the tmux.conf lines that show dun's state in the window list"},
 	{"dun mcp", "dun's sessions as an MCP server on stdio, for another agent (dun mcp --help)"},
 	{"dun watch <session>", "a line each time a session ends a turn or asks (dun watch --help)"},
