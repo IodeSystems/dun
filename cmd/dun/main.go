@@ -477,6 +477,20 @@ func main() {
 		}
 	}
 
+	// Register the workspace as a project on first sight, importing what an
+	// older dun left in its .dun/. Everything dun keeps about it lives in
+	// $DUN_HOME/projects/<id>/, never in the repo. Not fatal: without it dun
+	// still reads the repo's own config, it only cannot save anything.
+	//
+	// This must run BEFORE any session lookup: RootDir reads the registry to
+	// key sessions by project id, and a directory that is not yet registered
+	// would fall back to the old path-keyed layout.
+	if !*noDir {
+		if _, err := project.Ensure(absWS); err != nil {
+			fmt.Fprintf(os.Stderr, "dun: %v\n", err)
+		}
+	}
+
 	if *listSessions {
 		ids := harness.ListSessions(absWS)
 		if len(ids) == 0 {
@@ -522,7 +536,7 @@ func main() {
 	}
 
 	startClock.Mark("flags and config")
-	// Session persistence, scoped by the workspace ROOT (~/.dun/sessions/<root>/).
+	// Session persistence, scoped by the workspace ROOT (~/.dun/sessions/<id>/).
 	var sessionFile, sessionID string
 	switch {
 	case *resume != "":
@@ -544,16 +558,6 @@ func main() {
 	// its own home and namespaces this workspace by PROJECT (see
 	// harness.DefaultServers), so the index outlives the session and several
 	// sessions share one.
-
-	// Register the workspace as a project on first sight, importing what an
-	// older dun left in its .dun/. Everything dun keeps about it lives in
-	// $DUN_HOME/projects/<id>/, never in the repo. Not fatal: without it dun
-	// still reads the repo's own config, it only cannot save anything.
-	if *noDir {
-		// not a project: nothing to register
-	} else if _, err := project.Ensure(absWS); err != nil {
-		fmt.Fprintf(os.Stderr, "dun: %v\n", err)
-	}
 
 	// Resolve extra mounts: local paths that must be accessible from both
 	// the worktree (symlink) and the Docker container (volume mount).

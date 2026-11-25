@@ -243,6 +243,12 @@ type Entry struct {
 	Source string
 }
 
+// SessionDir is where a project's session transcripts live:
+// $DUN_HOME/sessions/<id>. It reads the registry and creates nothing.
+func SessionDir(id string) string {
+	return filepath.Join(dunHome(), "sessions", id)
+}
+
 // List is every registry entry, sorted by id. It reads the registry and
 // creates nothing.
 func List() ([]Entry, error) {

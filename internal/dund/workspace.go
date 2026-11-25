@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/iodesystems/dun/internal/harness"
+	"github.com/iodesystems/dun/internal/project"
 )
 
 // userHome is the home directory paths without a leading slash are read
@@ -142,6 +143,20 @@ func (s *Service) Workspaces(principal string, disk bool) []Workspace {
 			}
 			if a := get(p); t.After(a.last) {
 				a.last = t
+			}
+		}
+		// Id-keyed session directories: look up the project registry for
+		// directories whose sessions live under $DUN_HOME/sessions/<id>/.
+		if entries2, err := project.List(); err == nil {
+			for _, entry := range entries2 {
+				dir := project.SessionDir(entry.ID)
+				t := newestTranscript(dir)
+				if t.IsZero() {
+					continue
+				}
+				if a := get(entry.Source); t.After(a.last) {
+					a.last = t
+				}
 			}
 		}
 	}

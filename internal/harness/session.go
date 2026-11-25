@@ -14,6 +14,7 @@ import (
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/dun/internal/dunhome"
 	"github.com/iodesystems/dun/internal/fsutil"
+	"github.com/iodesystems/dun/internal/project"
 )
 
 // Session persistence layout — à la ~/.claude, scoped by the workspace ROOT.
@@ -27,15 +28,92 @@ import (
 // SessionsDir is the root of dun's session storage (~/.dun/sessions).
 func SessionsDir() string { return filepath.Join(dunhome.Dir(), "sessions") }
 
-// RootDir is the sessions directory for one workspace root — the abs path
-// flattened to a single, filesystem-safe name (leading marker kept for read-back).
+// RootDir is the sessions directory for one workspace root.
+//
+// When the directory is registered in the project registry, sessions live
+// under $DUN_HOME/sessions/<project-id>/ — keyed by the registry id, not the
+// path, so a linked worktree shares its source repo's sessions and a moved
+// repo keeps them. The old path-keyed location (~/.dun/sessions/<encoded-root>/)
+// is migrated by copy on first use: the old files are copied into the new
+// directory (never deleted), so a session is resumable from the new location.
+//
+// A directory dun has never seen (unregistered) falls back to the path-keyed
+// layout, which is what an older dun wrote and what dund's disk-scan reads.
 func RootDir(root string) string {
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		abs = root
 	}
+	// Registered project: key by id.
+	if p := project.Resolve(abs); p != nil {
+		dir := project.SessionDir(p.ID)
+		// Migrate the old path-keyed contents on first use.
+		migrateLegacySessions(legacyRootDir(abs), dir)
+		return dir
+	}
+	// Unregistered: the old path-keyed layout.
 	name := strings.NewReplacer(string(os.PathSeparator), "-", " ", "_").Replace(abs)
 	return filepath.Join(SessionsDir(), name)
+}
+
+// legacyRootDir is the old path-keyed sessions directory for root.
+func legacyRootDir(root string) string {
+	name := strings.NewReplacer(string(os.PathSeparator), "-", " ", "_").Replace(root)
+	return filepath.Join(SessionsDir(), name)
+}
+
+// migrateLegacySessions copies every entry from legacyDir into newDir,
+// skipping files that are already present (idempotent). The source is never
+// deleted: the old location is the user's data, and a half-finished copy
+// can be retried. A missing legacyDir is the normal case for a project
+// registered for the first time.
+func migrateLegacySessions(legacyDir, newDir string) {
+	if legacyDir == newDir {
+		return
+	}
+	entries, err := os.ReadDir(legacyDir)
+	if err != nil {
+		return // no legacy directory: nothing to migrate
+	}
+	for _, e := range entries {
+		from := filepath.Join(legacyDir, e.Name())
+		to := filepath.Join(newDir, e.Name())
+		if e.IsDir() {
+			migrateDirTree(from, to)
+		} else {
+			migrateOneFile(from, to)
+		}
+	}
+}
+
+// migrateOneFile copies a single file if it is not already in the destination.
+func migrateOneFile(from, to string) {
+	if _, err := os.Stat(to); err == nil {
+		return // already migrated
+	}
+	data, err := os.ReadFile(from)
+	if err != nil {
+		return
+	}
+	_ = fsutil.WriteAtomic(to, data, 0o600)
+}
+
+// migrateDirTree recursively copies the tree under src into dst, skipping
+// files that are already present.
+func migrateDirTree(src, dst string) {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		from := filepath.Join(src, e.Name())
+		to := filepath.Join(dst, e.Name())
+		if e.IsDir() {
+			migrateDirTree(from, to)
+		} else {
+			migrateOneFile(from, to)
+		}
+	}
 }
 
 // NewSessionFile returns the path for a fresh session under root, plus its id.
