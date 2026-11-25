@@ -133,6 +133,8 @@ func TestRouteSlash(t *testing.T) {
 		"mcp unset corp --session":             {"server", "corp", "unset --session"},
 		"mcp toggle corp Tool_X off --project": {"control", "mcptools", "toggle corp Tool_X off --project"},
 		"rag on --project":                     {"server", "raglit", "on --project"},
+		`until goal "Tests  Pass" turns 3`:     {"control", "until", `goal "Tests  Pass" turns 3`},
+		"until":                                {"control", "until", ""},
 		"mcp tools el":                         {"control", "mcptools", "el"},
 		"mcp tools":                            {"control", "mcptools", ""},
 		"mcp restart":                          {"server", enginecmd.AllServers, "restart"},

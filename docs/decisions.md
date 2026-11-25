@@ -2080,3 +2080,67 @@ Air, Neovim) drive dun over the Agent Client Protocol.
   question UI.
 - **--no-suggest** on ACP sessions: no ACP client shows suggestions, and
   each costs a side call.
+
+## Stop conditions: /until (USER 2026-11-24)
+
+"You're dun when…": `/until` (`internal/harness/until.go`,
+`cmd/dun/until.go`) keeps a session starting turns itself until a
+condition fires. Carl approved the feature and layered conditions; the
+rest below are assumptions he can overturn.
+
+- **A set of conditions, not one mode** (USER). `turns N`, `goal <text>
+  [--check "<cmd>"]`, `plan`, any of them at once
+  (`/until plan turns 15`, `/until goal "tests pass" --check "make test"
+  turns 10`). The run goes on while every target is unmet and stops at the
+  first that fires, and says which. goal or plan without turns stops at 20
+  turns. `/until off` clears them; bare `/until` shows each condition's
+  progress. The name: no command, flag or tool was called until.
+- **Safety stops, always** (USER): the person interrupted (a turn, or an
+  interrupt between turns while the goal is judged); the turn failed; a
+  question was put to the person in the turn (ask_user, or a file-access
+  question: the permission prompt); two turns in a row with no progress.
+  Progress: a plan node changed state (with plan), or the turn made a tool
+  call (with goal or turns). Assumption: a question stops the run even
+  though ask_user waits for its answer inside the turn: a model that needs
+  the person should not be pushed on.
+- **Engine-owned, persisted** (USER: dund and the engine own semantics,
+  clients dumb). The conditions and the run are in `<session>.until.json`
+  and in a `until` state event (event-protocol.md) with a one-line summary
+  for status bars. A run under way when the engine stops (dund's restart,
+  a model switch, a crash; an interrupt with a reason is not the person's)
+  is owed its next turn, which the new engine starts at once. A
+  `[automatic]` resume message dund sends meanwhile is queued into that
+  turn, or is a turn of the run itself. Not tested live: only the sidecar
+  round trip is (until_test.go). `/clear` stops a run and keeps the
+  conditions.
+- **A turn is any turn the session runs** while conditions are set: the
+  person's message is turn 1 (or the turn running when /until is given).
+  Assumption: the conditions stay after a run stops, so the next message
+  starts a new run (a mode, as the ACP option reads). Messages typed during
+  a run are queued and delivered as always; they do not stop it.
+- **The next turn is a user-set turn**, started with a `[until]`
+  notification that says the turn number, the cap, the goal's last
+  verdict and the plan's open nodes. User-set (autoturn.go): not under the
+  automatic-turn budget, and ask_user is not refused in it, because the
+  person asked for the run.
+- **Goal judging** (USER). With `--check`, the command alone decides:
+  run in the session's exec backend in a subshell, 10 minutes at most,
+  exit 0 is met; a failure's last 2000 bytes of output are the verdict
+  the next turn reads. Without it, a side call of kind `until` (its own
+  role, tier work like learn, since it judges) gets the goal, the last
+  turn's reply (6000 bytes) and its tool-call count, and must answer
+  `{"met": bool, "reason": "…"}`; 2048 tokens out, reasoningBudget's share
+  for thinking. An answer that does not parse, or a failed call, is not
+  met: the run goes on to its cap or stalls.
+- **plan stops when no node is ready or under way**: drained (none
+  open), empty, or open nodes all blocked or waiting (said as such).
+  Archived nodes are not counted.
+- **ACP: two options** (USER): `mode` (off/goal/plan/goal+plan) and
+  `turn_cap` (off/5/10/20/50, custom category `_turn_cap`); a turn cap with
+  mode off is "run N turns". A goal's text is the next prompt's (or the
+  running one's). A prompt is answered when its run stops. Details:
+  acp.md "Stop conditions".
+- **Not done**: no `--max` flag (turns N is the cap; one way to say it);
+  no web or phone view of the run beyond the `until` event and the
+  notification; the judge does not see tool results, only the reply and
+  the call count.

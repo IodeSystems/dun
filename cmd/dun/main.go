@@ -899,6 +899,12 @@ func main() {
 				em.emit(planEvent(h, ""))
 			}
 		}
+		// The stop conditions or their run changed (dun/until.go).
+		cfg.OnUntil = func() {
+			if h, _ := started.Load().(*harness.Harness); h != nil {
+				em.emit(untilEvent(h))
+			}
+		}
 		cfg.OnPlanNote = func(msg string) {
 			if h, _ := started.Load().(*harness.Harness); h != nil {
 				ev := planEvent(h, "")

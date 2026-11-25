@@ -169,6 +169,9 @@ func (h *Harness) Continue(ctx context.Context) (agent.TurnResult, error) {
 	// The person's message typed mid-turn makes this their turn; anything
 	// else is automatic (autoturn.go). Read before prepareTurn flushes it.
 	origin := originAuto
+	if h.untilTakeNext() { // a stop condition's run (until.go): the person set it
+		origin = originUserSet
+	}
 	if h.queuedPerson() {
 		origin = originPerson
 	}
@@ -199,6 +202,7 @@ func (h *Harness) Continue(ctx context.Context) (agent.TurnResult, error) {
 	res, err := h.turnThenTriggers(ctx)
 	h.settleEnd(false, st, err)
 	res, err = h.finishInterrupt(ctx, res, err)
+	h.untilTurnEnd(res, err)
 	h.ledgerEnd(ctx, err)
 	h.netWaitAfter(err)
 	return res, err

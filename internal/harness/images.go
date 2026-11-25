@@ -419,13 +419,16 @@ func (h *Harness) AskImages(ctx context.Context, task string, imgs []ImageInput)
 			text, derr := h.describeImages(ctx, task, imgs, parts)
 			if derr != nil {
 				h.store.dropEntry(e.ID)
+				h.untilTurnEnd(res, derr)
 				return res, derr
 			}
 			h.store.setText(e.ID, text)
 			res, err = h.turnThenTriggers(ctx)
 		}
 	}
-	return h.finishInterrupt(ctx, res, err)
+	res, err = h.finishInterrupt(ctx, res, err)
+	h.untilTurnEnd(res, err)
+	return res, err
 }
 
 // oneLineErr is an error's text on one line, bounded, for the probe record.

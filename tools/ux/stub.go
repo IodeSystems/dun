@@ -254,6 +254,14 @@ func cannedReply(req chatRequest) (string, string) {
 		}
 		return "Done: the greeting uses the colour you chose.", ""
 	}
+	// A look at the plan (plan_show): a tool call a turn of a /until run
+	// makes, so the run sees progress; then a short answer.
+	if (strings.Contains(strings.ToLower(last), "the plan") || strings.Contains(last, "[until]")) && hasTool(req.Tools, "plan_show") {
+		if lastRole != "tool" {
+			return "", "plan_show"
+		}
+		return "Looked at the plan.", ""
+	}
 	if strings.Contains(strings.ToLower(last), "project") || strings.Contains(last, "?") {
 		return "This project is a small command-line tool. The README says it prints a greeting, " +
 			"and main.go holds the whole program. I can read files, run commands in an isolated " +
