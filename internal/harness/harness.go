@@ -853,9 +853,18 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// Every response the engine's clients get reaches the root session's
 	// round stats, and its stats ledger (roundstats.go). A child shares the
 	// parent's meter and leaves the hook to it.
-	if cfg.Parent == nil && cfg.Spend != nil {
+	if cfg.Parent == nil {
 		h.rounds.ledger = cfg.StatsLedger
-		cfg.Spend.SetRoundHook(h.noteRound)
+		if cfg.Spend != nil {
+			cfg.Spend.SetRoundHook(h.noteRound)
+		}
+		// A malformed-call repair note is one ledger line (agentkit
+		// v0.41.1: a MALFORMED_FUNCTION_CALL round with no text or call).
+		store.setOnEntry(func(e agent.Entry, _ uint64) {
+			if e.Kind == agent.KindNotification && e.Tag == agent.MalformedCallTag {
+				h.noteRoundEvent(RoundEvent{Kind: "malformed_call_repair", NativeFinish: "MALFORMED_FUNCTION_CALL", Trace: h.trace.Last()})
+			}
+		})
 	}
 
 	// Server→client push. Only the OWNER registers: a child shares its
@@ -1017,7 +1026,11 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		OnIdle: h.onIdle,
 		// A round the provider ended with a failure finish_reason is resent;
 		// each resend shows as a retry line (retry.go providerFailNote).
-		OnProviderFailRetry: func(r agent.ProviderFailRetry) { h.retry(providerFailNote(r)) },
+		OnProviderFailRetry: func(r agent.ProviderFailRetry) {
+			h.noteRoundEvent(RoundEvent{Kind: "provider_fail_retry", Finish: r.FinishReason, NativeFinish: r.NativeFinishReason,
+				Attempt: r.Attempt, Max: r.Max, WaitMS: r.Wait.Milliseconds(), Trace: h.trace.Last()})
+			h.retry(providerFailNote(r))
+		},
 	}
 	// $DUN_HARNESS in exec's environment, and the file it names written
 	// before the first request (harnessinfo.go).
@@ -1136,6 +1149,7 @@ func (h *Harness) turnThenTriggers(ctx context.Context) (agent.TurnResult, error
 		return res, ErrSuspended
 	}
 	err = h.describeTurnError(err) // an empty reply or a stall, said plainly (turnerrors.go)
+	h.noteEmptyReply(err)
 	h.noteTurnError(ctx, err)      // <session>.errors.jsonl, for dun errors (turnerrors.go)
 	// Held churn episodes become candidate lessons once the task verifies
 	// (learn.go): after the turn, so no request of the turn waits on it.

@@ -106,6 +106,15 @@ type shownError struct {
 	err error
 }
 
+// noteEmptyReply files an empty-reply end in the rounds ledger, beside the
+// round that ended in it.
+func (h *Harness) noteEmptyReply(err error) {
+	var empty *agent.EmptyReplyError
+	if errors.As(err, &empty) {
+		h.noteRoundEvent(RoundEvent{Kind: "empty_reply", Finish: empty.FinishReason, NativeFinish: empty.NativeFinishReason, Trace: h.trace.Last()})
+	}
+}
+
 func (e *shownError) Error() string { return e.msg }
 func (e *shownError) Unwrap() error { return e.err }
 

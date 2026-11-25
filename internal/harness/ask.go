@@ -57,11 +57,9 @@ func askToolDef() llm.ToolDef {
 				"description": "at least two concrete choices",
 			},
 			"recommended": map[string]any{
-				"anyOf": []any{
-					map[string]any{"type": "string"},
-					map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-				},
-				"description": "the option you recommend, or for multi an array of them, each as written in options",
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "the options you recommend, each exactly as written in options: one entry for a pick-one question, one or more for multi",
 			},
 			"multi": map[string]any{
 				"type":        "boolean",

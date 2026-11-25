@@ -39,6 +39,9 @@ import (
 
 // RoundStat is one model round; one stats-ledger line.
 type RoundStat struct {
+	// Kind is empty on a round; a line with one is another record in the
+	// file (an event, a shrink, an outcome) and readers of rounds skip it.
+	Kind     string    `json:"kind,omitempty"`
 	Time     time.Time `json:"t"`
 	Session  string    `json:"session,omitempty"`
 	Role     string    `json:"role,omitempty"` // spendmeter.Source.Role: main, model, vision
@@ -134,10 +137,10 @@ type TurnStats struct {
 // lines by order sees the outcome and the reaction together. The line is a
 // SIBLING of the round stats in the same file, the way a ShrinkEvent is.
 type TurnOutcome struct {
-	Kind    string `json:"kind"` // "outcome"
+	Kind    string    `json:"kind"` // "outcome"
 	Time    time.Time `json:"t"`
-	Session string `json:"session,omitempty"`
-	Turn    int    `json:"turn,omitempty"` // the ask turn the outcome is of
+	Session string    `json:"session,omitempty"`
+	Turn    int       `json:"turn,omitempty"` // the ask turn the outcome is of
 	// Commits are the turn's commit hashes, short; NCommits counts them past
 	// the cap, and NFiles / TestVerdict the rest of the turn's outcome.
 	Commits     []string `json:"commits,omitempty"`
@@ -174,18 +177,18 @@ func reactionLabel(text string) string {
 }
 
 type ShrinkEvent struct {
-	Kind       string `json:"kind"` // "shrink"
+	Kind       string    `json:"kind"` // "shrink"
 	Time       time.Time `json:"t"`
-	Session    string `json:"session,omitempty"`
-	Model      string `json:"model,omitempty"`
-	Cause      string `json:"cause,omitempty"` // the build's rewrite cause
-	Before     int    `json:"before"` // the previous main round's prompt tokens
-	After      int    `json:"after"`  // this round's prompt tokens
-	KeptChars  int    `json:"kept_chars,omitempty"`
-	KeptTokens int    `json:"kept_tokens,omitempty"`
-	Estimated  bool   `json:"estimated,omitempty"` // KeptTokens is at the meter's ratio
-	Window     int    `json:"window,omitempty"`    // the context window in force
-	Budget     int    `json:"budget,omitempty"`    // the shaping target in force
+	Session    string    `json:"session,omitempty"`
+	Model      string    `json:"model,omitempty"`
+	Cause      string    `json:"cause,omitempty"` // the build's rewrite cause
+	Before     int       `json:"before"`          // the previous main round's prompt tokens
+	After      int       `json:"after"`           // this round's prompt tokens
+	KeptChars  int       `json:"kept_chars,omitempty"`
+	KeptTokens int       `json:"kept_tokens,omitempty"`
+	Estimated  bool      `json:"estimated,omitempty"` // KeptTokens is at the meter's ratio
+	Window     int       `json:"window,omitempty"`    // the context window in force
+	Budget     int       `json:"budget,omitempty"`    // the shaping target in force
 }
 
 // roundStats is the root session's collector.
@@ -472,6 +475,56 @@ func (l *StatsLedger) AppendShrink(e ShrinkEvent) error {
 	return err
 }
 
+// RoundEvent is what happened to a round besides its usage: the provider
+// ended it with a failure finish and agentkit resent it ("provider_fail_retry"),
+// or the turn ended on an empty reply ("empty_reply"). Finish and
+// NativeFinish are the provider's words, verbatim.
+type RoundEvent struct {
+	Kind         string    `json:"kind"`
+	Time         time.Time `json:"t"`
+	Session      string    `json:"session,omitempty"`
+	Provider     string    `json:"provider,omitempty"`
+	Model        string    `json:"model,omitempty"`
+	Finish       string    `json:"finish,omitempty"`
+	NativeFinish string    `json:"native_finish,omitempty"`
+	Attempt      int       `json:"attempt,omitempty"`
+	Max          int       `json:"max,omitempty"`
+	WaitMS       int64     `json:"wait_ms,omitempty"`
+	Trace        string    `json:"trace,omitempty"`
+}
+
+// AppendEvent writes e as one line, the same file and append rule as Append.
+func (l *StatsLedger) AppendEvent(e RoundEvent) error {
+	if e.Time.IsZero() {
+		e.Time = time.Now()
+	}
+	b, err := json.Marshal(e)
+	if err != nil || len(b)+1 > statsLineMax {
+		return err
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if err := os.MkdirAll(l.dir, 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(filepath.Join(l.dir, "rounds-"+e.Time.UTC().Format("2006-01")+".jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(append(b, '\n'))
+	return err
+}
+
+// noteRoundEvent files an event for the session's ledger; nil-safe.
+func (h *Harness) noteRoundEvent(e RoundEvent) {
+	if h.rounds.ledger == nil {
+		return
+	}
+	e.Session, e.Provider, e.Model = h.sessionName(), h.cfg.Provider, h.cfg.Endpoint.Model
+	_ = h.rounds.ledger.AppendEvent(e)
+}
+
 // AppendOutcome writes a turn outcome as one line, the same file and the
 // same append rule as AppendShrink: the readers glob rounds-*.jsonl and skip
 // what does not parse as a round stat, and "kind":"outcome" is how a reader
@@ -561,7 +614,7 @@ func (l *StatsLedger) Summary(since time.Time) (s StatsSummary) {
 		}
 		for _, line := range strings.Split(string(b), "\n") {
 			var r RoundStat
-			if line == "" || json.Unmarshal([]byte(line), &r) != nil || r.Time.Before(since) {
+			if line == "" || json.Unmarshal([]byte(line), &r) != nil || r.Kind != "" || r.Time.Before(since) {
 				continue
 			}
 			if r.PromptN >= speedMinTokens && r.PromptMS > 0 {
@@ -734,7 +787,7 @@ func (l *StatsLedger) each(since time.Time, fn func(RoundStat)) {
 		}
 		for _, line := range strings.Split(string(b), "\n") {
 			var r RoundStat
-			if line == "" || json.Unmarshal([]byte(line), &r) != nil || r.Time.Before(since) {
+			if line == "" || json.Unmarshal([]byte(line), &r) != nil || r.Kind != "" || r.Time.Before(since) {
 				continue
 			}
 			fn(r)

@@ -3,10 +3,12 @@ package harness
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/iodesystems/agentkit/agent"
 	"github.com/iodesystems/agentkit/llm"
@@ -56,7 +58,8 @@ func startEmpty(t *testing.T, r *emptyRunner, notes *[]string) *Harness {
 	dir := t.TempDir()
 	var mu sync.Mutex
 	cfg := Config{Workspace: dir, Servers: []mcpserver.Server{}, Client: r, Exec: &HostShell{Dir: dir},
-		SessionFile: filepath.Join(dir, "20261119-120000.jsonl"), PlanNudgeRounds: -1, PlanNudgeFails: -1, PlanStallRounds: -1}
+		SessionFile: filepath.Join(dir, "20261119-120000.jsonl"), PlanNudgeRounds: -1, PlanNudgeFails: -1, PlanStallRounds: -1,
+		StatsLedger: NewStatsLedger(filepath.Join(dir, "stats"))}
 	cfg.Endpoint.Model = "gemini-4"
 	cfg.OnNotify = func(s string) {
 		mu.Lock()
@@ -68,15 +71,12 @@ func startEmpty(t *testing.T, r *emptyRunner, notes *[]string) *Harness {
 		t.Fatal(err)
 	}
 	t.Cleanup(h.Close)
-	// agentkit v0.41 resends a failed round (native MALFORMED_FUNCTION_CALL)
-	// up to 10 times with a ~13 minute backoff before the empty-reply path;
-	// these tests exercise that path, not the resend.
-	h.Session.MaxProviderFailRetries = -1
 	return h
 }
 
-// A turn whose every round is empty: agentkit runs one repair round, then
-// ends the turn with *agent.EmptyReplyError. dun says it once, naming the
+// A turn whose every round is empty with native MALFORMED_FUNCTION_CALL
+// (agentkit v0.41.1): three malformed-call repair rounds, then the turn ends
+// with *agent.EmptyReplyError. Each repair is a ledger line. dun says it once, naming the
 // model and the finish reasons, and keeps a record with them. The repair
 // note is the model's: no notice of it, not in the history shown.
 func TestEmptyReply_NoticeAndErrorsEntry(t *testing.T) {
@@ -94,7 +94,7 @@ func TestEmptyReply_NoticeAndErrorsEntry(t *testing.T) {
 		t.Errorf("error %q, want %q", err, want)
 	}
 	for _, n := range notes {
-		if strings.Contains(n, "Your last reply was empty") {
+		if strings.Contains(n, "Your last reply was empty") || strings.Contains(strings.ToLower(n), "malformed_function_call") {
 			t.Errorf("the repair note reached the person: %q", n)
 		}
 	}
@@ -108,9 +108,23 @@ func TestEmptyReply_NoticeAndErrorsEntry(t *testing.T) {
 			t.Errorf("the repair note is in the history shown: %q", it.Content)
 		}
 	}
-	// The model read the repair note: it is in the second request.
-	if rq := r.requests(); len(rq) != 2 || !strings.Contains(rq[1][len(rq[1])-1].Content, "Your last reply was empty") {
-		t.Errorf("the repair did not reach the model: %d requests", len(rq))
+	// The model read the repair notes: one in each request after the first.
+	rq := r.requests()
+	if len(rq) != 4 {
+		t.Fatalf("%d requests, want 1 and 3 repairs", len(rq))
+	}
+	for i := 1; i < 4; i++ {
+		if last := rq[i][len(rq[i])-1].Content; !strings.Contains(strings.ToLower(last), "malformed_function_call") {
+			t.Errorf("request %d did not carry the repair note: %q", i, last)
+		}
+	}
+	// The ledger: three repairs, then the empty-reply end.
+	b, err := os.ReadFile(filepath.Join(filepath.Dir(h.cfg.SessionFile), "stats", "rounds-"+time.Now().UTC().Format("2006-01")+".jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(b), `"kind":"malformed_call_repair"`); n != 3 || strings.Count(string(b), `"kind":"empty_reply"`) != 1 {
+		t.Errorf("ledger:\n%s", b)
 	}
 }
 

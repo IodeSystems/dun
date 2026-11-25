@@ -258,6 +258,34 @@ was "word word word…", and nothing said it was raglit's context probe.
   and does not expose the response body's `id` (OpenRouter's `gen-…`).
   Requests for both owners: 2026-11-20.
 
+- **Round events.** Besides each round, `rounds-*.jsonl` has lines with a
+  `kind` (readers of rounds skip them): `provider_fail_retry` (agentkit resent
+  a round the provider ended with a failure finish; `attempt`, `max`,
+  `wait_ms`), `malformed_call_repair` (agentkit v0.41.1: an empty round with
+  native MALFORMED_FUNCTION_CALL got a repair note, up to 3 per turn) and
+  `empty_reply` (the turn ended on an empty reply). Each round line has
+  `finish` and `native_finish`, verbatim.
+
+### Wire dump: `AGENTKIT_WIRE_DUMP=<dir>`
+
+agentkit writes one plain-text file per HTTP attempt into `<dir>`: the
+request line, headers, the full body (tools included), and every raw
+response line with its time offset. Header and query values named
+authorization, key, token or secret are redacted. **Bodies are not
+redacted: the files hold full prompts, file contents and tool results. Treat
+`<dir>` as sensitive; delete it after use, and send nobody its files without
+reading them.** Use it where `finish`/`native_finish` or a reply cannot be
+explained from the ledger alone (the Gemini through OpenRouter
+MALFORMED_FUNCTION_CALL case).
+
+Engines inherit the environment of the dund that starts them
+(`internal/dund/engine.go`, `cmd.Env = os.Environ() + ...`); nothing filters
+it. Set the variable where dund starts, not only in the TUI's shell: a dund
+that is already running keeps its own environment, so restart it
+(`AGENTKIT_WIRE_DUMP=/path dund serve`, or the unit's `Environment=`).
+`DUN_DUMP_PROMPT=<dir>` is the older, dun-side dump of the message list
+(`shaping.go`).
+
 ## Cache statistics
 
 Code: `internal/harness/cachestats.go`. The question behind it (USER 2026-10-20): was a cache

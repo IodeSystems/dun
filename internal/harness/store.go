@@ -192,7 +192,12 @@ const tagIdleCheck = "idle_check"
 // agentkit's turn-end check, and its empty-reply repair note ("Your last
 // reply was empty … Reply again.", agent.EmptyReplyTag). No onNotify ping,
 // not in the history shown; the transcript and the model input keep them.
-func modelsNote(tag string) bool { return tag == tagIdleCheck || tag == agent.EmptyReplyTag }
+//
+// agent.MalformedCallTag is the same kind: the repair note for a round the
+// provider ended with MALFORMED_FUNCTION_CALL and no text or call.
+func modelsNote(tag string) bool {
+	return tag == tagIdleCheck || tag == agent.EmptyReplyTag || tag == agent.MalformedCallTag
+}
 
 // blobMarker prefixes a ref where an entry's content was extracted to a blob.
 // It leads with NUL so it can't collide with real tool output or prose.

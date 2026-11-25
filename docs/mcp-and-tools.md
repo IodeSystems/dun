@@ -270,6 +270,12 @@ Engine control `skillfile` (JSON `{"skill", "file"}`) answers with
 a `skill_file` event: one file of a skill for the /skill reader, confined
 to the skill's folder, with the folder's file list and its @includes' text.
 
+- To leave one tool out (an A/B test, say mcpshell's `eval`), name it in the
+  server's `disable` list in a config file: `{"servers":[{"id":"shell",
+  "disable":["eval"]}]}` in `dun.json` (omitted fields inherit, so nothing
+  else is restated). The tool is not sent to the model. No env var does this;
+  `/mcp tools shell` toggles it for the session. Test:
+  `TestFilterTools_ConfigDisablesShellEval`.
 - Disable entries may be globs (`path.Match`). Re-enabling a tool a glob hides
   is refused (edit the glob).
 - Each scope stores its own list. **An emptied list is written as `[]`, not
