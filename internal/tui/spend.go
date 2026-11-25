@@ -222,19 +222,37 @@ func modelTokensBlock(models []proto.ModelTokens) string {
 	if len(models) == 0 {
 		return ""
 	}
-	const colW = 11
+	// Token columns are humanized (5.5B, 294M); every column is as wide as its
+	// widest cell plus two spaces, so values cannot run together.
+	cells := make([][]string, len(models))
+	w := make([]int, len(modelCols))
+	for j, c := range modelCols {
+		w[j] = len(c.head) + 2
+	}
+	for i, t := range models {
+		cells[i] = make([]string, len(modelCols))
+		for j, c := range modelCols {
+			v := c.val(t)
+			if c.head == "requests" || c.head == "closed" {
+				cells[i][j] = numfmt.Grouped(v)
+			} else {
+				cells[i][j] = numfmt.Short(v)
+			}
+			w[j] = max(w[j], len(cells[i][j])+2)
+		}
+	}
 	var b strings.Builder
 	b.WriteString("\n\n  " + stHeader.Render("this month by model, tokens"))
 	b.WriteString(StDim.Render(" — every role, from the stats ledger"))
 	head := strings.Repeat(" ", ctxLabelW)
-	for _, c := range modelCols {
-		head += fmt.Sprintf("%*s", colW, c.head)
+	for j, c := range modelCols {
+		head += fmt.Sprintf("%*s", w[j], c.head)
 	}
 	b.WriteString("\n  " + StDim.Render(head))
-	for _, t := range models {
+	for i, t := range models {
 		row := ""
-		for _, c := range modelCols {
-			row += fmt.Sprintf("%*s", colW, numfmt.Grouped(c.val(t)))
+		for j := range modelCols {
+			row += fmt.Sprintf("%*s", w[j], cells[i][j])
 		}
 		b.WriteString(ctxRow(t.Model, row, ""))
 	}

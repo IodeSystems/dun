@@ -175,3 +175,25 @@ func TestUsage_FirstRecap(t *testing.T) {
 		t.Errorf("%s", out)
 	}
 }
+
+// Billions of tokens are humanized and the columns widen to the widest cell.
+func TestRenderUsage_Huge(t *testing.T) {
+	big := &usageTotals{Requests: 123456, Prompt: 5_497_362_718, Completion: 294_047_097}
+	rep := usageReport{Periods: []usagePeriod{{Name: "all", usageTotals: *big}}, ByModel: map[string]*usageTotals{"m": big}}
+	out := renderUsage(rep)
+	if strings.Contains(out, "5,497,362,718") {
+		t.Errorf("tokens not humanized:\n%s", out)
+	}
+	found := false
+	for _, line := range strings.Split(out, "\n") {
+		if f := strings.Fields(line); len(f) > 3 && f[0] == "all" {
+			found = true
+			if strings.Join(f[1:4], " ") != "123,456 5.5B 294M" {
+				t.Errorf("row: %q", line)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("no row:\n%s", out)
+	}
+}
