@@ -1,7 +1,10 @@
 package acp
 
 import (
+	"encoding/json"
+
 	sdk "github.com/coder/acp-go-sdk"
+	"github.com/iodesystems/agentkit/llm"
 
 	"github.com/iodesystems/dun/proto"
 )
@@ -29,13 +32,20 @@ type usageState struct {
 // usageCost is the session's spend as an ACP cost: nil when dun has none, or
 // when it is not in dollars (ACP's currency is an ISO 4217 code: dun's
 // "credits" and a mix of currencies have none). The amount is the sum of the
-// costs the gateway reported per response, so an estimate where the gateway
-// prices by its own rate card; ACP has no exact/estimate flag.
+// costs the gateway reported per response. dun's "USD estimate" (a price dun
+// computed itself) goes out as "USD"; ACP has no estimate flag, so the Cost's
+// `_meta` carries `estimate: true` (clients must not assume it).
 func usageCost(sp *proto.Spend) *sdk.Cost {
-	if sp == nil || sp.Session == nil || sp.Mixed || sp.Currency != "USD" {
+	if sp == nil || sp.Session == nil || sp.Mixed {
 		return nil
 	}
-	return &sdk.Cost{Amount: *sp.Session, Currency: sp.Currency}
+	switch sp.Currency {
+	case llm.CurrencyUSD:
+		return &sdk.Cost{Amount: *sp.Session, Currency: "USD"}
+	case llm.CurrencyUSDEstimate:
+		return &sdk.Cost{Amount: *sp.Session, Currency: "USD", Meta: sdk.Meta{"estimate": json.RawMessage("true")}}
+	}
+	return nil
 }
 
 // turnUsage is a turn's totals as ACP's usage. Input counts the cached part,

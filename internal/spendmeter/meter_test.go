@@ -38,7 +38,7 @@ func TestSpendMeterAccumulates(t *testing.T) {
 	if s.Session != 1.75 {
 		t.Errorf("session = %v", s.Session)
 	}
-	m.Note(costed(1, llm.CurrencyCredits))
+	m.Note(costed(1, "credits"))
 	if !m.Snapshot().Mixed {
 		t.Error("a cost in another currency must mark the total mixed")
 	}

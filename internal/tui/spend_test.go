@@ -165,7 +165,7 @@ func TestCostBlock_NoCostHint(t *testing.T) {
 	}{
 		{&proto.KeyBudget{Source: "litellm", Currency: "USD"}, "include_cost_in_streaming_usage"},
 		{&proto.KeyBudget{Source: "litellm-headers", Currency: "USD"}, "include_cost_in_streaming_usage"},
-		{&proto.KeyBudget{Source: "openrouter", Currency: "credits"}, "openrouter.ai"},
+		{&proto.KeyBudget{Source: "openrouter", Currency: "USD"}, "openrouter.ai"},
 		{nil, "sends no cost with its responses"},
 	} {
 		out := stripANSI(costBlock(&contextStats{spend: &proto.Spend{Calls: 3, Key: c.key}}, now))
