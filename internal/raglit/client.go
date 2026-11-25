@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -210,6 +211,38 @@ func (c *Client) Savings(ctx context.Context, projectID, namespace string) (Savi
 		return Savings{}, err
 	}
 	return out, nil
+}
+
+// SearchHit is one result from a raglit layer search.
+type SearchHit struct {
+	DocID    string  `json:"doc_id"`
+	Snippet  string  `json:"snippet"`
+	Score    float64 `json:"score"`
+	Index    string  `json:"index"`
+	Title    string  `json:"title"`
+	Rel      string  `json:"rel"`
+	Name     string  `json:"name"`
+	Kind     string  `json:"kind"`
+	Summary  string  `json:"summary"`
+	Similarity float64 `json:"similarity"`
+}
+
+// Search queries a layer by text. It calls GET /api/search with the index,
+// query and limit. The daemon fans out across sibling indexes when the
+// layer is part of a maintained base; the caller only sees the hits.
+func (c *Client) Search(ctx context.Context, index, query string, limit int) ([]SearchHit, error) {
+	q := url.Values{
+		"index": {index},
+		"q":     {query},
+		"n":     {strconv.Itoa(limit)},
+	}
+	var out struct {
+		Hits []SearchHit `json:"hits"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/api/search", q, nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Hits, nil
 }
 
 // do sends one API request with the bearer token and decodes the answer.

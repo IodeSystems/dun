@@ -220,6 +220,45 @@ func TestUnreachableDaemonIsErrUnavailable(t *testing.T) {
 	}
 }
 
+func TestSearchSendsQueryAndParsesHits(t *testing.T) {
+	c, f := newClient(t)
+	f.resp = `{"hits":[{"doc_id":"abc__u0001-priv/xyz.md","snippet":"a fact about x","score":0.91,"index":"abc__u0001-priv","title":"fact","rel":"xyz.md","name":"xyz.md","kind":"memory","summary":"short summary","similarity":0.91},{"doc_id":"abc__u0001-priv/other.md","snippet":"another","score":0.55,"index":"abc__u0001-priv","title":"other","rel":"other.md","name":"other.md","kind":"memory","summary":"","similarity":0.55}]}`
+	hits, err := c.Search(context.Background(), "abc__u0001-priv", "a fact", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.lastMethod != "GET" || f.lastPath != "/api/search" {
+		t.Errorf("want GET /api/search, got %s %s", f.lastMethod, f.lastPath)
+	}
+	if f.lastQuery["index"] != "abc__u0001-priv" || f.lastQuery["q"] != "a fact" || f.lastQuery["n"] != "5" {
+		t.Errorf("query = %v", f.lastQuery)
+	}
+	if len(hits) != 2 {
+		t.Fatalf("got %d hits, want 2", len(hits))
+	}
+	if hits[0].DocID != "abc__u0001-priv/xyz.md" || hits[0].Snippet != "a fact about x" || hits[0].Score != 0.91 {
+		t.Errorf("hit[0] = %+v", hits[0])
+	}
+	if hits[0].Title != "fact" || hits[0].Kind != "memory" || hits[0].Summary != "short summary" {
+		t.Errorf("hit[0] fields = %+v", hits[0])
+	}
+	if hits[1].DocID != "abc__u0001-priv/other.md" || hits[1].Score != 0.55 {
+		t.Errorf("hit[1] = %+v", hits[1])
+	}
+}
+
+func TestSearchEmptyResponse(t *testing.T) {
+	c, f := newClient(t)
+	f.resp = `{"hits":[]}`
+	hits, err := c.Search(context.Background(), "abc__u0001-priv", "nothing", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hits != nil && len(hits) != 0 {
+		t.Errorf("want empty or nil, got %v", hits)
+	}
+}
+
 func TestTokenIsReadPerRequest(t *testing.T) {
 	c, f := newClient(t)
 	tok := "tok-1"
