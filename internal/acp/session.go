@@ -67,6 +67,8 @@ type session struct {
 
 	usage usageState // usage.go
 
+	plan []sdk.PlanEntry // the last plan sent: resent at each prompt's start and end
+
 	// untilSent counts the /until lines the bridge sent whose replies are
 	// not shown; untilHeld: a turn ended while its run goes on, and its
 	// prompts wait for the run's end (until.go).
@@ -85,6 +87,27 @@ func newSession(ctx context.Context, id, cwd string, p peer, log *slog.Logger, d
 func (s *session) update(u sdk.SessionUpdate) {
 	if err := s.peer.SessionUpdate(s.ctx, sdk.SessionNotification{SessionId: sdk.SessionId(s.id), Update: u}); err != nil {
 		s.log.Debug("acp: session/update", "session", s.id, "err", err)
+	}
+}
+
+// sendPlan sends dun's plan to the editor and keeps its entries.
+func (s *session) sendPlan(p *proto.Plan) {
+	e := planEntries(p)
+	s.mu.Lock()
+	s.plan = e
+	s.mu.Unlock()
+	s.update(planUpdate(s.caps, s.id, e))
+}
+
+// resendPlan sends the last plan again, when there is one: an editor that
+// clears its plan per turn (JetBrains Air) shows it again. The editor
+// replaces its plan at each update, so a resend changes nothing else.
+func (s *session) resendPlan() {
+	s.mu.Lock()
+	e := s.plan
+	s.mu.Unlock()
+	if len(e) > 0 {
+		s.update(planUpdate(s.caps, s.id, e))
 	}
 }
 
@@ -207,7 +230,7 @@ func (s *session) handle(ev proto.Event) {
 			s.update(endCall(p))
 		}
 	case *proto.Plan:
-		s.update(planUpdate(s.caps, planEntries(p)))
+		s.sendPlan(p)
 		s.slashReply(p.Message)
 	case *proto.Commands:
 		s.onCommands(p)
@@ -315,7 +338,7 @@ func (s *session) onSnapshot(ev proto.Event, sn *proto.Snapshot) {
 		case *proto.Usage:
 			s.loadUsage(p, replay)
 		case *proto.Plan:
-			s.update(planUpdate(s.caps, planEntries(p)))
+			s.sendPlan(p)
 		case *proto.Until:
 			s.onConfig(func(c *config) { c.until = p })
 		case *proto.TurnState:

@@ -262,6 +262,7 @@ func (a *Agent) Prompt(_ context.Context, p sdk.PromptRequest) (sdk.PromptRespon
 	if text == "" {
 		return sdk.PromptResponse{}, sdk.NewInvalidParams(map[string]any{"error": "the prompt has no text"})
 	}
+	s.resendPlan()
 	pr, err := s.submit(text)
 	if err != nil {
 		return sdk.PromptResponse{}, err

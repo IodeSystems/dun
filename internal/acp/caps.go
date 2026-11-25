@@ -46,13 +46,14 @@ func airCaps(m sdk.Meta) []string {
 	return jb.Air.Capabilities
 }
 
-// planID names dun's one plan in plan_update: a session has one plan.
-const planID = "dun"
+// planID names a session's one plan in plan_update: per session, so an
+// editor with several sessions keeps their plans apart.
+func planID(session string) string { return "dun-" + session }
 
 // planUpdate is dun's plan as the update the editor takes.
-func planUpdate(k caps, entries []sdk.PlanEntry) sdk.SessionUpdate {
+func planUpdate(k caps, session string, entries []sdk.PlanEntry) sdk.SessionUpdate {
 	if !k.planUpdate {
 		return sdk.UpdatePlan(entries...)
 	}
-	return sdk.SessionUpdate{PlanUpdate: &sdk.SessionPlanUpdate{Plan: sdk.NewPlanUpdateContentItems(planID, entries)}}
+	return sdk.SessionUpdate{PlanUpdate: &sdk.SessionPlanUpdate{Plan: sdk.NewPlanUpdateContentItems(sdk.PlanId(planID(session)), entries)}}
 }
