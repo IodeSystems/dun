@@ -42,15 +42,18 @@ type session struct {
 	streamed bool            // the reply's text came as tokens
 	commands map[string]bool // dun's command names, for slash prompts
 	ask      *proto.Ask      // a question asked as text: the next prompt answers it
-	lastAsk  string          // the ask id handled last (ask and turn_state both carry it)
-	perm     string          // the ask id a permission request is open for
-	permStop context.CancelFunc
-	seq      uint64 // the last event seen, to resubscribe after
-	epoch    string
-	snapped  bool // the first snapshot is in
-	replay   bool // session/load: stream the first snapshot's history
-	ready    chan struct{}
-	closed   bool
+	// suspended: the engine stopped with a question open (done suspended):
+	// the prompt it holds is not over, the next engine asks again.
+	suspended bool
+	lastAsk   string // the ask id handled last (ask and turn_state both carry it)
+	perm      string // the ask id a permission request is open for
+	permStop  context.CancelFunc
+	seq       uint64 // the last event seen, to resubscribe after
+	epoch     string
+	snapped   bool // the first snapshot is in
+	replay    bool // session/load: stream the first snapshot's history
+	ready     chan struct{}
+	closed    bool
 
 	// The config options (config.go): what they are made from, the list
 	// the editor has (cfgSent, once cfgLive), the set_config_options under
@@ -313,7 +316,7 @@ func (s *session) onSnapshot(ev proto.Event, sn *proto.Snapshot) {
 			if p.Phase == proto.PhaseWaitingAnswer && p.Ask != nil {
 				s.onAsk(p.Ask)
 			}
-			if !first && p.Phase == proto.PhaseIdle && len(p.Queued) == 0 {
+			if !first && p.Phase == proto.PhaseIdle && len(p.Queued) == 0 && !s.isSuspended() {
 				s.endTurn(sdk.StopReasonEndTurn, nil)
 			}
 		}

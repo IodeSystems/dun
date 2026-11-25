@@ -268,10 +268,13 @@ func (s *session) setConfig(ctx context.Context, id, value string) ([]sdk.Sessio
 		if done(cfg) {
 			return s.liveConfig(), nil
 		}
-		// The switch restarts the engine: a turn of the editor's would end
-		// with no done, and its prompt would never be answered.
-		if waiting {
-			return nil, sdk.NewInvalidRequest(map[string]any{"error": "a prompt of this session is running: switch the model after it ends, or cancel it"})
+		// The switch restarts the engine: a turn that is generating would
+		// end with no done, and its prompt would never be answered. A turn
+		// that waits on an open question is safe: the restart suspends the
+		// question, the new engine asks it again, and its answer goes on
+		// with the turn (turns.go, onDone).
+		if waiting && !s.questionOnly() {
+			return nil, sdk.NewInvalidRequest(map[string]any{"error": "a prompt of this session is running: switch the model after it ends, answer its question, or cancel it"})
 		}
 		cmd = &proto.SwitchModel{URL: ref.url, Model: ref.model}
 		wait = switchWait
