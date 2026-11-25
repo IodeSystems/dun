@@ -117,6 +117,10 @@ func TestIndex_BudgetExcludesAndRetries(t *testing.T) {
 		t.Errorf("the later session reported %q", m)
 	}
 	waitIndex(t, h2, IndexReady)
+	// The start must end (its tools listed) before the include: a restart
+	// under a start still in flight stops the server and is skipped as
+	// "already starting", leaving it down until that start times out.
+	h2.WaitServers(context.Background())
 	if args := argLines(log2); len(args) != 1 || !strings.HasSuffix(args[0], "--exclude .claude/worktrees") {
 		t.Fatalf("later spawn: %q", args)
 	}
