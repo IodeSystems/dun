@@ -146,6 +146,7 @@ func (h *Harness) restartExited(ctx context.Context, id string, callErr error) s
 		o.noteServer(id, "exited during a call again (%d times in %s): not restarting it", len(recent)+1, restartWindow)
 		log.Printf("dun: %s exited during a call again (%d times in %s); not restarting it (%s, %s)", id, len(recent)+1, restartWindow, path, version)
 		o.applyTools()
+		h.noteRoundEvent(RoundEvent{Kind: "server_restart", Server: id, Outcome: "gave_up", Attempt: len(recent) + 1})
 		return msg
 	}
 	r.at[id] = append(recent, at)
@@ -159,8 +160,10 @@ func (h *Harness) restartExited(ctx context.Context, id string, callErr error) s
 	}
 	var msg string
 	if err := o.startServer(ctx, s); err != nil {
+		h.noteRoundEvent(RoundEvent{Kind: "server_restart", Server: id, Outcome: "restart_failed", Attempt: n, Reason: oneLine(err.Error(), 200)})
 		msg = fmt.Sprintf("ERROR: the %s server exited during this call, and restarting it failed: %s", id, oneLine(err.Error(), 300))
 	} else {
+		h.noteRoundEvent(RoundEvent{Kind: "server_restart", Server: id, Outcome: "restarted", Attempt: n})
 		msg = fmt.Sprintf("ERROR: the %s server exited during this call. dun restarted it; the call was not run again. %s "+
 			"Retry, in smaller pieces if the call was large.", id, state)
 	}

@@ -182,6 +182,9 @@ func (h *Harness) foldBegin() {
 // nothing was folded). A no-op when no fold is open, so a caller calls it
 // on every path out of a fold. noteCompactionCause is the other end.
 func (h *Harness) foldEnd(err error) {
+	if err != nil && h.foldOpen.Load() {
+		h.noteRoundEvent(RoundEvent{Kind: "fold_failed", Reason: oneLine(err.Error(), 200)})
+	}
 	if !h.foldOpen.CompareAndSwap(true, false) || h.cfg.OnCompacting == nil {
 		return
 	}
@@ -196,6 +199,17 @@ func (h *Harness) foldEnd(err error) {
 // hands it to the UI.
 func (h *Harness) noteCompaction(ci agent.CompactionInfo) {
 	h.noteCompactionCause(ci, foldByShaper)
+}
+
+// foldCauseName is the cause as a ledger line names it.
+func foldCauseName(c foldCause) string {
+	switch c {
+	case foldByOverflow:
+		return "overflow"
+	case foldByBoundary:
+		return "boundary"
+	}
+	return "shaper"
 }
 
 // foldCause is why a fold happened, which decides what the thrash warning is
@@ -222,6 +236,7 @@ func (h *Harness) noteCompactionCause(ci agent.CompactionInfo, cause foldCause) 
 	// The fold may have taken a once-said hint's text (forget.go). The other
 	// call site is applyRecapText (recap.go).
 	h.forgetHints()
+	h.noteRoundEvent(RoundEvent{Kind: "fold", Cause: foldCauseName(cause), Before: ci.TokensBefore, After: ci.TokensAfter})
 	if cause == foldByBoundary {
 		h.cache.noteBoundaryFold()
 	} else {

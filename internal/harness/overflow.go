@@ -126,6 +126,11 @@ func (h *Harness) onOverflow(ctx context.Context, o agent.Overflow) agent.Overfl
 		}
 	}
 
+	where := "reply"
+	if note.InToolCall {
+		where = "tool_call"
+	}
+	h.noteRoundEvent(RoundEvent{Kind: "length_cut", Cause: where, Attempt: o.Attempt, Before: note.PromptTokens, Trace: h.trace.Last()})
 	h.noteMu.Lock()
 	h.overflowCuts++
 	if note.Folded > 0 {

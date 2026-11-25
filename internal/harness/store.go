@@ -51,6 +51,11 @@ type sessionStore struct {
 	// store forwards them to a person watching it (subagent.go, watch).
 	// Called outside mu.
 	onEntry func(e agent.Entry, seq uint64)
+	// onRecord sees each entry agentkit appends (Append only: not a silent
+	// note, not a published message), outside mu: what files the repairs
+	// and the tool errors in the rounds ledger (repairs.go). Separate from
+	// onEntry, which a sub-agent's watch replaces.
+	onRecord func(agent.Entry)
 	// suspended are the calls whose question the engine's stop cut: they
 	// get no result in this process (replay.go).
 	suspended map[string]bool
@@ -363,10 +368,13 @@ func (s *sessionStore) Append(_ context.Context, _ string, e agent.Entry) error 
 	s.flushLocked()
 	cb := s.onNotify
 	s.seq++
-	seq, onEntry, onResult := s.seq, s.onEntry, s.onToolResult
+	seq, onEntry, onResult, onRecord := s.seq, s.onEntry, s.onToolResult, s.onRecord
 	s.mu.Unlock()
 	if onEntry != nil {
 		onEntry(e, seq)
+	}
+	if onRecord != nil {
+		onRecord(e)
 	}
 	if e.Kind == agent.KindToolResult && onResult != nil {
 		onResult(e)
@@ -398,6 +406,13 @@ func (s *sessionStore) contextAt() ([]agent.Entry, uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.contextLocked(), s.seq
+}
+
+// setOnRecord installs the ledger hook (see onRecord).
+func (s *sessionStore) setOnRecord(fn func(agent.Entry)) {
+	s.mu.Lock()
+	s.onRecord = fn
+	s.mu.Unlock()
 }
 
 // setOnEntry installs the entry hook (see onEntry).

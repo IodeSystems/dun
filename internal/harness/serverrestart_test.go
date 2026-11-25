@@ -48,6 +48,8 @@ func TestRestart_ExitedServer(t *testing.T) {
 	defer func(n int) { restartLimit = n }(restartLimit)
 	restartLimit = 2
 	h, logPath := exiterHarness(t, "")
+	stats := t.TempDir()
+	h.rounds.ledger = NewStatsLedger(stats)
 	pid := callAs(t, h, h.mgr, "ex__pid")
 	out := callAs(t, h, h.mgr, "ex__crash")
 	for _, want := range []string{"ERROR: the ex server exited during this call. dun restarted it; the call was not run again.",
@@ -83,6 +85,16 @@ func TestRestart_ExitedServer(t *testing.T) {
 	}
 	if h.mgr.ServerStarted("ex") {
 		t.Error("still running past the limit")
+	}
+	// Each restart, and the give-up, is a server_restart line.
+	var outcomes []string
+	for _, e := range ledgerEvents(t, stats) {
+		if e.Kind == "server_restart" && e.Server == "ex" {
+			outcomes = append(outcomes, e.Outcome)
+		}
+	}
+	if strings.Join(outcomes, ",") != "restarted,restarted,gave_up" {
+		t.Errorf("ledger outcomes %v", outcomes)
 	}
 }
 

@@ -430,6 +430,7 @@ type Harness struct {
 	// rounds is what each model round cost, the open turn's totals and the
 	// endpoint's prefill speed (roundstats.go). The root session's only.
 	rounds     roundStats
+	repairs    repairState // this Turn's repairs, for their outcomes (repairs.go)
 	agents     map[int]*subAgent
 	ownsMgr    bool
 	parent     *Harness     // nil for a root
@@ -855,17 +856,16 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// parent's meter and leaves the hook to it.
 	if cfg.Parent == nil {
 		h.rounds.ledger = cfg.StatsLedger
+		if cfg.StatsLedger != nil {
+			capsLedger.Store(cfg.StatsLedger) // capability clamps (repairs.go)
+		}
 		if cfg.Spend != nil {
 			cfg.Spend.SetRoundHook(h.noteRound)
 		}
-		// A malformed-call repair note is one ledger line (agentkit
-		// v0.41.1: a MALFORMED_FUNCTION_CALL round with no text or call).
-		store.setOnEntry(func(e agent.Entry, _ uint64) {
-			if e.Kind == agent.KindNotification && e.Tag == agent.MalformedCallTag {
-				h.noteRoundEvent(RoundEvent{Kind: "malformed_call_repair", NativeFinish: "MALFORMED_FUNCTION_CALL", Trace: h.trace.Last()})
-			}
-		})
 	}
+	// agentkit's repair notices and the tool results that are errors are
+	// ledger lines, for a root and a sub-agent alike (repairs.go).
+	store.setOnRecord(h.recordEntry)
 
 	// Server→client push. Only the OWNER registers: a child shares its
 	// parent's manager, and registering again would replace the parent's sink
@@ -926,7 +926,7 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// Carry the client's own retry narration out to the UI. Without this the
 	// waiting is only ever logged, and a TUI's log is not on screen.
 	applyRetryPolicy(cfg.Client)
-	wireRetry(cfg.Client, h.noteRetry, h.noteTicket)
+	wireRetry(cfg.Client, func(n RetryNote) { h.noteRetryEvent(n); h.noteRetry(n) }, h.noteTicket)
 
 	// The window is subtracted from all session long: the prompt's budget on
 	// every build, the response's cap on every round. It is ASKED for here and,
@@ -1024,6 +1024,9 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		OnOverflow: h.onOverflow,
 		// Where the turn would end: a check, or the open plan (idlecheck.go).
 		OnIdle: h.onIdle,
+		// Why the Turn stopped: the outcome of each repair it ran, and a
+		// MaxTurns cut, in the rounds ledger (repairs.go).
+		OnTurnEnd: h.noteTurnEnd,
 		// A round the provider ended with a failure finish_reason is resent;
 		// each resend shows as a retry line (retry.go providerFailNote).
 		OnProviderFailRetry: func(r agent.ProviderFailRetry) {
