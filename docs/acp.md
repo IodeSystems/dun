@@ -339,7 +339,11 @@ changes until approval; it is not a run type and is not shown.
   and a fake dund (initialize, new, prompt with a diff, cancel, queued
   prompts, load replay, permission, text question, slash command, config
   options: listed, set, refused, changed elsewhere; stop conditions: mode,
-  turn_cap, a goal from the next prompt, a prompt held to its run's stop).
+  turn_cap, a goal from the next prompt, a prompt held to its run's stop;
+  for an editor that advertises them: plan_update, elicitation forms
+  (select, multiple choice, text, custom answer, decline, cancel,
+  withdrawn, fallback); `_session/steering`). Forms, plan_update and
+  steering are not yet run in any editor.
 - Live (2026-11-24, against a running dund): initialize, session/new, a
   prompt streamed to `end_turn`, session/load of that session replaying it.
   Not yet live: cancel, queued prompts, permission requests, any editor.
@@ -362,9 +366,9 @@ clone of the kit:
     uv run acp-tck --agent-cwd $D/wd --timeout 60 --test-timeout 180 -- $D/agent.sh
 
 Stop the private dund (kill the PID in `$D/home/.dun/dund.pid`; dund has no stop command)
-and the stub afterwards. Result 2026-11-24: 0 mandatory failures. Two
-advisory failures remain, both out of scope: ACP-PLAN-002 (the bridge sends
-the baseline `plan` update, not the unstable `plan_update`, when the client
-advertises `plan`) and ACP-SESSION-004 (the editor's MCP servers are not
-started). Many capability tests skip: modes, config options, list, resume,
-delete, images, subagents.
+and the stub afterwards. Result 2026-11-24 (after plan_update, forms and
+steering): 75 passed, 1 failed, 74 skipped; 0 mandatory failures.
+ACP-PLAN-002 (plan_update when the client advertises `plan`) now passes.
+One advisory failure remains, out of scope: ACP-SESSION-004 (the editor's
+MCP servers are not started). Many capability tests skip: modes, config
+options, list, resume, delete, images, subagents.
