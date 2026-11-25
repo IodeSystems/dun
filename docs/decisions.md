@@ -2039,6 +2039,51 @@ rescue), and agentkit's capability record on the wire. Code:
   `host_hooks` is still accepted in a manifest as a deprecated field and
   ignored, because installed and published poly-lsp manifests still carry it.
 
+## The harbor sweep is gated on a proven env (2026-11-25)
+
+- **No sweep subtask is dispatched into an unproven env (draft).** The
+  rule a dispatcher reads, for the `examples/harbor` sweep:
+  1. `run.sh preflight` (below) has PASSED on the host the sweep will run
+     on, since the last change to any of its inputs (harbor build,
+     `TASKS` dir, `~/.dun/config.json`);
+  2. the sweep's doc names the most recent proof trial — one real
+     end-to-end trial through `run.sh` (smallest task, cheapest
+     model/effort, `ATTEMPTS=1`) — with its `result.json` (a reward
+     present) and agent logs (model requests made) as the evidence.
+  A sweep dispatched without both is a dispatch error: it stops, and the
+  missing proof is the first thing restored.
+- **Preflight is one command, and a failed check names itself.**
+  `HARBOR=<venv>/bin/harbor TASKS=<tasks> ./run.sh preflight` checks the
+  harbor binary and its version (0.26.0 takes `run --config <jobconfig>`,
+  not the retired `-p <tasks-dir>`), the docker daemon, `~/.dun/config.json`
+  (url and key present), and the `TASKS` dir (usable: a task with a
+  `task.toml`, or a `task.yaml` that `convert_task_yaml.py` converts).
+  It exits non-zero and prints each failed check by name. The command
+  itself is the sibling subtask's draft under p_1m879sa8f8dtd4rzm7vwna,
+  not yet in the tree; the wording of its checks is what this section
+  pins.
+- **Why: the blocker must be proven before dispatch, not discovered in
+  it.** Sprint 21's arm A subtask was invalidated and sessions were burned
+  discovering the env was unrunnable (issue i_1m7yw2xpe7c7p1f5b9y4j9
+  documents the drift: task.toml v2 vs task.yaml v1, the flag rejected);
+  the harness prerequisites (harbor venv path, docker's state,
+  `~/.dun/config.json`) live on the aw4 host, outside the repo, and were
+  not verifiable from the log. The adaptation of `run.sh` to harbor
+  0.26.0 is done (the RFX x_1m87aaybx5hqmjwtktqy99 measured it: `run.sh`
+  on base writes a per-task JobConfig YAML and calls `harbor run
+  --config`; `convert_task_yaml.py` is present) — what was missing was
+  proof the adapted path runs end-to-end, and a check cheap enough to run
+  at dispatch time.
+- **Machine-side enforcement is a separate issue.** This section is the
+  human-side rule: a dispatcher reads it. The structural "no dispatch
+  without proof" gate is i_1m7zc0nq22f0zrs4dkn55y and belongs there, not
+  here.
+- **Provenance.** This section is a draft: its acceptance row (an F16 spec
+  "sweep env proven before dispatch") is pending RFX
+  x_1m87aaybx5hqmjwtktqy99 to the PM. When the spec lands, `run.sh
+  preflight` becomes a dev subtask judged against that row and this
+  section's wording is conformed to it.
+
 ## File edits on tool results (USER 2026-11-24)
 
 - **A tool result carries the files it changed, whole texts before and after**
