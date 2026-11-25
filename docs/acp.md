@@ -164,14 +164,43 @@ outside the workspace, `harness/fileaccess.go`):
   the `answer`, not as a message, and is answered with the turn it
   continues.
 
+## Config options
+
+session/new and session/load answer with `configOptions` (ACP session
+config options), both `select`, in this order:
+
+| id | category | values | current | set sends |
+|---|---|---|---|---|
+| `model` | `model` | every saved provider's models (control `models`, as the web app's picker): one group per provider when there are several, a provider whose list failed left out; value `<provider>/<model id>` | the `settings` event's model and URL, listed even when its provider's list did not come | dund `switch_model {url, model}`: the engine restarts on the same conversation with its other flags (the web app's switchModel; the TUI's /model without saving a default) |
+| `effort` | `thought_level` | the `effort` command's choices in the `commands` event (default, none, minimal … max; a level the model does not take says what is sent instead) | that command's state | control `effort <level>`: dun's /effort, which is saved for every session |
+
+session/new waits up to 5 s for the model list, the settings and the
+commands; an option whose events come later arrives as a
+`config_option_update`. `session/set_config_option` waits for the engine to
+report the new value (15 s; a model switch 2 min) and answers with the full
+list. A change from any client (the TUI's /model or /effort) is a
+`config_option_update` with the full list; the change a set answers is not
+sent again.
+
+Refused: a value not in the option's list, an unknown option id, or a
+boolean value (`-32602`); a model switch while a prompt of the editor's
+waits (`-32600`: the restart would end the turn with no `done`); a switch
+dund refuses or a value the engine does not report in time (`-32603`).
+
+No `mode` option and no `modes`: dun has no per-session run type (a stop
+condition such as a turn cap, a goal, or a drained plan) to select.
+`session/set_mode` is method-not-found. Plan mode (`/plan mode on|off`)
+gates file changes until approval; it is not a run type and is not shown.
+
 ## Not supported
 
 - The editor's MCP servers (`mcpServers` in session/new and load): ignored,
   with a log line. dun runs its own servers (`dun.json`, `/mcp`).
 - Client `fs/*` and `terminal/*`: dun reads and writes the disk and runs
   commands itself; the editor sees the files change on disk.
-- Session modes, config options, `session/list`, `session/resume`,
-  `session/delete`.
+- Session modes, boolean config options, the unstable model selection
+  (`models`, `session/set_model`: not in SDK v0.20.0), `session/list`,
+  `session/resume`, `session/delete`.
 - Sign-in: there is none. initialize advertises one `agent` auth method
   (id `dun`) because editors such as JetBrains Air wait for one and the ACP
   registry requires one. `authenticate` with `dun` succeeds with no check;
@@ -185,7 +214,8 @@ outside the workspace, `harness/fileaccess.go`):
 
 - Unit: `internal/acp` tests drive the bridge with the SDK's client side
   and a fake dund (initialize, new, prompt with a diff, cancel, queued
-  prompts, load replay, permission, text question, slash command).
+  prompts, load replay, permission, text question, slash command, config
+  options: listed, set, refused, changed elsewhere).
 - Live (2026-11-24, against a running dund): initialize, session/new, a
   prompt streamed to `end_turn`, session/load of that session replaying it.
   Not yet live: cancel, queued prompts, permission requests, any editor.

@@ -49,11 +49,22 @@ type session struct {
 	replay   bool // session/load: stream the first snapshot's history
 	ready    chan struct{}
 	closed   bool
+
+	// The config options (config.go): what they are made from, the list
+	// the editor has (cfgSent, once cfgLive), the set_config_options under
+	// way and their commands' ids, and a channel closed at each change.
+	cfg     config
+	cfgSent string
+	cfgLive bool
+	setting int
+	cfgAcks map[string]chan string
+	cfgWake chan struct{}
 }
 
 func newSession(ctx context.Context, id, cwd string, p peer, log *slog.Logger, dial func() (net.Conn, error), replay bool) *session {
 	return &session{id: id, cwd: cwd, ctx: ctx, peer: p, log: log, dial: dial,
-		replay: replay, ready: make(chan struct{}), commands: map[string]bool{}}
+		replay: replay, ready: make(chan struct{}), commands: map[string]bool{},
+		cfgAcks: map[string]chan string{}, cfgWake: make(chan struct{})}
 }
 
 // update sends one session/update; a failed write is logged, as the
@@ -187,6 +198,10 @@ func (s *session) handle(ev proto.Event) {
 		s.slashReply(p.Message)
 	case *proto.Commands:
 		s.onCommands(p)
+	case *proto.Settings:
+		s.onConfig(func(c *config) { c.settings = p })
+	case *proto.Models:
+		s.onConfig(func(c *config) { c.providers, c.models = p.Providers, true })
 	case *proto.Ask:
 		s.onAsk(p)
 	case *proto.Answered:
@@ -229,6 +244,9 @@ func (s *session) onAck(re string, a *proto.Ack) {
 	if a.Error == "" {
 		return
 	}
+	if re != "" && s.cfgAck(re, a.Error) {
+		return
+	}
 	if strings.HasPrefix(a.Error, "dropped:") {
 		s.mu.Lock()
 		after, epoch := s.seq, s.epoch
@@ -264,6 +282,8 @@ func (s *session) onSnapshot(ev proto.Event, sn *proto.Snapshot) {
 		switch p := st.Payload.(type) {
 		case *proto.Commands:
 			s.onCommands(p)
+		case *proto.Settings:
+			s.onConfig(func(c *config) { c.settings = p })
 		case *proto.Plan:
 			s.update(sdk.UpdatePlan(planEntries(p)...))
 		case *proto.TurnState:
@@ -287,6 +307,7 @@ func (s *session) onCommands(c *proto.Commands) {
 		s.commands[it.Name] = true
 	}
 	s.mu.Unlock()
+	s.onConfig(func(cfg *config) { cfg.effort = effortSpec(c) })
 	s.update(sdk.SessionUpdate{AvailableCommandsUpdate: &sdk.SessionAvailableCommandsUpdate{AvailableCommands: availableCommands(c)}})
 }
 

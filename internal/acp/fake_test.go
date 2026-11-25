@@ -29,7 +29,11 @@ type fakeDund struct {
 	items   []proto.HistoryItem // the snapshot's history
 	state   []any               // the snapshot's state events
 	missing bool                // subscribe answers "no such session" until a create
+	models  *proto.Models       // control "models" answers with it (none: an empty list)
 }
+
+// The tests that do not set the config's events wait for them briefly.
+func init() { configWait = 50 * time.Millisecond }
 
 func newFakeDund(t *testing.T) *fakeDund {
 	return &fakeDund{t: t, cmds: make(chan proto.Command, 64), creates: make(chan proto.Create, 8)}
@@ -87,6 +91,16 @@ func (f *fakeDund) serve(c net.Conn) {
 			f.write(c, ev)
 			f.subs = append(f.subs, c)
 			f.mu.Unlock()
+		case *proto.ControlCmd:
+			if p.ID != "models" {
+				f.cmds <- cmd
+				continue
+			}
+			m := f.models
+			if m == nil {
+				m = &proto.Models{}
+			}
+			go f.emit(m)
 		default:
 			f.cmds <- cmd
 		}
