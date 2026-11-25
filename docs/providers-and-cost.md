@@ -259,12 +259,64 @@ was "word word word…", and nothing said it was raglit's context probe.
   Requests for both owners: 2026-11-20.
 
 - **Round events.** Besides each round, `rounds-*.jsonl` has lines with a
-  `kind` (readers of rounds skip them): `provider_fail_retry` (agentkit resent
-  a round the provider ended with a failure finish; `attempt`, `max`,
-  `wait_ms`), `malformed_call_repair` (agentkit v0.41.1: an empty round with
-  native MALFORMED_FUNCTION_CALL got a repair note, up to 3 per turn) and
-  `empty_reply` (the turn ended on an empty reply). Each round line has
-  `finish` and `native_finish`, verbatim.
+  `kind` (readers of rounds skip them). Each round line has `finish` and
+  `native_finish`, verbatim. The kinds are in "Repairs in the stats ledger"
+  below.
+
+## Repairs in the stats ledger
+
+Code: `internal/harness/repairs.go` (recording), `internal/repairs`
+(reader and renderer), `/usage repairs`, `/usage perf`,
+`dun --usage --repairs [--json]`. The question (Carl, 2026-11-25): which
+workarounds dun and agentkit run against which model and provider, how
+often they work, and what they cost.
+
+Every event line has `kind`, `t`, `session`, `provider` and `model` (the
+harness the event happened in: a sub-agent's events go to its root's
+ledger under the sub-agent's own model). The kinds:
+
+| kind | written | fields |
+|---|---|---|
+| `repair` | agentkit appended a repair notice (the store's `onRecord` hook) | `cause`: the notice tag: `empty-reply`, `reasoning-cut`, `malformed-call`, `repetition`, `tool_loop`, `idle_check` |
+| `repair_outcome` | the agentkit Turn ended (`OnTurnEnd`), one per cause it repaired | `cause` (a repair tag, `provider_fail`, `length_cut`), `outcome` `repaired` or `failed`, `attempt` the count. Failed: the Turn ended in the error the cause repairs (empty_reply, reasoning_cut, repetition, tool_loop, overflow). A cancelled Turn writes none; `idle_check` has no outcome |
+| `provider_fail_retry` | agentkit resent a round the provider ended with a failure finish | `attempt`, `max`, `wait_ms`, `finish`, `native_finish` |
+| `empty_reply` | the turn ended on an empty reply | `finish`, `native_finish` |
+| `retry` | the client waited to retry a request (`scope` request: transport, 429, 5xx, stream, stall) or dun re-ran a turn (`scope` turn: interrupted) | `cause` the kind, `status`, `attempt`, `wait_ms`; the end of one has `outcome` `recovered` or `gave_up` |
+| `length_cut` | the provider cut a round for room (`onOverflow`) | `cause` `reply` or `tool_call`, `attempt`, `before` the prompt tokens |
+| `fold` | a fold (shaper, overflow, boundary, rescue) | `cause`, `before`, `after` (tokens) |
+| `fold_failed` | a begun fold ended in an error (a rescue's summarize call) | `reason` |
+| `cap_clamp` | the client changed a field from what dun asked (`OnTranslate`); once per model, field and values per process | `key`, `sent`, `wanted`, `reason`; `provider` is the endpoint URL |
+| `server_restart` | an MCP server exited during a call | `server`, `outcome` `restarted`, `restart_failed` or `gave_up`, `attempt` |
+| `cancel` | a turn was stopped before it finished | `cause` `user` (TUI, web and ACP session/cancel all reach `Interrupt("")`), `budget`, `restart`, `other`; `reason` |
+| `turn_cap` | the Turn hit MaxTurns | `attempt` rounds, `max` |
+| `tool_error` | a tool result was an error | `tool`, `cause` `error`, `malformed_json`, `truncated`, `unknown_tool`, `warned` (node_edit landed incomplete or unvalidated). A call an interrupt cut or skipped is not one |
+| `cmd_time` | a command finished | `cmd`, `ms`, `surface`: `tui` is keypress to the first frame that shows the result (`internal/tui/cmdtime.go`); `engine` is the control line's arrival to the first event that answers it (`cmd/dun/cmdtime.go`) |
+
+Older kinds still in the files: `malformed_call_repair` (before
+`repair`/`malformed-call`; the reader counts it as that), `shrink`,
+`outcome`.
+
+A round after a resend or a repair (provider_fail_retry, repair,
+length_cut, a retry wait) has `repair` set to its cause: those rounds'
+tokens and cost, plus the events' `wait_ms`, are "the cost of repairs".
+Rounds are not told apart by who asked, so a sub-agent's round can take
+the tag.
+
+Not recorded: agentkit's RepairLooseJSON successes (a loose tool-call
+argument repaired before dispatch) are only a `log.Printf` in agentkit
+(`agent/session.go` checkArgs); counting them needs an agentkit hook.
+`/until` stop reasons are not events.
+
+The Repairs tab groups the month's lines by kind, then provider and
+model, with count, today, ok, failed and wait; the top lines are the cost
+of repairs this month and today; then tool errors by tool. The Perf tab
+has this session's frame times by stage (`perf.go`: p50, p95, max, slow
+frames, the slow-frame dump's path), this session's command times (a ring
+of 64 a command), the month's command times by surface (over 300 ms
+flagged `!`), and round latency by model (latency_ms p50/p95, and
+llama.cpp's prefill and generation tokens a second where reported). The
+read runs off the UI's goroutine: 13 ms for 2.4k lines (2026-11-25), again
+at most every 3 s while either tab is open.
 
 ### Wire dump: `AGENTKIT_WIRE_DUMP=<dir>`
 
