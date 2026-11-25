@@ -21,6 +21,7 @@ import (
 
 	sdk "github.com/coder/acp-go-sdk"
 
+	"github.com/iodesystems/dun/internal/harness"
 	"github.com/iodesystems/dun/proto"
 )
 
@@ -36,8 +37,31 @@ type Agent struct {
 	peer    peer
 	started chan struct{} // closed once peer is set
 
-	mu       sync.Mutex
-	sessions map[string]*session
+	mu          sync.Mutex
+	sessions    map[string]*session
+	initialized bool
+}
+
+// sessionFileExists says whether dun has a session file for id in the
+// workspace cwd; a variable so tests need no dun home.
+var sessionFileExists = func(cwd, id string) bool {
+	_, err := os.Stat(harness.SessionFile(cwd, id))
+	return err == nil
+}
+
+// notFound is ACP's resource-not-found (-32002) for a session id.
+func notFound(id string) error {
+	return sdk.NewRequestError(-32002, "Resource not found", map[string]any{"error": "no such session", "sessionId": id})
+}
+
+// ready fails a request that came before initialize (-32600).
+func (a *Agent) ready() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.initialized {
+		return sdk.NewInvalidRequest(map[string]any{"error": "initialize first"})
+	}
+	return nil
 }
 
 // The ACP methods the bridge implements; the build breaks when the SDK
@@ -80,18 +104,25 @@ func (a *Agent) closeAll() {
 }
 
 func (a *Agent) Initialize(ctx context.Context, p sdk.InitializeRequest) (sdk.InitializeResponse, error) {
+	a.mu.Lock()
+	a.initialized = true
+	a.mu.Unlock()
 	return sdk.InitializeResponse{
 		ProtocolVersion: sdk.ProtocolVersionNumber,
 		AgentInfo:       &sdk.Implementation{Name: "dun", Version: a.version},
 		AgentCapabilities: sdk.AgentCapabilities{
-			LoadSession:        true,
-			PromptCapabilities: sdk.PromptCapabilities{EmbeddedContext: true},
+			LoadSession:         true,
+			SessionCapabilities: sdk.SessionCapabilities{Close: &sdk.SessionCloseCapabilities{}},
+			PromptCapabilities:  sdk.PromptCapabilities{EmbeddedContext: true},
 		},
 		AuthMethods: []sdk.AuthMethod{},
 	}, nil
 }
 
 func (a *Agent) NewSession(ctx context.Context, p sdk.NewSessionRequest) (sdk.NewSessionResponse, error) {
+	if err := a.ready(); err != nil {
+		return sdk.NewSessionResponse{}, err
+	}
 	s, err := a.open(ctx, p.Cwd, "", len(p.McpServers))
 	if err != nil {
 		return sdk.NewSessionResponse{}, err
@@ -102,6 +133,9 @@ func (a *Agent) NewSession(ctx context.Context, p sdk.NewSessionRequest) (sdk.Ne
 // LoadSession attaches to a dun session (a dund id, as session/new gave)
 // and streams its conversation before it answers.
 func (a *Agent) LoadSession(ctx context.Context, p sdk.LoadSessionRequest) (sdk.LoadSessionResponse, error) {
+	if err := a.ready(); err != nil {
+		return sdk.LoadSessionResponse{}, err
+	}
 	if p.SessionId == "" {
 		return sdk.LoadSessionResponse{}, sdk.NewInvalidParams(map[string]any{"error": "sessionId is required"})
 	}
@@ -152,7 +186,12 @@ func (a *Agent) open(ctx context.Context, cwd, resume string, mcpServers int) (*
 			return nil, err
 		}
 		// A conversation dund does not have (stopped, or from before it):
-		// adopt it from the workspace's session file.
+		// adopt it from the workspace's session file; with none, there is
+		// no such session (the engine would start a new one under the id).
+		if !sessionFileExists(cwd, id) {
+			l.close()
+			return nil, notFound(id)
+		}
 		if _, err := l.call("", &proto.Create{Workspace: cwd, Args: a.args, Resume: id}); err != nil {
 			l.close()
 			return nil, fmt.Errorf("load dun session %s in %s: %w", id, cwd, err)
@@ -186,7 +225,7 @@ func (a *Agent) session(id sdk.SessionId) (*session, error) {
 	defer a.mu.Unlock()
 	s := a.sessions[string(id)]
 	if s == nil {
-		return nil, sdk.NewInvalidParams(map[string]any{"error": "no such session", "sessionId": id})
+		return nil, notFound(string(id))
 	}
 	return s, nil
 }
@@ -220,13 +259,17 @@ func (a *Agent) Cancel(ctx context.Context, p sdk.CancelNotification) error {
 	return nil
 }
 
-// CloseSession ends the bridge's link; dund keeps the session.
+// CloseSession cancels the session's work as session/cancel does (its
+// prompts end "cancelled"), then ends the bridge's link; dund keeps the
+// session.
 func (a *Agent) CloseSession(ctx context.Context, p sdk.CloseSessionRequest) (sdk.CloseSessionResponse, error) {
 	a.mu.Lock()
 	s := a.sessions[string(p.SessionId)]
 	delete(a.sessions, string(p.SessionId))
 	a.mu.Unlock()
 	if s != nil {
+		s.stop()
+		s.finish(outcome{stop: sdk.StopReasonCancelled}, func(*prompt) bool { return true })
 		s.close()
 	}
 	return sdk.CloseSessionResponse{}, nil

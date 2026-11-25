@@ -65,7 +65,12 @@ adapter config; give it the command `dun` and the args `["acp"]`.
   file. The conversation is streamed before the answer: user messages,
   thinking, replies, and each tool call with its result and diffs. dun's
   own notices are left out.
-- Closing the editor detaches; dund keeps the session.
+- Closing the editor detaches; dund keeps the session. `session/close`
+  (advertised) cancels the session's turn as `session/cancel` does, ends
+  its prompts `cancelled`, and detaches.
+- An unknown session id (prompt, or a load with no dund session and no
+  session file in the workspace) is `-32002` with `data.sessionId`; a
+  request before `initialize` is `-32600`.
 - A lost dund connection (dund restarting into a new build) is redialed
   for 2 minutes and resubscribed after the last event seen; a prompt
   waiting meanwhile is answered when its turn ends.
@@ -178,3 +183,25 @@ outside the workspace, `harness/fileaccess.go`):
 - Live (2026-11-24, against a running dund): initialize, session/new, a
   prompt streamed to `end_turn`, session/load of that session replaying it.
   Not yet live: cancel, queued prompts, permission requests, any editor.
+
+## Conformance kit (manual)
+
+[acp-tck](https://github.com/agentclientprotocol/acp-tck) (v0.5.0, commit
+7c71c4d, 2026-11-24) launches the agent as a stdio subprocess, one process
+per test. It needs network to fetch its Python 3.14 and dependencies (uv),
+so there is no make target. Run it with a private dund and a stub LLM, never
+the real dund: build `go build -o $D/dun ./cmd/dun` and `go build -o $D/ux
+./tools/ux`; start `$D/ux llm --port-file $D/llm.addr`; make a wrapper that
+`exec env HOME=$D/home DUN_HOME=$D/home/.dun DUN_URL=http://<addr>/v1
+DUN_MODEL=<a model the stub lists> DUN_LLM_KEY=x $D/dun acp`; then, in a
+clone of the kit:
+
+    uv run acp-tck --agent-cwd $D/wd --timeout 60 --test-timeout 180 -- $D/agent.sh
+
+Stop the private dund (`DUN_HOME=$D/home/.dun $D/dun dund stop`, or kill by
+PID) and the stub afterwards. Result 2026-11-24: 0 mandatory failures. Two
+advisory failures remain, both out of scope: ACP-PLAN-002 (the bridge sends
+the baseline `plan` update, not the unstable `plan_update`, when the client
+advertises `plan`) and ACP-SESSION-004 (the editor's MCP servers are not
+started). Many capability tests skip: modes, config options, list, resume,
+delete, images, subagents.
