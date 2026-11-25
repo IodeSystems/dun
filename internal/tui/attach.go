@@ -129,14 +129,20 @@ func startDund(key string) error {
 func dundServeEnv(key string) []string {
 	if key != "" && getenv("DUN_LLM_KEY", os.Environ()) == "" {
 		// Replace an existing empty entry rather than appending a second
-		// DUN_LLM_KEY that would read as the empty one.
+		// DUN_LLM_KEY that would read as the empty one; when the env has
+		// none at all, append it.
 		env := make([]string, 0, len(os.Environ())+1)
+		set := false
 		for _, kv := range os.Environ() {
 			if k, _, ok := strings.Cut(kv, "="); ok && k == "DUN_LLM_KEY" {
 				env = append(env, "DUN_LLM_KEY="+key)
+				set = true
 				continue
 			}
 			env = append(env, kv)
+		}
+		if !set {
+			env = append(env, "DUN_LLM_KEY="+key)
 		}
 		return append(env, "DUN_CHILD=1")
 	}

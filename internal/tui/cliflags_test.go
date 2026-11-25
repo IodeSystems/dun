@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"slices"
 	"testing"
 )
@@ -51,6 +52,15 @@ func TestKeyOnTheDundEnv(t *testing.T) {
 	env := dundServeEnv("sk-secret")
 	if v := getenv("DUN_LLM_KEY", env); v != "sk-secret" {
 		t.Fatalf("dund env DUN_LLM_KEY = %q, want the passed key", v)
+	}
+
+	// No DUN_LLM_KEY in the environment at all: the passed key must be added,
+	// not lost in the copy of the process environment.
+	os.Unsetenv("DUN_LLM_KEY")
+	t.Cleanup(func() { t.Setenv("DUN_LLM_KEY", "") })
+	env = dundServeEnv("sk-secret")
+	if v := getenv("DUN_LLM_KEY", env); v != "sk-secret" {
+		t.Fatalf("dund env DUN_LLM_KEY = %q with the env var absent, want the passed key", v)
 	}
 
 	// A key already in the environment is not overridden by the one on the CLI.
