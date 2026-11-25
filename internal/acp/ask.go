@@ -21,7 +21,15 @@ import (
 // onAsk asks a question once (the ask event and turn_state both carry it).
 func (s *session) onAsk(a *proto.Ask) {
 	s.mu.Lock()
-	if a.AskID != "" && a.AskID == s.lastAsk {
+	// The same question again (ask and turn_state both carry it) is not
+	// raised twice. After the engine's stop suspended the turn (done
+	// suspended) the new engine asks it again, with the same ask_id: one
+	// still open (a form or request pending, or shown as text) is kept; one
+	// the bridge dropped is raised again.
+	held := s.perm == a.AskID || (s.ask != nil && s.ask.AskID == a.AskID)
+	again := s.suspended
+	s.suspended = false
+	if a.AskID != "" && a.AskID == s.lastAsk && (held || !again) {
 		s.mu.Unlock()
 		return
 	}

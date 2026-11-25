@@ -204,6 +204,19 @@ prompts with a JSON-RPC error carrying dun's message. dun reports no token
 limit or refusal as a turn end, so `max_tokens`, `max_turn_requests` and
 `refusal` are not sent.
 
+`done {reason: suspended}` (the engine stopped with a question open: a
+kill, dund's restart, a model switch) is **not** a turn end: the prompts
+stay held, with no `cancelled` or `end_turn`. A form or permission request
+still open stays open. The next engine asks the same question again (same
+`ask_id` and `call_id`; `docs/event-protocol.md`, "Questions across a
+restart"): one still open is kept, one the bridge dropped (a cancelled
+request) is raised again, and an `ask` for another id is a new question.
+The reply is sent as the `answer` with that `ask_id`; the continuation
+turn (no new user message) ends the prompt with its stop reason and the
+usage of both turns added up. A snapshot that shows the session idle while
+suspended does not end the prompt either. Code: `turns.go` (`onDone`),
+`ask.go` (`onAsk`).
+
 ### session/cancel
 
 Prompts dun has not taken yet are answered `cancelled` at once. Queued ones
@@ -279,8 +292,11 @@ list. A change from any client (the TUI's /model or /effort) is a
 sent again.
 
 Refused: a value not in the option's list, an unknown option id, or a
-boolean value (`-32602`); a model switch while a prompt of the editor's
-waits (`-32600`: the restart would end the turn with no `done`); a switch
+boolean value (`-32602`); a model switch while the model generates for a prompt of the editor's
+(`-32600`: the restart would end the turn with no `done`; a switch is
+allowed while every prompt waits on an open question, because the
+restart suspends the question and the new engine asks it again, see "Stop
+reasons"; a queued message or a command also waits, so it is refused); a switch
 dund refuses or a value the engine does not report in time (`-32603`).
 
 ### Stop conditions (mode, turn_cap)

@@ -213,6 +213,16 @@ func (s *session) onDone(d *proto.Done) {
 	if d.Reason == "held" {
 		return
 	}
+	// The engine stopped with a question open (a kill, a restart, a model
+	// switch): the turn is not over. The prompt stays held, a form stays
+	// open, and the next engine asks the question again (ask.go); the turn
+	// that goes on with its answer ends the prompt.
+	if d.Reason == "suspended" {
+		s.mu.Lock()
+		s.suspended = true
+		s.mu.Unlock()
+		return
+	}
 	stop := sdk.StopReasonEndTurn
 	s.mu.Lock()
 	if d.Reason == "interrupted" || s.cancel {
@@ -237,7 +247,7 @@ func (s *session) onError(e *proto.Error) {
 // endTurn answers the prompts the turn held and closes its question.
 func (s *session) endTurn(stop sdk.StopReason, err error) {
 	s.mu.Lock()
-	s.cancel, s.streamed, s.ask, s.untilHeld = false, false, nil, false
+	s.cancel, s.streamed, s.ask, s.untilHeld, s.suspended = false, false, nil, false, false
 	stopPerm := s.permStop
 	s.mu.Unlock()
 	if stopPerm != nil {
@@ -316,4 +326,27 @@ func (s *session) stop() {
 	s.mu.Lock()
 	s.cancel = false // no turn of ours to end
 	s.mu.Unlock()
+}
+
+func (s *session) isSuspended() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.suspended
+}
+
+// questionOnly: the session's prompts all wait on a question the engine
+// holds (it is open, and each prompt's turn has the model's message), so
+// the engine is idle and a restart suspends the question.
+func (s *session) questionOnly() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.perm == "" && s.ask == nil {
+		return false
+	}
+	for _, p := range s.prompts {
+		if !p.inTurn || p.slash {
+			return false
+		}
+	}
+	return true
 }
