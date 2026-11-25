@@ -62,8 +62,30 @@ func filesToolset(c *mcpserver.FilesConfig, root string) (filetools.Config, bool
 	// to refuse, with the command that changes it.
 	cfg.ReadMax, cfg.UnrangedMax = c.ReadMax, c.UnrangedMax
 	cfg.GrepMax, cfg.ListMax = c.GrepMax, c.ListMax
-	cfg.ExtraIgnore = c.Ignore
+	cfg.ExtraIgnore = append([]string(nil), c.Ignore...)
+	// A session that works in the main checkout pays a full-tree grep for
+	// every other agent's worktree copy of the same files (a planning
+	// session, 2026-11-20: 116s in .claude/worktrees for noise it had
+	// already located on base). The copies are the RAG ingest's
+	// workspaceCopies; skip them here too. A session in its own worktree
+	// is left as configured: it may name a sibling worktree deliberately.
+	if workspaceIsMainCheckout(root) {
+		for d := range workspaceCopies {
+			cfg.ExtraIgnore = append(cfg.ExtraIgnore, d+"/")
+		}
+	}
 	return cfg, root != ""
+}
+
+// workspaceIsMainCheckout reports whether root is the main checkout of the
+// git repo containing it (the --no-worktree, work-in-place case): not a
+// repo, and not a linked worktree of a repo checked out elsewhere.
+func workspaceIsMainCheckout(root string) bool {
+	if root == "" {
+		return false
+	}
+	top, repo := RepoRoot(root), MainRepo(root)
+	return top != "" && sameDir(top, repo)
 }
 
 // fileTools returns the session's toolset for its current working tree,

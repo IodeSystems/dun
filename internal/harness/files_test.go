@@ -180,6 +180,110 @@ func TestFileTools_RootIsTheWorktree(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(wt.Path, "new.txt")); err != nil {
 		t.Fatalf("write did not land in the worktree: %s", out)
 	}
+	// The other direction: a session in its own worktree is left as
+	// configured — a worktree-copy directory in its tree is visible (the
+	// plan leaves a deliberate sibling-worktree read to the session), where
+	// the same directory is hidden from a session in the main checkout.
+	copies := filepath.Join(wt.Path, ".dun", "worktrees", "sibling")
+	if err := os.MkdirAll(copies, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(copies, "sibling.txt"), []byte("worktree-copy-marker\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out = dispatchFile(t, h, "file_read", `{"path":".dun/worktrees/sibling/sibling.txt"}`)
+	if !strings.Contains(out, "worktree-copy-marker") {
+		t.Fatalf("a worktree session lost access to a worktree-copy directory: %s", out)
+	}
+	cfg, _ := filesToolset(&mcpserver.FilesConfig{Ignore: []string{"gen/"}}, wt.Path)
+	if !reflect.DeepEqual(cfg.ExtraIgnore, []string{"gen/"}) {
+		t.Fatalf("a worktree session's ExtraIgnore = %v, want only the user's", cfg.ExtraIgnore)
+	}
+}
+
+// A session that works in the main checkout (--no-worktree) must not pay a
+// full-tree grep for other agents' worktree copies of the same files:
+// .claude/worktrees and .dun/worktrees are skipped, at any depth, by grep
+// and list, in both directions.
+func TestFileTools_WorktreeCopiesIgnoredInMainCheckout(t *testing.T) {
+	t.Setenv("DUN_HOME", t.TempDir())
+	repo := t.TempDir()
+	mustRunGit(t, repo, "init", "-q", "-b", "main")
+	mustRunGit(t, repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init")
+	for _, d := range []string{".claude/worktrees/agent-abc", ".dun/worktrees/dun-1"} {
+		p := filepath.Join(repo, filepath.FromSlash(d), "internal", "harness")
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(p, "systemprompt.go"), []byte("DUN_FINISH_CANDIDATE worktree copy\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(repo, "src.txt"), []byte("DUN_FINISH_CANDIDATE real\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// In the main checkout: a full-tree grep finds the real file only.
+	h := startFiles(t, Config{Workspace: repo, Files: &mcpserver.FilesConfig{Ignore: []string{"gen/"}}})
+	out := dispatchFile(t, h, "file_read", `{"path":".","grep":"DUN_FINISH_CANDIDATE"}`)
+	if strings.Contains(out, "worktree copy") {
+		t.Errorf("a full-tree grep walked a worktree copy:\n%s", out)
+	}
+	if !strings.Contains(out, "src.txt") {
+		t.Errorf("the real file was not found:\n%s", out)
+	}
+	// A by-name read is not hidden (ExtraIgnore is grep and list only): a
+	// deliberate read of a copy is the session's act, not noise.
+	if out := dispatchFile(t, h, "file_read", `{"path":".claude/worktrees/agent-abc/internal/harness/systemprompt.go"}`); !strings.Contains(out, "worktree copy") {
+		t.Errorf("a by-name read of a worktree copy was refused:\n%s", out)
+	}
+	if out := dispatchFile(t, h, "file_read", `{"path":"."}`); strings.Contains(out, "worktrees") {
+		t.Errorf("a list of the root shows a worktree-copy directory:\n%s", out)
+	}
+	cfg, _ := filesToolset(&mcpserver.FilesConfig{Ignore: []string{"gen/"}}, repo)
+	want := map[string]bool{"gen/": true, ".claude/worktrees/": true, ".dun/worktrees/": true}
+	if len(cfg.ExtraIgnore) != len(want) {
+		t.Fatalf("ExtraIgnore = %v, want the user's plus the worktree copies", cfg.ExtraIgnore)
+	}
+	for _, p := range cfg.ExtraIgnore {
+		delete(want, p)
+	}
+	if len(want) != 0 {
+		t.Fatalf("ExtraIgnore = %v, want the user's plus the worktree copies", cfg.ExtraIgnore)
+	}
+
+}
+
+// The detection itself, all four cases: main checkout, a linked worktree,
+// the repo root named as a worktree (pass-through), and a non-repo.
+func TestWorkspaceIsMainCheckout(t *testing.T) {
+	repo := t.TempDir()
+	mustRunGit(t, repo, "init", "-q", "-b", "main")
+	mustRunGit(t, repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init")
+	if !workspaceIsMainCheckout(repo) {
+		t.Error("the main checkout must be recognised as main")
+	}
+	wt, isRepo, err := NewWorktree(repo, nil)
+	if err != nil || !isRepo {
+		t.Fatalf("worktree: %v (repo=%v)", err, isRepo)
+	}
+	t.Cleanup(wt.Cleanup)
+	if workspaceIsMainCheckout(wt.Path) {
+		t.Error("a linked worktree must not be treated as the main checkout")
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "internal", "harness"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !workspaceIsMainCheckout(filepath.Join(repo, "internal")) {
+		t.Error("a subdirectory of the main checkout must be recognised as main")
+	}
+	plain := t.TempDir()
+	if workspaceIsMainCheckout(plain) {
+		t.Error("a non-repo directory is not the main checkout of anything")
+	}
+	if workspaceIsMainCheckout("") {
+		t.Error("an empty root is not the main checkout of anything")
+	}
 }
 
 func TestLoadFiles_Layers(t *testing.T) {
