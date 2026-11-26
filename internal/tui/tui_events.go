@@ -477,6 +477,10 @@ func (m tuiModel) applyEvent(ev evMsg) tuiModel {
 		case "until":
 			// A stop condition's run ended (/until): the machinery, dim.
 			m.append(StDim.Render("⟳ " + textfmt.OneLine(str(ev["text"]))))
+		case "media":
+			// A media limit applied to a file read: scaled, or not sent
+			// (harness/mediapolicy.go). The machinery, dim.
+			m.append(StDim.Render("▣ " + textfmt.OneLine(str(ev["text"]))))
 		case "schedule":
 			// The scheduler speaking (a loop paced, or defaulted): dim, as
 			// the machinery is.

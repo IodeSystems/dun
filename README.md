@@ -540,17 +540,21 @@ With none set, a message with images to such a model is not sent: the TUI says
 why and puts the message back in the composer. A message with images sent
 during a turn waits for the turn to end (an image cannot ride a tool result).
 
-**Images in tool results:** a tool may return an image (an MCP tool's
-screenshot; file_read on an image once agentkit's media read is in). The
-model gets it in the tool result where the endpoint takes it (agentkit
-routes it: Claude inside `tool_result`, the OpenAI format in one user
-message after the round's tool messages). For a model recorded without
-vision, the vision model describes it (`[image/png from shots__take —
-description: …]`); with none set, a label says it was left out. Every view
-(the TUI, the web UI, ACP, the history) shows `[image/png, 412 KiB]` where
-the image was, never base64. `/media` shows which of these is in effect;
-its changes (`/media images off`, `/media cap 20MB`, `/media scale off`)
-wait on agentkit's media policy and say so until it is in this build.
+**Media file_read returns:** reading an image, a recording, a video or a
+PDF gives the model the file itself (agentkit's file tools; MCP tools return
+text only). Each kind has a 5 MiB cap and an image a 1568 px long edge; a
+file over either is shrunk by the first of `magick`, `convert`, `ffmpeg` or
+`vipsthumbnail` found, else by dun's own scaler (png, jpeg, gif, webp), or
+it is not sent and a label says why. Each time that happens the transcript
+gets a dim line (`▣ scaled shot.png 4032→1568 px, 3.1 MiB→412 KiB
+(magick)`). A model recorded without vision and with no vision model gets
+images off; with a vision model, the image is described in its place
+(`[image/png from file_read — description: …]`). Every view (the TUI, the
+web UI, ACP, the history) shows `[image/png, 412 KiB]` where the image was,
+never base64. `/media` shows the policy and changes it for the session:
+`/media images off`, `/media cap 20MB`, `/media cap video 50MB`,
+`/media scale off`, `/media scaler /usr/bin/magick`.
+
 
 ## The task plan
 

@@ -2323,19 +2323,30 @@ model switch or a crash dropped it with no trace.
   (`TestWrappersKeepMediaParts`, toolmedia_test.go).
 - **A model without vision**: `Session.PrepareToolResult`
   (`Harness.prepareToolResult`, toolmedia.go), not a dispatcher wrapper,
-  because the answer is the session's model, not the tool's, and it covers
-  MCP tools with no wrapper of their own. A model recorded without vision
+  because the answer is the session's model, not the tool's, and it sees
+  every toolset. A model recorded without vision
   (vision.json) gets each image as the vision model's description, the
   describer a user message's image uses; with none, a label says it was
   left out. A model not yet probed gets the image: the probe is a user
   message's (images.go), and a tool result has no retry without the image.
 - **Views**: the tool's end event and the history carry a label per media
   part (`[image/png, 412 KiB]`); no event carries the media.
-- **Waits on agentkit** (not on its main yet): the media policy (per kind
-  send/off, a cap, scale, the scaler), its `MediaEvent` callback, and
-  read_file media. `/media` shows what is in effect and refuses the policy's
-  changes with that reason. When it lands: images off while the model is
-  recorded without vision and no describer is set; MediaEvent as a TUI note
-  and a RoundEvent kind `media` (repairs.go). mcpmgr on agentkit main still
-  flattens an MCP image to text (`[image: <mime>, N bytes]`), so an MCP
-  image reaches dun as that text until it returns parts.
+- **The read policy** (mediapolicy.go): agentkit's `files.MediaPolicy`,
+  built from the session's `/media` choices and the vision record, and set
+  on the toolset before every read (withFiles), so a change applies at the
+  next read on every toolset (workspace, session tmp, /file add) and a
+  vision probe that records "no vision" mid-session applies too. Images are
+  off while the model is recorded without vision and no vision model is
+  set; `/media images send` overrides that. Per session, not saved.
+- **Scaler**: agentkit's tools (magick, convert, ffmpeg, vipsthumbnail, then
+  its stdlib for png, jpeg, gif). A host scaler replaces them all, so dun's
+  x/image scaler (adds webp) is the host scaler only when none of those
+  tools is pinned or on PATH. `/media scale off` is a host scaler that
+  refuses: a file over its cap is not sent, one over the edge only is sent
+  as is.
+- **Events**: agentkit's `OnMedia` is a quiet UI line (`Config.OnMediaNote`,
+  notification kind `media`) and a `media` RoundEvent (outcome, the scaler
+  as `tool`, the kind, the sizes).
+- **MCP media** (Carl, declined): mcpmgr keeps an MCP image as the text
+  `[image: <mime>, N bytes]`. Media reaches the model only through
+  agentkit's own tools; PrepareToolResult's describer is for file_read.

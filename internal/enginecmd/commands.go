@@ -229,14 +229,17 @@ func OwnCommands(iso string) []proto.CommandSpec {
 				"Give several at once: /until plan turns 15, /until goal \"tests pass\" --check \"make test\" turns 10. goal or plan without turns stops at 20 turns.\n" +
 				"A run also stops when you interrupt, a turn fails, or two turns in a row make no progress. A question the model asks you pauses the run; your answer resumes it. Your next message starts the run (or the turn running now is its first); the conditions stay for later messages until /until off.\n" +
 				"Messages you type during a run reach the model as usual. Quote a goal that holds the words turns, plan or goal."},
-		{Name: "media", Usage: "[images|audio|video|files send|off | cap <size> | scale on|off]", Group: "session",
-			Choices: choices("images", "send|off: images a tool returns", "audio", "send|off", "video", "send|off", "files", "send|off",
-				"cap", "<size>: the largest media a tool result sends, e.g. cap 20MB", "scale", "on|off: scale an image over the cap down to fit"),
-			Description: "media in tool results (an image file_read or an MCP tool returns): alone, what is sent, described or left out; " +
-				"the changes wait on agentkit's media policy",
-			Help: "/media alone shows what happens to an image, audio, video or file a tool returns this session.\n" +
-				"A model recorded without vision gets each image as the vision model's description (vision_model in config.json), or a label saying it was left out.\n" +
-				"/media images off, /media cap 20MB and /media scale off change it for the session once agentkit's media policy is in this build; until then they say so."},
+		{Name: "media", Usage: "[images|audio|video|pdf send|off|auto | cap [<kind>] <size>|default | scale on|off | scaler <path>|auto|none]", Group: "session",
+			Choices: choices("images", "send|off|auto: images file_read returns; auto is off for a model that cannot read them and has no vision model",
+				"audio", "send|off|auto", "video", "send|off|auto", "pdf", "send|off|auto",
+				"cap", "[<kind>] <size>: the largest file a read sends, e.g. cap 20MB, cap video 50MB; default is 5 MiB",
+				"scale", "on|off: shrink an image over 1568 px or a file over its cap; off sends it as is or not at all",
+				"scaler", "<path> of magick, convert, ffmpeg or vipsthumbnail; auto finds one on PATH; none uses dun's own (images only)"),
+			Description: "media file_read sends the model (images, audio, video, pdf): alone, each kind, its cap, scale and the scaler; a change is for this session",
+			Help: "/media alone shows, for this session, whether file_read sends each kind of media, its byte cap, whether it is scaled, and the scaler found.\n" +
+				"A model recorded without vision and with no vision model gets images off; with a vision model, an image is described in its place.\n" +
+				"/media images off · /media cap 20MB (every kind) · /media cap video 50MB · /media scale off · /media scaler /usr/bin/magick · /media scaler auto.\n" +
+				"Each time a limit applies (a file scaled, or not sent) the transcript gets a dim line."},
 		{Name: "interrupt", Group: "session", Description: "stop the running turn; what it wrote so far stays, and your next message continues from there"},
 		{Name: "clear", Usage: "[keep|drop] [jobs=keep|stop] [plan=keep|drop]", Group: "session",
 			Choices: choices("keep", "keep running jobs and open asks and plan items; the new conversation is told about them",

@@ -11,68 +11,21 @@ import (
 // toolmedia.go — media parts in a tool result (llm.ToolResult.Parts,
 // agentkit v0.42.0).
 //
-// A tool result may carry media: an image a file read returned, a
-// screenshot from an MCP tool. agentkit persists the parts on the result's
-// entry and sends them where the endpoint takes them. dun has two jobs:
+// A tool result may carry media: an image, a recording, a video or a PDF
+// that file_read returned (agentkit's files; MCP tools return text only).
+// agentkit persists the parts on the result's entry and sends them where
+// the endpoint takes them. dun has two jobs here, and the read policy is in
+// mediapolicy.go:
 //
 //   - The model. A model recorded without vision (images.go, vision.json)
 //     gets each image as a description from the vision model, the same
-//     describer a user message's image uses. With none configured, the image
-//     is left out and a label says why. Session.PrepareToolResult does this,
-//     so it covers every toolset, MCP servers too. A model not yet probed
-//     gets the image: the probe is a user message's.
+//     describer a user message's image uses. With none configured, the
+//     image is left out and a label says why (the read policy already has
+//     images off then; this covers a part that got through). It is
+//     Session.PrepareToolResult, so it sees every toolset. A model not yet
+//     probed gets the image: the probe is a user message's.
 //   - The person. Every text-only view (the tool's end event, the history,
 //     ACP) shows a label where an image was, never its base64.
-//
-// TODO(agentkit v0.42.0): the media policy (per kind send/off, a cap, scale
-// on/off, the scaler) and MediaEvent are not on agentkit main yet. When they
-// land: set images off for a model recorded without vision and no describer,
-// report MediaEvent as a TUI note and a RoundEvent kind "media"
-// (repairs.go), and let /media change the policy (mediacmd.go).
-
-// MediaCmd is /media: alone, what happens to media in a tool result this
-// session. The changes (a kind send|off, cap <size>, scale on|off) are the
-// agentkit media policy's, which this build does not have: they are
-// recognized and refused with that reason, so the command's shape is the
-// one it will keep.
-func (h *Harness) MediaCmd(action string) (string, error) {
-	f := strings.Fields(strings.ToLower(action))
-	if len(f) == 0 {
-		return h.mediaStatus(), nil
-	}
-	switch {
-	case len(f) == 2 && mediaKinds[f[0]] && (f[1] == "send" || f[1] == "off"),
-		len(f) == 2 && f[0] == "cap",
-		len(f) == 2 && f[0] == "scale" && (f[1] == "on" || f[1] == "off"):
-		return "", fmt.Errorf("/media %s waits on agentkit's media policy, which this build does not have; /media shows what is in effect", strings.Join(f, " "))
-	}
-	return "", fmt.Errorf("usage: /media [images|audio|video|files send|off | cap <size> | scale on|off]")
-}
-
-// mediaKinds are the kinds /media names, as a tool result's parts have them.
-var mediaKinds = map[string]bool{"images": true, "audio": true, "video": true, "files": true}
-
-// mediaStatus is /media alone.
-func (h *Harness) mediaStatus() string {
-	v := h.cfg.Vision
-	model := v.Model
-	if model == "" {
-		model = "the model"
-	}
-	images := "send (" + model + " has not been sent an image yet; a refusal records it without vision)"
-	switch known, vision := v.lookup(); {
-	case known && vision:
-		images = "send (" + model + " reads images)"
-	case known && v.Describer != nil:
-		images = "described by " + v.DescriberModel + " (" + model + " cannot read images)"
-	case known:
-		images = "off: left out with a label (" + model + " cannot read images, and no vision_model is set)"
-	}
-	return "media in tool results:\n" +
-		"  images: " + images + "\n" +
-		"  audio, video, files: send where the endpoint takes them; agentkit puts a label in place of the rest\n" +
-		"  cap, scale, scaler: not in this build (agentkit's media policy); /media images|audio|video|files send|off, cap <size> and scale on|off wait on it"
-}
 
 // describeToolInstruction is the describer's prompt for an image a tool
 // returned; the tool's name and the result's text follow it.
@@ -139,6 +92,9 @@ func byteSize(n int) string {
 	case n < 1<<20:
 		return fmt.Sprintf("%d KiB", n>>10)
 	default:
+		if n%(1<<20) == 0 {
+			return fmt.Sprintf("%d MiB", n>>20)
+		}
 		return fmt.Sprintf("%.1f MiB", float64(n)/(1<<20))
 	}
 }

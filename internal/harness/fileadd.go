@@ -528,7 +528,7 @@ func cleanAdded(p string) (string, error) {
 // An edit or a write to a path open for reading only is refused (withFiles).
 func (h *Harness) addedWriters() *addedSets {
 	s := &addedSets{readOnly: map[*filetools.Toolset]bool{}, writable: map[*filetools.Toolset]map[string]bool{}}
-	cfg, ok := filesToolset(h.cfg.Files, h.cfg.Workspace)
+	cfg, ok := h.filesConfig()
 	if !ok {
 		return s
 	}

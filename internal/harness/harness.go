@@ -170,6 +170,10 @@ type Config struct {
 	// OnUntil says the stop conditions or their run changed (until.go): a
 	// client reads them again with Until().
 	OnUntil func()
+	// OnMediaNote is a quiet line for the UI alone when a media limit
+	// applied to a file read ("scaled shot.png 4032→1568 px (magick)";
+	// mediapolicy.go). Never in the model's context.
+	OnMediaNote func(msg string)
 	// OnServerSetup says a server's install hint (setupstate.go): one
 	// quiet line, at most once per session.
 	OnServerSetup func(id, msg string)
@@ -362,6 +366,8 @@ var CompactionPause func() (resume func())
 
 // Harness is a running dun: the MCP manager + an agent Session over its tools.
 type Harness struct {
+	// media is the session's /media choices (mediapolicy.go).
+	media mediaSettings
 	// recapsSince counts recaps applied since the last main round's stat.
 	recapsSince atomic.Int32
 	// procs samples background jobs' process groups (bgjob.go usage).

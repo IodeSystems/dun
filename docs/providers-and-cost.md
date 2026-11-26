@@ -291,6 +291,7 @@ ledger under the sub-agent's own model). The kinds:
 | `turn_cap` | the Turn hit MaxTurns | `attempt` rounds, `max` |
 | `tool_error` | a tool result was an error | `tool`, `cause` `error`, `malformed_json`, `truncated`, `unknown_tool`, `warned` (node_edit landed incomplete or unvalidated). A call an interrupt cut or skipped is not one |
 | `cmd_time` | a command finished | `cmd`, `ms`, `surface`: `tui` is keypress to the first frame that shows the result (`internal/tui/cmdtime.go`); `engine` is the control line's arrival to the first event that answers it (`cmd/dun/cmdtime.go`) |
+| `media` | a media limit applied to a file_read (agentkit `OnMedia`, `harness/mediapolicy.go`): scaled, or not sent | `outcome` `scaled`, `unscaled` (sent as is, the scaler failed), `off` or `refused`; `tool` the scaler (`magick`, `convert`, `ffmpeg`, `vipsthumbnail`, `stdlib`, `host` = dun's x/image, `none`); `cause` the kind (`image`, `audio`, `video`, `pdf`); `key` the file's type, `sent` what was sent; `before`, `after` bytes; `reason` |
 
 Older kinds still in the files: `malformed_call_repair` (before
 `repair`/`malformed-call`; the reader counts it as that), `shrink`,

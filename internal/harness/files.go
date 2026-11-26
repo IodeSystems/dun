@@ -94,7 +94,7 @@ func workspaceIsMainCheckout(root string) bool {
 // this session has read — what write's overwrite guard consults — and a
 // server starting is no reason to forget that. Callers hold turnMu.
 func (h *Harness) fileTools() *filetools.Toolset {
-	cfg, ok := filesToolset(h.cfg.Files, h.cfg.Workspace)
+	cfg, ok := h.filesConfig()
 	if !ok {
 		h.files, h.filesKey = nil, ""
 		return nil
@@ -142,7 +142,7 @@ func tmpReaders(cfg filetools.Config, roots ...string) []*filetools.Toolset {
 // file tools are off. Rebuilt with the tool set: they track no reads that
 // matter, since nothing writes through them.
 func (h *Harness) tmpReaders() []*filetools.Toolset {
-	cfg, ok := filesToolset(h.cfg.Files, h.cfg.Workspace)
+	cfg, ok := h.filesConfig()
 	if !ok {
 		return nil
 	}
@@ -287,6 +287,11 @@ func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, tmp []*filetoo
 				out = fmt.Sprintf("ERROR: this workspace (%s) is open to dun for reading only. To change it the user runs "+
 					"/file mode . write. Do not work around this with exec.", ts.Root())
 			}
+		}
+		// The media policy in force now, on the toolset this read goes to
+		// (mediapolicy.go): /media and the vision record can change it.
+		if out == "" && ts.Bare(tc.Function.Name) == filetools.Read {
+			h.applyMediaPolicy(route)
 		}
 		// res carries the toolset's media parts (a read image) through.
 		res := llm.TextResult(out)
