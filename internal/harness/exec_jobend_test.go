@@ -28,12 +28,12 @@ func TestExec_JobFinishCutsAWaitingExec(t *testing.T) {
 	}
 	for _, want := range []string{"background job #2", "other background work finished",
 		"[background] background job #1 succeeded", "key-found"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("result missing %q:\n%s", want, out)
+		if !strings.Contains(out.Text, want) {
+			t.Errorf("result missing %q:\n%s", want, out.Text)
 		}
 	}
-	if n := strings.Count(out, "background job #1 succeeded"); n != 1 {
-		t.Errorf("the notice must be in the result once, got %d:\n%s", n, out)
+	if n := strings.Count(out.Text, "background job #1 succeeded"); n != 1 {
+		t.Errorf("the notice must be in the result once, got %d:\n%s", n, out.Text)
 	}
 	// Not delivered again: nothing is left to lift or to flush.
 	if n := h.notes(); len(n) != 0 {
@@ -60,10 +60,10 @@ func TestExec_MutedJobFinishDoesNotCut(t *testing.T) {
 	start := time.Now()
 	out, _ := d(context.Background(), execCall(`{"command":"sleep 2; echo waited-out","timeout":600}`))
 	if el := time.Since(start); el < 1500*time.Millisecond {
-		t.Fatalf("a muted job's finish must not end the wait: %s\n%s", el, out)
+		t.Fatalf("a muted job's finish must not end the wait: %s\n%s", el, out.Text)
 	}
-	if !strings.Contains(out, "waited-out") || strings.Contains(out, "still running") {
-		t.Fatalf("want the command's own output inline: %q", out)
+	if !strings.Contains(out.Text, "waited-out") || strings.Contains(out.Text, "still running") {
+		t.Fatalf("want the command's own output inline: %q", out.Text)
 	}
 	if js := h.Jobs(); len(js) != 1 {
 		t.Fatalf("the waited exec must not become a job: %+v", js)
@@ -84,13 +84,13 @@ func TestExec_ProgressReportDoesNotCut(t *testing.T) {
 	start := time.Now()
 	out, _ := d(context.Background(), execCall(`{"command":"sleep 2; echo waited-out","timeout":600}`))
 	if el := time.Since(start); el < 1500*time.Millisecond {
-		t.Fatalf("a progress report must not end the wait: %s\n%s", el, out)
+		t.Fatalf("a progress report must not end the wait: %s\n%s", el, out.Text)
 	}
-	if !strings.Contains(out, "waited-out") || strings.Contains(out, "other background work finished") {
-		t.Fatalf("want the command's own output inline: %q", out)
+	if !strings.Contains(out.Text, "waited-out") || strings.Contains(out.Text, "other background work finished") {
+		t.Fatalf("want the command's own output inline: %q", out.Text)
 	}
-	if !strings.Contains(out, "still running") {
-		t.Errorf("the reports still ride the result: %q", out)
+	if !strings.Contains(out.Text, "still running") {
+		t.Errorf("the reports still ride the result: %q", out.Text)
 	}
 }
 

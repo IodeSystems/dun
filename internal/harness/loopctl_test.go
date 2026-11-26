@@ -48,15 +48,15 @@ func TestLoopCtl_Calls(t *testing.T) {
 	f := &fakeLoops{}
 	d := withLoopCtl(nil, f, nil)
 	out, _ := d(context.Background(), peerCall("loop_ctl", `{"next_in":"15m","reason":"build still running"}`))
-	if !strings.HasPrefix(out, "loop 4: next run in 15m") || f.calls[0] != "15m0s|go|build still running" {
-		t.Errorf("next_in: %q %v", out, f.calls)
+	if !strings.HasPrefix(out.Text, "loop 4: next run in 15m") || f.calls[0] != "15m0s|go|build still running" {
+		t.Errorf("next_in: %q %v", out.Text, f.calls)
 	}
 	out, _ = d(context.Background(), peerCall("loop_ctl", `{"stop":true,"reason":"done"}`))
-	if out != "loop 4 stopped." || f.calls[1] != "0s|stop|done" {
-		t.Errorf("stop: %q %v", out, f.calls)
+	if out.Text != "loop 4 stopped." || f.calls[1] != "0s|stop|done" {
+		t.Errorf("stop: %q %v", out.Text, f.calls)
 	}
 	out, _ = d(context.Background(), peerCall("loop_ctl", `{"next_in":"soon"}`))
-	if !strings.HasPrefix(out, "ERROR: next_in \"soon\"") || len(f.calls) != 2 {
-		t.Errorf("bad next_in: %q %v", out, f.calls)
+	if !strings.HasPrefix(out.Text, "ERROR: next_in \"soon\"") || len(f.calls) != 2 {
+		t.Errorf("bad next_in: %q %v", out.Text, f.calls)
 	}
 }

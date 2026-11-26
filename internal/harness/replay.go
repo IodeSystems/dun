@@ -99,11 +99,11 @@ func AskIDFrom(ctx context.Context) string {
 // no result (agent.ErrSessionClosed: no further round; the store drops the
 // result agentkit writes for it).
 func withCallInfo(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		c := tc
 		out, err := inner(context.WithValue(ctx, callKey{}, &c), tc)
 		if h.store != nil && h.store.isSuspended(tc.ID) {
-			return "", errors.Join(agent.ErrSessionClosed, ErrSuspended)
+			return llm.TextResult(""), errors.Join(agent.ErrSessionClosed, ErrSuspended)
 		}
 		return out, err
 	}
@@ -292,17 +292,25 @@ func (h *Harness) replayRun(ctx context.Context, p *PendingAsk) (agent.TurnResul
 		CreatedAt: time.Now().UnixNano()}
 	if interrupted(ctx) {
 		h.pendingWrite(nil) // the ask did, unless the cut came before it asked
-		if strings.TrimSpace(out) == "" {
-			out = questionCancelled(p.Tool)
+		if strings.TrimSpace(out.Text) == "" && len(out.Parts) == 0 {
+			out = llm.TextResult(questionCancelled(p.Tool))
 		}
-		e.Content = out
+		e.Content, e.Parts = out.Text, out.Parts
 		h.store.appendSilent(e)
 		return agent.TurnResult{}, context.Cause(ctx)
 	}
 	if derr != nil {
-		out = "ERROR: " + derr.Error()
+		out = llm.TextResult("ERROR: " + derr.Error())
 	}
-	e.Content = out
+	// The Turn's hook, which this dispatch outside a Turn would skip.
+	if prep := h.Session.PrepareToolResult; prep != nil {
+		if r, perr := prep(ctx, tc, out); perr != nil {
+			out = llm.TextResult("ERROR: " + perr.Error())
+		} else {
+			out = r
+		}
+	}
+	e.Content, e.Parts = out.Text, out.Parts
 	h.store.publish(e)
 	// No prepareTurn: this goes on with a turn, and the model reads the
 	// result last, as after any call. The asks and plan block went in with

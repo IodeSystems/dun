@@ -34,13 +34,13 @@ type step struct {
 func runSteps(t *testing.T, h *Harness, steps ...step) {
 	t.Helper()
 	i := 0
-	d := withPlanNudge(func(_ context.Context, tc llm.ToolCall) (string, error) {
+	d := withPlanNudge(func(_ context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		s := steps[i]
 		i++
 		if s.fail {
-			return "ERROR: sh: 1: gcc: not found", nil
+			return llm.TextResult("ERROR: sh: 1: gcc: not found"), nil
 		}
-		return "ok", nil
+		return llm.TextResult("ok"), nil
 	}, h)
 	for _, s := range steps {
 		var tc llm.ToolCall

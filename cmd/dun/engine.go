@@ -181,6 +181,15 @@ func runProgrammatic(ctx context.Context, h *harness.Harness, em *emitter, in *i
 			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
 			return
 		}
+		// /media: media in tool results (harness/toolmedia.go).
+		if id == "media" {
+			msg, err := h.MediaCmd(action)
+			if err != nil {
+				msg = "media: " + err.Error()
+			}
+			em.emit(&proto.ControlEvent{ID: id, Action: action, Message: msg})
+			return
+		}
 		// /schedule and /loop (schedule.go): dund keeps them, so the answer
 		// is a round-trip over the peer link — detached, because dund's reply
 		// comes in on this reader goroutine.

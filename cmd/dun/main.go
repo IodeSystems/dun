@@ -998,6 +998,8 @@ func main() {
 				Bytes: n.Bytes, Tokens: n.Tokens, LatencyMS: n.LatMS})
 		}
 		cfg.OnRetry = func(n harness.RetryNote) { em.emit(retryEvent(n)) }
+		// A media limit applied to a read (harness/mediapolicy.go): a quiet line.
+		cfg.OnMediaNote = func(msg string) { em.emit(&proto.Notification{Kind: "media", Text: msg}) }
 		// The count, the citation and what REPLACED the span — never the removed
 		// content itself: re-rendering the churn a recap just took out would
 		// defeat the point of it. Recap no longer asks first, so this event is
@@ -1091,6 +1093,7 @@ func main() {
 			}
 		}
 		cfg.OnRetry = func(n harness.RetryNote) { fmt.Fprintf(os.Stderr, "\n  %s %s\n", retryGlyph(n), n.String()) }
+		cfg.OnMediaNote = func(msg string) { fmt.Fprintf(os.Stderr, "\n  ▣ %s\n", msg) }
 		cfg.OnCompaction = func(n harness.CompactionNote) { fmt.Fprintf(os.Stderr, "\n  🗜 %s\n", n) }
 		cfg.Ask = func(actx context.Context, q string, opts []string, multi bool, noCustom bool, rec []string) (string, error) {
 			return withoutClock(func() (string, error) { return humanAsk(actx, q, opts, multi, noCustom, rec) })

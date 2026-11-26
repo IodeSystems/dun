@@ -138,7 +138,7 @@ func (h *Harness) wholeRoom() wholeRoom {
 
 // readWhole answers an unranged file_read on route, the toolset withFiles
 // chose for it. id is the call's id, for the recap cue.
-func (h *Harness) readWhole(ctx context.Context, route *filetools.Toolset, name, args, id string) string {
+func (h *Harness) readWhole(ctx context.Context, route *filetools.Toolset, name, args, id string) llm.ToolResult {
 	var a wholeArgs
 	_ = json.Unmarshal([]byte(args), &a)
 	abs, err := filetools.Under(route.Root(), a.Path)
@@ -149,11 +149,12 @@ func (h *Harness) readWhole(ctx context.Context, route *filetools.Toolset, name,
 	}
 	n, room := h.bytesToTokens(int(st.Size())), h.wholeRoom()
 	if msg := wholeVerdict(a.Path, n, room); msg != "" {
-		return msg
+		return llm.TextResult(msg)
 	}
-	out := readPages(ctx, route, name, a.Path)
+	res := readPages(ctx, route, name, a.Path)
+	out := res.Text
 	if strings.HasPrefix(out, "ERROR: ") {
-		return out
+		return res
 	}
 	h.keepWhole(out)
 	if t := h.meter.Estimate(out); t > wholeSmallTokens {
@@ -163,7 +164,7 @@ func (h *Harness) readWhole(ctx context.Context, route *filetools.Toolset, name,
 			h.AsideWith(fmt.Sprintf(wholeAsideFor(t, room), t), AsideOpts{Key: "recap"})
 		}
 	}
-	return out
+	return res
 }
 
 // wholeAsideFor is the cue's wording for a read of n tokens against r.
@@ -232,20 +233,22 @@ var (
 // readPages reads all of path through route with ranged reads, one page
 // (agentkit's ReadMax) each, and returns it as one read: the header of a
 // read that got every line, then the lines. A line longer than a page
-// comes back cut, as a ranged read cuts it.
-func readPages(ctx context.Context, route *filetools.Toolset, name, path string) string {
+// comes back cut, as a ranged read cuts it. A read with media parts comes
+// back as the toolset gave it.
+func readPages(ctx context.Context, route *filetools.Toolset, name, path string) llm.ToolResult {
 	var body strings.Builder
 	display, total := "", 0
 	for from := 1; ; {
 		args, _ := json.Marshal(map[string]any{"path": path, "offset": from})
-		out := route.Dispatch(ctx, name, string(args))
+		res := route.Dispatch(ctx, name, string(args))
+		out := res.Text
 		head, rest, _ := strings.Cut(out, "\n")
-		if from == 1 && pageAll.MatchString(head) || strings.HasPrefix(out, "ERROR: ") {
-			return out // all of it in one page, an empty file, or a refusal
+		if from == 1 && pageAll.MatchString(head) || strings.HasPrefix(out, "ERROR: ") || len(res.Parts) > 0 {
+			return res // all of it in one page, an empty file, a refusal, or media
 		}
 		m := pageRange.FindStringSubmatch(head)
 		if m == nil {
-			return out // not a page: agentkit's format moved; this read is what it gives
+			return res // not a page: agentkit's format moved; this read is what it gives
 		}
 		start, last := atoi(m[2]), atoi(m[3])
 		display, total = m[1], atoi(m[4])
@@ -259,7 +262,7 @@ func readPages(ctx context.Context, route *filetools.Toolset, name, path string)
 		}
 		from = last + 1
 	}
-	return fmt.Sprintf("%s: %d lines\n%s", display, total, strings.TrimRight(body.String(), "\n"))
+	return llm.TextResult(fmt.Sprintf("%s: %d lines\n%s", display, total, strings.TrimRight(body.String(), "\n")))
 }
 
 func atoi(s string) int { n, _ := strconv.Atoi(s); return n }

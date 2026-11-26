@@ -74,7 +74,7 @@ func askToolDef() llm.ToolDef {
 // withAsk wraps a dispatcher so ask_user is handled locally (via the AskFunc);
 // everything else routes onward.
 func withAsk(inner agent.ToolDispatcher, ask AskFunc, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		if tc.Function.Name != "ask_user" {
 			return inner(ctx, tc)
 		}
@@ -89,21 +89,21 @@ func withAsk(inner agent.ToolDispatcher, ask AskFunc, onCall func(string, map[st
 		if msg := checkAsk(args.Question, args.Options, args.Multi, rec); msg != "" {
 			// Back to the model, which asks again properly; the user sees
 			// nothing until it does.
-			return "ERROR: " + msg, nil
+			return llm.TextResult("ERROR: " + msg), nil
 		}
 		ans, err := ask(ctx, args.Question, args.Options, args.Multi, false, rec)
 		if err != nil && interrupted(ctx) {
-			return questionCancelled("ask_user"), nil
+			return llm.TextResult(questionCancelled("ask_user")), nil
 		}
 		if err != nil {
 			// Feed the failure back to the model rather than aborting the turn.
-			return "ERROR: could not get an answer: " + err.Error(), nil
+			return llm.TextResult("ERROR: could not get an answer: " + err.Error()), nil
 		}
 		if onCall != nil {
 			onCall("ask_user", map[string]any{"question": args.Question, "options": args.Options, "multi": args.Multi,
 				"recommended": rec}, ans)
 		}
-		return ans, nil
+		return llm.TextResult(ans), nil
 	}
 }
 
@@ -190,9 +190,9 @@ func (h *Harness) autoRound() bool {
 
 // withAskGuard refuses ask_user in a round dun added (autoRound).
 func withAskGuard(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		if tc.Function.Name == "ask_user" && h.autoRound() {
-			return askAutoRefused, nil
+			return llm.TextResult(askAutoRefused), nil
 		}
 		return inner(ctx, tc)
 	}

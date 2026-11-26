@@ -246,6 +246,8 @@ func Read(dir string, now time.Time) Report {
 				grp("server restart "+l.Server, model, one)
 			case "cancel":
 				grp("cancelled by "+l.Cause, model, one)
+			case "media": // a media limit applied to a read (harness/mediapolicy.go)
+				grp("media "+l.Cause+" "+l.Outcome, model, one)
 			case "turn_cap":
 				grp("turn cap", model, one)
 			case "tool_error":

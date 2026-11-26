@@ -291,8 +291,8 @@ func TestGateway_RegainAfterDrop(t *testing.T) {
 	var tc llm.ToolCall
 	tc.Function.Name, tc.Function.Arguments = "ctr__echo", `{"x":"again"}`
 	out, err := call(ctx, tc)
-	if err != nil || out != "echo again" {
-		t.Fatalf("after the drop: %q %v", out, err)
+	if err != nil || out.Text != "echo again" {
+		t.Fatalf("after the drop: %q %v", out.Text, err)
 	}
 	if inits.Load() != 2 {
 		t.Errorf("handshakes: %d, want the restart's second", inits.Load())

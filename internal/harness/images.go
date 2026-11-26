@@ -321,7 +321,7 @@ func (h *Harness) describeImages(ctx context.Context, task string, imgs []ImageI
 		if i >= len(images) {
 			break
 		}
-		desc, err := h.describeOne(ctx, task, images[i])
+		desc, err := h.describeOne(ctx, describeInstruction+task, images[i])
 		if err != nil {
 			return "", &ImageRefusedError{Msg: fmt.Sprintf("%s: the vision model %s could not describe it: %v — the message was not sent",
 				im.Label, v.DescriberModel, err)}
@@ -336,9 +336,9 @@ func (h *Harness) describeImages(ctx context.Context, task string, imgs []ImageI
 	return out, nil
 }
 
-func (h *Harness) describeOne(ctx context.Context, task string, img llm.ContentPart) (string, error) {
+func (h *Harness) describeOne(ctx context.Context, instruction string, img llm.ContentPart) (string, error) {
 	start := time.Now()
-	msgs := []llm.Message{{Role: "user", Parts: []llm.ContentPart{llm.TextPart(describeInstruction + task), img}}}
+	msgs := []llm.Message{{Role: "user", Parts: []llm.ContentPart{llm.TextPart(instruction), img}}}
 	ch, err := h.traced("vision", h.cfg.Vision.Describer).ChatStream(ctx, msgs, nil, nil)
 	if err != nil {
 		h.noteSideCall("vision", start, nil)

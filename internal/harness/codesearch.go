@@ -364,7 +364,7 @@ type searchArgs struct {
 
 // withCodeSearch answers the `search` tool from the code and docs indexes.
 func withCodeSearch(inner agent.ToolDispatcher, h *Harness, l *codeLink, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		if tc.Function.Name != "search" {
 			return inner(ctx, tc)
 		}
@@ -374,7 +374,7 @@ func withCodeSearch(inner agent.ToolDispatcher, h *Harness, l *codeLink, onCall 
 			_ = json.Unmarshal([]byte(tc.Function.Arguments), &a)
 			onCall("search", a, out)
 		}
-		return out, nil
+		return llm.TextResult(out), nil
 	}
 }
 

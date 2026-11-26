@@ -324,17 +324,17 @@ func planDescFor(nonInteractive bool) string {
 // (textcall.go).
 func withPlan(inner agent.ToolDispatcher, tg *taskgraph.Tools, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
 	plan := tg.Wrap(inner)
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		if n := tc.Function.Name; tg.Has(n) {
 			if what := argsMarkup(tc.Function.Arguments); what != "" {
-				return fmt.Sprintf(textCallRefused, n, what), nil
+				return llm.TextResult(fmt.Sprintf(textCallRefused, n, what)), nil
 			}
 		}
 		out, err := plan(ctx, tc)
 		if onCall != nil && tg.Has(tc.Function.Name) {
 			var a map[string]any
 			_ = json.Unmarshal([]byte(tc.Function.Arguments), &a)
-			onCall(tc.Function.Name, a, out)
+			onCall(tc.Function.Name, a, out.Text)
 		}
 		return out, err
 	}
@@ -542,11 +542,11 @@ func changesWorkspace(name, server string) bool {
 // on and the plan is not approved. The refusal is a result the model reads,
 // and says what to do.
 func withPlanGate(inner agent.ToolDispatcher, h *Harness, serverOf map[string]string) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		if n := tc.Function.Name; changesWorkspace(n, serverOf[n]) && h.planLocked() {
-			return "ERROR: plan mode is on and the plan is not approved, so " + n + " is refused: it changes things. " +
+			return llm.TextResult("ERROR: plan mode is on and the plan is not approved, so " + n + " is refused: it changes things. " +
 				"Write the plan with plan_add (nodes with done_when), tell the user, and wait for them to run /plan approve. " +
-				"Reading, searching and the plan tools work meanwhile.", nil
+				"Reading, searching and the plan tools work meanwhile."), nil
 		}
 		return inner(ctx, tc)
 	}

@@ -61,7 +61,7 @@ func Def() llm.ToolDef {
 // Wrap wraps a dispatcher so the mount tool is handled locally; everything
 // else routes onward.
 func Wrap(inner agent.ToolDispatcher, ask Func, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		if tc.Function.Name != "mount" {
 			return inner(ctx, tc)
 		}
@@ -73,14 +73,14 @@ func Wrap(inner agent.ToolDispatcher, ask Func, onCall func(string, map[string]a
 		source := strings.TrimSpace(args.Source)
 		name := strings.TrimSpace(args.Name)
 		if source == "" {
-			return "ERROR: mount requires a source path", nil
+			return llm.TextResult("ERROR: mount requires a source path"), nil
 		}
 		if name == "" {
-			return "ERROR: mount requires a name", nil
+			return llm.TextResult("ERROR: mount requires a name"), nil
 		}
 		ok, err := ask(ctx, source, name)
 		if err != nil {
-			return "ERROR: could not get an answer: " + err.Error(), nil
+			return llm.TextResult("ERROR: could not get an answer: " + err.Error()), nil
 		}
 		result := fmt.Sprintf("mount denied: %s", source)
 		if ok {
@@ -89,7 +89,7 @@ func Wrap(inner agent.ToolDispatcher, ask Func, onCall func(string, map[string]a
 		if onCall != nil {
 			onCall("mount", map[string]any{"source": source, "name": name}, result)
 		}
-		return result, nil
+		return llm.TextResult(result), nil
 	}
 }
 

@@ -138,7 +138,7 @@ func historyItems(entries []agent.Entry) []HistoryItem {
 				byCall[e.ToolCallID] = n
 			}
 		case agent.KindToolResult:
-			out = append(out, HistoryItem{Kind: "tool_result", Tool: e.ToolName, CallID: e.ToolCallID, Content: e.Content,
+			out = append(out, HistoryItem{Kind: "tool_result", Tool: e.ToolName, CallID: e.ToolCallID, Content: withMediaLabels(e.Content, e.Parts),
 				IsError: ToolFailed(e.ToolName, e.Content), Agent: byCall[e.ToolCallID]})
 		case agent.KindNotification:
 			// The model's own turn-end check and empty-reply repair, not

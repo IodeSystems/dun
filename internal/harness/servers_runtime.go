@@ -1449,8 +1449,8 @@ func (h *Harness) useNoTools() {
 		sys += h.cfg.SystemNote
 	}
 	h.Session.Tools = nil
-	h.Session.Dispatch = func(_ context.Context, tc llm.ToolCall) (string, error) {
-		return "", fmt.Errorf("no tool %q: this session has no tools", tc.Function.Name)
+	h.Session.Dispatch = func(_ context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
+		return llm.TextResult(""), fmt.Errorf("no tool %q: this session has no tools", tc.Function.Name)
 	}
 	h.Session.System = sys
 	names := []string{}

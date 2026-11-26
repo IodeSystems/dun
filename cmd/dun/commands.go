@@ -310,6 +310,8 @@ func routeSlash(line string, r slashRoutes) {
 		default:
 			r.reply("usage: /file [add|remove <path>]")
 		}
+	case "media":
+		r.control(name, strings.Join(args, " "))
 	case "retry":
 		r.control(name, strings.Join(args, " "))
 	case "suggest":

@@ -200,7 +200,7 @@ func normalizeToolArgs(args string) string {
 // model's own call by construction, so it needs no notification, no aside and no
 // place in the history to be dropped from later.
 func withLoopGuard(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		limit := loopRepeats()
 		name := tc.Function.Name
 		if limit <= 0 {
@@ -211,7 +211,7 @@ func withLoopGuard(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher 
 		if n < limit {
 			out, err := inner(ctx, tc)
 			if err == nil {
-				h.loop.noteResult(out)
+				h.loop.noteResult(out.Text)
 			}
 			return out, err
 		}
@@ -228,7 +228,7 @@ func withLoopGuard(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher 
 		// being drained — and the queue is where a message the user typed
 		// mid-turn is waiting. Stranding that behind a loop the user is probably
 		// typing ABOUT is the worst possible moment to drop it.
-		return h.liftQueued(loopRefusal(name, h.loop.previous())), nil
+		return llm.TextResult(h.liftQueued(loopRefusal(name, h.loop.previous()))), nil
 	}
 }
 

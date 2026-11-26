@@ -122,7 +122,7 @@ func dispatchTool(t *testing.T, h *Harness, name, args string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return out
+	return out.Text
 }
 
 // spawnRoot is the --root of a spawn's args line.

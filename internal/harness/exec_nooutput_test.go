@@ -39,11 +39,11 @@ func TestExec_NoOutputThroughTheTool(t *testing.T) {
 	for name, d := range map[string]func(string) string{
 		"bare": func(cmd string) string {
 			out, _ := bare(context.Background(), *nudgeCall("c", "exec", `{"command":"`+cmd+`"}`))
-			return out
+			return out.Text
 		},
 		"session": func(cmd string) string {
 			out, _ := h.Session.Dispatch(context.Background(), *nudgeCall("c", "exec", `{"command":"`+cmd+`"}`))
-			return out
+			return out.Text
 		},
 	} {
 		if got := d("true"); got != "(no output; exit 0)" {

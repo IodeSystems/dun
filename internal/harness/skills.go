@@ -688,7 +688,7 @@ func clipSkill(s string) string {
 
 // withSkill handles the skill tool locally; everything else routes onward.
 func withSkill(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		if tc.Function.Name != "skill" {
 			return inner(ctx, tc)
 		}
@@ -701,7 +701,7 @@ func withSkill(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 		if onCall != nil {
 			onCall("skill", map[string]any{"name": a.Name, "file": a.File}, out)
 		}
-		return out, nil
+		return llm.TextResult(out), nil
 	}
 }
 

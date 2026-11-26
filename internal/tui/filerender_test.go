@@ -70,12 +70,12 @@ func TestFileToolStepLines(t *testing.T) {
 	for _, c := range cases {
 		b, _ := json.Marshal(c.args)
 		result := ts.Dispatch(context.Background(), c.tool, string(b))
-		preview, body := renderToolResult(renderCtx{tool: c.tool, args: c.args, result: result, width: 100})
+		preview, body := renderToolResult(renderCtx{tool: c.tool, args: c.args, result: result.Text, width: 100})
 		line := stripANSI(callText(c.tool, c.args, 80) + preview)
 		if !strings.HasPrefix(line, c.want) {
-			t.Errorf("%s %v\n got %q\nwant %q\nresult: %s", c.tool, c.args, line, c.want, result)
+			t.Errorf("%s %v\n got %q\nwant %q\nresult: %s", c.tool, c.args, line, c.want, result.Text)
 		}
-		if got := toolFailed(c.tool, result); got != c.failed {
+		if got := toolFailed(c.tool, result.Text); got != c.failed {
 			t.Errorf("%s: toolFailed = %v, want %v", c.tool, got, c.failed)
 		}
 		if strings.TrimSpace(stripANSI(body)) == "" {

@@ -129,7 +129,7 @@ func callTool(t *testing.T, h *Harness, name string, args map[string]any) string
 	if err != nil {
 		t.Fatal(err)
 	}
-	return out
+	return out.Text
 }
 
 func modelToolNames(h *Harness) []string {

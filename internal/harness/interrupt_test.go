@@ -247,11 +247,11 @@ func TestInterrupt_ToolInFlightAndQueued(t *testing.T) {
 	h := startScripted(t, r)
 	inTool := make(chan struct{})
 	var ran int
-	h.Session.Dispatch = withInterrupt(withLiftedQueue(func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	h.Session.Dispatch = withInterrupt(withLiftedQueue(func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		ran++
 		close(inTool)
 		<-ctx.Done()
-		return "", ctx.Err()
+		return llm.TextResult(""), ctx.Err()
 	}, h))
 
 	done := askAsync(h, "run it")

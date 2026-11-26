@@ -1013,7 +1013,7 @@ func execWhere(b ExecBackend) string {
 // completion or a sub-agent's report): the notice rides the handoff, so a
 // model that waits in exec beside a job hears of its finish at once.
 func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(string, map[string]any, string), startJob func(command, stdinPath string) *bgJob, spill func(command, output string) string, userWaiting, workEnded func() <-chan struct{}) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		if tc.Function.Name != "exec" {
 			return inner(ctx, tc)
 		}
@@ -1024,7 +1024,7 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 		}
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
 		if strings.TrimSpace(args.Command) == "" {
-			return "ERROR: exec requires a non-empty command", nil
+			return llm.TextResult("ERROR: exec requires a non-empty command"), nil
 		}
 
 		// NOT capped here: the cap is applied once, around every tool, in
@@ -1041,7 +1041,7 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 			if onCall != nil {
 				onCall("exec", map[string]any{"command": args.Command}, out)
 			}
-			return out, nil
+			return llm.TextResult(out), nil
 		}
 
 		grace := execGrace
@@ -1117,7 +1117,7 @@ func withExec(inner agent.ToolDispatcher, backend ExecBackend, onCall func(strin
 		if onCall != nil {
 			onCall("exec", map[string]any{"command": args.Command}, out)
 		}
-		return out, nil
+		return llm.TextResult(out), nil
 	}
 }
 

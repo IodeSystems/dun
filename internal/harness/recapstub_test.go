@@ -245,7 +245,7 @@ func TestRecapStub_FailedExecShowsItsExitCode(t *testing.T) {
 	if got := h.execVerdictOf("c1"); got != "exit 3" {
 		t.Fatalf("recorded verdict %q", got)
 	}
-	for _, e := range stubConvo([][3]string{{"exec", `{"command":"make all"}`, out}})[1:] {
+	for _, e := range stubConvo([][3]string{{"exec", `{"command":"make all"}`, out.Text}})[1:] {
 		st.appendSilent(e)
 	}
 	// The recorded verdict wins over the text: here they agree, so make the
@@ -258,7 +258,7 @@ func TestRecapStub_FailedExecShowsItsExitCode(t *testing.T) {
 	// With no record (a resumed session), the exit line is read.
 	if got := h.callOutcome(removedCall{
 		Call:   agent.Entry{ToolName: "exec", ToolCallID: "gone"},
-		Result: agent.Entry{Content: out + "\n\n" + queuedPolicies[queuedUser].prefix + "stop"},
+		Result: agent.Entry{Content: out.Text + "\n\n" + queuedPolicies[queuedUser].prefix + "stop"},
 	}); got != "exit 3" {
 		t.Errorf("from the text: %q", got)
 	}

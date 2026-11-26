@@ -305,10 +305,10 @@ func builtinID(id string) (string, bool) {
 
 // refuseTools answers a call to a switched-off tool with how to turn it on.
 func refuseTools(inner agent.ToolDispatcher, off map[string]bool) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		if n := tc.Function.Name; off[n] {
-			return fmt.Sprintf("ERROR: %s is switched off in this session (/mcp, %s%s). Ask the user to turn it on if you need it.",
-				n, BuiltinPrefix, groupOfTool(n)), nil
+			return llm.TextResult(fmt.Sprintf("ERROR: %s is switched off in this session (/mcp, %s%s). Ask the user to turn it on if you need it.",
+				n, BuiltinPrefix, groupOfTool(n))), nil
 		}
 		return inner(ctx, tc)
 	}

@@ -2315,3 +2315,50 @@ model switch or a crash dropped it with no trace.
   workspaces); `dun sessions --all` takes about 100 ms.
 - Not listed: the model (the transcript does not hold it), and legacy
   path-keyed session directories that no registry entry points to.
+
+## Media in tool results (agentkit v0.42.0, 2026-11-25)
+
+- agentkit's `ToolDispatcher` returns `llm.ToolResult{Text, Parts}`. Every
+  dun wrapper hands Parts on; a wrapper that adds a line changes Text only
+  (`TestWrappersKeepMediaParts`, toolmedia_test.go).
+- **A model without vision**: `Session.PrepareToolResult`
+  (`Harness.prepareToolResult`, toolmedia.go), not a dispatcher wrapper,
+  because the answer is the session's model, not the tool's, and it sees
+  every toolset. A model recorded without vision
+  (vision.json) gets each image as the vision model's description, the
+  describer a user message's image uses; with none, a label says it was
+  left out. A model not yet probed gets the image: the probe is a user
+  message's (images.go), and a tool result has no retry without the image.
+- **Views**: the tool's end event and the history carry a label per media
+  part (`[image/png, 412 KiB]`); no event carries the media.
+- **The read policy** (mediapolicy.go): agentkit's `files.MediaPolicy`,
+  built from the session's `/media` choices and the vision record, and set
+  on the toolset before every read (withFiles), so a change applies at the
+  next read on every toolset (workspace, session tmp, /file add) and a
+  vision probe that records "no vision" mid-session applies too. Images are
+  off while the model is recorded without vision and no vision model is
+  set; `/media images send` overrides that. Per session, not saved.
+- **Scaler**: agentkit's tools (magick, convert, ffmpeg, vipsthumbnail, then
+  its stdlib for png, jpeg, gif). A host scaler replaces them all, so dun's
+  x/image scaler (adds webp) is the host scaler only when none of those
+  tools is pinned or on PATH. `/media scale off` is a host scaler that
+  refuses: a file over its cap is not sent, one over the edge only is sent
+  as is.
+- **Events**: agentkit's `OnMedia` is a quiet UI line (`Config.OnMediaNote`,
+  notification kind `media`) and a `media` RoundEvent (outcome, the scaler
+  as `tool`, the kind, the sizes).
+- **MCP media** (Carl, declined): mcpmgr keeps an MCP image as the text
+  `[image: <mime>, N bytes]`. Media reaches the model only through
+  agentkit's own tools; PrepareToolResult's describer is for file_read.
+- **Storage**: a tool result's media parts are the KindToolResult entry's
+  Parts. The session file holds none of their bytes: every entry's image,
+  audio, video and PDF parts go to `blobs/<sha256>.<ext>` and a ref
+  (storemedia.go), the way a user message's image always did.
+- **Old media** (`ShaperPolicy.StubMediaOlderThan = 4`, setMediaStub): a
+  part that 4 model rounds have followed is no longer resent; it renders
+  as a label naming `media:<hex>`, and file_read on that path reads the
+  stored part back (`files.Config.MediaRef` = `Session.MediaRef`) while the
+  entry is in context. 4: the model uses a read image in the next few
+  rounds (act on it, check, read again); past that, an image is resent on
+  every request for nothing. agentkit steps the boundary by LODStep, so the
+  prompt prefix stays cacheable.

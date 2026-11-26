@@ -417,7 +417,7 @@ func retryForgets(ctx context.Context, link RagLink, logs string) {
 // withSessionSearch answers session_search (agent.SessionSearchTool's run).
 func withSessionSearch(inner agent.ToolDispatcher, run func(context.Context, string) string,
 	onCall func(string, map[string]any, string)) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		if tc.Function.Name != agent.SessionSearchName {
 			return inner(ctx, tc)
 		}
@@ -427,7 +427,7 @@ func withSessionSearch(inner agent.ToolDispatcher, run func(context.Context, str
 			_ = json.Unmarshal([]byte(tc.Function.Arguments), &a)
 			onCall(agent.SessionSearchName, a, out)
 		}
-		return out, nil
+		return llm.TextResult(out), nil
 	}
 }
 

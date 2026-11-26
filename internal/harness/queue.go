@@ -507,11 +507,12 @@ func (h *Harness) noteServerNotification(n mcpmgr.Notification) {
 // already reading the result, so the news costs no extra turn and, critically, no
 // assistant message is appended after another assistant message.
 func withLiftedQueue(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		out, err := inner(ctx, tc)
 		if err != nil {
 			return out, err
 		}
-		return h.liftQueued(out), nil
+		out.Text = h.liftQueued(out.Text)
+		return out, nil
 	}
 }

@@ -48,6 +48,11 @@ Tea copies the model each `Update`). Rendering is deferred via `renderDue` +
 `tool_call` is sent when the call starts, `tool_result` when it returns; both
 carry `call_id`, and a client pairs them by it (`session-events.md`).
 
+A result with media (an image a tool returned) is text on the wire: its
+`result`, and the `history` event's `tool_result` item, carry the text, then
+one label per media part, `[image/png, 412 KiB]`. No event carries the media
+itself; the session keeps it in `blobs/` (`harness/toolmedia.go`).
+
 ### File edits
 
 A `tool_result` whose call changed files carries `edits[]`, one per file:

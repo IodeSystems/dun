@@ -38,7 +38,7 @@ func callAs(t *testing.T, h *Harness, caller toolCaller, tool string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return out
+	return out.Text
 }
 
 // A server that exits during a call is restarted, the call is not

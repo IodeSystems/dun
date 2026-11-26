@@ -286,7 +286,7 @@ func (s *idleState) change() string {
 
 // withIdleRearm records the calls that re-arm the check.
 func withIdleRearm(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		h.idle.note(tc.Function.Name, tc.Function.Arguments)
 		return inner(ctx, tc)
 	}

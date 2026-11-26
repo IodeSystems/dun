@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -15,7 +14,6 @@ import (
 	"time"
 
 	"github.com/iodesystems/agentkit/agent"
-	"github.com/iodesystems/agentkit/llm"
 
 	"github.com/iodesystems/dun/internal/fsutil"
 )
@@ -89,7 +87,7 @@ func openSessionStore(path string) (*sessionStore, error) {
 					e.Content = "[dun: session blob missing]"
 				}
 			}
-			e.Parts = s.loadImages(e.Parts)
+			e.Parts = s.loadMedia(e.Parts)
 			s.entries = append(s.entries, sanitizeOnLoad(e))
 		}
 		s.entries = pairToolResults(s.entries)
@@ -241,86 +239,6 @@ func (s *sessionStore) readBlob(ref string) (string, bool) {
 	return string(data), true
 }
 
-// imageMarker prefixes an image part's URL in the session file where the
-// image itself was written to blobs/ (see saveImages). NUL-led like
-// blobMarker, so no real URL is one.
-const imageMarker = "\x00dun-image:"
-
-// saveImages returns parts with every inline (data: URI) image written to
-// blobs/<sha256>.<ext> and replaced by a ref, so the session file holds no
-// base64. A copy: the in-memory entry keeps its data URIs. An image that
-// cannot be written stays inline rather than being lost.
-func (s *sessionStore) saveImages(parts []llm.ContentPart) []llm.ContentPart {
-	if len(parts) == 0 {
-		return parts
-	}
-	out := make([]llm.ContentPart, len(parts))
-	for i, p := range parts {
-		out[i] = p
-		if p.ImageURL == nil {
-			continue
-		}
-		mime, data, ok := decodeDataURI(p.ImageURL.URL)
-		if !ok {
-			continue
-		}
-		sum := sha256.Sum256(data)
-		name := hex.EncodeToString(sum[:]) + "." + strings.TrimPrefix(mime, "image/")
-		path := filepath.Join(s.blobsDir(), name)
-		if _, err := os.Stat(path); err != nil {
-			if fsutil.WriteAtomic(path, data, 0o600) != nil {
-				continue
-			}
-		}
-		u := *p.ImageURL
-		u.URL = imageMarker + name
-		out[i].ImageURL = &u
-	}
-	return out
-}
-
-// loadImages is saveImages undone: each ref becomes its data URI again. An
-// image whose file is gone becomes a text part saying so — the message
-// still reads, and the model is told an image was there.
-func (s *sessionStore) loadImages(parts []llm.ContentPart) []llm.ContentPart {
-	for i, p := range parts {
-		if p.ImageURL == nil || !strings.HasPrefix(p.ImageURL.URL, imageMarker) {
-			continue
-		}
-		name := filepath.Base(strings.TrimPrefix(p.ImageURL.URL, imageMarker))
-		data, err := os.ReadFile(filepath.Join(s.blobsDir(), name))
-		if err != nil {
-			parts[i] = llm.TextPart("[dun: image missing from the session — " + name + "]")
-			continue
-		}
-		parts[i] = llm.ImageData("image/"+strings.TrimPrefix(filepath.Ext(name), "."), data)
-	}
-	return parts
-}
-
-// decodeDataURI splits a base64 image data: URI into its MIME type and
-// bytes; ok=false for anything else (an https URL stays as it is).
-func decodeDataURI(u string) (mime string, data []byte, ok bool) {
-	rest, found := strings.CutPrefix(u, "data:")
-	if !found {
-		return "", nil, false
-	}
-	meta, b64, found := strings.Cut(rest, ",")
-	if !found {
-		return "", nil, false
-	}
-	mime, found = strings.CutSuffix(meta, ";base64")
-	sub, isImage := strings.CutPrefix(mime, "image/")
-	if !found || !isImage || sub == "" || strings.ContainsAny(sub, "/.\\") {
-		return "", nil, false
-	}
-	data, err := base64.StdEncoding.DecodeString(b64)
-	if err != nil {
-		return "", nil, false
-	}
-	return mime, data, true
-}
-
 // flushLocked rewrites the session file from entries, extracting oversized
 // contents to blobs. The range copies each Entry, so swapping Content for a ref
 // touches only the on-disk form — in-memory entries keep full content. Caller
@@ -337,7 +255,7 @@ func (s *sessionStore) flushLocked() {
 				e.Content = ref
 			}
 		}
-		e.Parts = s.saveImages(e.Parts)
+		e.Parts = s.saveMedia(e.Parts)
 		_ = enc.Encode(e)
 	}
 	_ = fsutil.WriteAtomic(s.path, b.Bytes(), 0o600) // atomic replace

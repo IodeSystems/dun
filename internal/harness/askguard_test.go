@@ -33,7 +33,7 @@ func TestAskGuard_RefusedInAutomaticRounds(t *testing.T) {
 		tc.Function.Name = "ask_user"
 		tc.Function.Arguments = `{"question":"which?","options":["a","b"],"recommended":"a"}`
 		out, _ := d(context.Background(), tc)
-		return out
+		return out.Text
 	}
 	h.turnBegin(originPerson)
 	if out := call(); out != "a" {

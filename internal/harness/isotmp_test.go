@@ -128,10 +128,10 @@ func TestSavedOutput_ReadWithFileRead(t *testing.T) {
 		var tc llm.ToolCall
 		tc.Function.Name, tc.Function.Arguments = "file_read", args
 		out, err := h.Session.Dispatch(context.Background(), tc)
-		if err != nil || strings.HasPrefix(out, "ERROR") {
-			t.Fatalf("file_read %s: %v %s", args, err, out)
+		if err != nil || strings.HasPrefix(out.Text, "ERROR") {
+			t.Fatalf("file_read %s: %v %s", args, err, out.Text)
 		}
-		return out
+		return out.Text
 	}
 	q := func(s string) string { b, _ := json.Marshal(s); return string(b) }
 	if g := read(`{"path":` + q(path) + `,"grep":"SECRET=[a-f0-9]+"}`); !strings.Contains(g, "SECRET=abc123") || !strings.Contains(g, "at=") {

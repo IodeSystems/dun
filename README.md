@@ -540,6 +540,25 @@ With none set, a message with images to such a model is not sent: the TUI says
 why and puts the message back in the composer. A message with images sent
 during a turn waits for the turn to end (an image cannot ride a tool result).
 
+**Media file_read returns:** reading an image, a recording, a video or a
+PDF gives the model the file itself (agentkit's file tools; MCP tools return
+text only). Each kind has a 5 MiB cap and an image a 1568 px long edge; a
+file over either is shrunk by the first of `magick`, `convert`, `ffmpeg` or
+`vipsthumbnail` found, else by dun's own scaler (png, jpeg, gif, webp), or
+it is not sent and a label says why. Each time that happens the transcript
+gets a dim line (`▣ scaled shot.png 4032→1568 px, 3.1 MiB→412 KiB
+(magick)`). A model recorded without vision and with no vision model gets
+images off; with a vision model, the image is described in its place
+(`[image/png from file_read — description: …]`). Every view (the TUI, the
+web UI, ACP, the history) shows `[image/png, 412 KiB]` where the image was,
+never base64. `/media` shows the policy and changes it for the session:
+`/media images off`, `/media cap 20MB`, `/media cap video 50MB`,
+`/media scale off`, `/media scaler /usr/bin/magick`. The session file keeps
+the media in `blobs/`, never as base64. After 4 model rounds a read's media
+is no longer resent: the model sees a label naming `media:<hex>` and reads
+it back with file_read on that path if it needs it again.
+
+
 ## The task plan
 
 For work with several steps the model keeps a plan: a graph of tasks (the `plan_add`, `plan_update`, `plan_close` and `plan_show` tools,

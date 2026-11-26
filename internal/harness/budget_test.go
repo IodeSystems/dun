@@ -49,12 +49,12 @@ func TestBudgetNotice_NextCallOnce(t *testing.T) {
 	r := &scriptRunner{rounds: []roundFn{toolRound("c1", "slow"), toolRound("c2", "slow")}}
 	h := startScripted(t, r)
 	calls := 0
-	h.Session.Dispatch = withInterrupt(func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	h.Session.Dispatch = withInterrupt(func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		calls++
 		if calls == 1 {
 			h.NoteBudget(30*time.Minute, 6*time.Minute) // the clock, mid-call
 		}
-		return "done", nil
+		return llm.TextResult("done"), nil
 	})
 	if _, err := h.Ask(context.Background(), "work"); err != nil {
 		t.Fatal(err)
@@ -124,10 +124,10 @@ func TestBudgetCut_NextTurnNoteOnce(t *testing.T) {
 	r := &scriptRunner{rounds: []roundFn{toolRound("c1", "exec")}}
 	h := startScripted(t, r)
 	inTool := make(chan struct{})
-	h.Session.Dispatch = withInterrupt(func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	h.Session.Dispatch = withInterrupt(func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		close(inTool)
 		<-ctx.Done()
-		return "", ctx.Err()
+		return llm.TextResult(""), ctx.Err()
 	})
 	if err := waitErr(t, cutWith(h, inTool)); !errors.Is(err, ErrInterrupted) {
 		t.Fatalf("err = %v, want ErrInterrupted", err)

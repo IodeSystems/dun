@@ -80,20 +80,20 @@ func TestFlushesPartitionEveryKind(t *testing.T) {
 // it as a user message of its own (midreply.go).
 func TestSayLiftsIntoToolResult(t *testing.T) {
 	h := newNoteHarness(t)
-	inner := func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	inner := func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		h.Say("actually, skip the tests for now")
-		return "wrote 3 lines", nil
+		return llm.TextResult("wrote 3 lines"), nil
 	}
 	out, err := withLiftedQueue(inner, h)(context.Background(), llm.ToolCall{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "wrote 3 lines") {
-		t.Errorf("tool result lost: %q", out)
+	if !strings.Contains(out.Text, "wrote 3 lines") {
+		t.Errorf("tool result lost: %q", out.Text)
 	}
 	// Not in the result: held to follow it as a user message (midreply.go).
-	if strings.Contains(out, "skip the tests") || !slices.Contains(liftedTexts(h), "actually, skip the tests for now") {
-		t.Errorf("message not held for after the result: %q, held %q", out, liftedTexts(h))
+	if strings.Contains(out.Text, "skip the tests") || !slices.Contains(liftedTexts(h), "actually, skip the tests for now") {
+		t.Errorf("message not held for after the result: %q, held %q", out.Text, liftedTexts(h))
 	}
 	if h.Pending() != 0 || h.Queued() != 0 {
 		t.Errorf("lifted message should leave nothing buffered (pending=%d queued=%d)", h.Pending(), h.Queued())
