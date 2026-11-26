@@ -573,7 +573,10 @@ type Harness struct {
 	// so a cached token and a running login are not lost. Its own lock:
 	// Servers() reads it while holding srvMu.
 	oauthMu sync.Mutex
-	oauth   map[string]oauthEntry
+	// authMu guards authCache: Servers' recent OAuth auth states.
+	authMu    sync.Mutex
+	authCache map[string]authEntry
+	oauth     map[string]oauthEntry
 	// added is the /file grants as file toolsets (addedWriters), read by
 	// each file call: a path the person adds in a turn is open to that
 	// turn's next call, though the tool set waits for the turn's end.

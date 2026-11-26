@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/iodesystems/agentkit/mcpmgr"
@@ -64,6 +65,58 @@ func (h *Harness) HasOAuth(id string) bool {
 	return ok && s.OAuth != nil
 }
 
+// authTTL is how long an OAuth server's auth state is reused by Servers. A
+// var for tests.
+var authTTL = 3 * time.Second
+
+type authEntry struct {
+	state string
+	at    time.Time
+}
+
+// fillAuth sets out[i].Auth from specs[i]: the OAuth servers, which may need
+// a dund round trip, concurrently, and one seen within authTTL not at all.
+func (h *Harness) fillAuth(out []ServerState, specs []mcpserver.Server) {
+	var wg sync.WaitGroup
+	for i := range out {
+		s := specs[i]
+		if s.OAuth == nil || s.URL == "" {
+			out[i].Auth = h.authState(s)
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			out[i].Auth = h.cachedAuth(s)
+		}()
+	}
+	wg.Wait()
+}
+
+func (h *Harness) cachedAuth(s mcpserver.Server) string {
+	h.authMu.Lock()
+	e, ok := h.authCache[s.ID]
+	h.authMu.Unlock()
+	if ok && time.Since(e.at) < authTTL {
+		return e.state
+	}
+	st := h.authState(s)
+	h.authMu.Lock()
+	if h.authCache == nil {
+		h.authCache = map[string]authEntry{}
+	}
+	h.authCache[s.ID] = authEntry{st, time.Now()}
+	h.authMu.Unlock()
+	return st
+}
+
+// forgetAuth drops the kept auth states: a login or logout changed one.
+func (h *Harness) forgetAuth() {
+	h.authMu.Lock()
+	h.authCache = nil
+	h.authMu.Unlock()
+}
+
 // authState is the /mcp listing's auth column for s.
 func (h *Harness) authState(s mcpserver.Server) string {
 	if _, keyed := raglitKeyed(s); keyed { // raglitauth.go
@@ -100,6 +153,7 @@ func (h *Harness) LoginServer(ctx context.Context, id string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("no server %q", id)
 	}
+	defer h.forgetAuth() // the listing must not show the state from before
 	var msg string
 	if _, keyed := raglitKeyed(s); keyed {
 		m, err := h.raglitLogin(ctx, s)
@@ -136,6 +190,7 @@ func (h *Harness) LogoutServer(ctx context.Context, id string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("no server %q", id)
 	}
+	defer h.forgetAuth() // the listing must not show the state from before
 	var msg string
 	if _, keyed := raglitKeyed(s); keyed {
 		m, err := h.raglitLogout(ctx, s)
