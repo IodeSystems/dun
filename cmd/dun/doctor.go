@@ -99,6 +99,7 @@ var fixableNames = []string{
 	"mcpshell, poly-lsp-mcp missing or a kept copy behind this dun: go install the version it pins into $DUN_HOME/tools (when Go is here)",
 	"a config file others can read: chmod 600",
 	"a service on another build: dun dund service restart",
+	"no media scaling tools, on macOS with brew: brew install imagemagick ffmpeg (Linux and Windows: the sudo or winget command is printed, not run)",
 }
 
 // fixNames is fixableNames, with a release build's downloads.
@@ -118,6 +119,14 @@ func fixable(f finding) func() error {
 	case strings.HasPrefix(f.fix, "chmod 600 "):
 		p := strings.TrimPrefix(f.fix, "chmod 600 ")
 		return func() error { return os.Chmod(p, 0o600) }
+	case f.area == "media" && f.fix == "brew install "+mediaPkgs:
+		// mediaInstall emits exactly this only on macOS with brew on PATH.
+		// Linux and Windows fixes (sudo, winget) are print-only; see mediaInstall.
+		return func() error {
+			cmd := exec.Command("brew", "install", "imagemagick", "ffmpeg")
+			cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+			return cmd.Run()
+		}
 	case strings.HasPrefix(f.fix, "dun dund service restart"):
 		return func() error {
 			cmd := exec.Command(os.Args[0], "dund", "service", "restart")
@@ -165,6 +174,7 @@ func check(fix bool) *doctor {
 	d.tools()
 	d.polyLSP()
 	d.raglit()
+	d.media()
 	d.dund()
 	d.build()
 	return d
