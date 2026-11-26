@@ -136,7 +136,7 @@ func TestRouteSlash(t *testing.T) {
 		`until goal "Tests  Pass" turns 3`:     {"control", "until", `goal "Tests  Pass" turns 3`},
 		"until":                                {"control", "until", ""},
 		"media":                                {"control", "media", ""},
-		"media cap 20MB":                       {"control", "media", "cap 20mb"},
+		"media cap 20MB":                       {"control", "media", "cap 20MB"},
 		"mcp tools el":                         {"control", "mcptools", "el"},
 		"mcp tools":                            {"control", "mcptools", ""},
 		"mcp restart":                          {"server", enginecmd.AllServers, "restart"},
