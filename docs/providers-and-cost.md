@@ -44,7 +44,12 @@ model reads").
 - `dun doctor` is read-only and prints a fix per finding: providers (logged in,
   model chosen, each model list with its real failure), git on PATH and on
   the service's PATH, dun's own tools (pinned, your build, missing, and unused
-  copies left on PATH or beside dun), whether dund's socket answers this user (tests peer
+  copies left on PATH or beside dun), the media tools agentkit scales images,
+  audio and video with (`cmd/dun/doctor_media.go`: magick, else convert if it
+  is ImageMagick, ffmpeg, vipsthumbnail, in that lookup order; which one
+  scales images, whether audio/video can scale, a per-OS install command;
+  `--fix` runs it only on macOS with brew, elsewhere it is printed, not run),
+  whether dund's socket answers this user (tests peer
   credentials), the service, a self-updating build's Go version.
 
 ## Model facets
