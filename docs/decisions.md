@@ -2315,3 +2315,27 @@ model switch or a crash dropped it with no trace.
   workspaces); `dun sessions --all` takes about 100 ms.
 - Not listed: the model (the transcript does not hold it), and legacy
   path-keyed session directories that no registry entry points to.
+
+## Media in tool results (agentkit v0.42.0, 2026-11-25)
+
+- agentkit's `ToolDispatcher` returns `llm.ToolResult{Text, Parts}`. Every
+  dun wrapper hands Parts on; a wrapper that adds a line changes Text only
+  (`TestWrappersKeepMediaParts`, toolmedia_test.go).
+- **A model without vision**: `Session.PrepareToolResult`
+  (`Harness.prepareToolResult`, toolmedia.go), not a dispatcher wrapper,
+  because the answer is the session's model, not the tool's, and it covers
+  MCP tools with no wrapper of their own. A model recorded without vision
+  (vision.json) gets each image as the vision model's description, the
+  describer a user message's image uses; with none, a label says it was
+  left out. A model not yet probed gets the image: the probe is a user
+  message's (images.go), and a tool result has no retry without the image.
+- **Views**: the tool's end event and the history carry a label per media
+  part (`[image/png, 412 KiB]`); no event carries the media.
+- **Waits on agentkit** (not on its main yet): the media policy (per kind
+  send/off, a cap, scale, the scaler), its `MediaEvent` callback, and
+  read_file media. `/media` shows what is in effect and refuses the policy's
+  changes with that reason. When it lands: images off while the model is
+  recorded without vision and no describer is set; MediaEvent as a TUI note
+  and a RoundEvent kind `media` (repairs.go). mcpmgr on agentkit main still
+  flattens an MCP image to text (`[image: <mime>, N bytes]`), so an MCP
+  image reaches dun as that text until it returns parts.

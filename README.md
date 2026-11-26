@@ -540,6 +540,18 @@ With none set, a message with images to such a model is not sent: the TUI says
 why and puts the message back in the composer. A message with images sent
 during a turn waits for the turn to end (an image cannot ride a tool result).
 
+**Images in tool results:** a tool may return an image (an MCP tool's
+screenshot; file_read on an image once agentkit's media read is in). The
+model gets it in the tool result where the endpoint takes it (agentkit
+routes it: Claude inside `tool_result`, the OpenAI format in one user
+message after the round's tool messages). For a model recorded without
+vision, the vision model describes it (`[image/png from shots__take —
+description: …]`); with none set, a label says it was left out. Every view
+(the TUI, the web UI, ACP, the history) shows `[image/png, 412 KiB]` where
+the image was, never base64. `/media` shows which of these is in effect;
+its changes (`/media images off`, `/media cap 20MB`, `/media scale off`)
+wait on agentkit's media policy and say so until it is in this build.
+
 ## The task plan
 
 For work with several steps the model keeps a plan: a graph of tasks (the `plan_add`, `plan_update`, `plan_close` and `plan_show` tools,

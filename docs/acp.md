@@ -393,6 +393,10 @@ changes until approval; it is not a run type and is not shown.
   checks the socket's peer. `agentCapabilities.auth` is the SDK's zero
   value (`{}`), not set by dun.
 - Audio in prompts; usage and cost updates.
+- An image in a tool result as an `image` content block: the
+  `tool_call_update` carries the result's text with a label where the image
+  was (`[image/png, 412 KiB]`, `event-protocol.md`). `proto.ToolResult`
+  carries no media, so the bridge has no image to send.
 
 ## Verified
 
