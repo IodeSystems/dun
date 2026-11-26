@@ -151,10 +151,14 @@ func TestReadImageScaledNoteAndEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Noise, so the PNG stays far over the 1 KiB cap below whatever the
+	// encoder's compression (a gradient compressed to 425 bytes on CI's Go).
 	img := image.NewRGBA(image.Rect(0, 0, 2000, 40))
+	seed := uint32(1)
 	for x := 0; x < 2000; x++ {
 		for y := 0; y < 40; y++ {
-			img.Set(x, y, color.RGBA{uint8(x), uint8(y), 90, 255})
+			seed = seed*1664525 + 1013904223
+			img.Set(x, y, color.RGBA{uint8(seed >> 24), uint8(seed >> 16), uint8(seed >> 8), 255})
 		}
 	}
 	var buf bytes.Buffer
