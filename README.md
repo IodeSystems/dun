@@ -553,7 +553,10 @@ images off; with a vision model, the image is described in its place
 web UI, ACP, the history) shows `[image/png, 412 KiB]` where the image was,
 never base64. `/media` shows the policy and changes it for the session:
 `/media images off`, `/media cap 20MB`, `/media cap video 50MB`,
-`/media scale off`, `/media scaler /usr/bin/magick`.
+`/media scale off`, `/media scaler /usr/bin/magick`. The session file keeps
+the media in `blobs/`, never as base64. After 4 model rounds a read's media
+is no longer resent: the model sees a label naming `media:<hex>` and reads
+it back with file_read on that path if it needs it again.
 
 
 ## The task plan

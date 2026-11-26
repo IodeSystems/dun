@@ -2350,3 +2350,15 @@ model switch or a crash dropped it with no trace.
 - **MCP media** (Carl, declined): mcpmgr keeps an MCP image as the text
   `[image: <mime>, N bytes]`. Media reaches the model only through
   agentkit's own tools; PrepareToolResult's describer is for file_read.
+- **Storage**: a tool result's media parts are the KindToolResult entry's
+  Parts. The session file holds none of their bytes: every entry's image,
+  audio, video and PDF parts go to `blobs/<sha256>.<ext>` and a ref
+  (storemedia.go), the way a user message's image always did.
+- **Old media** (`ShaperPolicy.StubMediaOlderThan = 4`, setMediaStub): a
+  part that 4 model rounds have followed is no longer resent; it renders
+  as a label naming `media:<hex>`, and file_read on that path reads the
+  stored part back (`files.Config.MediaRef` = `Session.MediaRef`) while the
+  entry is in context. 4: the model uses a read image in the next few
+  rounds (act on it, check, read again); past that, an image is resent on
+  every request for nothing. agentkit steps the boundary by LODStep, so the
+  prompt prefix stays cacheable.

@@ -17,7 +17,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/iodesystems/agentkit/agent"
 	filetools "github.com/iodesystems/agentkit/files"
+	"github.com/iodesystems/agentkit/llm"
 	xdraw "golang.org/x/image/draw"
 )
 
@@ -109,7 +111,33 @@ func (h *Harness) applyMediaPolicy(ts *filetools.Toolset) {
 func (h *Harness) filesConfig() (filetools.Config, bool) {
 	cfg, ok := filesToolset(h.cfg.Files, h.cfg.Workspace)
 	cfg.OnMedia = h.onMedia
+	// A stubbed part's "media:<hex>" read (StubMediaOlderThan): the session's
+	// entries hold it while it is in context. Read at the call: the Session
+	// is built after the first toolset.
+	cfg.MediaRef = func(ctx context.Context, ref string) (llm.ContentPart, bool) {
+		if h.Session == nil {
+			return llm.ContentPart{}, false
+		}
+		return h.Session.MediaRef(ctx, ref)
+	}
 	return cfg, ok
+}
+
+// mediaStubRounds is ShaperPolicy.StubMediaOlderThan: a media part stops
+// being resent once this many model rounds have followed it. 4: the model
+// looks at a read image in the round after the read and in the next few as
+// it acts on it (edit, check, read again), and a screenshot is 1–2k tokens
+// of image per request after that; it is a "media:<hex>" read away. agentkit
+// steps the boundary by LODStep, so the prompt prefix stays cacheable.
+const mediaStubRounds = 4
+
+// setMediaStub sets the Shaper's old-media rule (agentkit mediastub.go): a
+// part that mediaStubRounds model rounds have followed renders as a label
+// naming its "media:<hex>", and says to call file_read with it (dun sets no
+// NamePrefix, so the read tool is file_read); filesConfig reads it back.
+func setMediaStub(p *agent.ShaperPolicy) {
+	p.StubMediaOlderThan = mediaStubRounds
+	p.MediaReadTool = filetools.DefaultPrefix + filetools.Read
 }
 
 // ── the scaler ──

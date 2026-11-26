@@ -1002,6 +1002,8 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 	// with tool entries and the user message is summarized (fold.go keeps a
 	// copy in the plan and the summary; this keeps it verbatim).
 	shaper.Policy.PinLatestUser = true
+	// Old media: a label, read back by its media:<hex> (mediapolicy.go).
+	setMediaStub(&shaper.Policy)
 	sess := &agent.Session{
 		// agentkit derives prompt_cache_key from it: one shared value would put
 		// every dun session on one endpoint in one cache slot.

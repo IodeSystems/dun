@@ -200,7 +200,10 @@ func TestReadImageScaledNoteAndEvent(t *testing.T) {
 	_, _ = h.MediaCmd("images auto")
 	_, _ = h.MediaCmd("cap 1KB")
 	_, _ = h.MediaCmd("scale off")
-	_, _ = d(context.Background(), mediaCall(ts.Name(filetools.Read), `{"path":"wide.png"}`))
+	res, _ = d(context.Background(), mediaCall(ts.Name(filetools.Read), `{"path":"wide.png"}`))
+	if len(res.Parts) != 0 || !strings.HasPrefix(res.Text, "ERROR: ") {
+		t.Errorf("over the cap, not shrunk: %q, want an ERROR: result", res.Text)
+	}
 	if len(notes) != 1 || notes[0] != "wide.png over the 1 KiB limit; not scaled (scale is off). /media to change" {
 		t.Errorf("refused notes %q", notes)
 	}
