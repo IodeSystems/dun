@@ -356,7 +356,7 @@ func (s Stores) Standing() (string, map[string]bool) {
 // files server. Only these prefixes (docs/reading.md): an item is small,
 // so there are no ranges or caps to apply. stores is read at each call.
 func WithItemRead(inner agent.ToolDispatcher, stores func() Stores) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		if tc.Function.Name != "file_read" {
 			return inner(ctx, tc)
 		}
@@ -368,7 +368,7 @@ func WithItemRead(inner agent.ToolDispatcher, stores func() Stores) agent.ToolDi
 		if !ok {
 			return inner(ctx, tc)
 		}
-		return stores().readItem(kind, name), nil
+		return llm.TextResult(stores().readItem(kind, name)), nil
 	}
 }
 

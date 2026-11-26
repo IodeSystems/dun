@@ -177,8 +177,8 @@ func TestMountTool_DispatcherCallsMountFunc(t *testing.T) {
 	if !mounted {
 		t.Fatal("MountFunc was not called")
 	}
-	if !strings.Contains(result, "approved") {
-		t.Errorf("result = %q, want approved", result)
+	if !strings.Contains(result.Text, "approved") {
+		t.Errorf("result = %q, want approved", result.Text)
 	}
 }
 
@@ -211,8 +211,8 @@ func TestMountTool_DispatcherDeny(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
-	if !strings.Contains(result, "denied") {
-		t.Errorf("result = %q, want denied", result)
+	if !strings.Contains(result.Text, "denied") {
+		t.Errorf("result = %q, want denied", result.Text)
 	}
 }
 
@@ -242,8 +242,8 @@ func TestMountTool_DispatcherMissingArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
-	if !strings.Contains(result, "ERROR") {
-		t.Errorf("expected error for empty source, got %q", result)
+	if !strings.Contains(result.Text, "ERROR") {
+		t.Errorf("expected error for empty source, got %q", result.Text)
 	}
 
 	// Empty name.
@@ -252,7 +252,7 @@ func TestMountTool_DispatcherMissingArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
-	if !strings.Contains(result, "ERROR") {
-		t.Errorf("expected error for empty name, got %q", result)
+	if !strings.Contains(result.Text, "ERROR") {
+		t.Errorf("expected error for empty name, got %q", result.Text)
 	}
 }

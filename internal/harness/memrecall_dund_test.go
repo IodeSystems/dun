@@ -115,7 +115,7 @@ func memoryCall(t *testing.T, h *harness.Harness, args map[string]any) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return out
+	return out.Text
 }
 
 // End to end over dund's socket (docs/rag.md, slice 5): a note the memory
@@ -211,7 +211,7 @@ func TestStrategiesGoToDund(t *testing.T) {
 	d.none(proj, "quokka")
 	var tc llm.ToolCall
 	tc.Function.Name, tc.Function.Arguments = "file_read", `{"path":"constraint:no-wombat"}`
-	if out, _ := h.Session.Dispatch(context.Background(), tc); !strings.Contains(out, "wombat config") {
-		t.Fatalf("file_read constraint: %q", out)
+	if out, _ := h.Session.Dispatch(context.Background(), tc); !strings.Contains(out.Text, "wombat config") {
+		t.Fatalf("file_read constraint: %q", out.Text)
 	}
 }

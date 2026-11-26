@@ -178,15 +178,15 @@ func TestWithExec_RoutesExecLocallyElseMCP(t *testing.T) {
 	call.Function.Name = "exec"
 	call.Function.Arguments = `{"command":"echo hello-exec"}`
 	out, _ := d(context.Background(), call)
-	if !strings.Contains(out, "hello-exec") {
-		t.Fatalf("exec should run the backend: %q", out)
+	if !strings.Contains(out.Text, "hello-exec") {
+		t.Fatalf("exec should run the backend: %q", out.Text)
 	}
 
 	call = llm.ToolCall{}
 	call.Function.Name = "search"
 	out, _ = d(context.Background(), call)
-	if out != "MCP:search" {
-		t.Fatalf("non-exec tools should route to MCP: %q", out)
+	if out.Text != "MCP:search" {
+		t.Fatalf("non-exec tools should route to MCP: %q", out.Text)
 	}
 }
 
@@ -235,8 +235,8 @@ func TestExecToolDef(t *testing.T) {
 }
 
 // agentDispatch adapts a name→result func to a ToolDispatcher.
-func agentDispatch(f func(name string) string) func(context.Context, llm.ToolCall) (string, error) {
-	return func(_ context.Context, tc llm.ToolCall) (string, error) {
-		return f(tc.Function.Name), nil
+func agentDispatch(f func(name string) string) func(context.Context, llm.ToolCall) (llm.ToolResult, error) {
+	return func(_ context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
+		return llm.TextResult(f(tc.Function.Name)), nil
 	}
 }

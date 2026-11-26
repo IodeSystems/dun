@@ -27,8 +27,8 @@ func TestWithAsk_MultiPassthrough(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res != "A, C" {
-		t.Fatalf("result = %q, want the AskFunc's answer", res)
+	if res.Text != "A, C" {
+		t.Fatalf("result = %q, want the AskFunc's answer", res.Text)
 	}
 	if gotQ != "Pick" || len(gotOpts) != 3 || !gotMulti {
 		t.Fatalf("args not passed through: q=%q opts=%v multi=%v", gotQ, gotOpts, gotMulti)
@@ -88,9 +88,9 @@ func TestWithAsk_RequiresOptionsAndARecommendation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		gotErr := len(res) > 6 && res[:6] == "ERROR:"
+		gotErr := len(res.Text) > 6 && res.Text[:6] == "ERROR:"
 		if gotErr != wantErr {
-			t.Errorf("%s: result %q", args, res)
+			t.Errorf("%s: result %q", args, res.Text)
 		}
 		if wantErr && asked != "" {
 			t.Errorf("%s: the user was asked anyway", args)

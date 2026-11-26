@@ -41,11 +41,11 @@ func TestExec_FastCommandAnswersInline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "quick") {
-		t.Fatalf("want the output inline: %q", out)
+	if !strings.Contains(out.Text, "quick") {
+		t.Fatalf("want the output inline: %q", out.Text)
 	}
-	if strings.Contains(out, "background job") {
-		t.Errorf("a fast command must not become a job: %q", out)
+	if strings.Contains(out.Text, "background job") {
+		t.Errorf("a fast command must not become a job: %q", out.Text)
 	}
 	if n := h.notes(); len(n) != 0 {
 		t.Errorf("a fast command has nothing to announce: %q", n)
@@ -70,11 +70,11 @@ func TestExec_SlowCommandBecomesAJob(t *testing.T) {
 	if el := time.Since(start); el > 1500*time.Millisecond {
 		t.Fatalf("the call must return at the grace, not at the command: %s", el)
 	}
-	if !strings.Contains(out, "still running") || !strings.Contains(out, "not killed") {
-		t.Fatalf("the notice must say the command is alive: %q", out)
+	if !strings.Contains(out.Text, "still running") || !strings.Contains(out.Text, "not killed") {
+		t.Fatalf("the notice must say the command is alive: %q", out.Text)
 	}
-	if !strings.Contains(out, "background job #1") || !strings.Contains(out, "job-1.log (file_read)") {
-		t.Fatalf("the notice must name the job and where to look: %q", out)
+	if !strings.Contains(out.Text, "background job #1") || !strings.Contains(out.Text, "job-1.log (file_read)") {
+		t.Fatalf("the notice must name the job and where to look: %q", out.Text)
 	}
 
 	// Output produced BEFORE the handover is not lost: a provisional job holds
@@ -208,8 +208,8 @@ func TestExec_TimeoutIsCapped(t *testing.T) {
 	if el := time.Since(start); el > 5*time.Second {
 		t.Fatalf("the wait must stop at the cap: %s", el)
 	}
-	if !strings.Contains(out, "background job #1") || !strings.Contains(out, "timeout of 900s was capped at 1s") {
-		t.Fatalf("want the handoff and the cap: %q", out)
+	if !strings.Contains(out.Text, "background job #1") || !strings.Contains(out.Text, "timeout of 900s was capped at 1s") {
+		t.Fatalf("want the handoff and the cap: %q", out.Text)
 	}
 	if _, err := h.KillJob(1, "test"); err != nil {
 		t.Fatal(err)
@@ -217,7 +217,7 @@ func TestExec_TimeoutIsCapped(t *testing.T) {
 
 	// Under the cap: no word about it.
 	out, _ = d(context.Background(), execCall(`{"command":"echo quick","timeout":1}`))
-	if strings.Contains(out, "capped") {
-		t.Fatalf("a timeout under the cap is not capped: %q", out)
+	if strings.Contains(out.Text, "capped") {
+		t.Fatalf("a timeout under the cap is not capped: %q", out.Text)
 	}
 }

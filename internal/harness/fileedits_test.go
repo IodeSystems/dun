@@ -42,7 +42,7 @@ func editCall(t *testing.T, h *Harness, ts *filetools.Toolset, ends *[]ToolEnd, 
 	inner agent.ToolDispatcher) []FileEdit {
 	t.Helper()
 	if inner == nil {
-		inner = func(ctx context.Context, tc llm.ToolCall) (string, error) {
+		inner = func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 			return ts.Dispatch(ctx, tc.Function.Name, tc.Function.Arguments), nil
 		}
 	}
@@ -119,8 +119,8 @@ func TestEdits_NodeEdit(t *testing.T) {
 	h, ts, ends := editHarness(t)
 	p := writeWS(t, h, "pkg/x.go", "package x\n")
 	writer := func(text string) agent.ToolDispatcher {
-		return func(ctx context.Context, tc llm.ToolCall) (string, error) {
-			return `{"node":"pkg/x.go","bytesAdded":1}`, os.WriteFile(p, []byte(text), 0o644)
+		return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
+			return llm.TextResult(`{"node":"pkg/x.go","bytesAdded":1}`), os.WriteFile(p, []byte(text), 0o644)
 		}
 	}
 	got := editCall(t, h, ts, ends, "n1", "node_edit", `{"file":"pkg/x.go","newText":"package x\n\nfunc F() {}\n"}`,
@@ -131,13 +131,15 @@ func TestEdits_NodeEdit(t *testing.T) {
 		writer("package x\n\nfunc F() { G() }\n"))
 	wantEdits(t, got, FileEdit{Path: p, OldText: "package x\n\nfunc F() {}\n", NewText: "package x\n\nfunc F() { G() }\n"})
 
-	del := func(ctx context.Context, tc llm.ToolCall) (string, error) { return `{"deleted":true}`, os.Remove(p) }
+	del := func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
+		return llm.TextResult(`{"deleted":true}`), os.Remove(p)
+	}
 	got = editCall(t, h, ts, ends, "n3", "node_delete", `{"file":"`+p+`"}`, del)
 	wantEdits(t, got, FileEdit{Path: p, OldText: "package x\n\nfunc F() { G() }\n", Deleted: true})
 
 	q := writeWS(t, h, "q.go", "package q\n")
-	got = editCall(t, h, ts, ends, "n4", "node_refactor", `{"file":"q.go"}`, func(ctx context.Context, tc llm.ToolCall) (string, error) {
-		return "{}", os.WriteFile(q, []byte("package r\n"), 0o644)
+	got = editCall(t, h, ts, ends, "n4", "node_refactor", `{"file":"q.go"}`, func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
+		return llm.TextResult("{}"), os.WriteFile(q, []byte("package r\n"), 0o644)
 	})
 	if got != nil {
 		t.Errorf("node_refactor carried edits: %+v", got)
@@ -149,14 +151,14 @@ func TestEdits_NodeEdit(t *testing.T) {
 func TestEdits_Caps(t *testing.T) {
 	h, ts, ends := editHarness(t)
 	big := writeWS(t, h, "big.txt", strings.Repeat("x", editFileMax+1))
-	got := editCall(t, h, ts, ends, "b1", "node_edit", `{"file":"big.txt"}`, func(ctx context.Context, tc llm.ToolCall) (string, error) {
-		return "{}", os.WriteFile(big, []byte("small\n"), 0o644)
+	got := editCall(t, h, ts, ends, "b1", "node_edit", `{"file":"big.txt"}`, func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
+		return llm.TextResult("{}"), os.WriteFile(big, []byte("small\n"), 0o644)
 	})
 	wantEdits(t, got, FileEdit{Path: big, Skipped: "too_large"})
 
 	bin := writeWS(t, h, "bin.dat", "a\x00b")
-	got = editCall(t, h, ts, ends, "b2", "node_edit", `{"file":"bin.dat"}`, func(ctx context.Context, tc llm.ToolCall) (string, error) {
-		return "{}", os.WriteFile(bin, []byte("a\x00c"), 0o644)
+	got = editCall(t, h, ts, ends, "b2", "node_edit", `{"file":"bin.dat"}`, func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
+		return llm.TextResult("{}"), os.WriteFile(bin, []byte("a\x00c"), 0o644)
 	})
 	wantEdits(t, got, FileEdit{Path: bin, Skipped: "binary"})
 
@@ -173,8 +175,8 @@ func TestEdits_OffWithoutToolEnd(t *testing.T) {
 	h, ts, _ := editHarness(t)
 	h.cfg.OnToolEnd = nil
 	p := writeWS(t, h, "a", "a")
-	inner := func(ctx context.Context, tc llm.ToolCall) (string, error) {
-		return "", os.WriteFile(p, []byte("b"), 0o644)
+	inner := func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
+		return llm.TextResult(""), os.WriteFile(p, []byte("b"), 0o644)
 	}
 	tc := llm.ToolCall{ID: "x"}
 	tc.Function.Name, tc.Function.Arguments = "node_edit", `{"file":"a"}`
@@ -190,8 +192,8 @@ func TestEdits_PersistedForHistory(t *testing.T) {
 	h, ts, ends := editHarness(t)
 	big := strings.Repeat("line\n", 4000) // over blobThreshold
 	p := writeWS(t, h, "f.txt", big)
-	editCall(t, h, ts, ends, "c1", "node_edit", `{"file":"f.txt"}`, func(ctx context.Context, tc llm.ToolCall) (string, error) {
-		return "{}", os.WriteFile(p, []byte(big+"end\n"), 0o644)
+	editCall(t, h, ts, ends, "c1", "node_edit", `{"file":"f.txt"}`, func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
+		return llm.TextResult("{}"), os.WriteFile(p, []byte(big+"end\n"), 0o644)
 	})
 	raw, err := os.ReadFile(h.store.editsPath())
 	if err != nil {

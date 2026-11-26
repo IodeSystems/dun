@@ -153,7 +153,7 @@ func askID(raw json.RawMessage) (n int, intake bool, ok bool) {
 }
 
 func withAsks(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		if tc.Function.Name != asksToolName {
 			return inner(ctx, tc)
 		}
@@ -163,7 +163,7 @@ func withAsks(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[st
 			_ = json.Unmarshal([]byte(tc.Function.Arguments), &a)
 			onCall(asksToolName, a, out)
 		}
-		return out, nil
+		return llm.TextResult(out), nil
 	}
 }
 

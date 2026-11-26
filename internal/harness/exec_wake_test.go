@@ -30,8 +30,8 @@ func TestExec_SayDuringWaitHandsOverAtOnce(t *testing.T) {
 		t.Fatalf("the message must end the wait, not the timeout: %s", el)
 	}
 	for _, want := range []string{"still running", "background job #1", "user wrote"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("result missing %q:\n%s", want, out)
+		if !strings.Contains(out.Text, want) {
+			t.Errorf("result missing %q:\n%s", want, out.Text)
 		}
 	}
 	// The message follows the result as a user message (midreply.go).
@@ -59,8 +59,8 @@ func TestExec_MessageQueuedBeforeTheCallReleasesIt(t *testing.T) {
 	if el := time.Since(start); el > 3*time.Second {
 		t.Fatalf("a queued message must not wait out the grace: %s", el)
 	}
-	if !strings.Contains(out, "background job #1") || !slices.Contains(liftedTexts(h), "stop and look") {
-		t.Fatalf("want the handoff and the message: %q", out)
+	if !strings.Contains(out.Text, "background job #1") || !slices.Contains(liftedTexts(h), "stop and look") {
+		t.Fatalf("want the handoff and the message: %q", out.Text)
 	}
 	if _, err := h.KillJob(1, "test"); err != nil {
 		t.Fatal(err)
@@ -103,11 +103,11 @@ func TestExec_FinishedBeforeTheWakeAnswersInline(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.Say("too late")
-	if !strings.Contains(out, "done-fast") || strings.Contains(out, "still running") {
-		t.Fatalf("want the normal output: %q", out)
+	if !strings.Contains(out.Text, "done-fast") || strings.Contains(out.Text, "still running") {
+		t.Fatalf("want the normal output: %q", out.Text)
 	}
-	if strings.Contains(out, "too late") {
-		t.Fatalf("a message typed after the result cannot be in it: %q", out)
+	if strings.Contains(out.Text, "too late") {
+		t.Fatalf("a message typed after the result cannot be in it: %q", out.Text)
 	}
 	if js := h.Jobs(); len(js) != 0 {
 		t.Fatalf("a finished command must not become a job: %+v", js)
@@ -123,7 +123,7 @@ func TestExec_SayReleasesEveryWait(t *testing.T) {
 	for range 2 {
 		go func() {
 			out, _ := d(context.Background(), execCall(`{"command":"sleep 30","timeout":600}`))
-			outs <- out
+			outs <- out.Text
 		}()
 	}
 	waitFor(t, 5*time.Second, func() bool { return len(h.liveJobs()) == 2 })

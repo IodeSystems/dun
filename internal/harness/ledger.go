@@ -407,7 +407,7 @@ func fileTool(name string) string {
 // withLedger records every dispatched call into the root's ledger. Outside
 // every other wrapper: a refused call is a call too.
 func withLedger(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		name := tc.Function.Name
 		var args struct {
 			Path    string `json:"path"`
@@ -429,7 +429,7 @@ func withLedger(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher {
 		lc := &ledgerCall{}
 		t0 := time.Now()
 		out, err := inner(context.WithValue(ctx, ledgerCallKey{}, lc), tc)
-		res := out
+		res := out.Text
 		if err != nil && res == "" {
 			res = "ERROR: " + err.Error()
 		}

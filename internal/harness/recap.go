@@ -535,7 +535,7 @@ const readSavedRetired = "ERROR: read_saved is retired: saved output is a file n
 	"result was clipped names its path. Read it with file_read (grep, a line range, or at for a byte page)."
 
 func withRecap(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		if tc.Function.Name != "recap" && tc.Function.Name != "read_saved" {
 			return inner(ctx, tc)
 		}
@@ -584,7 +584,7 @@ func withRecap(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 			}
 			onCall(tc.Function.Name, a, out)
 		}
-		return out, nil
+		return llm.TextResult(out), nil
 	}
 }
 
@@ -841,7 +841,7 @@ func (h *Harness) claimCue(key string) bool {
 // withRecapWatch runs after every tool call, so a suggestion lands at the moment
 // the churn is created rather than whenever the window happens to be measured.
 func withRecapWatch(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		out, err := inner(ctx, tc)
 		if err != nil || tc.Function.Name == "recap" {
 			// recap bounds its own reads; clipping them again would clip the
@@ -854,8 +854,8 @@ func withRecapWatch(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher
 		// Structured results are clipped too, and knowingly — a clipped JSON is
 		// still readable prose to a model, while an unbounded one only has to
 		// start with "{" to reopen the hole.
-		out = h.capOnce(tc.Function.Name+" "+oneLine(tc.Function.Arguments, 120), out)
-		h.watchRecap(tc.Function.Name, len(out))
+		out.Text = h.capOnce(tc.Function.Name+" "+oneLine(tc.Function.Arguments, 120), out.Text)
+		h.watchRecap(tc.Function.Name, len(out.Text))
 		return out, err
 	}
 }

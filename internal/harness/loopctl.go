@@ -58,7 +58,7 @@ func loopCtlToolDef() llm.ToolDef {
 
 // withLoopCtl handles loop_ctl; everything else routes onward.
 func withLoopCtl(inner agent.ToolDispatcher, link LoopLink, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		if tc.Function.Name != "loop_ctl" {
 			return inner(ctx, tc)
 		}
@@ -72,7 +72,7 @@ func withLoopCtl(inner agent.ToolDispatcher, link LoopLink, onCall func(string, 
 		if onCall != nil {
 			onCall("loop_ctl", map[string]any{"next_in": args.NextIn, "stop": args.Stop, "reason": args.Reason}, out)
 		}
-		return out, nil
+		return llm.TextResult(out), nil
 	}
 }
 

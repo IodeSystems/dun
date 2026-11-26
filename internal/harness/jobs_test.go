@@ -14,14 +14,14 @@ import (
 // jobsCall dispatches one call of name (jobs or an alias) with args.
 func jobsCall(t *testing.T, h *Harness, name, args string) string {
 	t.Helper()
-	d := withJobs(func(context.Context, llm.ToolCall) (string, error) { return "inner", nil }, h, nil)
+	d := withJobs(func(context.Context, llm.ToolCall) (llm.ToolResult, error) { return llm.TextResult("inner"), nil }, h, nil)
 	var tc llm.ToolCall
 	tc.Function.Name, tc.Function.Arguments = name, args
 	out, err := d(context.Background(), tc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return out
+	return out.Text
 }
 
 // registerAgent puts sa in h's agent list, as spawnAgent does.
@@ -146,12 +146,12 @@ func TestJobs_ProgressSaysHowMuchNotWhat(t *testing.T) {
 func TestAgent_ActsOnAnExistingChildByID(t *testing.T) {
 	h, sa := testAgent(t, 3, "look around")
 	registerAgent(h, sa)
-	d := withAgent(func(context.Context, llm.ToolCall) (string, error) { return "inner", nil }, h, nil)
+	d := withAgent(func(context.Context, llm.ToolCall) (llm.ToolResult, error) { return llm.TextResult("inner"), nil }, h, nil)
 	call := func(args string) string {
 		var tc llm.ToolCall
 		tc.Function.Name, tc.Function.Arguments = "agent", args
 		out, _ := d(context.Background(), tc)
-		return out
+		return out.Text
 	}
 	// No node and no id: a start with nothing to start on (USER 2026-11-10).
 	// This harness has no plan tool, so the refusal says that.

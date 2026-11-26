@@ -118,7 +118,7 @@ func withToolEvents(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher
 	if start == nil && end == nil {
 		return inner
 	}
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		name := tc.Function.Name
 		if start != nil {
 			var args map[string]any
@@ -134,7 +134,7 @@ func withToolEvents(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher
 		agentNum := h.toolCur.takeAgent()
 		edits := h.toolCur.takeEdits()
 		if !ok {
-			shown = out
+			shown = resultShown(out)
 		}
 		failed := err != nil
 		if err != nil && shown == "" {

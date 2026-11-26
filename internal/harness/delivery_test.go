@@ -17,9 +17,9 @@ func TestLiftedMessageDeliveredAfterItsResult(t *testing.T) {
 	h.store.onToolResult = h.deliverLifted
 	var got []Delivery
 	h.cfg.OnDelivered = func(d Delivery) { got = append(got, d) }
-	inner := func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	inner := func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		h.SayAs("m1", "skip the tests")
-		return "ok", nil
+		return llm.TextResult("ok"), nil
 	}
 	out, err := withLiftedQueue(inner, h)(context.Background(), llm.ToolCall{ID: "c1"})
 	if err != nil {
@@ -29,7 +29,7 @@ func TestLiftedMessageDeliveredAfterItsResult(t *testing.T) {
 		t.Fatalf("delivered before the result was stored: %+v", got)
 	}
 	ctx := context.Background()
-	_ = h.store.Append(ctx, "dun", agent.Entry{ID: "r", Kind: agent.KindToolResult, ToolCallID: "c1", ToolName: "exec", Content: out, CreatedAt: 1})
+	_ = h.store.Append(ctx, "dun", agent.Entry{ID: "r", Kind: agent.KindToolResult, ToolCallID: "c1", ToolName: "exec", Content: out.Text, CreatedAt: 1})
 	if len(got) != 1 || got[0].CallID != "c1" || len(got[0].IDs) != 1 || got[0].IDs[0] != "m1" {
 		t.Fatalf("delivered %+v; want m1 by c1", got)
 	}

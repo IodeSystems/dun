@@ -110,7 +110,7 @@ func signatureError(tool, why string, params any, args map[string]any) string {
 // withRequiredArgs answers a call that leaves out a required parameter
 // with its tool's signature, before the tool sees it.
 func withRequiredArgs(inner agent.ToolDispatcher, defs func() []llm.ToolDef) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		for _, d := range defs() {
 			if d.Function.Name != tc.Function.Name {
 				continue
@@ -121,8 +121,8 @@ func withRequiredArgs(inner agent.ToolDispatcher, defs func() []llm.ToolDef) age
 				args = map[string]any{}
 			}
 			if miss := missingRequired(d.Function.Parameters, args); len(miss) > 0 {
-				return signatureError(tc.Function.Name, "was called without "+strings.Join(miss, ", ")+" (required)",
-					d.Function.Parameters, args), nil
+				return llm.TextResult(signatureError(tc.Function.Name, "was called without "+strings.Join(miss, ", ")+" (required)",
+					d.Function.Parameters, args)), nil
 			}
 			break
 		}

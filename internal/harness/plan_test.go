@@ -135,7 +135,7 @@ func TestPlan_GateRefusesUntilApproved(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return out
+		return out.Text
 	}
 	// Off by default: nothing is refused.
 	if out := run("exec"); out != "ok" {
@@ -179,8 +179,8 @@ func TestPlan_GateRefusesUntilApproved(t *testing.T) {
 	}
 	// An MCP tool is looked up by server.
 	d = withPlanGate(inner.dispatch, h, map[string]string{"srv__push": "srv"})
-	if out, _ := d(ctx, call("srv__push", `{}`)); !strings.Contains(out, "refused") {
-		t.Errorf("mcp: %s", out)
+	if out, _ := d(ctx, call("srv__push", `{}`)); !strings.Contains(out.Text, "refused") {
+		t.Errorf("mcp: %s", out.Text)
 	}
 }
 

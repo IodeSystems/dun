@@ -388,11 +388,11 @@ func unrunResult(ctx context.Context, tc llm.ToolCall) string {
 // withInterrupt is the outermost dispatcher: a call the turn reaches after the
 // interrupt is not run, and one the interrupt cut short says so.
 func withInterrupt(inner agent.ToolDispatcher) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		name := tc.Function.Name
 		by := func() string { return stoppedBy(ctx) }
 		if interrupted(ctx) {
-			return unrunResult(ctx, tc), nil
+			return llm.TextResult(unrunResult(ctx, tc)), nil
 		}
 		out, err := inner(ctx, tc)
 		if !interrupted(ctx) {
@@ -400,13 +400,14 @@ func withInterrupt(inner agent.ToolDispatcher) agent.ToolDispatcher {
 		}
 		if err != nil {
 			if r := interruptReason(ctx); r != "" {
-				return interruptedCallFor(name, r), nil
+				return llm.TextResult(interruptedCallFor(name, r)), nil
 			}
-			return userInterruptedCall(name), nil
+			return llm.TextResult(userInterruptedCall(name)), nil
 		}
 		// It finished, but the interrupt may have cut it short: keep what it
 		// returned and say so.
-		return strings.TrimRight(out, "\n") + "\n\n[" + by() + " while this call ran; " +
-			"the output above may be incomplete]", nil
+		out.Text = strings.TrimRight(out.Text, "\n") + "\n\n[" + by() + " while this call ran; " +
+			"the output above may be incomplete]"
+		return out, nil
 	}
 }

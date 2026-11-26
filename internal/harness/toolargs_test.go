@@ -23,13 +23,16 @@ func TestRequiredArgs(t *testing.T) {
 		"required": []any{"vin"},
 	}
 	reached := false
-	d := withRequiredArgs(func(context.Context, llm.ToolCall) (string, error) { reached = true; return "ok", nil },
+	d := withRequiredArgs(func(context.Context, llm.ToolCall) (llm.ToolResult, error) {
+		reached = true
+		return llm.TextResult("ok"), nil
+	},
 		func() []llm.ToolDef { return []llm.ToolDef{td} })
 	call := func(args string) string {
 		var tc llm.ToolCall
 		tc.Function.Name, tc.Function.Arguments = "lookup", args
 		out, _ := d(context.Background(), tc)
-		return out
+		return out.Text
 	}
 	out := call(`{"limit": 3, "vin": ""}`)
 	for _, want := range []string{"lookup was called without vin (required)", "{vin: string, limit?: integer, tags?: string[]}", "you sent {limit, vin}"} {
@@ -49,13 +52,13 @@ func TestRequiredArgs(t *testing.T) {
 // was sent.
 func TestRecap_SaysItsShape(t *testing.T) {
 	h := &Harness{}
-	d := withRecap(func(context.Context, llm.ToolCall) (string, error) { return "", nil }, h, nil)
+	d := withRecap(func(context.Context, llm.ToolCall) (llm.ToolResult, error) { return llm.TextResult(""), nil }, h, nil)
 	var tc llm.ToolCall
 	tc.Function.Name, tc.Function.Arguments = "recap", `{"from": "was reported towed", "keep": null}`
 	out, _ := d(context.Background(), tc)
 	for _, want := range []string{"without summary", "{summary: string, from?: string, keep?: string[], drop?: string[]}", "use file_read on the path", "You sent {from, keep}"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("lacks %q:\n%s", want, out)
+		if !strings.Contains(out.Text, want) {
+			t.Errorf("lacks %q:\n%s", want, out.Text)
 		}
 	}
 }

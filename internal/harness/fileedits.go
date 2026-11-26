@@ -195,7 +195,7 @@ func withEdits(inner agent.ToolDispatcher, h *Harness, ft *filetools.Toolset) ag
 	if h.cfg.OnToolEnd == nil {
 		return inner
 	}
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		paths := editPaths(ft, h.Workspace(), tc.Function.Name, tc.Function.Arguments)
 		if len(paths) == 0 {
 			return inner(ctx, tc)

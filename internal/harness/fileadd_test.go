@@ -22,7 +22,7 @@ func fileCall(t *testing.T, h *Harness, name string, args map[string]any) string
 	if err != nil {
 		t.Fatal(err)
 	}
-	return out
+	return out.Text
 }
 
 // A path outside the workspace: the model is told to ask for /file add;

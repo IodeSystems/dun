@@ -1565,7 +1565,7 @@ func agentToolDef(defaultModel, defaultProvider, defaultEffort string, providers
 }
 
 func withAgent(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		if tc.Function.Name != "agent" {
 			return inner(ctx, tc)
 		}
@@ -1637,7 +1637,7 @@ func withAgent(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[s
 			}
 			onCall("agent", call, out)
 		}
-		return out, nil
+		return llm.TextResult(out), nil
 	}
 }
 
@@ -1795,7 +1795,7 @@ func tellParentToolDef() llm.ToolDef {
 }
 
 func withTellParent(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		if tc.Function.Name != "tell_parent" {
 			return inner(ctx, tc)
 		}
@@ -1811,7 +1811,7 @@ func withTellParent(inner agent.ToolDispatcher, h *Harness, onCall func(string, 
 				"status": args.Status, "message": args.Message, "final": args.Final,
 			}, out)
 		}
-		return out, nil
+		return llm.TextResult(out), nil
 	}
 }
 
@@ -1848,7 +1848,7 @@ func tellParent(h *Harness, status, message, final string) string {
 // delivers it to the parent, and the parent's tell starts the next turn. It
 // never blocks — there is no answer channel to wait on.
 func withAskParent(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		if tc.Function.Name != "ask_parent" {
 			return inner(ctx, tc)
 		}
@@ -1860,7 +1860,7 @@ func withAskParent(inner agent.ToolDispatcher, h *Harness, onCall func(string, m
 		if onCall != nil {
 			onCall("ask_parent", map[string]any{"question": args.Question}, out)
 		}
-		return out, nil
+		return llm.TextResult(out), nil
 	}
 }
 

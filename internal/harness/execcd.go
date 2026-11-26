@@ -94,7 +94,7 @@ func redundantCd(command, dir string) bool {
 // The model's view of its own earlier calls stays as it wrote them: a
 // history that differs from what the model wrote is worse than the cd.
 func withCdNudge(inner agent.ToolDispatcher, dir string) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		out, err := inner(ctx, tc)
 		if tc.Function.Name != "exec" || err != nil {
 			return out, err
@@ -104,7 +104,7 @@ func withCdNudge(inner agent.ToolDispatcher, dir string) agent.ToolDispatcher {
 		}
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
 		if redundantCd(args.Command, dir) {
-			out += "\n" + cdNudge(dir)
+			out.Text += "\n" + cdNudge(dir)
 		}
 		return out, err
 	}

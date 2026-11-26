@@ -19,12 +19,12 @@ type counting struct {
 	result string
 }
 
-func (c *counting) dispatch(_ context.Context, tc llm.ToolCall) (string, error) {
+func (c *counting) dispatch(_ context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 	c.calls = append(c.calls, tc.Function.Name+" "+tc.Function.Arguments)
 	if c.result == "" {
-		return "ok", nil
+		return llm.TextResult("ok"), nil
 	}
-	return c.result, nil
+	return llm.TextResult(c.result), nil
 }
 
 func call(name, args string) llm.ToolCall {
@@ -51,7 +51,7 @@ func TestLoopGuard_RefusesTheMeasuredRecapLoop(t *testing.T) {
 		if err != nil {
 			t.Fatalf("call %d: %v", i, err)
 		}
-		if strings.HasPrefix(out, "ERROR: this call was NOT run") {
+		if strings.HasPrefix(out.Text, "ERROR: this call was NOT run") {
 			refusals++
 		}
 	}
@@ -71,13 +71,13 @@ func TestLoopGuard_RefusalCarriesThePreviousResult(t *testing.T) {
 	inner := &counting{result: "nothing to fold: 0 entries matched"}
 	d := withLoopGuard(inner.dispatch, h)
 
-	var out string
+	var out llm.ToolResult
 	for i := 0; i < defaultLoopRepeats; i++ {
 		out, _ = d(context.Background(), call("recap", `{"from":"x"}`))
 	}
 	for _, want := range []string{"NOT run", "recap", "nothing to fold", "something DIFFERENT"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("refusal is missing %q:\n%s", want, out)
+		if !strings.Contains(out.Text, want) {
+			t.Errorf("refusal is missing %q:\n%s", want, out.Text)
 		}
 	}
 }
@@ -91,10 +91,10 @@ func TestLoopGuard_LeavesSeparatedRepeatsAlone(t *testing.T) {
 	d := withLoopGuard(inner.dispatch, h)
 
 	for i := 0; i < 8; i++ {
-		if out, _ := d(context.Background(), call("land", `{"mode":"push"}`)); strings.HasPrefix(out, "ERROR") {
+		if out, _ := d(context.Background(), call("land", `{"mode":"push"}`)); strings.HasPrefix(out.Text, "ERROR") {
 			t.Fatalf("land #%d was refused; separated repeats are normal work", i)
 		}
-		if out, _ := d(context.Background(), call("exec", `{"command":"go test ./..."}`)); strings.HasPrefix(out, "ERROR") {
+		if out, _ := d(context.Background(), call("exec", `{"command":"go test ./..."}`)); strings.HasPrefix(out.Text, "ERROR") {
 			t.Fatalf("exec #%d was refused", i)
 		}
 	}
@@ -212,10 +212,10 @@ func TestLoopGuard_RefusalStillCarriesQueuedMessages(t *testing.T) {
 
 	d(context.Background(), call("recap", `{"from":"x"}`))
 	h.Say("stop doing that, try the other file")
-	var out string
+	var out llm.ToolResult
 	for i := 0; i < defaultLoopRepeats+2; i++ {
 		out, _ = d(context.Background(), call("recap", `{"from":"x"}`))
-		if strings.Contains(out, "NOT run") {
+		if strings.Contains(out.Text, "NOT run") {
 			break // the FIRST refusal is the one the queue was waiting for
 		}
 	}
@@ -223,8 +223,8 @@ func TestLoopGuard_RefusalStillCarriesQueuedMessages(t *testing.T) {
 	if got := liftedTexts(h); len(got) != 1 || got[0] != "stop doing that, try the other file" {
 		t.Errorf("the user's message was stranded behind the refusal: held %q", got)
 	}
-	if !strings.Contains(out, "NOT run") {
-		t.Errorf("the refusal itself was lost:\n%s", out)
+	if !strings.Contains(out.Text, "NOT run") {
+		t.Errorf("the refusal itself was lost:\n%s", out.Text)
 	}
 }
 
@@ -236,7 +236,7 @@ func TestLoopGuard_IsTransparentWhenItDoesNotFire(t *testing.T) {
 	d := withLoopGuard(inner.dispatch, h)
 
 	out, err := d(context.Background(), call("exec", `{"command":"ls"}`))
-	if err != nil || out != "the real result" {
-		t.Errorf("got (%q, %v), want the tool's own result untouched", out, err)
+	if err != nil || out.Text != "the real result" {
+		t.Errorf("got (%q, %v), want the tool's own result untouched", out.Text, err)
 	}
 }

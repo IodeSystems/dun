@@ -1004,14 +1004,16 @@ func Start(ctx context.Context, cfg Config) (*Harness, error) {
 		OmitSlotInstructions: true,
 		OnCompactionComplete: h.noteCompaction,
 		// A call a cancel skipped says who stopped the turn (interrupt.go).
-		UnrunResult:      unrunResult,
-		Store:            store,
-		Runner:           h.teeTurn(cfg.Client, cfg.OnReasoning),
-		OnAssistantToken: cfg.OnToken,
-		OnUsage:          h.noteUsage,
-		MaxTurns:         h.turnLimit(),
-		Build:            measuredBuild(shaper, h),
-		ToolFormat:       toolFormat(),
+		UnrunResult: unrunResult,
+		// Images in a tool result, for a model that cannot read them (toolmedia.go).
+		PrepareToolResult: h.prepareToolResult,
+		Store:             store,
+		Runner:            h.teeTurn(cfg.Client, cfg.OnReasoning),
+		OnAssistantToken:  cfg.OnToken,
+		OnUsage:           h.noteUsage,
+		MaxTurns:          h.turnLimit(),
+		Build:             measuredBuild(shaper, h),
+		ToolFormat:        toolFormat(),
 		// The same estimator the Shaper uses, so `Active` and the budget cannot
 		// disagree about how big the context is.
 		Estimate: &h.meter,
@@ -1153,7 +1155,7 @@ func (h *Harness) turnThenTriggers(ctx context.Context) (agent.TurnResult, error
 	}
 	err = h.describeTurnError(err) // an empty reply or a stall, said plainly (turnerrors.go)
 	h.noteEmptyReply(err)
-	h.noteTurnError(ctx, err)      // <session>.errors.jsonl, for dun errors (turnerrors.go)
+	h.noteTurnError(ctx, err) // <session>.errors.jsonl, for dun errors (turnerrors.go)
 	// Held churn episodes become candidate lessons once the task verifies
 	// (learn.go): after the turn, so no request of the turn waits on it.
 	h.learnAfterTurn(ctx, err)

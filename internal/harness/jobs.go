@@ -60,11 +60,11 @@ func jobsToolDef(commands, agents bool) llm.ToolDef {
 
 // jobsArgs is every parameter of jobs.
 type jobsArgs struct {
-	Job        *int  `json:"job"`
-	Kill       bool  `json:"kill"`
-	Mute       *bool `json:"mute"`
-	EveryBytes *int  `json:"every_bytes"`
-	EverySecs  *int  `json:"every_secs"`
+	Job        *int   `json:"job"`
+	Kill       bool   `json:"kill"`
+	Mute       *bool  `json:"mute"`
+	EveryBytes *int   `json:"every_bytes"`
+	EverySecs  *int   `json:"every_secs"`
 	Input      string `json:"input"`
 	// unknown is what else the call sent: refused, naming what jobs takes.
 	unknown []string
@@ -73,7 +73,7 @@ type jobsArgs struct {
 var jobsParams = map[string]bool{"job": true, "kill": true, "mute": true, "every_bytes": true, "every_secs": true, "input": true}
 
 func withJobs(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		if tc.Function.Name != "jobs" {
 			return inner(ctx, tc)
 		}
@@ -113,7 +113,7 @@ func withJobs(inner agent.ToolDispatcher, h *Harness, onCall func(string, map[st
 		if onCall != nil {
 			onCall("jobs", a.reported(), out)
 		}
-		return out, nil
+		return llm.TextResult(out), nil
 	}
 }
 

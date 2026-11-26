@@ -285,7 +285,7 @@ func withCodeGuard(inner agent.ToolDispatcher, h *Harness, tools []mcpmgr.MCPToo
 	if len(owner) == 0 {
 		return inner
 	}
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		id, ok := owner[tc.Function.Name]
 		if !ok {
 			return inner(ctx, tc)
@@ -310,15 +310,15 @@ func withCodeGuard(inner agent.ToolDispatcher, h *Harness, tools []mcpmgr.MCPToo
 		note := ""
 		switch {
 		case len(named) > 1 || (len(named) == 0 && scope == "") || g.scan.InRepo:
-			return g.refusal(named), nil
+			return llm.TextResult(g.refusal(named)), nil
 		case len(named) == 1 && named[0] != scope:
 			repo := named[0]
 			if r := scanRootCached(filepath.Join(g.ws, filepath.FromSlash(repo))); r.TooBig() {
-				return fmt.Sprintf("ERROR: %s/ holds %s: poly-lsp is off for it (dun's root guard, over %s files). Find code there with exec (grep) or search.",
-					repo, scanSummary(r), numfmt.Grouped(guardMaxFiles)), nil
+				return llm.TextResult(fmt.Sprintf("ERROR: %s/ holds %s: poly-lsp is off for it (dun's root guard, over %s files). Find code there with exec (grep) or search.",
+					repo, scanSummary(r), numfmt.Grouped(guardMaxFiles))), nil
 			}
 			if err := o.moveCodeServer(ctx, id, g, repo); err != nil {
-				return fmt.Sprintf("ERROR: poly-lsp could not start on %s/: %s", repo, oneLine(err.Error(), 300)), nil
+				return llm.TextResult(fmt.Sprintf("ERROR: poly-lsp could not start on %s/: %s", repo, oneLine(err.Error(), 300))), nil
 			}
 			scope = repo
 			note = fmt.Sprintf("[poly-lsp now runs on %s/ (this folder holds %s): paths in its answers are relative to %s/; name a path in another repo to move it]\n",
@@ -330,7 +330,8 @@ func withCodeGuard(inner agent.ToolDispatcher, h *Harness, tools []mcpmgr.MCPToo
 			tc.Function.Arguments = string(b)
 		}
 		res, err := inner(ctx, tc)
-		return note + res, err
+		res.Text = note + res.Text
+		return res, err
 	}
 }
 

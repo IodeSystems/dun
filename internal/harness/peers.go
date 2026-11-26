@@ -87,14 +87,14 @@ func dunMsgToolDef() llm.ToolDef {
 
 // withPeers handles dun_list and dun_msg; everything else routes onward.
 func withPeers(inner agent.ToolDispatcher, link PeerLink, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		switch tc.Function.Name {
 		case "dun_list":
 			out := peerListing(link.List(ctx))
 			if onCall != nil {
 				onCall("dun_list", map[string]any{}, out)
 			}
-			return out, nil
+			return llm.TextResult(out), nil
 		case "dun_msg":
 			var args struct {
 				To   string `json:"to"`
@@ -122,7 +122,7 @@ func withPeers(inner agent.ToolDispatcher, link PeerLink, onCall func(string, ma
 			if onCall != nil {
 				onCall("dun_msg", map[string]any{"to": args.To, "text": args.Text, "wake": wake}, out)
 			}
-			return out, nil
+			return llm.TextResult(out), nil
 		}
 		return inner(ctx, tc)
 	}

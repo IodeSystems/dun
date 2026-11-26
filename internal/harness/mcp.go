@@ -127,11 +127,11 @@ func mcpDispatcher(mgr toolCaller, tools []mcpmgr.MCPTool, onCall func(tool stri
 	for _, t := range tools {
 		routes[modelToolName(t)] = route{t.ServerID, t.Name}
 	}
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		r, ok := routes[tc.Function.Name]
 		serverID := r.server
 		if !ok {
-			return fmt.Sprintf("ERROR: unknown tool %q", tc.Function.Name), nil
+			return llm.TextResult(fmt.Sprintf("ERROR: unknown tool %q", tc.Function.Name)), nil
 		}
 		var args map[string]any
 		if s := strings.TrimSpace(tc.Function.Arguments); s != "" && s != "null" {
@@ -143,12 +143,12 @@ func mcpDispatcher(mgr toolCaller, tools []mcpmgr.MCPTool, onCall func(tool stri
 				// correct response is different — retry SMALLER, not "fix your
 				// syntax". A valid prefix that simply ends is the signature.
 				if isTruncatedJSON(s) {
-					return fmt.Sprintf("ERROR: malformed json — truncation detected: the arguments "+
+					return llm.TextResult(fmt.Sprintf("ERROR: malformed json — truncation detected: the arguments "+
 						"were cut off after %d characters and this call was NOT executed. "+
 						"Retry with a smaller call (split large writes into successive edits).",
-						len(s)), nil
+						len(s))), nil
 				}
-				return fmt.Sprintf("ERROR: malformed json: %v", err), nil
+				return llm.TextResult(fmt.Sprintf("ERROR: malformed json: %v", err)), nil
 			}
 		}
 		res, err := mgr.CallTool(ctx, serverID, r.tool, args)
@@ -166,7 +166,7 @@ func mcpDispatcher(mgr toolCaller, tools []mcpmgr.MCPTool, onCall func(tool stri
 		if onCall != nil {
 			onCall(tc.Function.Name, args, res)
 		}
-		return res, nil
+		return llm.TextResult(res), nil
 	}
 }
 

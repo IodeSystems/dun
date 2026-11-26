@@ -41,16 +41,16 @@ func TestAside_NeverSchedulesATurn(t *testing.T) {
 // rides along inside it and costs nothing.
 func TestAside_LiftsIntoToolResult(t *testing.T) {
 	h := newNoteHarness(t)
-	inner := func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	inner := func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		h.Aside("your tools changed — raglit is now available: search")
-		return "wrote 3 lines", nil
+		return llm.TextResult("wrote 3 lines"), nil
 	}
 	out, err := withLiftedQueue(inner, h)(context.Background(), llm.ToolCall{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "[session] your tools changed") {
-		t.Errorf("aside was not lifted into the tool result: %q", out)
+	if !strings.Contains(out.Text, "[session] your tools changed") {
+		t.Errorf("aside was not lifted into the tool result: %q", out.Text)
 	}
 	if h.Pending() != 0 {
 		t.Errorf("nothing should be left buffered: %d", h.Pending())

@@ -393,14 +393,14 @@ func markExecVerdict(ctx context.Context, verdict string) {
 // withPlanNudge counts each tool result toward a stall. Inside
 // withLiftedQueue, so an aside it queues rides this very result.
 func withPlanNudge(inner agent.ToolDispatcher, h *Harness) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		o := &execOutcome{}
 		out, err := inner(context.WithValue(ctx, execOutcomeKey{}, o), tc)
-		res := out
+		res := out.Text
 		if err != nil {
 			res = "ERROR: " + err.Error()
 		}
-		failed := err != nil || o.failed || strings.HasPrefix(out, "ERROR")
+		failed := err != nil || o.failed || strings.HasPrefix(out.Text, "ERROR")
 		h.learnQueue(h.planNudgeResult(failed, newChurnAttempt(tc.Function.Name, tc.Function.Arguments, res)))
 		if o.verdict != "" {
 			h.noteExecVerdict(tc.ID, o.verdict)

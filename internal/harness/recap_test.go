@@ -529,7 +529,7 @@ func TestRecapWatch_CapsEveryTool(t *testing.T) {
 	h := &Harness{store: st, wake: make(chan struct{}, 1), cfg: Config{SessionFile: filepath.Join(dir, "s.jsonl")}}
 
 	huge := strings.Repeat("{\"hit\": \"result line\"},\n", 20000)
-	inner := func(context.Context, llm.ToolCall) (string, error) { return huge, nil }
+	inner := func(context.Context, llm.ToolCall) (llm.ToolResult, error) { return llm.TextResult(huge), nil }
 	d := withRecapWatch(inner, h)
 
 	var tc llm.ToolCall
@@ -538,18 +538,18 @@ func TestRecapWatch_CapsEveryTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out) > execInlineMax+400 {
-		t.Fatalf("a non-exec tool went uncapped: %d characters", len(out))
+	if len(out.Text) > execInlineMax+400 {
+		t.Fatalf("a non-exec tool went uncapped: %d characters", len(out.Text))
 	}
 	// Structured output is clipped too, knowingly: an unbounded result would
 	// only have to start with "{" to reopen the hole.
-	if !strings.Contains(out, "characters elided") {
-		t.Errorf("the gap must say what happened: %q", out[:200])
+	if !strings.Contains(out.Text, "characters elided") {
+		t.Errorf("the gap must say what happened: %q", out.Text[:200])
 	}
 	// A PATH in the isolation tmp, read with file_read (isotmp.go).
-	m := regexp.MustCompile(`saved to (\S+) — read it with file_read`).FindStringSubmatch(out)
+	m := regexp.MustCompile(`saved to (\S+) — read it with file_read`).FindStringSubmatch(out.Text)
 	if m == nil {
-		t.Fatalf("the gap must name the saved file and how to read it: %q", out[len(out)-300:])
+		t.Fatalf("the gap must name the saved file and how to read it: %q", out.Text[len(out.Text)-300:])
 	}
 	if b, err := os.ReadFile(m[1]); err != nil || !strings.Contains(string(b), "result line") {
 		t.Errorf("the named file does not hold the result: %v", err)
@@ -584,9 +584,9 @@ func TestCappedReporter_ShowsTheHumanWhatTheModelSaw(t *testing.T) {
 	report := h.cappedReporter(func(_ string, _ map[string]any, result string) { reported = result })
 
 	huge := strings.Repeat("output line\n", 30000)
-	inner := func(_ context.Context, _ llm.ToolCall) (string, error) {
+	inner := func(_ context.Context, _ llm.ToolCall) (llm.ToolResult, error) {
 		report("exec", map[string]any{"command": "cat big"}, huge) // as each wrapper does
-		return huge, nil
+		return llm.TextResult(huge), nil
 	}
 	var tc llm.ToolCall
 	tc.Function.Name, tc.Function.Arguments = "exec", `{"command":"cat big"}`
@@ -594,8 +594,8 @@ func TestCappedReporter_ShowsTheHumanWhatTheModelSaw(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reported != toModel {
-		t.Fatalf("the human and the model must see the same text (%d vs %d chars)", len(reported), len(toModel))
+	if reported != toModel.Text {
+		t.Fatalf("the human and the model must see the same text (%d vs %d chars)", len(reported), len(toModel.Text))
 	}
 	saved, _ := filepath.Glob(filepath.Join(h.bgLogDir(), "exec-*.out"))
 	if len(saved) != 1 {
@@ -619,8 +619,8 @@ func TestReadSaved_Retired(t *testing.T) {
 	for _, args := range []string{`{}`, `{"ref":"r1","grep":"x"}`} {
 		var tc llm.ToolCall
 		tc.Function.Name, tc.Function.Arguments = "read_saved", args
-		if out, _ := d(context.Background(), tc); !strings.Contains(out, "file_read") {
-			t.Errorf("%s: %q", args, out)
+		if out, _ := d(context.Background(), tc); !strings.Contains(out.Text, "file_read") {
+			t.Errorf("%s: %q", args, out.Text)
 		}
 	}
 }

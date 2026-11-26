@@ -359,7 +359,7 @@ func withAttached(next agent.ToolDispatcher, byTool map[string]string) agent.Too
 	if len(byTool) == 0 {
 		return next
 	}
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		sel, ok := byTool[tc.Function.Name]
 		if !ok {
 			return next(ctx, tc)

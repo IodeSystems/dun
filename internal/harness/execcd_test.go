@@ -91,11 +91,11 @@ func TestRedundantCd(t *testing.T) {
 func TestWithCdNudge(t *testing.T) {
 	dir := t.TempDir()
 	var ran []string
-	inner := func(_ context.Context, tc llm.ToolCall) (string, error) {
+	inner := func(_ context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		var a struct{ Command string }
 		_ = json.Unmarshal([]byte(tc.Function.Arguments), &a)
 		ran = append(ran, a.Command)
-		return "ok", nil
+		return llm.TextResult("ok"), nil
 	}
 	d := withCdNudge(inner, dir)
 	call := func(cmd string) string {
@@ -106,7 +106,7 @@ func TestWithCdNudge(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return out
+		return out.Text
 	}
 	line := "ok\nEach exec starts in the project dir " + dir + "; cd'ing into " + dir +
 		" wastes tokens. Only cd if the directory you want is not the project dir."

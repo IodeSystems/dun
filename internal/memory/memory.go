@@ -207,7 +207,7 @@ type NoteMeta struct {
 // ErrDown is a note to the model, not a failure: the file is the record
 // and the index catches up (recall.go).
 type Store struct {
-	dir    string
+	dir string
 	// legacy is where the notes used to live, before the directory was keyed
 	// by the project's id. sync sends it as gone, so the index holds each
 	// note once, at its new path, not at both.
@@ -671,7 +671,7 @@ func (m *Store) Holds(path string) bool {
 // call parses and applies one call's arguments and returns the result the
 // model reads (Stores.Call).
 func WithTool(inner agent.ToolDispatcher, call func(rawArgs string) string, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		if tc.Function.Name != "memory" {
 			return inner(ctx, tc)
 		}
@@ -681,7 +681,7 @@ func WithTool(inner agent.ToolDispatcher, call func(rawArgs string) string, onCa
 			_ = json.Unmarshal([]byte(tc.Function.Arguments), &a)
 			onCall("memory", a, out)
 		}
-		return out, nil
+		return llm.TextResult(out), nil
 	}
 }
 

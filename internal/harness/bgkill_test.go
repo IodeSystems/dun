@@ -202,7 +202,7 @@ func TestKillJob_DuringGrace(t *testing.T) {
 	done := make(chan result, 1)
 	go func() {
 		out, err := d(context.Background(), execCall(fmt.Sprintf(`{"command":%q,"timeout":60}`, treeCommand(pidFile))))
-		done <- result{out, err}
+		done <- result{out.Text, err}
 	}()
 	pids := readPids(t, pidFile)
 	if got := h.KillAllJobs("user"); !strings.Contains(got, "killed by the user") || !strings.Contains(got, "not yet backgrounded") {
@@ -276,7 +276,7 @@ func TestJobs_KillCommand(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return out
+		return out.Text
 	}
 	if out := call(`{"kill":true}`); !strings.HasPrefix(out, "ERROR") {
 		t.Errorf("kill without a job: %q", out)

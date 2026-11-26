@@ -22,9 +22,9 @@ func newNoteHarness(t *testing.T) *Harness {
 // result, so the model reads it without a turn being scheduled for it.
 func TestNotesLiftIntoToolResult(t *testing.T) {
 	h := newNoteHarness(t)
-	inner := func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	inner := func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		h.Notify("background job #1 finished — `go test`:\nok")
-		return "wrote 3 lines", nil
+		return llm.TextResult("wrote 3 lines"), nil
 	}
 	dispatch := withLiftedQueue(inner, h)
 
@@ -32,11 +32,11 @@ func TestNotesLiftIntoToolResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "wrote 3 lines") {
-		t.Errorf("tool result lost: %q", out)
+	if !strings.Contains(out.Text, "wrote 3 lines") {
+		t.Errorf("tool result lost: %q", out.Text)
 	}
-	if !strings.Contains(out, "background job #1 finished") {
-		t.Errorf("note was not lifted into the tool result: %q", out)
+	if !strings.Contains(out.Text, "background job #1 finished") {
+		t.Errorf("note was not lifted into the tool result: %q", out.Text)
 	}
 	if h.Pending() != 0 {
 		t.Errorf("lifted note should leave nothing pending, got %d", h.Pending())

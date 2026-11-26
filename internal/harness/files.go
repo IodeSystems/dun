@@ -232,14 +232,14 @@ func tmpReader(ts *filetools.Toolset, tmp []*filetools.Toolset, name, args strin
 
 // wholeReader answers an unranged read on the toolset it was routed to
 // (Harness.readWhole, wholeread.go).
-type wholeReader func(ctx context.Context, route *filetools.Toolset, name, args, id string) string
+type wholeReader func(ctx context.Context, route *filetools.Toolset, name, args, id string) llm.ToolResult
 
 // withFiles routes the file tools to the toolset and reports each call.
 // whole, when set, answers a read with no range: all of the file. A path
 // outside the workspace that is not open is the person's to open, asked in
 // the turn (fileaccess.go).
 func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, tmp []*filetools.Toolset, h *Harness, whole wholeReader, onCall func(string, map[string]any, string)) agent.ToolDispatcher {
-	return func(ctx context.Context, tc llm.ToolCall) (string, error) {
+	return func(ctx context.Context, tc llm.ToolCall) (llm.ToolResult, error) {
 		if !ts.Handles(tc.Function.Name) {
 			return inner(ctx, tc)
 		}
@@ -288,21 +288,23 @@ func withFiles(inner agent.ToolDispatcher, ts *filetools.Toolset, tmp []*filetoo
 					"/file mode . write. Do not work around this with exec.", ts.Root())
 			}
 		}
+		// res carries the toolset's media parts (a read image) through.
+		res := llm.TextResult(out)
 		if out == "" && whole != nil && ts.Bare(tc.Function.Name) == filetools.Read && wantsWhole(tc.Function.Arguments) {
-			out = whole(ctx, route, tc.Function.Name, tc.Function.Arguments, tc.ID)
+			res = whole(ctx, route, tc.Function.Name, tc.Function.Arguments, tc.ID)
 		}
-		if out == "" {
-			out = route.Dispatch(ctx, tc.Function.Name, tc.Function.Arguments)
+		if res.Text == "" && len(res.Parts) == 0 {
+			res = route.Dispatch(ctx, tc.Function.Name, tc.Function.Arguments)
 		}
 		if note != "" {
-			out += "\n\n[the user, opening the path: " + note + "]"
+			res.Text += "\n\n[the user, opening the path: " + note + "]"
 		}
 		if onCall != nil {
 			var args map[string]any
 			_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
-			onCall(tc.Function.Name, args, out)
+			onCall(tc.Function.Name, args, res.Text)
 		}
-		return out, nil
+		return res, nil
 	}
 }
 

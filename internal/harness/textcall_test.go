@@ -123,8 +123,8 @@ func TestTextCall_PlanArgRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(out, "ERROR: plan_add refused") || !strings.Contains(out, "tool API") {
-		t.Errorf("not refused: %s", out)
+	if !strings.HasPrefix(out.Text, "ERROR: plan_add refused") || !strings.Contains(out.Text, "tool API") {
+		t.Errorf("not refused: %s", out.Text)
 	}
 	if g, _ := (planStore{h}).View(context.Background()); len(g.Nodes) != 0 {
 		t.Errorf("node added: %+v", g.Nodes)
@@ -133,8 +133,8 @@ func TestTextCall_PlanArgRefused(t *testing.T) {
 		`{"title":"document ` + "`<tool_call>`" + ` tags","done_when":"written"}`,
 		`{"title":"parser","details":"fix <tool_call> parsing","done_when":"tests pass"}`,
 	} {
-		if out, _ := d(context.Background(), *nudgeCall("p2", "plan_add", ok)); strings.HasPrefix(out, "ERROR") {
-			t.Errorf("a tag named in text refused: %s", out)
+		if out, _ := d(context.Background(), *nudgeCall("p2", "plan_add", ok)); strings.HasPrefix(out.Text, "ERROR") {
+			t.Errorf("a tag named in text refused: %s", out.Text)
 		}
 	}
 }

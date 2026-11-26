@@ -107,8 +107,8 @@ func TestAddServer_RemoteToolsAreNamespacedAndRemovable(t *testing.T) {
 	}
 	tc := llm.ToolCall{}
 	tc.Function.Name, tc.Function.Arguments = "corp__search", `{"q":"x"}`
-	if out, _ := h.Session.Dispatch(ctx, tc); !strings.HasPrefix(out, "corp result") || !strings.Contains(out, "available: corp__search") {
-		t.Errorf("dispatch through the namespace: %q", out)
+	if out, _ := h.Session.Dispatch(ctx, tc); !strings.HasPrefix(out.Text, "corp result") || !strings.Contains(out.Text, "available: corp__search") {
+		t.Errorf("dispatch through the namespace: %q", out.Text)
 	}
 	if _, err := h.RemoveServer("corp"); err != nil {
 		t.Fatal(err)
