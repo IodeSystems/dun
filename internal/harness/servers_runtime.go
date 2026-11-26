@@ -168,9 +168,20 @@ const shellDescription = "sandboxed scripting (mcpshell): one eval tool for calc
 // Servers reports every configured server and whether it is up, in config
 // order. Servers a config file disabled outright are not listed — they are not
 // something a session can turn on.
+//
+// The auth column can take a dund round trip (an OAuth server's status), so
+// it is filled after srvMu is released, for all servers at once, and kept for
+// authTTL: a bare /mcp asks for the list several times in a row.
 func (h *Harness) Servers() []ServerState {
 	h.srvMu.Lock()
-	defer h.srvMu.Unlock()
+	out, specs := h.serversLocked()
+	h.srvMu.Unlock()
+	h.fillAuth(out, specs)
+	return out
+}
+
+// serversLocked is Servers' snapshot, Auth not yet set; srvMu is held.
+func (h *Harness) serversLocked() ([]ServerState, []mcpserver.Server) {
 	counts, cost, hidden := map[string]int{}, map[string]int{}, map[string]int{}
 	by := map[string]mcpserver.Server{}
 	for _, s := range h.specs {
@@ -197,7 +208,6 @@ func (h *Harness) Servers() []ServerState {
 			StartSeconds: h.lastStart[s.ID].Seconds(),
 			Cost:         cost[s.ID],
 			Hidden:       hidden[s.ID],
-			Auth:         h.authState(s),
 			Proto:        serverProto(s),
 			Global:       mcpserver.OnOffWord(s.Scopes.GlobalOn(s.Via)),
 			Project:      tri(s.Scopes.Project),
@@ -245,7 +255,7 @@ func (h *Harness) Servers() []ServerState {
 		}
 		out = append(out, st)
 	}
-	return out
+	return out, append([]mcpserver.Server(nil), h.specs...)
 }
 
 // serverProto is "stdio" for a command, else the URL's scheme.
