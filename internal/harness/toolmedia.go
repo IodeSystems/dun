@@ -30,6 +30,50 @@ import (
 // report MediaEvent as a TUI note and a RoundEvent kind "media"
 // (repairs.go), and let /media change the policy (mediacmd.go).
 
+// MediaCmd is /media: alone, what happens to media in a tool result this
+// session. The changes (a kind send|off, cap <size>, scale on|off) are the
+// agentkit media policy's, which this build does not have: they are
+// recognized and refused with that reason, so the command's shape is the
+// one it will keep.
+func (h *Harness) MediaCmd(action string) (string, error) {
+	f := strings.Fields(strings.ToLower(action))
+	if len(f) == 0 {
+		return h.mediaStatus(), nil
+	}
+	switch {
+	case len(f) == 2 && mediaKinds[f[0]] && (f[1] == "send" || f[1] == "off"),
+		len(f) == 2 && f[0] == "cap",
+		len(f) == 2 && f[0] == "scale" && (f[1] == "on" || f[1] == "off"):
+		return "", fmt.Errorf("/media %s waits on agentkit's media policy, which this build does not have; /media shows what is in effect", strings.Join(f, " "))
+	}
+	return "", fmt.Errorf("usage: /media [images|audio|video|files send|off | cap <size> | scale on|off]")
+}
+
+// mediaKinds are the kinds /media names, as a tool result's parts have them.
+var mediaKinds = map[string]bool{"images": true, "audio": true, "video": true, "files": true}
+
+// mediaStatus is /media alone.
+func (h *Harness) mediaStatus() string {
+	v := h.cfg.Vision
+	model := v.Model
+	if model == "" {
+		model = "the model"
+	}
+	images := "send (" + model + " has not been sent an image yet; a refusal records it without vision)"
+	switch known, vision := v.lookup(); {
+	case known && vision:
+		images = "send (" + model + " reads images)"
+	case known && v.Describer != nil:
+		images = "described by " + v.DescriberModel + " (" + model + " cannot read images)"
+	case known:
+		images = "off: left out with a label (" + model + " cannot read images, and no vision_model is set)"
+	}
+	return "media in tool results:\n" +
+		"  images: " + images + "\n" +
+		"  audio, video, files: send where the endpoint takes them; agentkit puts a label in place of the rest\n" +
+		"  cap, scale, scaler: not in this build (agentkit's media policy); /media images|audio|video|files send|off, cap <size> and scale on|off wait on it"
+}
+
 // describeToolInstruction is the describer's prompt for an image a tool
 // returned; the tool's name and the result's text follow it.
 const describeToolInstruction = `Describe this image for an assistant who cannot see it. A tool the assistant called returned it; the assistant will act on your description alone. Give what it needs for that: any text in the image verbatim (code, errors, logs, labels), what the image shows and how it is laid out, and numbers or data exactly. Plain text, no preamble.

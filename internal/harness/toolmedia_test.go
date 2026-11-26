@@ -240,3 +240,32 @@ func (f *fakeDescriber) ChatStream(_ context.Context, msgs []llm.Message, _ []ll
 	close(ch)
 	return ch, nil
 }
+
+// /media alone says what an image in a tool result becomes; the policy's
+// changes are recognized and refused until agentkit has the policy.
+func TestMediaCmd(t *testing.T) {
+	for _, c := range []struct {
+		vision    bool
+		describer agent.LLMRunner
+		want      string
+	}{
+		{true, nil, "images: send (model reads images)"},
+		{false, &fakeDescriber{}, "images: described by vl (model cannot read images)"},
+		{false, nil, "images: off: left out with a label"},
+	} {
+		h := visionHarness(t, c.vision, c.describer)
+		got, err := h.MediaCmd("")
+		if err != nil || !strings.Contains(got, c.want) {
+			t.Errorf("vision=%v: %q %v, want %q", c.vision, got, err, c.want)
+		}
+	}
+	h := visionHarness(t, true, nil)
+	for _, a := range []string{"images off", "cap 20MB", "scale off", "files send"} {
+		if _, err := h.MediaCmd(a); err == nil || !strings.Contains(err.Error(), "waits on agentkit's media policy") {
+			t.Errorf("%s: %v", a, err)
+		}
+	}
+	if _, err := h.MediaCmd("images maybe"); err == nil || !strings.HasPrefix(err.Error(), "usage: /media") {
+		t.Errorf("bad action: %v", err)
+	}
+}
