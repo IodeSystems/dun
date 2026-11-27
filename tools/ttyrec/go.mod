@@ -3,7 +3,7 @@ module github.com/iodesystems/dun/tools/ttyrec
 go 1.26.2
 
 require (
-	github.com/charmbracelet/ultraviolet v0.0.0-20261023060817-a45b7c86333f
+	github.com/charmbracelet/ultraviolet v0.0.0-20261125122737-8ed499892fb4
 	github.com/charmbracelet/x/vt v0.1.0
 	github.com/creack/pty v1.1.24
 	golang.org/x/image v0.48.0
